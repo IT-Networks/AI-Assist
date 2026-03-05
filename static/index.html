@@ -126,6 +126,10 @@
           <span class="explorer-arrow" id="java-arrow">&#9658;</span>
         </div>
         <div class="explorer-content" id="java-content">
+          <div id="java-repo-selector" class="repo-selector-bar" style="display:none">
+            <label class="repo-selector-label">Repo:</label>
+            <select id="java-repo-select" onchange="setActiveRepo('java', this.value)" title="Aktives Java-Repository"></select>
+          </div>
           <div class="index-status" id="java-index-status">Index wird geladen...</div>
           <div class="explorer-actions">
             <button class="sb-btn" onclick="buildJavaIndex()">&#127959; Index</button>
@@ -142,6 +146,10 @@
           <span class="explorer-arrow" id="python-arrow">&#9658;</span>
         </div>
         <div class="explorer-content" id="python-content">
+          <div id="python-repo-selector" class="repo-selector-bar" style="display:none">
+            <label class="repo-selector-label">Repo:</label>
+            <select id="python-repo-select" onchange="setActiveRepo('python', this.value)" title="Aktives Python-Repository"></select>
+          </div>
           <div class="index-status" id="python-index-status">Index wird geladen...</div>
           <div class="explorer-actions">
             <button class="sb-btn" onclick="buildPythonIndex()">&#127959; Index</button>
