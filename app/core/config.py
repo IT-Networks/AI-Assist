@@ -26,10 +26,28 @@ class LLMConfig(BaseModel):
     analysis_model: str = ""  # Größeres Modell für Analyse/Antwort (leer = default_model)
 
 
+class RepoEntry(BaseModel):
+    """Ein Repository-Eintrag."""
+    name: str  # Anzeigename
+    path: str  # Pfad zum Repository
+
+
 class JavaConfig(BaseModel):
-    repo_path: str = ""
+    repo_path: str = ""  # Aktiver Repo-Pfad (Kompatibilität)
+    repos: List[RepoEntry] = []  # Liste aller Repos
+    active_repo: str = ""  # Name des aktiven Repos
     exclude_dirs: List[str] = ["target", ".git", "node_modules", ".idea"]
     max_file_size_kb: int = 500
+
+    def get_active_path(self) -> str:
+        """Gibt den Pfad des aktiven Repos zurück."""
+        # Wenn active_repo gesetzt ist, suche in repos Liste
+        if self.active_repo and self.repos:
+            for repo in self.repos:
+                if repo.name == self.active_repo:
+                    return repo.path
+        # Fallback auf repo_path (Kompatibilität)
+        return self.repo_path
 
 
 class ConfluenceConfig(BaseModel):
@@ -41,9 +59,19 @@ class ConfluenceConfig(BaseModel):
 
 
 class PythonConfig(BaseModel):
-    repo_path: str = ""
+    repo_path: str = ""  # Aktiver Repo-Pfad (Kompatibilität)
+    repos: List[RepoEntry] = []  # Liste aller Repos
+    active_repo: str = ""  # Name des aktiven Repos
     exclude_dirs: List[str] = ["__pycache__", ".venv", ".git", "node_modules", ".mypy_cache", ".pytest_cache", "dist", "build"]
     max_file_size_kb: int = 500
+
+    def get_active_path(self) -> str:
+        """Gibt den Pfad des aktiven Repos zurück."""
+        if self.active_repo and self.repos:
+            for repo in self.repos:
+                if repo.name == self.active_repo:
+                    return repo.path
+        return self.repo_path
 
 
 class ToolsConfig(BaseModel):

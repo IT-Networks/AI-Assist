@@ -14,10 +14,10 @@ router = APIRouter(prefix="/api/python", tags=["python"])
 
 def _get_reader():
     from app.services.python_reader import PythonReader
-    if not settings.python.repo_path:
+    if not settings.python.get_active_path():
         raise HTTPException(status_code=400, detail="python.repo_path nicht konfiguriert")
     return PythonReader(
-        settings.python.repo_path,
+        settings.python.get_active_path(),
         exclude_dirs=settings.python.exclude_dirs,
         max_file_size_kb=settings.python.max_file_size_kb,
     )
@@ -70,11 +70,11 @@ async def build_python_index(
     from app.services.python_indexer import get_python_indexer
     from app.services.python_reader import PythonReader
 
-    if not settings.python.repo_path:
+    if not settings.python.get_active_path():
         raise HTTPException(status_code=400, detail="python.repo_path nicht konfiguriert")
 
     reader = PythonReader(
-        settings.python.repo_path,
+        settings.python.get_active_path(),
         exclude_dirs=settings.python.exclude_dirs,
         max_file_size_kb=settings.python.max_file_size_kb,
     )
@@ -85,7 +85,7 @@ async def build_python_index(
             loop = asyncio.new_event_loop()
             loop.run_until_complete(
                 asyncio.get_event_loop().run_in_executor(
-                    None, lambda: indexer.build(settings.python.repo_path, reader, force=force)
+                    None, lambda: indexer.build(settings.python.get_active_path(), reader, force=force)
                 )
             )
         bg_tasks.add_task(_run)
@@ -93,7 +93,7 @@ async def build_python_index(
 
     loop = asyncio.get_event_loop()
     result = await loop.run_in_executor(
-        None, lambda: indexer.build(settings.python.repo_path, reader, force=force)
+        None, lambda: indexer.build(settings.python.get_active_path(), reader, force=force)
     )
     return result
 

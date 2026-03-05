@@ -8,7 +8,7 @@ from app.core.exceptions import JavaReaderError, PathTraversalError
 
 class JavaReader:
     def __init__(self, repo_path: str = None):
-        self.repo_path = Path(repo_path or settings.java.repo_path).resolve()
+        self.repo_path = Path(repo_path or settings.java.get_active_path()).resolve()
         self.exclude_dirs = set(settings.java.exclude_dirs)
         self.max_file_size = settings.java.max_file_size_kb * 1024
 

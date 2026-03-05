@@ -435,3 +435,122 @@ async def delete_model(model_id: str) -> Dict[str, Any]:
         "remaining": len(settings.models),
         "message": "Modell entfernt. POST /save zum Persistieren."
     }
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Repository Management (Java/Python)
+# ══════════════════════════════════════════════════════════════════════════════
+
+class RepoRequest(BaseModel):
+    """Repository-Eintrag."""
+    name: str = Field(..., max_length=100, description="Anzeigename")
+    path: str = Field(..., max_length=500, description="Pfad zum Repository")
+
+
+@router.get("/repos/{lang}")
+async def get_repos(lang: str) -> Dict[str, Any]:
+    """Gibt alle Repositories für eine Sprache zurück."""
+    if lang not in ("java", "python"):
+        raise HTTPException(status_code=400, detail="Sprache muss 'java' oder 'python' sein")
+
+    config = getattr(settings, lang)
+    return {
+        "language": lang,
+        "repos": [r.model_dump() for r in config.repos],
+        "active_repo": config.active_repo,
+        "active_path": config.get_active_path(),
+        "legacy_path": config.repo_path  # Für Kompatibilität
+    }
+
+
+@router.post("/repos/{lang}")
+async def add_repo(lang: str, repo: RepoRequest) -> Dict[str, Any]:
+    """Fügt ein neues Repository hinzu."""
+    from app.core.config import RepoEntry
+
+    if lang not in ("java", "python"):
+        raise HTTPException(status_code=400, detail="Sprache muss 'java' oder 'python' sein")
+
+    config = getattr(settings, lang)
+
+    # Prüfen ob Name bereits existiert
+    existing_names = [r.name for r in config.repos]
+    if repo.name in existing_names:
+        raise HTTPException(status_code=400, detail=f"Repository '{repo.name}' existiert bereits")
+
+    # Prüfen ob Pfad existiert
+    from pathlib import Path
+    if not Path(repo.path).exists():
+        raise HTTPException(status_code=400, detail=f"Pfad existiert nicht: {repo.path}")
+
+    new_repo = RepoEntry(name=repo.name, path=repo.path)
+    config.repos.append(new_repo)
+
+    # Wenn erstes Repo, automatisch aktivieren
+    if len(config.repos) == 1:
+        config.active_repo = repo.name
+
+    return {
+        "added": repo.model_dump(),
+        "total": len(config.repos),
+        "active": config.active_repo,
+        "message": "Repository hinzugefügt. POST /save zum Persistieren."
+    }
+
+
+@router.put("/repos/{lang}/active")
+async def set_active_repo(lang: str, name: str) -> Dict[str, Any]:
+    """Setzt das aktive Repository."""
+    if lang not in ("java", "python"):
+        raise HTTPException(status_code=400, detail="Sprache muss 'java' oder 'python' sein")
+
+    config = getattr(settings, lang)
+
+    # Prüfen ob Repo existiert
+    repo_names = [r.name for r in config.repos]
+    if name not in repo_names:
+        raise HTTPException(status_code=404, detail=f"Repository '{name}' nicht gefunden. Verfügbar: {repo_names}")
+
+    config.active_repo = name
+
+    # Auch legacy repo_path setzen für Kompatibilität
+    for repo in config.repos:
+        if repo.name == name:
+            config.repo_path = repo.path
+            break
+
+    return {
+        "active_repo": name,
+        "active_path": config.get_active_path(),
+        "message": "Aktives Repository geändert. POST /save zum Persistieren."
+    }
+
+
+@router.delete("/repos/{lang}/{name}")
+async def delete_repo(lang: str, name: str) -> Dict[str, Any]:
+    """Entfernt ein Repository."""
+    if lang not in ("java", "python"):
+        raise HTTPException(status_code=400, detail="Sprache muss 'java' oder 'python' sein")
+
+    config = getattr(settings, lang)
+    original_count = len(config.repos)
+    config.repos = [r for r in config.repos if r.name != name]
+
+    if len(config.repos) == original_count:
+        raise HTTPException(status_code=404, detail=f"Repository '{name}' nicht gefunden")
+
+    # Wenn aktives Repo gelöscht, erstes verbleibendes aktivieren
+    if config.active_repo == name:
+        if config.repos:
+            config.active_repo = config.repos[0].name
+            config.repo_path = config.repos[0].path
+        else:
+            config.active_repo = ""
+            config.repo_path = ""
+
+    return {
+        "deleted": name,
+        "remaining": len(config.repos),
+        "active": config.active_repo,
+        "message": "Repository entfernt. POST /save zum Persistieren."
+    }

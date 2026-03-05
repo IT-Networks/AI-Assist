@@ -183,7 +183,7 @@ async def search_code(
     results = []
 
     # Java durchsuchen
-    if language in ("all", "java") and settings.java.repo_path:
+    if language in ("all", "java") and settings.java.get_active_path():
         try:
             from app.services.java_indexer import get_java_indexer
             indexer = get_java_indexer()
@@ -194,13 +194,13 @@ async def search_code(
                         "language": "java",
                         "file_path": r["file_path"],
                         "snippet": r["snippet"],
-                        "repo_path": settings.java.repo_path
+                        "repo_path": settings.java.get_active_path()
                     })
         except Exception:
             pass
 
     # Python durchsuchen
-    if language in ("all", "python") and settings.python.repo_path:
+    if language in ("all", "python") and settings.python.get_active_path():
         try:
             from app.services.python_indexer import get_python_indexer
             indexer = get_python_indexer()
@@ -211,7 +211,7 @@ async def search_code(
                         "language": "python",
                         "file_path": r["file_path"],
                         "snippet": r.get("snippet", ""),
-                        "repo_path": settings.python.repo_path
+                        "repo_path": settings.python.get_active_path()
                     })
         except Exception:
             pass
@@ -219,10 +219,10 @@ async def search_code(
     # SQL/SQLJ durchsuchen (einfache Dateisuche)
     if language in ("all", "sql", "sqlj"):
         repo_paths = []
-        if settings.java.repo_path:
-            repo_paths.append(Path(settings.java.repo_path))
-        if settings.python.repo_path:
-            repo_paths.append(Path(settings.python.repo_path))
+        if settings.java.get_active_path():
+            repo_paths.append(Path(settings.java.get_active_path()))
+        if settings.python.get_active_path():
+            repo_paths.append(Path(settings.python.get_active_path()))
 
         query_lower = query.lower()
         query_words = query_lower.split()
@@ -235,7 +235,7 @@ async def search_code(
             for ext in ("*.sql", "*.sqlj"):
                 for sql_file in repo_path.rglob(ext):
                     # Skip excluded directories
-                    exclude_dirs = settings.java.exclude_dirs if settings.java.repo_path else []
+                    exclude_dirs = settings.java.exclude_dirs if settings.java.get_active_path() else []
                     if any(ex in str(sql_file) for ex in exclude_dirs):
                         continue
 
@@ -373,13 +373,13 @@ async def read_file(path: str, encoding: str = "utf-8") -> ToolResult:
     # Wenn relativer Pfad, versuche in Repos zu finden
     if not Path(path).is_absolute():
         # Java Repo
-        if settings.java.repo_path:
-            java_full = Path(settings.java.repo_path) / path
+        if settings.java.get_active_path():
+            java_full = Path(settings.java.get_active_path()) / path
             if java_full.exists():
                 resolved_path = str(java_full)
         # Python Repo
-        if not Path(resolved_path).exists() and settings.python.repo_path:
-            python_full = Path(settings.python.repo_path) / path
+        if not Path(resolved_path).exists() and settings.python.get_active_path():
+            python_full = Path(settings.python.get_active_path()) / path
             if python_full.exists():
                 resolved_path = str(python_full)
 
@@ -630,10 +630,10 @@ async def trace_java_references(
     from pathlib import Path
     import re
 
-    if not settings.java.repo_path:
+    if not settings.java.get_active_path():
         return ToolResult(success=False, error="Java Repository nicht konfiguriert")
 
-    repo_path = Path(settings.java.repo_path)
+    repo_path = Path(settings.java.get_active_path())
     if not repo_path.exists():
         return ToolResult(success=False, error=f"Repository nicht gefunden: {repo_path}")
 

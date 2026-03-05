@@ -78,7 +78,7 @@ async def _collect_attachments(sources, session_id: str, user_message: str = "")
         try:
             from app.services.java_reader import JavaReader
             from app.core.config import settings
-            reader = JavaReader(settings.java.repo_path)
+            reader = JavaReader(settings.java.get_active_path())
             for rel_path in java_paths[:5]:  # limit to 5 files
                 try:
                     content = reader.read_file(rel_path)
@@ -98,7 +98,7 @@ async def _collect_attachments(sources, session_id: str, user_message: str = "")
             from app.services.pom_parser import PomParser
             from app.services.java_reader import JavaReader
             from app.core.config import settings
-            reader = JavaReader(settings.java.repo_path)
+            reader = JavaReader(settings.java.get_active_path())
             pom_files = reader.get_pom_files()
             if pom_files:
                 parser = PomParser()

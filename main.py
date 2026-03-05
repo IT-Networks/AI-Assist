@@ -15,17 +15,17 @@ async def lifespan(app: FastAPI):
     import asyncio
 
     # Java Index
-    if settings.index.auto_build_on_start and settings.java.repo_path:
+    if settings.index.auto_build_on_start and settings.java.get_active_path():
         try:
             from app.services.java_reader import JavaReader
             from app.services.java_indexer import get_java_indexer
-            reader = JavaReader(settings.java.repo_path)
+            reader = JavaReader(settings.java.get_active_path())
             indexer = get_java_indexer()
             loop = asyncio.get_event_loop()
             await loop.run_in_executor(
-                None, lambda: indexer.build(settings.java.repo_path, reader, force=False)
+                None, lambda: indexer.build(settings.java.get_active_path(), reader, force=False)
             )
-            print(f"[startup] Java-Index aufgebaut: {settings.java.repo_path}")
+            print(f"[startup] Java-Index aufgebaut: {settings.java.get_active_path()}")
         except Exception as e:
             print(f"[startup] Java-Index-Build fehlgeschlagen: {e}")
 
@@ -192,13 +192,13 @@ async def health_check() -> Dict[str, Any]:
 
     # Java Index
     try:
-        if settings.java.repo_path:
+        if settings.java.get_active_path():
             from app.services.java_indexer import get_java_indexer
             indexer = get_java_indexer()
             stats = indexer.get_stats()
             subsystems["java"] = {
                 "status": "healthy" if stats.get("indexed", False) else "not_indexed",
-                "repo_path": settings.java.repo_path,
+                "repo_path": settings.java.get_active_path(),
                 "classes_count": stats.get("classes_count", 0)
             }
         else:
@@ -215,11 +215,11 @@ async def health_check() -> Dict[str, Any]:
 
     # Python Repository
     try:
-        if settings.python.repo_path:
-            repo_path = Path(settings.python.repo_path)
+        if settings.python.get_active_path():
+            repo_path = Path(settings.python.get_active_path())
             subsystems["python"] = {
                 "status": "healthy" if repo_path.exists() else "path_not_found",
-                "repo_path": settings.python.repo_path,
+                "repo_path": settings.python.get_active_path(),
                 "exists": repo_path.exists()
             }
         else:

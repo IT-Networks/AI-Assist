@@ -22,7 +22,12 @@ models:
     display_name: "Qwen 428B"
 
 java:
-  repo_path: "/home/user/projects/my-java-app"
+  # Mehrere Repos möglich - nur eines aktiv
+  repos:
+    - name: "Beispiel-Projekt"
+      path: "/home/user/projects/my-java-app"
+  active_repo: "Beispiel-Projekt"  # Name des aktiven Repos
+  repo_path: "/home/user/projects/my-java-app"  # Legacy-Kompatibilität
   exclude_dirs:
     - "target"
     - ".git"

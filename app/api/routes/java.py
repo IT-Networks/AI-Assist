@@ -11,9 +11,9 @@ router = APIRouter(prefix="/api/java", tags=["java"])
 
 
 def _get_reader() -> JavaReader:
-    if not settings.java.repo_path:
+    if not settings.java.get_active_path():
         raise HTTPException(status_code=503, detail="Java-Repository-Pfad nicht konfiguriert (java.repo_path in config.yaml)")
-    return JavaReader(settings.java.repo_path)
+    return JavaReader(settings.java.get_active_path())
 
 
 @router.get("/tree")
@@ -89,7 +89,7 @@ async def get_pom_info():
 def _run_index_build(force: bool) -> dict:
     reader = _get_reader()
     indexer = get_java_indexer()
-    return indexer.build(settings.java.repo_path, reader, force=force)
+    return indexer.build(settings.java.get_active_path(), reader, force=force)
 
 
 @router.post("/index/build")
@@ -102,7 +102,7 @@ async def build_index(
     Baut den FTS5-Suchindex für das Java-Repository auf.
     Nur geänderte Dateien werden neu indexiert (inkrementell).
     """
-    if not settings.java.repo_path:
+    if not settings.java.get_active_path():
         raise HTTPException(status_code=503, detail="Java-Repository-Pfad nicht konfiguriert")
 
     if background:
