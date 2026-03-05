@@ -64,7 +64,7 @@ class JiraClient:
             "fields": ["summary", "status", "assignee", "priority", "updated", "issuetype"],
         }
 
-        async with httpx.AsyncClient(timeout=30) as client:
+        async with httpx.AsyncClient(timeout=30, verify=settings.jira.verify_ssl) as client:
             try:
                 resp = await client.post(
                     self._api_url("/search"),
@@ -105,7 +105,7 @@ class JiraClient:
         """
         self._check_configured()
 
-        async with httpx.AsyncClient(timeout=30) as client:
+        async with httpx.AsyncClient(timeout=30, verify=settings.jira.verify_ssl) as client:
             try:
                 resp = await client.get(
                     self._api_url(f"/issue/{issue_key}"),

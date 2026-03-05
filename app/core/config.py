@@ -58,6 +58,7 @@ class ConfluenceConfig(BaseModel):
     api_token: str = ""   # Atlassian Cloud API Token (bevorzugt)
     password: str = ""    # Atlassian Server/DC Passwort (Fallback wenn api_token leer)
     default_space: str = ""
+    verify_ssl: bool = True  # False für selbstsignierte Zertifikate
 
 
 class PythonConfig(BaseModel):
@@ -147,6 +148,7 @@ class JiraConfig(BaseModel):
     api_token: str = ""   # Atlassian Cloud API Token (bevorzugt)
     password: str = ""    # Server/DC Passwort (Fallback)
     default_project: str = ""  # Standard-Projektschlüssel (z.B. "PROJ")
+    verify_ssl: bool = True  # False für selbstsignierte Zertifikate
 
 
 class ContextConfig(BaseModel):

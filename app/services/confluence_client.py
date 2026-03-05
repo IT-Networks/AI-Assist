@@ -70,7 +70,7 @@ class ConfluenceClient:
             "limit": limit,
             "expand": "space,excerpt,version",
         }
-        async with httpx.AsyncClient(timeout=30) as client:
+        async with httpx.AsyncClient(timeout=30, verify=settings.confluence.verify_ssl) as client:
             try:
                 resp = await client.get(
                     self._api_url("/content/search"),
@@ -101,7 +101,7 @@ class ConfluenceClient:
 
     async def get_page_by_id(self, page_id: str) -> Dict:
         self._check_configured()
-        async with httpx.AsyncClient(timeout=30) as client:
+        async with httpx.AsyncClient(timeout=30, verify=settings.confluence.verify_ssl) as client:
             try:
                 resp = await client.get(
                     self._api_url(f"/content/{page_id}"),

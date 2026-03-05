@@ -42,6 +42,16 @@ confluence:
   api_token: ""       # Atlassian Cloud: API-Token hier eintragen
   password: ""        # Atlassian Server/DC: Passwort hier (statt api_token)
   default_space: ""
+  verify_ssl: false   # false für selbstsignierte Zertifikate (interne Server)
+
+jira:
+  enabled: false
+  base_url: "https://jira.example.com"
+  username: ""
+  api_token: ""       # Atlassian Cloud: API-Token hier eintragen
+  password: ""        # Atlassian Server/DC: Passwort hier (statt api_token)
+  default_project: ""
+  verify_ssl: false   # false für selbstsignierte Zertifikate (interne Server)
 
 context:
   max_tokens: 32000
