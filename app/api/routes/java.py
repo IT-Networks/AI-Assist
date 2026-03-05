@@ -1,0 +1,83 @@
+from fastapi import APIRouter, HTTPException, Query
+from typing import Optional
+
+from app.core.config import settings
+from app.core.exceptions import JavaReaderError, PathTraversalError
+from app.services.java_reader import JavaReader
+from app.services.pom_parser import PomParser
+
+router = APIRouter(prefix="/api/java", tags=["java"])
+
+
+def _get_reader() -> JavaReader:
+    if not settings.java.repo_path:
+        raise HTTPException(status_code=503, detail="Java-Repository-Pfad nicht konfiguriert (java.repo_path in config.yaml)")
+    return JavaReader(settings.java.repo_path)
+
+
+@router.get("/tree")
+async def get_file_tree():
+    """Return the nested directory/file tree of the Java repository."""
+    try:
+        reader = _get_reader()
+        return reader.get_file_tree()
+    except JavaReaderError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+
+
+@router.get("/file")
+async def get_file(path: str = Query(..., description="Relativer Pfad zur Datei im Repo")):
+    """Return the raw content of a Java source file."""
+    try:
+        reader = _get_reader()
+        content = reader.read_file(path)
+        return {"path": path, "content": content}
+    except PathTraversalError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except JavaReaderError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+
+
+@router.get("/summary")
+async def get_file_summary(path: str = Query(..., description="Relativer Pfad zur .java Datei")):
+    """Return an AST-based summary (package, class, method signatures) of a Java file."""
+    try:
+        reader = _get_reader()
+        return reader.summarize_file(path)
+    except PathTraversalError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except JavaReaderError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+
+
+@router.get("/search")
+async def search_class(q: str = Query(..., description="Klassen- oder Interface-Name")):
+    """Find all Java files containing a class/interface matching the query."""
+    try:
+        reader = _get_reader()
+        matches = reader.search_class(q)
+        return {"query": q, "matches": matches, "count": len(matches)}
+    except JavaReaderError as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/pom")
+async def get_pom_info():
+    """List all POM files in the repo with parsed dependency information."""
+    try:
+        reader = _get_reader()
+        pom_files = reader.get_pom_files()
+        if not pom_files:
+            return {"poms": []}
+
+        parser = PomParser()
+        results = []
+        for pom_path in pom_files:
+            try:
+                pom_data = parser.parse(pom_path)
+                results.append(pom_data)
+            except Exception as e:
+                results.append({"path": pom_path, "error": str(e)})
+        return {"poms": results}
+    except JavaReaderError as e:
+        raise HTTPException(status_code=500, detail=str(e))
