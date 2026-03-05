@@ -86,6 +86,7 @@ class DB2Client:
 
     def _get_jdbc_url(self) -> str:
         """Erstellt die JDBC URL."""
+        # Standard DB2 JDBC URL Format
         return f"jdbc:db2://{self.host}:{self.port}/{self.database}"
 
     @contextmanager
@@ -101,19 +102,48 @@ class DB2Client:
                 yield conn
             elif self.driver == "jaydebeapi":
                 import jaydebeapi
+                from pathlib import Path
+
+                # Prüfe ob JAR existiert
+                jar_path = Path(self.jdbc_driver_path)
+                if not jar_path.exists():
+                    raise FileNotFoundError(f"JDBC-Treiber nicht gefunden: {self.jdbc_driver_path}")
+
+                jdbc_url = self._get_jdbc_url()
+                print(f"[db] Connecting via JDBC: {jdbc_url}")
+                print(f"[db] Driver class: {self.jdbc_driver_class}")
+                print(f"[db] JAR: {self.jdbc_driver_path}")
+
+                # JPype JVM starten falls nötig
+                try:
+                    import jpype
+                    if not jpype.isJVMStarted():
+                        # JVM mit dem JDBC-Treiber im Classpath starten
+                        jpype.startJVM(classpath=[str(jar_path)])
+                        print("[db] JVM started")
+                except Exception as e:
+                    print(f"[db] JPype note: {e}")
+
                 conn = jaydebeapi.connect(
                     self.jdbc_driver_class,
-                    self._get_jdbc_url(),
+                    jdbc_url,
                     [self.username, self.password],
-                    self.jdbc_driver_path
+                    str(jar_path)
                 )
+                print("[db] Connection established")
+
                 if self.schema:
                     cursor = conn.cursor()
-                    cursor.execute(f"SET SCHEMA {self.schema}")
+                    cursor.execute(f"SET CURRENT SCHEMA = '{self.schema}'")
                     cursor.close()
+                    print(f"[db] Schema set to: {self.schema}")
+
                 yield conn
             else:
                 raise ValueError(f"Unbekannter Treiber: {self.driver}")
+        except Exception as e:
+            print(f"[db] Connection error: {type(e).__name__}: {e}")
+            raise
         finally:
             if conn:
                 try:
@@ -122,6 +152,7 @@ class DB2Client:
                         ibm_db.close(conn)
                     else:
                         conn.close()
+                        print("[db] Connection closed")
                 except Exception:
                     pass
 
@@ -392,9 +423,29 @@ class DB2Client:
         """Testet die Datenbankverbindung."""
         try:
             with self._connect() as conn:
+                # Einfache Test-Query ausführen
+                if self.driver == "jaydebeapi":
+                    cursor = conn.cursor()
+                    cursor.execute("SELECT 1 FROM SYSIBM.SYSDUMMY1")
+                    result = cursor.fetchone()
+                    cursor.close()
+                    if result:
+                        return True, f"Verbindung erfolgreich (JDBC: {self._get_jdbc_url()})"
                 return True, "Verbindung erfolgreich"
+        except FileNotFoundError as e:
+            return False, f"JDBC-Treiber nicht gefunden: {e}"
         except Exception as e:
-            return False, str(e)
+            error_msg = str(e)
+            # Hilfreiche Hinweise bei typischen Fehlern
+            if "ClassNotFoundException" in error_msg:
+                error_msg += f"\n→ Prüfe jdbc_driver_class (aktuell: {self.jdbc_driver_class})"
+            elif "No suitable driver" in error_msg:
+                error_msg += f"\n→ JAR-Pfad prüfen: {self.jdbc_driver_path}"
+            elif "authentication" in error_msg.lower() or "password" in error_msg.lower():
+                error_msg += "\n→ Username/Passwort prüfen"
+            elif "-204" in error_msg or "42704" in error_msg:
+                error_msg += "\n→ Tabelle/Objekt nicht gefunden - Schema korrekt?"
+            return False, error_msg
 
 
 # ══════════════════════════════════════════════════════════════════════════════

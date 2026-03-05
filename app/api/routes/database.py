@@ -48,31 +48,54 @@ async def test_connection() -> Dict[str, Any]:
             }
 
         from pathlib import Path
-        if not Path(settings.database.jdbc_driver_path).exists():
+        jar_path = Path(settings.database.jdbc_driver_path)
+        if not jar_path.exists():
             return {
                 "success": False,
                 "error": f"JDBC-Treiber nicht gefunden: {settings.database.jdbc_driver_path}"
             }
+
+    # Debug-Info sammeln
+    config_info = {
+        "driver": settings.database.driver,
+        "host": settings.database.host,
+        "port": settings.database.port,
+        "database": settings.database.database,
+        "schema": settings.database.schema or "(nicht gesetzt)",
+        "username": settings.database.username,
+        "jdbc_url": f"jdbc:db2://{settings.database.host}:{settings.database.port}/{settings.database.database}",
+    }
+
+    if settings.database.driver == "jaydebeapi":
+        config_info["jdbc_driver_path"] = settings.database.jdbc_driver_path
+        config_info["jdbc_driver_class"] = settings.database.jdbc_driver_class
 
     try:
         from app.services.db_client import get_db_client
         client = get_db_client()
 
         if not client:
-            return {"success": False, "error": "DB-Client konnte nicht erstellt werden"}
+            return {"success": False, "error": "DB-Client konnte nicht erstellt werden", "config": config_info}
 
         success, message = client.test_connection()
 
         if success:
             return {
                 "success": True,
-                "message": f"Verbindung erfolgreich zu {settings.database.host}:{settings.database.port}/{settings.database.database}"
+                "message": message,
+                "config": config_info
             }
         else:
-            return {"success": False, "error": message}
+            return {"success": False, "error": message, "config": config_info}
 
     except Exception as e:
-        return {"success": False, "error": str(e)}
+        import traceback
+        return {
+            "success": False,
+            "error": str(e),
+            "traceback": traceback.format_exc(),
+            "config": config_info
+        }
 
 
 @router.get("/tables")
