@@ -320,11 +320,15 @@ class AgentOrchestrator:
                         arguments=json.loads(tc["function"]["arguments"])
                     )
 
+                    # Pro-Tool Modell ermitteln
+                    tool_specific_model = settings.llm.tool_models.get(tool_call.name, "")
+                    effective_model = tool_specific_model or last_model or settings.llm.tool_model or settings.llm.default_model
+
                     yield AgentEvent(AgentEventType.TOOL_START, {
                         "id": tool_call.id,
                         "name": tool_call.name,
                         "arguments": tool_call.arguments,
-                        "model": last_model or settings.llm.tool_model or settings.llm.default_model
+                        "model": effective_model
                     })
 
                     # Tool ausführen
@@ -445,11 +449,11 @@ class AgentOrchestrator:
         """
         import httpx
 
-        # Modell-Auswahl
-        if model:
-            selected_model = model
-        elif settings.llm.analysis_model:
+        # Modell-Auswahl: Phase-spezifisch > Explizit > Default
+        if settings.llm.analysis_model:
             selected_model = settings.llm.analysis_model
+        elif model:
+            selected_model = model
         else:
             selected_model = settings.llm.default_model
 
@@ -557,15 +561,38 @@ class AgentOrchestrator:
         """
         import httpx
 
-        # Modell-Auswahl: Explizit > Phase-spezifisch > Default
-        if model:
-            selected_model = model
-        elif is_tool_phase and tools and settings.llm.tool_model:
-            selected_model = settings.llm.tool_model
-        elif not is_tool_phase and settings.llm.analysis_model:
-            selected_model = settings.llm.analysis_model
-        else:
-            selected_model = settings.llm.default_model
+        # Modell-Auswahl: Pro-Tool > Phase-spezifisch > Explizit (Header-Dropdown) > Default
+        # Pro-Tool und Phase-spezifische Modelle haben Vorrang, da sie bewusst konfiguriert wurden
+        selected_model = None
+
+        # 1. Pro-Tool Modell prüfen (wenn letzte Iteration ein bestimmtes Tool aufgerufen hat)
+        if is_tool_phase and settings.llm.tool_models:
+            # Prüfe ob in den Messages ein Tool-Result mit zugewiesenem Modell vorliegt
+            for msg in reversed(messages):
+                if msg.get("role") == "tool":
+                    # Tool-Name aus dem zugehörigen Assistant-Message extrahieren
+                    tool_call_id = msg.get("tool_call_id", "")
+                    for prev_msg in messages:
+                        for tc in prev_msg.get("tool_calls", []):
+                            if tc.get("id") == tool_call_id:
+                                tool_name = tc["function"]["name"]
+                                if tool_name in settings.llm.tool_models:
+                                    selected_model = settings.llm.tool_models[tool_name]
+                                    break
+                        if selected_model:
+                            break
+                    if selected_model:
+                        break
+
+        if not selected_model:
+            if is_tool_phase and tools and settings.llm.tool_model:
+                selected_model = settings.llm.tool_model
+            elif not is_tool_phase and settings.llm.analysis_model:
+                selected_model = settings.llm.analysis_model
+            elif model:
+                selected_model = model
+            else:
+                selected_model = settings.llm.default_model
 
         base_url = settings.llm.base_url.rstrip("/")
 

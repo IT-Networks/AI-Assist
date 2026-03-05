@@ -383,6 +383,49 @@ async def reload_settings() -> Dict[str, Any]:
 
 
 # ══════════════════════════════════════════════════════════════════════════════
+# Agent Tools Management
+# ══════════════════════════════════════════════════════════════════════════════
+
+@router.get("/agent-tools")
+async def get_agent_tools() -> Dict[str, Any]:
+    """Gibt alle registrierten Agent-Tools mit ihren Modell-Zuweisungen zurück."""
+    from app.agent.tools import get_tool_registry
+
+    registry = get_tool_registry()
+    tools_list = []
+
+    for tool in registry.list_tools():
+        tools_list.append({
+            "name": tool.name,
+            "description": tool.description,
+            "category": tool.category.value,
+            "is_write_operation": tool.is_write_operation,
+            "model": settings.llm.tool_models.get(tool.name, ""),
+        })
+
+    return {
+        "tools": tools_list,
+        "tool_models": settings.llm.tool_models,
+        "available_models": [m.model_dump() for m in settings.models],
+        "default_model": settings.llm.default_model,
+        "tool_model": settings.llm.tool_model,
+    }
+
+
+@router.put("/agent-tools/models")
+async def update_tool_models(tool_models: Dict[str, str]) -> Dict[str, Any]:
+    """Aktualisiert die Pro-Tool Modell-Zuweisungen."""
+    # Leere Werte entfernen (= Default verwenden)
+    cleaned = {k: v for k, v in tool_models.items() if v}
+    settings.llm.tool_models = cleaned
+
+    return {
+        "tool_models": settings.llm.tool_models,
+        "message": "Tool-Modelle aktualisiert. POST /save zum Persistieren."
+    }
+
+
+# ══════════════════════════════════════════════════════════════════════════════
 # Models Management
 # ══════════════════════════════════════════════════════════════════════════════
 

@@ -1,6 +1,6 @@
 import os
 from pathlib import Path
-from typing import List, Optional
+from typing import Dict, List, Optional
 
 import yaml
 from pydantic import BaseModel, field_validator
@@ -24,6 +24,8 @@ class LLMConfig(BaseModel):
     # Modell-Aufteilung für Agent
     tool_model: str = ""  # Schnelles Modell für Tool-Aufrufe/Suche (leer = default_model)
     analysis_model: str = ""  # Größeres Modell für Analyse/Antwort (leer = default_model)
+    # Pro-Tool Modell-Zuweisung: {"tool_name": "model_id"} (leer = tool_model oder default_model)
+    tool_models: Dict[str, str] = {}
 
 
 class RepoEntry(BaseModel):
