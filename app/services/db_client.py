@@ -291,15 +291,15 @@ class DB2Client:
             cursor = conn.cursor()
             cursor.execute(query)
 
-            # Spalten holen
-            columns = [desc[0] for desc in cursor.description] if cursor.description else []
+            # Spalten holen (str() nötig da jaydebeapi Java-Strings liefert)
+            columns = [str(desc[0]) for desc in cursor.description] if cursor.description else []
 
             # Rows holen (mit Limit)
             rows = []
             truncated = False
             all_rows = cursor.fetchall()
             for row in all_rows:
-                rows.append(tuple(row))
+                rows.append(tuple(str(v) if v is not None else None for v in row))
                 if len(rows) >= self.max_rows:
                     truncated = True
                     break
