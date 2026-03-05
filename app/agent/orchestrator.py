@@ -205,13 +205,18 @@ class AgentOrchestrator:
         last_finish_reason = ""
         last_model = ""
 
+        # Debug: Tool-Schemas Anzahl loggen
+        print(f"[agent] Starting with {len(tool_schemas)} tools, mode={state.mode.value}")
+
         for iteration in range(self.max_iterations):
             try:
                 # LLM aufrufen (nicht-streamend für Tool-Calls)
                 # Tool-Phase: Schnelles Modell für Suche/Tool-Aufrufe
+                print(f"[agent] Iteration {iteration + 1}: Calling LLM with {len(tool_schemas)} tools")
                 response = await self._call_llm_with_tools(
                     messages, tool_schemas, model, is_tool_phase=True
                 )
+                print(f"[agent] LLM response: tool_calls={len(response.get('tool_calls', []))}, content_len={len(response.get('content', ''))}")
 
                 # Token-Nutzung akkumulieren
                 usage = response.get("usage")
@@ -224,20 +229,25 @@ class AgentOrchestrator:
                 # Tool-Calls verarbeiten
                 tool_calls = response.get("tool_calls", [])
                 if not tool_calls:
-                    # Keine weiteren Tool-Calls -> Analyse-Phase
+                    # Keine weiteren Tool-Calls -> Finale Antwort generieren
                     assistant_response = ""
                     final_usage = None
 
-                    # Wenn Tools verwendet wurden UND ein Analyse-Modell konfiguriert ist
-                    # -> Finale Antwort mit Analyse-Modell generieren (optional mit Streaming)
-                    if has_used_tools and settings.llm.analysis_model and not model:
-                        # Streaming für finale Antwort
-                        if settings.llm.streaming:
+                    # Entscheiden ob wir streamen oder die vorhandene Antwort nutzen
+                    should_stream = settings.llm.streaming
+                    # Wenn wir bereits eine Antwort haben und NICHT streamen wollen
+                    existing_content = response.get("content", "")
+
+                    # Wenn ein separates Analyse-Modell konfiguriert ist, muss neu angefragt werden
+                    needs_new_request = (has_used_tools and settings.llm.analysis_model and not model)
+
+                    if needs_new_request:
+                        # Neue Anfrage mit Analyse-Modell
+                        if should_stream:
                             stream_result = await self._stream_final_response_with_usage(messages)
                             async for token in stream_result["tokens"]:
                                 assistant_response += token
                                 yield AgentEvent(AgentEventType.TOKEN, token)
-                            # Usage aus Container extrahieren (wird während Streaming gefüllt)
                             final_usage = stream_result["usage"].get("usage")
                         else:
                             analysis_response = await self._call_llm_with_tools(
@@ -247,20 +257,20 @@ class AgentOrchestrator:
                             final_usage = analysis_response.get("usage")
                             if assistant_response:
                                 yield AgentEvent(AgentEventType.TOKEN, assistant_response)
+                    elif should_stream and not existing_content:
+                        # Keine Antwort vorhanden -> Stream anfordern
+                        stream_result = await self._stream_final_response_with_usage(messages, model)
+                        async for token in stream_result["tokens"]:
+                            assistant_response += token
+                            yield AgentEvent(AgentEventType.TOKEN, token)
+                        final_usage = stream_result["usage"].get("usage")
                     else:
-                        # Keine Tool-Phase -> Antwort direkt nutzen oder streamen
-                        if settings.llm.streaming and not response.get("content"):
-                            stream_result = await self._stream_final_response_with_usage(messages, model)
-                            async for token in stream_result["tokens"]:
-                                assistant_response += token
-                                yield AgentEvent(AgentEventType.TOKEN, token)
-                            # Usage aus Container extrahieren
-                            final_usage = stream_result["usage"].get("usage")
-                        else:
-                            assistant_response = response.get("content", "")
-                            final_usage = usage
-                            if assistant_response:
-                                yield AgentEvent(AgentEventType.TOKEN, assistant_response)
+                        # Vorhandene Antwort nutzen (LLM hat direkt geantwortet ohne Tools)
+                        assistant_response = existing_content
+                        final_usage = usage
+                        if assistant_response:
+                            # Bei langem Content als Stream simulieren
+                            yield AgentEvent(AgentEventType.TOKEN, assistant_response)
 
                     # Finale Token-Nutzung akkumulieren
                     if final_usage and isinstance(final_usage, TokenUsage):
@@ -455,8 +465,12 @@ class AgentOrchestrator:
             "temperature": settings.llm.temperature,
             "max_tokens": settings.llm.max_tokens,
             "stream": True,
-            "stream_options": {"include_usage": True}  # OpenAI feature für Usage in Streaming
         }
+
+        # stream_options ist nur für OpenAI API verfügbar, nicht alle LLM-Server unterstützen es
+        # Wir fügen es nur hinzu wenn es wahrscheinlich unterstützt wird
+        if "openai" in base_url.lower() or "api.openai" in base_url.lower():
+            payload["stream_options"] = {"include_usage": True}
 
         # Container für Usage (wird während Streaming gefüllt)
         usage_container = {"usage": None, "finish_reason": ""}
@@ -587,8 +601,17 @@ class AgentOrchestrator:
             response.raise_for_status()
             data = response.json()
 
+        # Debug: Rohe Antwort prüfen
+        if "choices" not in data or not data["choices"]:
+            print(f"[agent] WARNING: No choices in LLM response: {list(data.keys())}")
+            return {"content": "", "tool_calls": [], "usage": TokenUsage(), "finish_reason": "error"}
+
         choice = data["choices"][0]
         message = choice.get("message", {})
+
+        # Debug: Tool-Calls in der Antwort
+        if "tool_calls" in message:
+            print(f"[agent] LLM returned {len(message['tool_calls'])} tool calls")
         finish_reason = choice.get("finish_reason", "")
 
         # Token-Nutzung extrahieren
@@ -641,27 +664,53 @@ class AgentOrchestrator:
 
     def _build_agent_instructions(self, mode: AgentMode) -> str:
         """Baut die Agent-Instruktionen für den System-Prompt."""
+        # Dynamisch prüfen welche Features aktiv sind
+        db_available = settings.database.enabled
+        handbook_available = settings.handbook.enabled
+
         base = """
 ## Agent-Anweisungen
 
 Du bist ein intelligenter Assistent mit Zugriff auf Tools.
 
-Verfügbare Tools:
+### Verfügbare Tools:
+
+**Code-Suche:**
 - search_code: Durchsuche Java/Python/SQL Code nach relevanten Dateien
-- search_handbook: Durchsuche das Handbuch nach Service-Dokumentation
-- search_skills: Durchsuche die Wissensbasen der aktiven Skills
-- search_pdf: Durchsuche hochgeladene PDF-Dokumente
 - read_file: Lese den Inhalt einer Datei
 - list_files: Liste Dateien in einem Verzeichnis auf
-- get_service_info: Hole Service-Details aus dem Handbuch
 - trace_java_references: Verfolge Java-Klassenhierarchien (Interfaces, Parent-Klassen)
-- list_database_tables: Liste Tabellen in der DB2-Datenbank auf
-- describe_database_table: Zeige Spalten und Typen einer DB2-Tabelle
+"""
 
-Verwende Tools um Informationen zu sammeln, bevor du antwortest.
-Bei Code-Fragen: Suche zuerst nach relevantem Code. Bei komplexen Klassen nutze trace_java_references.
-Bei Handbuch-Fragen: Suche zuerst im Handbuch.
-Bei PDF-Dokumenten: Durchsuche sie mit search_pdf.
+        if handbook_available:
+            base += """
+**Handbuch:**
+- search_handbook: Durchsuche das Handbuch nach Service-Dokumentation
+- get_service_info: Hole Service-Details aus dem Handbuch
+"""
+
+        base += """
+**Wissen & Dokumente:**
+- search_skills: Durchsuche die Wissensbasen der aktiven Skills
+- search_pdf: Durchsuche hochgeladene PDF-Dokumente
+"""
+
+        if db_available:
+            base += f"""
+**Datenbank (DB2):**
+Die DB2-Datenbank ist aktiviert und verbunden ({settings.database.host}:{settings.database.port}/{settings.database.database}).
+- list_database_tables: Liste alle Tabellen im Schema auf
+- describe_database_table: Zeige Spalten, Typen und Constraints einer Tabelle
+"""
+
+        base += """
+### Anweisungen:
+
+Verwende die passenden Tools um Informationen zu sammeln, bevor du antwortest.
+- Bei Code-Fragen: Suche zuerst nach relevantem Code. Bei komplexen Klassen nutze trace_java_references.
+- Bei Handbuch-Fragen: Suche zuerst im Handbuch.
+- Bei PDF-Dokumenten: Durchsuche sie mit search_pdf.
+- Bei Datenbank-Fragen: Nutze list_database_tables und describe_database_table um die Struktur zu verstehen.
 """
 
         if mode == AgentMode.READ_ONLY:
