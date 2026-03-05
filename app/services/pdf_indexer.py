@@ -28,7 +28,7 @@ class PDFIndexer:
                     pdf_id   UNINDEXED,
                     page_num UNINDEXED,
                     content,
-                    tokenize='porter ascii'
+                    tokenize='unicode61 remove_diacritics 0'
                 );
             """)
 

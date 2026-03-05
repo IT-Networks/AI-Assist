@@ -283,10 +283,10 @@ async def search_code(
                 full_path = Path(r['repo_path']) / r['file_path']
                 if full_path.exists():
                     content = full_path.read_text(encoding="utf-8", errors="replace")
-                    # Auf 10000 Zeichen pro Datei begrenzen
-                    if len(content) > 10000:
-                        content = content[:10000] + "\n... [Datei gekürzt]"
-                    output += f"```{r['language']}\n{content}\n```\n\n"
+                    # Vollständig lesen, nur in Ausgabe Hinweis auf Länge
+                    char_count = len(content)
+                    output += f"```{r['language']}\n{content}\n```\n"
+                    output += f"[{char_count:,} Zeichen]\n\n"
                 else:
                     output += f"  [Datei nicht lesbar]\n\n"
             except Exception as e:
@@ -390,14 +390,12 @@ async def read_file(path: str, encoding: str = "utf-8") -> ToolResult:
             return ToolResult(success=False, error=f"Datei nicht gefunden: {path}")
 
         content = file_path.read_text(encoding=encoding, errors="replace")
+        char_count = len(content)
 
-        # Auf 50000 Zeichen begrenzen
-        if len(content) > 50000:
-            content = content[:50000] + "\n\n... [Datei gekürzt, zu lang]"
-
+        # Vollständig lesen - keine Kürzung mehr
         return ToolResult(
             success=True,
-            data=f"=== Datei: {path} ===\n{content}"
+            data=f"=== Datei: {path} ({char_count:,} Zeichen) ===\n{content}"
         )
     except PermissionError as e:
         return ToolResult(success=False, error=f"Zugriff verweigert: {e}")

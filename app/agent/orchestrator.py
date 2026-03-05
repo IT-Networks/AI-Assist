@@ -101,8 +101,8 @@ class AgentOrchestrator:
     def __init__(
         self,
         tool_registry: Optional[ToolRegistry] = None,
-        max_iterations: int = 10,
-        max_tool_calls_per_iteration: int = 5
+        max_iterations: int = 30,  # Erhöht von 10 auf 30 für komplexe Aufgaben
+        max_tool_calls_per_iteration: int = 10  # Erhöht von 5 auf 10
     ):
         self.tools = tool_registry or get_tool_registry()
         self.max_iterations = max_iterations
@@ -475,8 +475,13 @@ class AgentOrchestrator:
         # Container für Usage (wird während Streaming gefüllt)
         usage_container = {"usage": None, "finish_reason": ""}
 
+        # Prompt-Tokens schätzen (ca. 4 Zeichen pro Token)
+        prompt_text = "".join(m.get("content", "") or "" for m in messages)
+        estimated_prompt_tokens = len(prompt_text) // 4
+
         async def token_generator():
             completion_tokens = 0
+            completion_chars = 0
             async with httpx.AsyncClient(
                 timeout=settings.llm.timeout_seconds,
                 verify=settings.llm.verify_ssl
@@ -521,18 +526,19 @@ class AgentOrchestrator:
                                     usage_container["finish_reason"] = choice["finish_reason"]
 
                                 if token:
-                                    completion_tokens += 1  # Approximation
+                                    completion_chars += len(token)
+                                    completion_tokens = completion_chars // 4  # ~4 chars per token
                                     yield token
 
                         except (ValueError, KeyError, IndexError):
                             continue
 
-            # Fallback: Wenn kein Usage vom Server, schätzen wir
+            # Fallback: Wenn kein Usage vom Server, schätzen wir basierend auf Zeichenzahl
             if not usage_container["usage"]:
                 usage_container["usage"] = TokenUsage(
-                    prompt_tokens=0,  # Unbekannt bei Streaming ohne Usage
+                    prompt_tokens=estimated_prompt_tokens,  # Geschätzt aus Prompt-Länge
                     completion_tokens=completion_tokens,
-                    total_tokens=completion_tokens,
+                    total_tokens=estimated_prompt_tokens + completion_tokens,
                     finish_reason=usage_container["finish_reason"],
                     model=selected_model,
                     truncated=(usage_container["finish_reason"] == "length")
