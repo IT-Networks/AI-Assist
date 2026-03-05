@@ -526,14 +526,22 @@ async def search_pdf(
     if not uploads_dir.exists():
         return ToolResult(success=False, error="Upload-Verzeichnis nicht gefunden")
 
+    # Versuche PyMuPDF, fallback auf pdfplumber
+    pdf_reader = None
+    reader_type = None
+
     try:
-        # PyMuPDF für PDF-Extraktion
         import fitz  # PyMuPDF
+        reader_type = "pymupdf"
     except ImportError:
-        return ToolResult(
-            success=False,
-            error="PyMuPDF nicht installiert. Bitte 'pip install PyMuPDF' ausführen."
-        )
+        try:
+            import pdfplumber
+            reader_type = "pdfplumber"
+        except ImportError:
+            return ToolResult(
+                success=False,
+                error="Kein PDF-Reader installiert. Bitte 'pip install PyMuPDF' oder 'pip install pdfplumber' ausführen."
+            )
 
     results = []
     query_lower = query.lower()
@@ -546,36 +554,50 @@ async def search_pdf(
 
     for pdf_path in pdf_files[:20]:  # Max 20 PDFs durchsuchen
         try:
-            doc = fitz.open(str(pdf_path))
             file_matches = []
 
-            for page_num, page in enumerate(doc, 1):
-                text = page.get_text()
-                text_lower = text.lower()
+            if reader_type == "pymupdf":
+                import fitz
+                doc = fitz.open(str(pdf_path))
+                for page_num, page in enumerate(doc, 1):
+                    text = page.get_text()
+                    text_lower = text.lower()
 
-                # Prüfen ob Query-Begriffe vorkommen
-                if any(word in text_lower for word in query_words):
-                    # Relevanten Abschnitt extrahieren
-                    for word in query_words:
-                        idx = text_lower.find(word)
-                        if idx >= 0:
-                            start = max(0, idx - 200)
-                            end = min(len(text), idx + 300)
-                            snippet = text[start:end].strip()
-                            snippet = re.sub(r'\s+', ' ', snippet)
-                            file_matches.append({
-                                "page": page_num,
-                                "snippet": snippet
-                            })
-                            break
+                    if any(word in text_lower for word in query_words):
+                        for word in query_words:
+                            idx = text_lower.find(word)
+                            if idx >= 0:
+                                start = max(0, idx - 200)
+                                end = min(len(text), idx + 300)
+                                snippet = text[start:end].strip()
+                                snippet = re.sub(r'\s+', ' ', snippet)
+                                file_matches.append({"page": page_num, "snippet": snippet})
+                                break
+                doc.close()
 
-            doc.close()
+            else:  # pdfplumber
+                import pdfplumber
+                with pdfplumber.open(str(pdf_path)) as pdf:
+                    for page_num, page in enumerate(pdf.pages, 1):
+                        text = page.extract_text() or ""
+                        text_lower = text.lower()
+
+                        if any(word in text_lower for word in query_words):
+                            for word in query_words:
+                                idx = text_lower.find(word)
+                                if idx >= 0:
+                                    start = max(0, idx - 200)
+                                    end = min(len(text), idx + 300)
+                                    snippet = text[start:end].strip()
+                                    snippet = re.sub(r'\s+', ' ', snippet)
+                                    file_matches.append({"page": page_num, "snippet": snippet})
+                                    break
 
             if file_matches:
                 results.append({
                     "filename": pdf_path.name,
                     "path": str(pdf_path),
-                    "matches": file_matches[:3]  # Max 3 Matches pro PDF
+                    "matches": file_matches[:3]
                 })
 
         except Exception as e:

@@ -7,7 +7,8 @@ python-multipart==0.0.9
 pydantic==2.7.1
 pydantic-settings==2.3.1
 pdfplumber==0.11.0
-PyMuPDF==1.24.5
+# Optional: PyMuPDF für schnellere PDF-Suche (pdfplumber als Fallback)
+# PyMuPDF==1.24.5
 lxml==5.2.2
 beautifulsoup4==4.12.3
 javalang==0.13.0
