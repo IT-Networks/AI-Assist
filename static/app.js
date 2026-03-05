@@ -18,6 +18,11 @@ const state = {
     pdfIds: [],
     handbookServices: [],
   },
+  // Live-Tracking für Anfragen
+  requestStartTime: null,
+  requestTimerInterval: null,
+  liveTokenCount: 0,
+  currentStatusBar: null,
 };
 
 // ── Initialization ──
@@ -297,6 +302,7 @@ async function sendAgentChat(message) {
 
   if (!res.ok) {
     const err = await res.json().catch(() => ({ detail: res.statusText }));
+    stopRequestTimer();
     throw new Error(err.detail || res.statusText);
   }
 
@@ -305,6 +311,13 @@ async function sendAgentChat(message) {
   const bubble = msgDiv.querySelector('.message-bubble');
   let fullText = '';
   let currentToolCard = null;
+
+  // Live-Status-Bar erstellen und Timer starten
+  startRequestTimer();
+  const statusBar = createLiveStatusBar();
+  msgDiv.appendChild(statusBar);
+  state.currentStatusBar = statusBar;
+  state.liveTokenCount = 0;
 
   const reader = res.body.getReader();
   const decoder = new TextDecoder();
@@ -330,6 +343,9 @@ async function sendAgentChat(message) {
           bubble.innerHTML = marked.parse(fullText);
           applyHighlight(bubble);
           scrollToBottom();
+          // Live-Token-Count aktualisieren (approximativ)
+          state.liveTokenCount += countTokensApprox(event.data);
+          updateLiveStatusBar();
         }
       } catch (e) {
         // Ignore parse errors for partial chunks
@@ -337,12 +353,81 @@ async function sendAgentChat(message) {
     }
   }
 
+  // Timer stoppen
+  stopRequestTimer();
+
   // Final render
   if (fullText) {
     bubble.innerHTML = marked.parse(fullText);
     applyHighlight(bubble);
   }
   scrollToBottom();
+}
+
+// ── Live Status Bar ──
+function createLiveStatusBar() {
+  const statusBar = document.createElement('div');
+  statusBar.className = 'live-status-bar';
+  statusBar.innerHTML = `
+    <div class="status-timer">
+      <span class="status-icon">⏱️</span>
+      <span class="timer-value">0:00</span>
+    </div>
+    <div class="status-tokens">
+      <span class="status-icon">📊</span>
+      <span class="tokens-value">0 tokens</span>
+    </div>
+    <div class="status-indicator">
+      <span class="pulse-dot"></span>
+      <span>Verarbeite...</span>
+    </div>
+  `;
+  return statusBar;
+}
+
+function startRequestTimer() {
+  state.requestStartTime = Date.now();
+  state.requestTimerInterval = setInterval(updateLiveStatusBar, 100);
+}
+
+function stopRequestTimer() {
+  if (state.requestTimerInterval) {
+    clearInterval(state.requestTimerInterval);
+    state.requestTimerInterval = null;
+  }
+  // Status-Bar auf "Fertig" setzen
+  if (state.currentStatusBar) {
+    const indicator = state.currentStatusBar.querySelector('.status-indicator');
+    if (indicator) {
+      indicator.innerHTML = `<span class="status-done">✓</span><span>Fertig</span>`;
+    }
+    state.currentStatusBar.classList.add('done');
+  }
+}
+
+function updateLiveStatusBar() {
+  if (!state.currentStatusBar || !state.requestStartTime) return;
+
+  const elapsed = Date.now() - state.requestStartTime;
+  const seconds = Math.floor(elapsed / 1000);
+  const minutes = Math.floor(seconds / 60);
+  const secs = seconds % 60;
+  const ms = Math.floor((elapsed % 1000) / 100);
+
+  const timerEl = state.currentStatusBar.querySelector('.timer-value');
+  if (timerEl) {
+    timerEl.textContent = `${minutes}:${secs.toString().padStart(2, '0')}.${ms}`;
+  }
+
+  const tokensEl = state.currentStatusBar.querySelector('.tokens-value');
+  if (tokensEl) {
+    tokensEl.textContent = `~${state.liveTokenCount} tokens`;
+  }
+}
+
+function countTokensApprox(text) {
+  // Grobe Schätzung: ~4 Zeichen pro Token (für Deutsch/Englisch)
+  return Math.ceil(text.length / 4);
 }
 
 async function processAgentEvent(event, bubble, msgDiv) {
@@ -389,10 +474,75 @@ async function processAgentEvent(event, bubble, msgDiv) {
       appendMessage('error', data.error || 'Unbekannter Fehler');
       break;
 
+    case 'usage':
+      // Token-Nutzung anzeigen
+      displayTokenUsage(data);
+      break;
+
     case 'done':
-      // Chat complete
+      // Chat complete - Nutzung aus done-Event falls vorhanden
+      if (data.usage) {
+        displayTokenUsage(data.usage);
+      }
       break;
   }
+}
+
+function displayTokenUsage(usage) {
+  // Aktualisiere die vorhandene Status-Bar statt neue zu erstellen
+  if (state.currentStatusBar) {
+    const statusBar = state.currentStatusBar;
+    statusBar.classList.add('done', 'final');
+
+    const truncatedWarning = usage.truncated
+      ? `<div class="truncated-warning">⚠️ Abgebrochen wegen max_tokens (${usage.max_tokens})</div>`
+      : '';
+
+    // Berechne verstrichene Zeit
+    const elapsed = state.requestStartTime ? Date.now() - state.requestStartTime : 0;
+    const seconds = (elapsed / 1000).toFixed(1);
+
+    statusBar.innerHTML = `
+      <div class="status-timer">
+        <span class="status-icon">⏱️</span>
+        <span class="timer-value">${seconds}s</span>
+      </div>
+      <div class="status-tokens">
+        <span class="status-icon">📊</span>
+        <span class="tokens-value">${usage.prompt_tokens || 0} + ${usage.completion_tokens || 0} = ${usage.total_tokens || 0} tokens</span>
+      </div>
+      ${usage.model ? `<div class="status-model">${usage.model}</div>` : ''}
+      ${truncatedWarning}
+      <div class="status-indicator">
+        <span class="status-done">✓</span>
+      </div>
+    `;
+
+    state.currentStatusBar = null;
+    scrollToBottom();
+    return;
+  }
+
+  // Fallback: Neue Anzeige erstellen wenn keine Status-Bar vorhanden
+  const usageDiv = document.createElement('div');
+  usageDiv.className = 'token-usage';
+
+  const truncatedWarning = usage.truncated
+    ? `<span class="truncated-warning">⚠️ Antwort wegen max_tokens (${usage.max_tokens}) abgebrochen</span>`
+    : '';
+
+  usageDiv.innerHTML = `
+    <div class="token-usage-row">
+      <span class="token-label">Tokens:</span>
+      <span class="token-value">${usage.prompt_tokens || 0} prompt + ${usage.completion_tokens || 0} completion = ${usage.total_tokens || 0}</span>
+      ${usage.model ? `<span class="token-model">${usage.model}</span>` : ''}
+      ${truncatedWarning}
+    </div>
+  `;
+
+  const messages = document.getElementById('messages');
+  messages.appendChild(usageDiv);
+  scrollToBottom();
 }
 
 function createToolCard(toolName, args, status) {

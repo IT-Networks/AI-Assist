@@ -1753,3 +1753,144 @@ body {
 .progress-details span {
   white-space: nowrap;
 }
+
+/* ══════════════════════════════════════════════════════════════════════════════
+   Token Usage Display
+   ══════════════════════════════════════════════════════════════════════════════ */
+
+.token-usage {
+  display: flex;
+  justify-content: flex-end;
+  padding: 4px 20px 8px 20px;
+  margin-top: -8px;
+}
+
+.token-usage-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+}
+
+.token-label {
+  color: var(--text-secondary);
+}
+
+.token-value {
+  color: var(--text-muted);
+}
+
+.token-model {
+  background: var(--surface);
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-size: 0.7rem;
+}
+
+.truncated-warning {
+  color: var(--warning);
+  font-size: 0.75rem;
+  padding: 2px 8px;
+  background: var(--warning-bg);
+  border-radius: 4px;
+  margin-left: 8px;
+}
+
+/* ══════════════════════════════════════════════════════════════════════════════
+   Live Status Bar (während AI arbeitet)
+   ══════════════════════════════════════════════════════════════════════════════ */
+
+.live-status-bar {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 8px 12px;
+  margin-top: 8px;
+  background: var(--surface);
+  border-radius: 8px;
+  font-size: 0.8rem;
+  font-family: var(--font-mono);
+  border: 1px solid var(--border);
+}
+
+.live-status-bar.done {
+  background: var(--success-bg);
+  border-color: var(--success);
+}
+
+.status-timer,
+.status-tokens {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--text-secondary);
+}
+
+.status-icon {
+  font-size: 0.9rem;
+}
+
+.timer-value {
+  color: var(--accent);
+  font-weight: 500;
+  min-width: 50px;
+}
+
+.tokens-value {
+  color: var(--text);
+}
+
+.status-indicator {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--text-secondary);
+  margin-left: auto;
+}
+
+.pulse-dot {
+  width: 8px;
+  height: 8px;
+  background: var(--accent);
+  border-radius: 50%;
+  animation: pulse 1.5s ease-in-out infinite;
+}
+
+@keyframes pulse {
+  0%, 100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.5;
+    transform: scale(0.8);
+  }
+}
+
+.live-status-bar.done .pulse-dot {
+  display: none;
+}
+
+.status-done {
+  color: var(--success);
+  font-weight: bold;
+}
+
+.status-model {
+  background: var(--surface-hover);
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-size: 0.75rem;
+  color: var(--text-muted);
+}
+
+.live-status-bar.final {
+  background: linear-gradient(135deg, var(--surface) 0%, var(--success-bg) 100%);
+}
+
+.live-status-bar.final .tokens-value {
+  color: var(--success);
+  font-weight: 500;
+}

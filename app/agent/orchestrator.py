@@ -37,7 +37,19 @@ class AgentEventType(str, Enum):
     CONFIRMED = "confirmed"            # User hat bestätigt
     CANCELLED = "cancelled"            # User hat abgelehnt
     ERROR = "error"                    # Fehler
+    USAGE = "usage"                    # Token-Nutzung
     DONE = "done"                      # Fertig
+
+
+@dataclass
+class TokenUsage:
+    """Token-Nutzung einer LLM-Anfrage."""
+    prompt_tokens: int = 0
+    completion_tokens: int = 0
+    total_tokens: int = 0
+    finish_reason: str = ""  # stop, length, tool_calls, etc.
+    model: str = ""
+    truncated: bool = False  # True wenn wegen max_tokens abgebrochen
 
 
 @dataclass
@@ -75,6 +87,10 @@ class AgentState:
     # Konversations-Historie für Multi-Turn Chats
     messages_history: List[Dict[str, str]] = field(default_factory=list)
     max_history_messages: int = 20  # Letzte N Nachrichten behalten
+    # Token-Tracking für aktuelle Anfrage
+    current_usage: Optional[TokenUsage] = None
+    total_prompt_tokens: int = 0
+    total_completion_tokens: int = 0
 
 
 class AgentOrchestrator:
@@ -182,6 +198,12 @@ class AgentOrchestrator:
 
         # Agent-Loop
         has_used_tools = False
+        # Token-Tracking für diese Anfrage zurücksetzen
+        state.current_usage = TokenUsage()
+        request_prompt_tokens = 0
+        request_completion_tokens = 0
+        last_finish_reason = ""
+        last_model = ""
 
         for iteration in range(self.max_iterations):
             try:
@@ -191,37 +213,65 @@ class AgentOrchestrator:
                     messages, tool_schemas, model, is_tool_phase=True
                 )
 
+                # Token-Nutzung akkumulieren
+                usage = response.get("usage")
+                if usage:
+                    request_prompt_tokens += usage.prompt_tokens
+                    request_completion_tokens += usage.completion_tokens
+                    last_finish_reason = usage.finish_reason
+                    last_model = usage.model
+
                 # Tool-Calls verarbeiten
                 tool_calls = response.get("tool_calls", [])
                 if not tool_calls:
                     # Keine weiteren Tool-Calls -> Analyse-Phase
                     assistant_response = ""
+                    final_usage = None
 
                     # Wenn Tools verwendet wurden UND ein Analyse-Modell konfiguriert ist
                     # -> Finale Antwort mit Analyse-Modell generieren (optional mit Streaming)
                     if has_used_tools and settings.llm.analysis_model and not model:
                         # Streaming für finale Antwort
                         if settings.llm.streaming:
-                            async for token in self._stream_final_response(messages):
+                            stream_result = await self._stream_final_response_with_usage(messages)
+                            async for token in stream_result["tokens"]:
                                 assistant_response += token
                                 yield AgentEvent(AgentEventType.TOKEN, token)
+                            # Usage aus Container extrahieren (wird während Streaming gefüllt)
+                            final_usage = stream_result["usage"].get("usage")
                         else:
                             analysis_response = await self._call_llm_with_tools(
                                 messages, [], None, is_tool_phase=False
                             )
                             assistant_response = analysis_response.get("content", "")
+                            final_usage = analysis_response.get("usage")
                             if assistant_response:
                                 yield AgentEvent(AgentEventType.TOKEN, assistant_response)
                     else:
                         # Keine Tool-Phase -> Antwort direkt nutzen oder streamen
                         if settings.llm.streaming and not response.get("content"):
-                            async for token in self._stream_final_response(messages, model):
+                            stream_result = await self._stream_final_response_with_usage(messages, model)
+                            async for token in stream_result["tokens"]:
                                 assistant_response += token
                                 yield AgentEvent(AgentEventType.TOKEN, token)
+                            # Usage aus Container extrahieren
+                            final_usage = stream_result["usage"].get("usage")
                         else:
                             assistant_response = response.get("content", "")
+                            final_usage = usage
                             if assistant_response:
                                 yield AgentEvent(AgentEventType.TOKEN, assistant_response)
+
+                    # Finale Token-Nutzung akkumulieren
+                    if final_usage and isinstance(final_usage, TokenUsage):
+                        request_prompt_tokens += final_usage.prompt_tokens
+                        request_completion_tokens += final_usage.completion_tokens
+                        last_finish_reason = final_usage.finish_reason
+                        last_model = final_usage.model
+
+                    # Gesamte Token-Nutzung aktualisieren
+                    state.total_prompt_tokens += request_prompt_tokens
+                    state.total_completion_tokens += request_completion_tokens
 
                     # Assistant-Antwort in Historie speichern
                     if assistant_response:
@@ -230,9 +280,25 @@ class AgentOrchestrator:
                             "content": assistant_response
                         })
 
+                    # Token-Nutzung als Event senden
+                    usage_data = {
+                        "prompt_tokens": request_prompt_tokens,
+                        "completion_tokens": request_completion_tokens,
+                        "total_tokens": request_prompt_tokens + request_completion_tokens,
+                        "finish_reason": last_finish_reason,
+                        "model": last_model,
+                        "truncated": last_finish_reason == "length",
+                        "max_tokens": settings.llm.max_tokens,
+                        # Session-Gesamtwerte
+                        "session_total_prompt": state.total_prompt_tokens,
+                        "session_total_completion": state.total_completion_tokens
+                    }
+                    yield AgentEvent(AgentEventType.USAGE, usage_data)
+
                     yield AgentEvent(AgentEventType.DONE, {
                         "response": assistant_response,
-                        "tool_calls_count": len(state.tool_calls_history)
+                        "tool_calls_count": len(state.tool_calls_history),
+                        "usage": usage_data
                     })
                     return
 
@@ -351,6 +417,21 @@ class AgentOrchestrator:
         Streamt die finale Antwort Token für Token.
         Verwendet das analysis_model wenn konfiguriert.
         """
+        result = await self._stream_final_response_with_usage(messages, model)
+        async for token in result["tokens"]:
+            yield token
+
+    async def _stream_final_response_with_usage(
+        self,
+        messages: List[Dict],
+        model: Optional[str] = None
+    ) -> Dict:
+        """
+        Streamt die finale Antwort und tracked Token-Nutzung.
+
+        Returns:
+            Dict mit "tokens" (AsyncGenerator) und "usage" (TokenUsage nach Abschluss)
+        """
         import httpx
 
         # Modell-Auswahl
@@ -373,34 +454,79 @@ class AgentOrchestrator:
             "temperature": settings.llm.temperature,
             "max_tokens": settings.llm.max_tokens,
             "stream": True,
+            "stream_options": {"include_usage": True}  # OpenAI feature für Usage in Streaming
         }
 
-        async with httpx.AsyncClient(
-            timeout=settings.llm.timeout_seconds,
-            verify=settings.llm.verify_ssl
-        ) as client:
-            async with client.stream(
-                "POST",
-                f"{base_url}/chat/completions",
-                headers=headers,
-                json=payload
-            ) as response:
-                response.raise_for_status()
-                async for line in response.aiter_lines():
-                    if not line.startswith("data:"):
-                        continue
-                    raw = line[5:].strip()
-                    if raw == "[DONE]":
-                        break
-                    try:
-                        import json as json_module
-                        chunk = json_module.loads(raw)
-                        delta = chunk["choices"][0].get("delta", {})
-                        token = delta.get("content", "")
-                        if token:
-                            yield token
-                    except (ValueError, KeyError, IndexError):
-                        continue
+        # Container für Usage (wird während Streaming gefüllt)
+        usage_container = {"usage": None, "finish_reason": ""}
+
+        async def token_generator():
+            completion_tokens = 0
+            async with httpx.AsyncClient(
+                timeout=settings.llm.timeout_seconds,
+                verify=settings.llm.verify_ssl
+            ) as client:
+                async with client.stream(
+                    "POST",
+                    f"{base_url}/chat/completions",
+                    headers=headers,
+                    json=payload
+                ) as response:
+                    response.raise_for_status()
+                    async for line in response.aiter_lines():
+                        if not line.startswith("data:"):
+                            continue
+                        raw = line[5:].strip()
+                        if raw == "[DONE]":
+                            break
+                        try:
+                            import json as json_module
+                            chunk = json_module.loads(raw)
+
+                            # Check for usage in final chunk (OpenAI stream_options)
+                            if "usage" in chunk and chunk["usage"]:
+                                usage_data = chunk["usage"]
+                                usage_container["usage"] = TokenUsage(
+                                    prompt_tokens=usage_data.get("prompt_tokens", 0),
+                                    completion_tokens=usage_data.get("completion_tokens", 0),
+                                    total_tokens=usage_data.get("total_tokens", 0),
+                                    finish_reason=usage_container["finish_reason"],
+                                    model=selected_model,
+                                    truncated=(usage_container["finish_reason"] == "length")
+                                )
+
+                            choices = chunk.get("choices", [])
+                            if choices:
+                                choice = choices[0]
+                                delta = choice.get("delta", {})
+                                token = delta.get("content", "")
+
+                                # finish_reason extrahieren
+                                if choice.get("finish_reason"):
+                                    usage_container["finish_reason"] = choice["finish_reason"]
+
+                                if token:
+                                    completion_tokens += 1  # Approximation
+                                    yield token
+
+                        except (ValueError, KeyError, IndexError):
+                            continue
+
+            # Fallback: Wenn kein Usage vom Server, schätzen wir
+            if not usage_container["usage"]:
+                usage_container["usage"] = TokenUsage(
+                    prompt_tokens=0,  # Unbekannt bei Streaming ohne Usage
+                    completion_tokens=completion_tokens,
+                    total_tokens=completion_tokens,
+                    finish_reason=usage_container["finish_reason"],
+                    model=selected_model,
+                    truncated=(usage_container["finish_reason"] == "length")
+                )
+
+        return {
+            "tokens": token_generator(),
+            "usage": usage_container  # Wird nach Streaming gefüllt
+        }
 
     async def _call_llm_with_tools(
         self,
@@ -462,10 +588,24 @@ class AgentOrchestrator:
 
         choice = data["choices"][0]
         message = choice.get("message", {})
+        finish_reason = choice.get("finish_reason", "")
+
+        # Token-Nutzung extrahieren
+        usage_data = data.get("usage", {})
+        usage = TokenUsage(
+            prompt_tokens=usage_data.get("prompt_tokens", 0),
+            completion_tokens=usage_data.get("completion_tokens", 0),
+            total_tokens=usage_data.get("total_tokens", 0),
+            finish_reason=finish_reason,
+            model=selected_model,
+            truncated=(finish_reason == "length")
+        )
 
         return {
             "content": message.get("content", ""),
-            "tool_calls": message.get("tool_calls", [])
+            "tool_calls": message.get("tool_calls", []),
+            "usage": usage,
+            "finish_reason": finish_reason
         }
 
     async def _execute_confirmed_operation(self, confirmation_data: Dict) -> ToolResult:
