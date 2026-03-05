@@ -29,10 +29,10 @@ router = APIRouter(prefix="/api/agent", tags=["agent"])
 
 class AgentChatRequest(BaseModel):
     """Anfrage für Agent-Chat."""
-    message: str = Field(..., min_length=1, description="User-Nachricht")
-    session_id: Optional[str] = Field(None, description="Session-ID (neu wenn leer)")
-    model: Optional[str] = Field(None, description="LLM-Modell")
-    skill_ids: Optional[List[str]] = Field(None, description="Skill-IDs zum Aktivieren")
+    message: str = Field(..., min_length=1, max_length=100000, description="User-Nachricht (max 100k Zeichen)")
+    session_id: Optional[str] = Field(None, max_length=100, description="Session-ID (neu wenn leer)")
+    model: Optional[str] = Field(None, max_length=100, description="LLM-Modell")
+    skill_ids: Optional[List[str]] = Field(None, max_length=20, description="Skill-IDs zum Aktivieren (max 20)")
 
 
 class AgentModeRequest(BaseModel):

@@ -3,27 +3,27 @@ from pydantic import BaseModel, Field
 
 
 class ContextSources(BaseModel):
-    java_files: List[str] = Field(default_factory=list, description="Relative paths to Java files")
+    java_files: List[str] = Field(default_factory=list, max_length=50, description="Relative paths to Java files (max 50)")
     include_pom: bool = False
     auto_java_search: bool = False  # FTS-Index nach relevanten Dateien durchsuchen
-    log_id: Optional[str] = None
-    pdf_ids: List[str] = Field(default_factory=list)
-    confluence_page_ids: List[str] = Field(default_factory=list)
-    python_files: List[str] = Field(default_factory=list, description="Relative paths to Python files")
+    log_id: Optional[str] = Field(None, max_length=100)
+    pdf_ids: List[str] = Field(default_factory=list, max_length=20, description="Max 20 PDFs")
+    confluence_page_ids: List[str] = Field(default_factory=list, max_length=20, description="Max 20 Seiten")
+    python_files: List[str] = Field(default_factory=list, max_length=50, description="Relative paths to Python files (max 50)")
     auto_python_search: bool = False  # FTS-Index nach relevanten Python-Dateien durchsuchen
     # Handbuch-Integration
-    handbook_pages: List[str] = Field(default_factory=list, description="Relative paths to handbook pages")
+    handbook_pages: List[str] = Field(default_factory=list, max_length=20, description="Relative paths to handbook pages (max 20)")
     auto_handbook_search: bool = False  # Handbuch-Index nach relevanten Seiten durchsuchen
-    handbook_service_filter: Optional[str] = None  # Nur in bestimmtem Service suchen
+    handbook_service_filter: Optional[str] = Field(None, max_length=100)
     # Skill-Integration
-    active_skill_ids: List[str] = Field(default_factory=list, description="IDs der aktiven Skills")
+    active_skill_ids: List[str] = Field(default_factory=list, max_length=10, description="IDs der aktiven Skills (max 10)")
     auto_skill_knowledge: bool = True  # Automatisch in Skill-Wissensbasen suchen
 
 
 class ChatRequest(BaseModel):
-    session_id: str
-    message: str
-    model: Optional[str] = None
+    session_id: str = Field(..., max_length=100)
+    message: str = Field(..., min_length=1, max_length=100000, description="Max 100k Zeichen")
+    model: Optional[str] = Field(None, max_length=100)
     stream: bool = True
     context_sources: Optional[ContextSources] = None
 
@@ -103,10 +103,10 @@ class TestResponse(BaseModel):
 
 
 class GenerateRequest(BaseModel):
-    target_dir: str
-    description: str
-    session_id: str
-    model: Optional[str] = None
+    target_dir: str = Field(..., max_length=500, description="Zielverzeichnis")
+    description: str = Field(..., min_length=10, max_length=10000, description="Beschreibung (10-10k Zeichen)")
+    session_id: str = Field(..., max_length=100)
+    model: Optional[str] = Field(None, max_length=100)
 
 
 class GenerateResponse(BaseModel):

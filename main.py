@@ -1,4 +1,5 @@
 from contextlib import asynccontextmanager
+from typing import Any, Dict
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
@@ -92,6 +93,171 @@ app.include_router(python_routes.router)
 app.include_router(handbook.router)
 app.include_router(skills.router)
 app.include_router(agent.router)
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Health Endpoint
+# ══════════════════════════════════════════════════════════════════════════════
+
+@app.get("/api/health", tags=["system"])
+async def health_check() -> Dict[str, Any]:
+    """
+    Health-Check für alle Subsysteme.
+
+    Prüft den Status von:
+    - LLM-Verbindung
+    - Skills-Service
+    - Handbuch-Index
+    - Java-Index
+    - Python-Repository
+    - Agent/Tools
+
+    Returns:
+        Dict mit Status aller Subsysteme und Gesamtstatus
+    """
+    from app.core.config import settings
+
+    subsystems = {}
+    overall_healthy = True
+
+    # LLM Connection
+    try:
+        from app.services.llm_client import get_llm_client
+        client = get_llm_client()
+        llm_models = await client.list_models()
+        subsystems["llm"] = {
+            "status": "healthy",
+            "base_url": settings.llm.base_url,
+            "models_available": len(llm_models),
+            "default_model": settings.llm.default_model
+        }
+    except Exception as e:
+        subsystems["llm"] = {
+            "status": "unhealthy",
+            "error": str(e),
+            "base_url": settings.llm.base_url
+        }
+        overall_healthy = False
+
+    # Skills Service
+    try:
+        if settings.skills.enabled:
+            from app.services.skill_manager import get_skill_manager
+            manager = get_skill_manager()
+            stats = manager.get_stats()
+            subsystems["skills"] = {
+                "status": "healthy",
+                "enabled": True,
+                "total_skills": stats.get("total_skills", 0),
+                "knowledge_chunks": stats.get("total_knowledge_chunks", 0)
+            }
+        else:
+            subsystems["skills"] = {
+                "status": "disabled",
+                "enabled": False
+            }
+    except Exception as e:
+        subsystems["skills"] = {
+            "status": "unhealthy",
+            "error": str(e)
+        }
+        overall_healthy = False
+
+    # Handbook Index
+    try:
+        if settings.handbook.enabled:
+            from app.services.handbook_indexer import get_handbook_indexer
+            indexer = get_handbook_indexer()
+            stats = indexer.get_stats()
+            subsystems["handbook"] = {
+                "status": "healthy" if stats.get("indexed", False) else "not_indexed",
+                "enabled": True,
+                "path": settings.handbook.path,
+                "services_count": stats.get("services_count", 0),
+                "fields_count": stats.get("fields_count", 0)
+            }
+        else:
+            subsystems["handbook"] = {
+                "status": "disabled",
+                "enabled": False
+            }
+    except Exception as e:
+        subsystems["handbook"] = {
+            "status": "unhealthy",
+            "error": str(e)
+        }
+        overall_healthy = False
+
+    # Java Index
+    try:
+        if settings.java.repo_path:
+            from app.services.java_indexer import get_java_indexer
+            indexer = get_java_indexer()
+            stats = indexer.get_stats()
+            subsystems["java"] = {
+                "status": "healthy" if stats.get("indexed", False) else "not_indexed",
+                "repo_path": settings.java.repo_path,
+                "classes_count": stats.get("classes_count", 0)
+            }
+        else:
+            subsystems["java"] = {
+                "status": "not_configured",
+                "repo_path": None
+            }
+    except Exception as e:
+        subsystems["java"] = {
+            "status": "unhealthy",
+            "error": str(e)
+        }
+        overall_healthy = False
+
+    # Python Repository
+    try:
+        if settings.python.repo_path:
+            repo_path = Path(settings.python.repo_path)
+            subsystems["python"] = {
+                "status": "healthy" if repo_path.exists() else "path_not_found",
+                "repo_path": settings.python.repo_path,
+                "exists": repo_path.exists()
+            }
+        else:
+            subsystems["python"] = {
+                "status": "not_configured",
+                "repo_path": None
+            }
+    except Exception as e:
+        subsystems["python"] = {
+            "status": "unhealthy",
+            "error": str(e)
+        }
+        overall_healthy = False
+
+    # Agent & Tools
+    try:
+        from app.agent import get_tool_registry
+        registry = get_tool_registry()
+        tools = registry.tools
+        write_tools = sum(1 for t in tools.values() if t.is_write_operation)
+        subsystems["agent"] = {
+            "status": "healthy",
+            "tools_count": len(tools),
+            "write_tools": write_tools,
+            "read_tools": len(tools) - write_tools,
+            "file_operations_enabled": settings.file_operations.enabled
+        }
+    except Exception as e:
+        subsystems["agent"] = {
+            "status": "unhealthy",
+            "error": str(e)
+        }
+        overall_healthy = False
+
+    return {
+        "status": "healthy" if overall_healthy else "degraded",
+        "version": "2.0.0",
+        "subsystems": subsystems
+    }
+
 
 # Static files (frontend)
 static_dir = Path(__file__).parent / "static"
