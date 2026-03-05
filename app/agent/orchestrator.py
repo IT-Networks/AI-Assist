@@ -516,13 +516,17 @@ class AgentOrchestrator:
         """
         import httpx
 
-        # Modell-Auswahl: Phase-spezifisch > Explizit > Default
-        if settings.llm.analysis_model:
-            selected_model = settings.llm.analysis_model
-        elif model:
+        # Modell-Auswahl: User-Auswahl > Phase-spezifisch > Default
+        if model:
+            # User hat explizit ein Modell ausgewählt - das hat Vorrang
             selected_model = model
+            print(f"[stream] Using user-selected model: {selected_model}")
+        elif settings.llm.analysis_model:
+            selected_model = settings.llm.analysis_model
+            print(f"[stream] Using analysis_model: {selected_model}")
         else:
             selected_model = settings.llm.default_model
+            print(f"[stream] Using default_model: {selected_model}")
 
         base_url = settings.llm.base_url.rstrip("/")
 
@@ -658,14 +662,20 @@ class AgentOrchestrator:
                         break
 
         if not selected_model:
-            if is_tool_phase and tools and settings.llm.tool_model:
+            # Priorität: User-Auswahl > Phase-spezifisch > Default
+            if model:
+                # User hat explizit ein Modell ausgewählt - das hat Vorrang
+                selected_model = model
+                print(f"[model] Using user-selected model: {selected_model}")
+            elif is_tool_phase and tools and settings.llm.tool_model:
                 selected_model = settings.llm.tool_model
+                print(f"[model] Using tool_model: {selected_model}")
             elif not is_tool_phase and settings.llm.analysis_model:
                 selected_model = settings.llm.analysis_model
-            elif model:
-                selected_model = model
+                print(f"[model] Using analysis_model: {selected_model}")
             else:
                 selected_model = settings.llm.default_model
+                print(f"[model] Using default_model: {selected_model}")
 
         base_url = settings.llm.base_url.rstrip("/")
 
