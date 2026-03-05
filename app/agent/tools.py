@@ -728,42 +728,57 @@ async def query_database(
 ) -> ToolResult:
     """
     Führt eine SQL-Abfrage auf der DB2-Datenbank aus.
-    BENÖTIGT USER-BESTÄTIGUNG vor Ausführung.
     Nur SELECT-Statements erlaubt (readonly).
     """
     from app.core.config import settings
 
     if not settings.database.enabled:
-        return ToolResult(success=False, error="Datenbank ist nicht aktiviert")
+        return ToolResult(success=False, error="Datenbank ist nicht aktiviert. Aktiviere database.enabled in config.yaml")
 
     try:
         from app.services.db_client import get_db_client
         client = get_db_client()
 
         if not client:
-            return ToolResult(success=False, error="DB-Client konnte nicht initialisiert werden")
+            return ToolResult(success=False, error="DB-Client konnte nicht initialisiert werden. Prüfe die Datenbank-Konfiguration.")
 
-        # Query validieren
+        # Query validieren (nur SELECT erlaubt)
         is_valid, error = client.validate_query(query)
         if not is_valid:
             return ToolResult(success=False, error=error)
 
-        # Preview erstellen für Bestätigung
-        preview = client.preview_query(query)
+        # Query direkt ausführen (keine Bestätigung nötig da nur SELECT)
+        effective_max_rows = min(max_rows, settings.database.max_rows)
+        original_max = client.max_rows
+        client.max_rows = effective_max_rows
 
-        return ToolResult(
-            success=True,
-            requires_confirmation=True,
-            data=f"Datenbank-Abfrage bereit zur Ausführung",
-            confirmation_data={
-                "operation": "query_database",
-                "query": preview.query,
-                "query_type": preview.query_type,
-                "tables": preview.tables,
-                "description": preview.estimated_description,
-                "max_rows": min(max_rows, settings.database.max_rows)
-            }
-        )
+        result = await client.execute(query)
+
+        client.max_rows = original_max
+
+        if not result.success:
+            return ToolResult(success=False, error=result.error)
+
+        # Formatierte Ausgabe
+        output = f"=== Query-Ergebnis ===\n"
+        output += f"Query: {query}\n"
+        output += f"Zeilen: {result.row_count}"
+        if result.truncated:
+            output += f" (begrenzt auf {effective_max_rows})"
+        output += "\n\n"
+
+        if result.columns and result.rows:
+            # Header
+            output += " | ".join(result.columns) + "\n"
+            output += "-" * (len(" | ".join(result.columns))) + "\n"
+
+            # Rows
+            for row in result.rows:
+                output += " | ".join(str(v) if v is not None else "NULL" for v in row) + "\n"
+        elif result.row_count == 0:
+            output += "(Keine Ergebnisse)\n"
+
+        return ToolResult(success=True, data=output)
     except Exception as e:
         return ToolResult(success=False, error=str(e))
 
@@ -1006,9 +1021,9 @@ TRACE_JAVA_REFERENCES_TOOL = Tool(
 
 QUERY_DATABASE_TOOL = Tool(
     name="query_database",
-    description="Führt eine SELECT-Abfrage auf der DB2-Datenbank aus. BENÖTIGT USER-BESTÄTIGUNG vor Ausführung. Nur SELECT-Statements erlaubt.",
+    description="Führt eine SELECT-Abfrage auf der DB2-Datenbank aus. Nur SELECT-Statements erlaubt (readonly). Nutze dieses Tool um Daten aus der Datenbank abzufragen.",
     category=ToolCategory.SEARCH,
-    is_write_operation=True,  # Benötigt Bestätigung
+    is_write_operation=False,  # Nur SELECT erlaubt, daher keine Bestätigung nötig
     parameters=[
         ToolParameter("query", "string", "SQL SELECT-Query"),
         ToolParameter("max_rows", "integer", "Maximale Anzahl Zeilen", required=False, default=100),

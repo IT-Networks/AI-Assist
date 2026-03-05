@@ -465,12 +465,8 @@ class AgentOrchestrator:
             "temperature": settings.llm.temperature,
             "max_tokens": settings.llm.max_tokens,
             "stream": True,
+            "stream_options": {"include_usage": True}
         }
-
-        # stream_options ist nur für OpenAI API verfügbar, nicht alle LLM-Server unterstützen es
-        # Wir fügen es nur hinzu wenn es wahrscheinlich unterstützt wird
-        if "openai" in base_url.lower() or "api.openai" in base_url.lower():
-            payload["stream_options"] = {"include_usage": True}
 
         # Container für Usage (wird während Streaming gefüllt)
         usage_container = {"usage": None, "finish_reason": ""}
@@ -699,8 +695,11 @@ Du bist ein intelligenter Assistent mit Zugriff auf Tools.
             base += f"""
 **Datenbank (DB2):**
 Die DB2-Datenbank ist aktiviert und verbunden ({settings.database.host}:{settings.database.port}/{settings.database.database}).
+- query_database: Führe eine SELECT-Abfrage aus (nur SELECT erlaubt, readonly)
 - list_database_tables: Liste alle Tabellen im Schema auf
 - describe_database_table: Zeige Spalten, Typen und Constraints einer Tabelle
+
+WICHTIG: Nutze query_database um Daten abzufragen. Beispiel: query_database(query="SELECT * FROM tabelle FETCH FIRST 10 ROWS ONLY")
 """
 
         base += """
@@ -718,6 +717,7 @@ Verwende die passenden Tools um Informationen zu sammeln, bevor du antwortest.
 MODUS: Nur Lesen
 Du kannst keine Dateien schreiben oder bearbeiten.
 Gib Code-Vorschläge als Markdown-Codeblöcke aus.
+Datenbank-Abfragen (SELECT) sind erlaubt.
 """
 
         elif mode == AgentMode.WRITE_WITH_CONFIRM:
@@ -726,9 +726,9 @@ MODUS: Schreiben mit Bestätigung
 Zusätzliche Tools:
 - write_file: Erstelle oder überschreibe eine Datei (benötigt Bestätigung)
 - edit_file: Bearbeite eine Datei (benötigt Bestätigung)
-- query_database: Führe eine SELECT-Abfrage auf DB2 aus (benötigt Bestätigung)
 
-Der User muss Schreib-Operationen und Datenbank-Abfragen bestätigen bevor sie ausgeführt werden.
+Der User muss Datei-Operationen bestätigen bevor sie ausgeführt werden.
+Datenbank-Abfragen (SELECT) sind ohne Bestätigung erlaubt.
 """
 
         else:  # AUTONOMOUS
@@ -737,7 +737,6 @@ MODUS: Autonom
 Zusätzliche Tools:
 - write_file: Erstelle oder überschreibe eine Datei
 - edit_file: Bearbeite eine Datei
-- query_database: Führe eine SELECT-Abfrage auf DB2 aus
 
 Du kannst Dateien ohne Bestätigung schreiben/bearbeiten.
 Sei vorsichtig und mache nur notwendige Änderungen.
