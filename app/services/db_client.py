@@ -287,38 +287,51 @@ class DB2Client:
         """Listet verfügbare Tabellen auf."""
         schema = schema or self.schema
 
-        # Wenn kein Schema angegeben, versuche alle User-Schemas zu listen
-        if not schema:
-            # Alle Tabellen außer System-Schemas
-            query = """
-                SELECT TABSCHEMA, TABNAME
-                FROM SYSCAT.TABLES
-                WHERE TYPE = 'T'
-                AND TABSCHEMA NOT LIKE 'SYS%'
-                AND TABSCHEMA NOT IN ('NULLID', 'SQLJ', 'SYSCAT', 'SYSFUN', 'SYSIBM', 'SYSIBMADM', 'SYSPROC', 'SYSPUBLIC', 'SYSSTAT')
-                ORDER BY TABSCHEMA, TABNAME
-                FETCH FIRST 100 ROWS ONLY
-            """
-            result = await self.execute(query)
-            if result.success:
-                return [f"{row[0]}.{row[1]}" for row in result.rows]
-            # Fallback: Fehlermeldung zurückgeben
-            return [f"Fehler: {result.error}. Bitte Schema in config.yaml setzen."]
+        # Verschiedene DB2-Varianten haben unterschiedliche Systemkataloge:
+        # - DB2 LUW (Linux/Unix/Windows): SYSCAT.TABLES
+        # - DB2 z/OS (Mainframe): SYSIBM.SYSTABLES
+        # - DB2 iSeries (AS/400): QSYS2.SYSTABLES
 
-        # Mit Schema filtern
-        query = f"""
-            SELECT TABNAME
-            FROM SYSCAT.TABLES
-            WHERE TABSCHEMA = '{schema.upper()}'
-            AND TYPE = 'T'
-            ORDER BY TABNAME
-        """
-        result = await self.execute(query)
-        if result.success:
-            if not result.rows:
-                return [f"Keine Tabellen im Schema '{schema}' gefunden. Verfügbare Schemas prüfen mit: SELECT DISTINCT TABSCHEMA FROM SYSCAT.TABLES WHERE TYPE='T'"]
-            return [row[0] for row in result.rows]
-        return [f"Fehler: {result.error}"]
+        queries_with_schema = [
+            # DB2 z/OS (Mainframe)
+            f"SELECT NAME FROM SYSIBM.SYSTABLES WHERE CREATOR = '{(schema or '').upper()}' AND TYPE = 'T' ORDER BY NAME FETCH FIRST 100 ROWS ONLY",
+            # DB2 LUW
+            f"SELECT TABNAME FROM SYSCAT.TABLES WHERE TABSCHEMA = '{(schema or '').upper()}' AND TYPE = 'T' ORDER BY TABNAME FETCH FIRST 100 ROWS ONLY",
+            # DB2 iSeries
+            f"SELECT TABLE_NAME FROM QSYS2.SYSTABLES WHERE TABLE_SCHEMA = '{(schema or '').upper()}' AND TABLE_TYPE = 'T' ORDER BY TABLE_NAME FETCH FIRST 100 ROWS ONLY",
+        ]
+
+        queries_all = [
+            # DB2 z/OS - alle Schemas
+            "SELECT CREATOR, NAME FROM SYSIBM.SYSTABLES WHERE TYPE = 'T' AND CREATOR NOT LIKE 'SYS%' ORDER BY CREATOR, NAME FETCH FIRST 100 ROWS ONLY",
+            # DB2 LUW - alle Schemas
+            "SELECT TABSCHEMA, TABNAME FROM SYSCAT.TABLES WHERE TYPE = 'T' AND TABSCHEMA NOT LIKE 'SYS%' ORDER BY TABSCHEMA, TABNAME FETCH FIRST 100 ROWS ONLY",
+            # DB2 iSeries
+            "SELECT TABLE_SCHEMA, TABLE_NAME FROM QSYS2.SYSTABLES WHERE TABLE_TYPE = 'T' AND TABLE_SCHEMA NOT LIKE 'SYS%' ORDER BY TABLE_SCHEMA, TABLE_NAME FETCH FIRST 100 ROWS ONLY",
+        ]
+
+        # Wähle Query-Liste basierend auf Schema
+        if schema:
+            queries = queries_with_schema
+        else:
+            queries = queries_all
+
+        # Versuche jede Query bis eine funktioniert
+        last_error = None
+        for query in queries:
+            result = await self.execute(query)
+            if result.success and result.rows:
+                if schema:
+                    return [row[0] for row in result.rows]
+                else:
+                    return [f"{row[0]}.{row[1]}" for row in result.rows]
+            if result.error:
+                last_error = result.error
+
+        # Keine Query hat funktioniert
+        if schema:
+            return [f"Keine Tabellen in Schema '{schema}' gefunden. Fehler: {last_error}"]
+        return [f"Konnte Tabellen nicht auflisten. Fehler: {last_error}. Versuche eine direkte Query."]
 
     async def describe_table(self, table_name: str, schema: str = None) -> Dict:
         """Gibt Tabellenstruktur zurück."""
@@ -333,28 +346,47 @@ class DB2Client:
         if not schema:
             return {"error": "Kein Schema angegeben. Nutze SCHEMA.TABELLE oder setze database.schema in config.yaml"}
 
-        query = f"""
-            SELECT COLNAME, TYPENAME, LENGTH, SCALE, NULLS, DEFAULT
-            FROM SYSCAT.COLUMNS
-            WHERE TABSCHEMA = '{schema.upper()}' AND TABNAME = '{table_name.upper()}'
-            ORDER BY COLNO
-        """
-        result = await self.execute(query)
-        if result.success:
-            if not result.rows:
-                return {"error": f"Tabelle '{schema}.{table_name}' nicht gefunden"}
-            columns = []
-            for row in result.rows:
-                columns.append({
-                    "name": row[0],
-                    "type": row[1],
-                    "length": row[2],
-                    "scale": row[3],
-                    "nullable": row[4] == 'Y',
-                    "default": row[5]
-                })
-            return {"table": table_name, "schema": schema, "columns": columns}
-        return {"error": result.error}
+        schema_upper = schema.upper()
+        table_upper = table_name.upper()
+
+        # Verschiedene DB2-Varianten
+        queries = [
+            # DB2 z/OS (Mainframe) - SYSIBM.SYSCOLUMNS
+            f"""SELECT NAME, COLTYPE, LENGTH, SCALE, NULLS, DEFAULT
+                FROM SYSIBM.SYSCOLUMNS
+                WHERE TBCREATOR = '{schema_upper}' AND TBNAME = '{table_upper}'
+                ORDER BY COLNO""",
+            # DB2 LUW - SYSCAT.COLUMNS
+            f"""SELECT COLNAME, TYPENAME, LENGTH, SCALE, NULLS, DEFAULT
+                FROM SYSCAT.COLUMNS
+                WHERE TABSCHEMA = '{schema_upper}' AND TABNAME = '{table_upper}'
+                ORDER BY COLNO""",
+            # DB2 iSeries - QSYS2.SYSCOLUMNS
+            f"""SELECT COLUMN_NAME, DATA_TYPE, LENGTH, NUMERIC_SCALE, IS_NULLABLE, COLUMN_DEFAULT
+                FROM QSYS2.SYSCOLUMNS
+                WHERE TABLE_SCHEMA = '{schema_upper}' AND TABLE_NAME = '{table_upper}'
+                ORDER BY ORDINAL_POSITION""",
+        ]
+
+        for query in queries:
+            result = await self.execute(query)
+            if result.success and result.rows:
+                columns = []
+                for row in result.rows:
+                    nullable_val = row[4]
+                    # Verschiedene Formate für NULLS/IS_NULLABLE
+                    is_nullable = nullable_val in ('Y', 'YES', True, 1)
+                    columns.append({
+                        "name": row[0],
+                        "type": row[1],
+                        "length": row[2],
+                        "scale": row[3],
+                        "nullable": is_nullable,
+                        "default": row[5]
+                    })
+                return {"table": table_name, "schema": schema, "columns": columns}
+
+        return {"error": f"Tabelle '{schema}.{table_name}' nicht gefunden oder Systemkatalog nicht zugänglich"}
 
     def test_connection(self) -> Tuple[bool, str]:
         """Testet die Datenbankverbindung."""
