@@ -1,10 +1,38 @@
 import json
-from typing import AsyncGenerator, List
+from typing import AsyncGenerator, List, Optional
 
 import httpx
 
 from app.core.config import settings
 from app.core.exceptions import LLMError
+
+# Shared HTTP Client für Connection-Pooling (Performance-Optimierung)
+# Vermeidet TCP/TLS-Handshake bei jedem Request (~200ms Ersparnis)
+_http_client: Optional[httpx.AsyncClient] = None
+
+
+def _get_http_client() -> httpx.AsyncClient:
+    """Gibt den shared HTTP-Client zurück (Lazy Init mit Connection-Pooling)."""
+    global _http_client
+    if _http_client is None:
+        _http_client = httpx.AsyncClient(
+            timeout=settings.llm.timeout_seconds,
+            verify=settings.llm.verify_ssl,
+            limits=httpx.Limits(
+                max_connections=20,
+                max_keepalive_connections=10,
+                keepalive_expiry=30.0
+            )
+        )
+    return _http_client
+
+
+async def close_http_client():
+    """Schließt den shared HTTP-Client (für Shutdown)."""
+    global _http_client
+    if _http_client is not None:
+        await _http_client.aclose()
+        _http_client = None
 
 SYSTEM_PROMPT = """Du bist ein erfahrener Software-Ingenieur mit Expertise in Java und Python. Du beherrschst:
 - Java 8–21, Spring Boot, Jakarta EE, Maven
@@ -56,22 +84,22 @@ class LLMClient:
             "max_tokens": self.max_tokens,
             "stream": False,
         }
-        async with httpx.AsyncClient(timeout=self.timeout, verify=self.verify_ssl) as client:
-            try:
-                response = await client.post(
-                    f"{self.base_url}/chat/completions",
-                    headers=self._headers(),
-                    json=payload,
-                )
-                response.raise_for_status()
-                data = response.json()
-                return data["choices"][0]["message"]["content"]
-            except httpx.HTTPStatusError as e:
-                raise LLMError(f"LLM API Fehler {e.response.status_code}: {e.response.text}") from e
-            except httpx.RequestError as e:
-                raise LLMError(f"LLM Verbindungsfehler: {e}") from e
-            except (KeyError, IndexError) as e:
-                raise LLMError(f"Unerwartetes LLM-Antwortformat: {e}") from e
+        client = _get_http_client()
+        try:
+            response = await client.post(
+                f"{self.base_url}/chat/completions",
+                headers=self._headers(),
+                json=payload,
+            )
+            response.raise_for_status()
+            data = response.json()
+            return data["choices"][0]["message"]["content"]
+        except httpx.HTTPStatusError as e:
+            raise LLMError(f"LLM API Fehler {e.response.status_code}: {e.response.text}") from e
+        except httpx.RequestError as e:
+            raise LLMError(f"LLM Verbindungsfehler: {e}") from e
+        except (KeyError, IndexError) as e:
+            raise LLMError(f"Unerwartetes LLM-Antwortformat: {e}") from e
 
     async def chat_stream(
         self,
@@ -86,50 +114,51 @@ class LLMClient:
             "max_tokens": self.max_tokens,
             "stream": True,
         }
-        async with httpx.AsyncClient(timeout=self.timeout, verify=self.verify_ssl) as client:
-            try:
-                async with client.stream(
-                    "POST",
-                    f"{self.base_url}/chat/completions",
-                    headers=self._headers(),
-                    json=payload,
-                ) as response:
-                    response.raise_for_status()
-                    async for line in response.aiter_lines():
-                        if not line.startswith("data:"):
-                            continue
-                        raw = line[5:].strip()
-                        if raw == "[DONE]":
-                            break
-                        try:
-                            chunk = json.loads(raw)
-                            delta = chunk["choices"][0].get("delta", {})
-                            token = delta.get("content", "")
-                            if token:
-                                yield token
-                        except (json.JSONDecodeError, KeyError, IndexError):
-                            continue
-            except httpx.HTTPStatusError as e:
-                raise LLMError(f"LLM API Fehler {e.response.status_code}: {e.response.text}") from e
-            except httpx.RequestError as e:
-                raise LLMError(f"LLM Verbindungsfehler: {e}") from e
+        client = _get_http_client()
+        try:
+            async with client.stream(
+                "POST",
+                f"{self.base_url}/chat/completions",
+                headers=self._headers(),
+                json=payload,
+            ) as response:
+                response.raise_for_status()
+                async for line in response.aiter_lines():
+                    if not line.startswith("data:"):
+                        continue
+                    raw = line[5:].strip()
+                    if raw == "[DONE]":
+                        break
+                    try:
+                        chunk = json.loads(raw)
+                        delta = chunk["choices"][0].get("delta", {})
+                        token = delta.get("content", "")
+                        if token:
+                            yield token
+                    except (json.JSONDecodeError, KeyError, IndexError):
+                        continue
+        except httpx.HTTPStatusError as e:
+            raise LLMError(f"LLM API Fehler {e.response.status_code}: {e.response.text}") from e
+        except httpx.RequestError as e:
+            raise LLMError(f"LLM Verbindungsfehler: {e}") from e
 
     async def list_models(self) -> List[str]:
         """Listet verfügbare Modelle vom LLM-Server auf."""
-        async with httpx.AsyncClient(timeout=10, verify=self.verify_ssl) as client:
-            try:
-                response = await client.get(
-                    f"{self.base_url}/models",
-                    headers=self._headers()
-                )
-                response.raise_for_status()
-                data = response.json()
-                # OpenAI-Format: {"data": [{"id": "model-name"}, ...]}
-                if "data" in data:
-                    return [m.get("id", "") for m in data["data"] if m.get("id")]
-                return []
-            except Exception:
-                return []
+        client = _get_http_client()
+        try:
+            response = await client.get(
+                f"{self.base_url}/models",
+                headers=self._headers(),
+                timeout=10.0  # Kürzerer Timeout für Model-Liste
+            )
+            response.raise_for_status()
+            data = response.json()
+            # OpenAI-Format: {"data": [{"id": "model-name"}, ...]}
+            if "data" in data:
+                return [m.get("id", "") for m in data["data"] if m.get("id")]
+            return []
+        except Exception:
+            return []
 
 
 llm_client = LLMClient()

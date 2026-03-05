@@ -20,7 +20,7 @@ from app.agent.tools import ToolRegistry, ToolResult, get_tool_registry
 from app.core.config import settings
 from app.core.token_budget import TokenBudget, create_budget_from_config
 from app.core.conversation_summarizer import get_summarizer
-from app.services.llm_client import SYSTEM_PROMPT
+from app.services.llm_client import SYSTEM_PROMPT, _get_http_client
 from app.services.memory_store import get_memory_store
 from app.utils.token_counter import estimate_tokens, estimate_messages_tokens
 
@@ -514,8 +514,6 @@ class AgentOrchestrator:
         Returns:
             Dict mit "tokens" (AsyncGenerator) und "usage" (TokenUsage nach Abschluss)
         """
-        import httpx
-
         # Modell-Auswahl: User-Auswahl > Phase-spezifisch > Default
         if model:
             # User hat explizit ein Modell ausgewählt - das hat Vorrang
@@ -553,56 +551,53 @@ class AgentOrchestrator:
         async def token_generator():
             completion_tokens = 0
             completion_chars = 0
-            async with httpx.AsyncClient(
-                timeout=settings.llm.timeout_seconds,
-                verify=settings.llm.verify_ssl
-            ) as client:
-                async with client.stream(
-                    "POST",
-                    f"{base_url}/chat/completions",
-                    headers=headers,
-                    json=payload
-                ) as response:
-                    response.raise_for_status()
-                    async for line in response.aiter_lines():
-                        if not line.startswith("data:"):
-                            continue
-                        raw = line[5:].strip()
-                        if raw == "[DONE]":
-                            break
-                        try:
-                            import json as json_module
-                            chunk = json_module.loads(raw)
+            client = _get_http_client()
+            async with client.stream(
+                "POST",
+                f"{base_url}/chat/completions",
+                headers=headers,
+                json=payload
+            ) as response:
+                response.raise_for_status()
+                async for line in response.aiter_lines():
+                    if not line.startswith("data:"):
+                        continue
+                    raw = line[5:].strip()
+                    if raw == "[DONE]":
+                        break
+                    try:
+                        import json as json_module
+                        chunk = json_module.loads(raw)
 
-                            # Check for usage in final chunk (OpenAI stream_options)
-                            if "usage" in chunk and chunk["usage"]:
-                                usage_data = chunk["usage"]
-                                usage_container["usage"] = TokenUsage(
-                                    prompt_tokens=usage_data.get("prompt_tokens", 0),
-                                    completion_tokens=usage_data.get("completion_tokens", 0),
-                                    total_tokens=usage_data.get("total_tokens", 0),
-                                    finish_reason=usage_container["finish_reason"],
-                                    model=selected_model,
-                                    truncated=(usage_container["finish_reason"] == "length")
-                                )
+                        # Check for usage in final chunk (OpenAI stream_options)
+                        if "usage" in chunk and chunk["usage"]:
+                            usage_data = chunk["usage"]
+                            usage_container["usage"] = TokenUsage(
+                                prompt_tokens=usage_data.get("prompt_tokens", 0),
+                                completion_tokens=usage_data.get("completion_tokens", 0),
+                                total_tokens=usage_data.get("total_tokens", 0),
+                                finish_reason=usage_container["finish_reason"],
+                                model=selected_model,
+                                truncated=(usage_container["finish_reason"] == "length")
+                            )
 
-                            choices = chunk.get("choices", [])
-                            if choices:
-                                choice = choices[0]
-                                delta = choice.get("delta", {})
-                                token = delta.get("content", "")
+                        choices = chunk.get("choices", [])
+                        if choices:
+                            choice = choices[0]
+                            delta = choice.get("delta", {})
+                            token = delta.get("content", "")
 
-                                # finish_reason extrahieren
-                                if choice.get("finish_reason"):
-                                    usage_container["finish_reason"] = choice["finish_reason"]
+                            # finish_reason extrahieren
+                            if choice.get("finish_reason"):
+                                usage_container["finish_reason"] = choice["finish_reason"]
 
-                                if token:
-                                    completion_chars += len(token)
-                                    completion_tokens = completion_chars // 4  # ~4 chars per token
-                                    yield token
+                            if token:
+                                completion_chars += len(token)
+                                completion_tokens = completion_chars // 4  # ~4 chars per token
+                                yield token
 
-                        except (ValueError, KeyError, IndexError):
-                            continue
+                    except (ValueError, KeyError, IndexError):
+                        continue
 
             # Fallback: Wenn kein Usage vom Server, schätzen wir basierend auf Zeichenzahl
             if not usage_container["usage"]:
@@ -636,7 +631,6 @@ class AgentOrchestrator:
             model: Explizites Modell (überschreibt automatische Auswahl)
             is_tool_phase: True = Tool-Phase (schnelles Modell), False = Analyse-Phase (großes Modell)
         """
-        import httpx
 
         # Modell-Auswahl: Pro-Tool > Phase-spezifisch > Explizit (Header-Dropdown) > Default
         # Pro-Tool und Phase-spezifische Modelle haben Vorrang, da sie bewusst konfiguriert wurden
@@ -695,17 +689,14 @@ class AgentOrchestrator:
             payload["tools"] = tools
             payload["tool_choice"] = "auto"
 
-        async with httpx.AsyncClient(
-            timeout=settings.llm.timeout_seconds,
-            verify=settings.llm.verify_ssl
-        ) as client:
-            response = await client.post(
-                f"{base_url}/chat/completions",
-                headers=headers,
-                json=payload
-            )
-            response.raise_for_status()
-            data = response.json()
+        client = _get_http_client()
+        response = await client.post(
+            f"{base_url}/chat/completions",
+            headers=headers,
+            json=payload
+        )
+        response.raise_for_status()
+        data = response.json()
 
         # Debug: Rohe Antwort prüfen
         if "choices" not in data or not data["choices"]:

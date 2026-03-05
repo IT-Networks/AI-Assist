@@ -9,6 +9,33 @@ from lxml import etree
 from app.core.config import settings
 from app.core.exceptions import ConfluenceError
 
+# Shared HTTP Client für Connection-Pooling
+_http_client: Optional[httpx.AsyncClient] = None
+
+
+def _get_http_client() -> httpx.AsyncClient:
+    """Gibt den shared HTTP-Client für Confluence zurück."""
+    global _http_client
+    if _http_client is None:
+        _http_client = httpx.AsyncClient(
+            timeout=30,
+            verify=settings.confluence.verify_ssl,
+            limits=httpx.Limits(
+                max_connections=10,
+                max_keepalive_connections=5,
+                keepalive_expiry=30.0
+            )
+        )
+    return _http_client
+
+
+async def close_confluence_client():
+    """Schließt den HTTP-Client (für Shutdown)."""
+    global _http_client
+    if _http_client is not None:
+        await _http_client.aclose()
+        _http_client = None
+
 
 class ConfluenceClient:
     def __init__(self):
@@ -70,21 +97,19 @@ class ConfluenceClient:
             "limit": limit,
             "expand": "space,excerpt,version",
         }
-        verify_ssl = settings.confluence.verify_ssl
-        print(f"[confluence] verify_ssl={verify_ssl}, base_url={self.base_url}")
-        async with httpx.AsyncClient(timeout=30, verify=verify_ssl) as client:
-            try:
-                resp = await client.get(
-                    self._api_url("/content/search"),
-                    headers=self._headers(),
-                    params=params,
-                )
-                resp.raise_for_status()
-                data = resp.json()
-            except httpx.HTTPStatusError as e:
-                raise ConfluenceError(f"Confluence API Fehler {e.response.status_code}: {e.response.text}") from e
-            except httpx.RequestError as e:
-                raise ConfluenceError(f"Confluence Verbindungsfehler: {e}") from e
+        client = _get_http_client()
+        try:
+            resp = await client.get(
+                self._api_url("/content/search"),
+                headers=self._headers(),
+                params=params,
+            )
+            resp.raise_for_status()
+            data = resp.json()
+        except httpx.HTTPStatusError as e:
+            raise ConfluenceError(f"Confluence API Fehler {e.response.status_code}: {e.response.text}") from e
+        except httpx.RequestError as e:
+            raise ConfluenceError(f"Confluence Verbindungsfehler: {e}") from e
 
         results = []
         for item in data.get("results", []):
@@ -103,21 +128,19 @@ class ConfluenceClient:
 
     async def get_page_by_id(self, page_id: str) -> Dict:
         self._check_configured()
-        verify_ssl = settings.confluence.verify_ssl
-        print(f"[confluence] get_page verify_ssl={verify_ssl}")
-        async with httpx.AsyncClient(timeout=30, verify=verify_ssl) as client:
-            try:
-                resp = await client.get(
-                    self._api_url(f"/content/{page_id}"),
-                    headers=self._headers(),
-                    params={"expand": "body.storage,version,space"},
-                )
-                resp.raise_for_status()
-                data = resp.json()
-            except httpx.HTTPStatusError as e:
-                raise ConfluenceError(f"Seite nicht gefunden oder Fehler {e.response.status_code}") from e
-            except httpx.RequestError as e:
-                raise ConfluenceError(f"Verbindungsfehler: {e}") from e
+        client = _get_http_client()
+        try:
+            resp = await client.get(
+                self._api_url(f"/content/{page_id}"),
+                headers=self._headers(),
+                params={"expand": "body.storage,version,space"},
+            )
+            resp.raise_for_status()
+            data = resp.json()
+        except httpx.HTTPStatusError as e:
+            raise ConfluenceError(f"Seite nicht gefunden oder Fehler {e.response.status_code}") from e
+        except httpx.RequestError as e:
+            raise ConfluenceError(f"Verbindungsfehler: {e}") from e
 
         storage = data.get("body", {}).get("storage", {}).get("value", "")
         base = data.get("_links", {}).get("base", self.base_url)

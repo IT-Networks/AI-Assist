@@ -1,3 +1,4 @@
+import asyncio
 import json
 import logging
 from typing import Optional
@@ -159,19 +160,34 @@ async def _collect_attachments(sources, session_id: str, user_message: str = "")
         except Exception as e:
             logger.debug(f"PDF-Verarbeitung fehlgeschlagen ({pdf_id}): {e}")
 
-    # Confluence pages
-    for page_id in sources.confluence_page_ids[:3]:
+    # Confluence pages - parallel mit asyncio.gather (~3x schneller)
+    if sources.confluence_page_ids:
         try:
             from app.services.confluence_client import get_confluence_client
             client = get_confluence_client()
-            page = await client.get_page_by_id(page_id)
-            attachments.append(ContextAttachment(
-                label=f"CONFLUENCE: {page.get('title', page_id)}",
-                content=page.get("content", ""),
-                priority=5,
-            ))
+
+            async def fetch_confluence_page(page_id: str):
+                """Holt eine Confluence-Seite mit Fehlerbehandlung."""
+                try:
+                    return await client.get_page_by_id(page_id)
+                except Exception as e:
+                    logger.debug(f"Confluence-Seite abrufen fehlgeschlagen ({page_id}): {e}")
+                    return None
+
+            # Parallel abrufen statt sequentiell (Performance-Optimierung)
+            pages = await asyncio.gather(*[
+                fetch_confluence_page(pid) for pid in sources.confluence_page_ids[:3]
+            ])
+
+            for page in pages:
+                if page:
+                    attachments.append(ContextAttachment(
+                        label=f"CONFLUENCE: {page.get('title', '')}",
+                        content=page.get("content", ""),
+                        priority=5,
+                    ))
         except Exception as e:
-            logger.debug(f"Confluence-Seite abrufen fehlgeschlagen ({page_id}): {e}")
+            logger.debug(f"Confluence-Verarbeitung fehlgeschlagen: {e}")
 
     # Handbuch-Seiten – manuell gewählt oder per Auto-Index-Suche
     handbook_paths = list(sources.handbook_pages) if hasattr(sources, 'handbook_pages') else []

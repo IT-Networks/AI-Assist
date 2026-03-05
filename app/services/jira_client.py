@@ -13,6 +13,33 @@ import httpx
 from app.core.config import settings
 from app.core.exceptions import JiraError
 
+# Shared HTTP Client für Connection-Pooling
+_http_client: Optional[httpx.AsyncClient] = None
+
+
+def _get_http_client() -> httpx.AsyncClient:
+    """Gibt den shared HTTP-Client für Jira zurück."""
+    global _http_client
+    if _http_client is None:
+        _http_client = httpx.AsyncClient(
+            timeout=30,
+            verify=settings.jira.verify_ssl,
+            limits=httpx.Limits(
+                max_connections=10,
+                max_keepalive_connections=5,
+                keepalive_expiry=30.0
+            )
+        )
+    return _http_client
+
+
+async def close_jira_client():
+    """Schließt den HTTP-Client (für Shutdown)."""
+    global _http_client
+    if _http_client is not None:
+        await _http_client.aclose()
+        _http_client = None
+
 
 class JiraClient:
     def __init__(self):
@@ -64,21 +91,19 @@ class JiraClient:
             "fields": ["summary", "status", "assignee", "priority", "updated", "issuetype"],
         }
 
-        verify_ssl = settings.jira.verify_ssl
-        print(f"[jira] search verify_ssl={verify_ssl}, base_url={self.base_url}")
-        async with httpx.AsyncClient(timeout=30, verify=verify_ssl) as client:
-            try:
-                resp = await client.post(
-                    self._api_url("/search"),
-                    headers=self._headers(),
-                    json=payload,
-                )
-                resp.raise_for_status()
-                data = resp.json()
-            except httpx.HTTPStatusError as e:
-                raise JiraError(f"Jira API Fehler {e.response.status_code}: {e.response.text}") from e
-            except httpx.RequestError as e:
-                raise JiraError(f"Jira Verbindungsfehler: {e}") from e
+        client = _get_http_client()
+        try:
+            resp = await client.post(
+                self._api_url("/search"),
+                headers=self._headers(),
+                json=payload,
+            )
+            resp.raise_for_status()
+            data = resp.json()
+        except httpx.HTTPStatusError as e:
+            raise JiraError(f"Jira API Fehler {e.response.status_code}: {e.response.text}") from e
+        except httpx.RequestError as e:
+            raise JiraError(f"Jira Verbindungsfehler: {e}") from e
 
         results = []
         for issue in data.get("issues", []):
@@ -107,21 +132,19 @@ class JiraClient:
         """
         self._check_configured()
 
-        verify_ssl = settings.jira.verify_ssl
-        print(f"[jira] get_issue verify_ssl={verify_ssl}")
-        async with httpx.AsyncClient(timeout=30, verify=verify_ssl) as client:
-            try:
-                resp = await client.get(
-                    self._api_url(f"/issue/{issue_key}"),
-                    headers=self._headers(),
-                    params={"expand": "renderedFields"},
-                )
-                resp.raise_for_status()
-                data = resp.json()
-            except httpx.HTTPStatusError as e:
-                raise JiraError(f"Issue '{issue_key}' nicht gefunden oder Fehler {e.response.status_code}") from e
-            except httpx.RequestError as e:
-                raise JiraError(f"Jira Verbindungsfehler: {e}") from e
+        client = _get_http_client()
+        try:
+            resp = await client.get(
+                self._api_url(f"/issue/{issue_key}"),
+                headers=self._headers(),
+                params={"expand": "renderedFields"},
+            )
+            resp.raise_for_status()
+            data = resp.json()
+        except httpx.HTTPStatusError as e:
+            raise JiraError(f"Issue '{issue_key}' nicht gefunden oder Fehler {e.response.status_code}") from e
+        except httpx.RequestError as e:
+            raise JiraError(f"Jira Verbindungsfehler: {e}") from e
 
         fields = data.get("fields", {})
         rendered = data.get("renderedFields", {})
