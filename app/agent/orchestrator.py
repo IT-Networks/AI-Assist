@@ -72,6 +72,9 @@ class AgentState:
     pending_confirmation: Optional[ToolCall] = None
     tool_calls_history: List[ToolCall] = field(default_factory=list)
     context_items: List[str] = field(default_factory=list)
+    # Konversations-Historie für Multi-Turn Chats
+    messages_history: List[Dict[str, str]] = field(default_factory=list)
+    max_history_messages: int = 20  # Letzte N Nachrichten behalten
 
 
 class AgentOrchestrator:
@@ -167,7 +170,15 @@ class AgentOrchestrator:
                 "content": f"=== KONTEXT AUS VORHERIGEN TOOL-AUFRUFEN ===\n{context_block}"
             })
 
+        # Konversations-Historie hinzufügen (für Multi-Turn)
+        for hist_msg in state.messages_history[-state.max_history_messages:]:
+            messages.append(hist_msg)
+
+        # Aktuelle User-Nachricht hinzufügen
         messages.append({"role": "user", "content": user_message})
+
+        # User-Nachricht in Historie speichern
+        state.messages_history.append({"role": "user", "content": user_message})
 
         # Agent-Loop
         for iteration in range(self.max_iterations):
@@ -185,8 +196,17 @@ class AgentOrchestrator:
                 tool_calls = response.get("tool_calls", [])
                 if not tool_calls:
                     # Keine weiteren Tool-Calls -> fertig
+                    assistant_response = response.get("content", "")
+
+                    # Assistant-Antwort in Historie speichern
+                    if assistant_response:
+                        state.messages_history.append({
+                            "role": "assistant",
+                            "content": assistant_response
+                        })
+
                     yield AgentEvent(AgentEventType.DONE, {
-                        "response": response.get("content", ""),
+                        "response": assistant_response,
                         "tool_calls_count": len(state.tool_calls_history)
                     })
                     return
