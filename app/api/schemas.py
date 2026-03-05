@@ -5,6 +5,7 @@ from pydantic import BaseModel, Field
 class ContextSources(BaseModel):
     java_files: List[str] = Field(default_factory=list, description="Relative paths to Java files")
     include_pom: bool = False
+    auto_java_search: bool = False  # FTS-Index nach relevanten Dateien durchsuchen
     log_id: Optional[str] = None
     pdf_ids: List[str] = Field(default_factory=list)
     confluence_page_ids: List[str] = Field(default_factory=list)

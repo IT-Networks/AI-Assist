@@ -141,6 +141,16 @@ body {
 }
 .chip .chip-remove:hover { opacity: 1; }
 
+/* Index panel */
+.index-panel {
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 8px;
+  margin-bottom: 8px;
+}
+.index-panel input[type="checkbox"] { accent-color: var(--accent); }
+
 /* File tree */
 .tree-node { padding: 2px 0; }
 .tree-dir { cursor: pointer; }

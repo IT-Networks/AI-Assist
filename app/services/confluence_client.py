@@ -15,11 +15,17 @@ class ConfluenceClient:
         self.base_url = settings.confluence.base_url.rstrip("/")
         self.username = settings.confluence.username
         self.api_token = settings.confluence.api_token
+        self.password = settings.confluence.password
+
+    def _get_secret(self) -> str:
+        """API-Token bevorzugen (Cloud), sonst Passwort (Server/DC)."""
+        return self.api_token or self.password
 
     def _headers(self) -> Dict:
         headers = {"Accept": "application/json", "Content-Type": "application/json"}
-        if self.username and self.api_token:
-            creds = base64.b64encode(f"{self.username}:{self.api_token}".encode()).decode()
+        secret = self._get_secret()
+        if self.username and secret:
+            creds = base64.b64encode(f"{self.username}:{secret}".encode()).decode()
             headers["Authorization"] = f"Basic {creds}"
         return headers
 

@@ -19,19 +19,32 @@ def _get_stores():
     return _log_store, _pdf_store
 
 
-async def _collect_attachments(sources, session_id: str):
+async def _collect_attachments(sources, session_id: str, user_message: str = ""):
     attachments = []
 
     if not sources:
         return attachments
 
-    # Java files
-    if sources.java_files:
+    # Java files – manuell gewählt oder per Auto-Index-Suche
+    java_paths = list(sources.java_files)
+    if sources.auto_java_search and not java_paths:
+        # FTS-Index nach zur Frage passenden Dateien durchsuchen
+        try:
+            from app.services.java_indexer import get_java_indexer
+            from app.core.config import settings as _s
+            indexer = get_java_indexer()
+            if indexer.is_built():
+                results = indexer.search(user_message, top_k=_s.index.max_search_results)
+                java_paths = [r["file_path"] for r in results]
+        except Exception:
+            pass
+
+    if java_paths:
         try:
             from app.services.java_reader import JavaReader
             from app.core.config import settings
             reader = JavaReader(settings.java.repo_path)
-            for rel_path in sources.java_files[:5]:  # limit to 5 files
+            for rel_path in java_paths[:5]:  # limit to 5 files
                 try:
                     content = reader.read_file(rel_path)
                     attachments.append(ContextAttachment(
@@ -77,17 +90,34 @@ async def _collect_attachments(sources, session_id: str):
         except Exception:
             pass
 
-    # PDFs
+    # PDFs – relevante Seiten per Index, sonst Volltext
     for pdf_id in sources.pdf_ids[:3]:
         try:
             _, _pdf_store = _get_stores()
-            if pdf_id in _pdf_store:
-                pdf_data = _pdf_store[pdf_id]
-                attachments.append(ContextAttachment(
-                    label=f"PDF: {pdf_data['filename']}",
-                    content=pdf_data["text"],
-                    priority=4,
-                ))
+            if pdf_id not in _pdf_store:
+                continue
+            pdf_data = _pdf_store[pdf_id]
+            content = ""
+            # Versuche Index-basierte Suche (nur relevante Seiten)
+            if user_message:
+                try:
+                    from app.services.pdf_indexer import get_pdf_indexer
+                    from app.core.config import settings as _s
+                    pdf_idx = get_pdf_indexer()
+                    if pdf_idx.has_pdf(pdf_id):
+                        content = pdf_idx.search(
+                            pdf_id, user_message, top_k=_s.index.max_search_results
+                        )
+                except Exception:
+                    pass
+            # Fallback: gesamter Text (kleine PDFs oder kein Index)
+            if not content:
+                content = pdf_data["text"]
+            attachments.append(ContextAttachment(
+                label=f"PDF: {pdf_data['filename']}",
+                content=content,
+                priority=4,
+            ))
         except Exception:
             pass
 
@@ -114,7 +144,7 @@ async def chat_non_stream(request: ChatRequest):
     if request.stream:
         raise HTTPException(status_code=400, detail="Use stream=false for this endpoint or accept text/event-stream")
 
-    attachments = await _collect_attachments(request.context_sources, request.session_id)
+    attachments = await _collect_attachments(request.context_sources, request.session_id, request.message)
     messages = context_manager.build_messages(
         session_id=request.session_id,
         user_message=request.message,
@@ -135,7 +165,7 @@ async def chat_non_stream(request: ChatRequest):
 @router.post("/stream")
 async def chat_stream(request: ChatRequest):
     """Streaming chat endpoint – returns text/event-stream."""
-    attachments = await _collect_attachments(request.context_sources, request.session_id)
+    attachments = await _collect_attachments(request.context_sources, request.session_id, request.message)
     messages = context_manager.build_messages(
         session_id=request.session_id,
         user_message=request.message,

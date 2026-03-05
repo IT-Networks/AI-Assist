@@ -30,8 +30,15 @@ class JavaConfig(BaseModel):
 class ConfluenceConfig(BaseModel):
     base_url: str = ""
     username: str = ""
-    api_token: str = ""
+    api_token: str = ""   # Atlassian Cloud API Token (bevorzugt)
+    password: str = ""    # Atlassian Server/DC Passwort (Fallback wenn api_token leer)
     default_space: str = ""
+
+
+class IndexConfig(BaseModel):
+    directory: str = "./index"
+    auto_build_on_start: bool = False
+    max_search_results: int = 5
 
 
 class ContextConfig(BaseModel):
@@ -59,6 +66,7 @@ class Settings(BaseModel):
     context: ContextConfig = ContextConfig()
     uploads: UploadsConfig = UploadsConfig()
     server: ServerConfig = ServerConfig()
+    index: IndexConfig = IndexConfig()
 
     def apply_env_overrides(self) -> "Settings":
         if os.getenv("LLM_BASE_URL"):
@@ -73,6 +81,8 @@ class Settings(BaseModel):
             self.confluence.username = os.getenv("CONFLUENCE_USERNAME")
         if os.getenv("CONFLUENCE_API_TOKEN"):
             self.confluence.api_token = os.getenv("CONFLUENCE_API_TOKEN")
+        if os.getenv("CONFLUENCE_PASSWORD"):
+            self.confluence.password = os.getenv("CONFLUENCE_PASSWORD")
         return self
 
 
@@ -90,8 +100,9 @@ def load_settings(config_path: str = "config.yaml") -> Settings:
     settings = Settings(**data)
     settings.apply_env_overrides()
 
-    # Ensure upload directory exists
+    # Ensure required directories exist
     Path(settings.uploads.directory).mkdir(parents=True, exist_ok=True)
+    Path(settings.index.directory).mkdir(parents=True, exist_ok=True)
 
     return settings
 

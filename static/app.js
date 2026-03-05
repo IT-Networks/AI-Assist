@@ -17,6 +17,7 @@ const state = {
 document.addEventListener("DOMContentLoaded", async () => {
   marked.setOptions({ breaks: true, gfm: true });
   await loadModels();
+  await loadIndexStatus();
   document.getElementById("stream-cb").addEventListener("change", e => {
     state.streaming = e.target.checked;
   });
@@ -75,9 +76,11 @@ async function sendMessage() {
   sendBtn.disabled = true;
   sendBtn.innerHTML = '<span class="spinner"></span>';
 
+  const autoSearch = document.getElementById("auto-search-cb")?.checked || false;
   const contextSources = {
     java_files: state.context.javaFiles.map(f => f.path),
     include_pom: state.context.includePom,
+    auto_java_search: autoSearch,
     log_id: state.context.logId || null,
     pdf_ids: state.context.pdfIds.map(p => p.id),
     confluence_page_ids: state.context.confluenceIds.map(c => c.id),
@@ -463,6 +466,52 @@ function renderContextChips() {
 function escapeHtml(str) {
   if (!str) return "";
   return str.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+}
+
+// ── Java Index ──
+async function loadIndexStatus() {
+  const el = document.getElementById("index-status");
+  if (!el) return;
+  try {
+    const res = await fetch("/api/java/index/status");
+    if (!res.ok) { el.textContent = "Status nicht verfügbar"; return; }
+    const d = await res.json();
+    if (d.is_built) {
+      el.textContent = `${d.indexed_files} Dateien indexiert · ${d.last_build}`;
+      el.style.color = "var(--green)";
+    } else {
+      el.textContent = "Kein Index – bitte aufbauen";
+      el.style.color = "var(--text-muted)";
+    }
+  } catch {
+    el.textContent = "Status nicht verfügbar";
+  }
+}
+
+async function buildJavaIndex() {
+  const el = document.getElementById("index-status");
+  if (el) { el.textContent = "Index wird aufgebaut..."; el.style.color = "var(--yellow)"; }
+  try {
+    const res = await fetch("/api/java/index/build?background=false", { method: "POST" });
+    const d = await res.json();
+    if (!res.ok) {
+      if (el) { el.textContent = d.detail || "Fehler"; el.style.color = "var(--red)"; }
+      return;
+    }
+    appendMessage("system",
+      `Index aufgebaut: ${d.indexed} Dateien indexiert, ${d.skipped} unverändert, ${d.stale_removed} veraltet entfernt (${d.duration_s}s)`
+    );
+    await loadIndexStatus();
+  } catch (e) {
+    if (el) { el.textContent = e.message; el.style.color = "var(--red)"; }
+  }
+}
+
+async function deleteJavaIndex() {
+  if (!confirm("Java-Index wirklich löschen?")) return;
+  await fetch("/api/java/index", { method: "DELETE" });
+  await loadIndexStatus();
+  appendMessage("system", "Java-Index gelöscht.");
 }
 
 // Auto-resize textarea

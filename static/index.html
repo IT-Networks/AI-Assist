@@ -31,6 +31,17 @@
         &#9749; Java Repository <span id="java-arrow">&#9658;</span>
       </div>
       <div class="sidebar-section-body" id="java-body">
+        <!-- Index-Steuerung -->
+        <div class="index-panel">
+          <div style="display:flex;gap:6px;align-items:center;margin-bottom:4px">
+            <button class="sb-btn" style="flex:1;margin:0" onclick="buildJavaIndex()">&#127959; Index aufbauen</button>
+            <button class="sb-btn" style="margin:0;padding:4px 8px" title="Index löschen" onclick="deleteJavaIndex()">&#128465;</button>
+          </div>
+          <div id="index-status" style="font-size:0.75rem;color:var(--text-muted);margin-bottom:6px">Status wird geladen...</div>
+          <label class="sb-label" style="display:flex;align-items:center;gap:6px;cursor:pointer">
+            <input type="checkbox" id="auto-search-cb"> Auto-Suche (relevante Dateien automatisch finden)
+          </label>
+        </div>
         <button class="sb-btn" id="load-tree-btn" onclick="loadFileTree()">&#128196; Dateibaum laden</button>
         <input class="sb-input" id="java-search-input" placeholder="Klasse suchen..." onkeydown="if(event.key==='Enter')searchClass()">
         <button class="sb-btn" onclick="searchClass()">&#128269; Klasse suchen</button>

@@ -1,9 +1,10 @@
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Query, BackgroundTasks
 from typing import Optional
 
 from app.core.config import settings
 from app.core.exceptions import JavaReaderError, PathTraversalError
 from app.services.java_reader import JavaReader
+from app.services.java_indexer import get_java_indexer
 from app.services.pom_parser import PomParser
 
 router = APIRouter(prefix="/api/java", tags=["java"])
@@ -81,3 +82,67 @@ async def get_pom_info():
         return {"poms": results}
     except JavaReaderError as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+# ── Index-Endpunkte ──────────────────────────────────────────────────────────
+
+def _run_index_build(force: bool) -> dict:
+    reader = _get_reader()
+    indexer = get_java_indexer()
+    return indexer.build(settings.java.repo_path, reader, force=force)
+
+
+@router.post("/index/build")
+async def build_index(
+    background_tasks: BackgroundTasks,
+    force: bool = Query(False, description="true = alle Dateien neu indexieren"),
+    background: bool = Query(False, description="true = asynchron im Hintergrund starten"),
+):
+    """
+    Baut den FTS5-Suchindex für das Java-Repository auf.
+    Nur geänderte Dateien werden neu indexiert (inkrementell).
+    """
+    if not settings.java.repo_path:
+        raise HTTPException(status_code=503, detail="Java-Repository-Pfad nicht konfiguriert")
+
+    if background:
+        background_tasks.add_task(_run_index_build, force)
+        return {"message": "Index-Build im Hintergrund gestartet"}
+
+    try:
+        result = _run_index_build(force)
+        return result
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Index-Build fehlgeschlagen: {e}")
+
+
+@router.get("/index/status")
+async def get_index_status():
+    """Gibt den aktuellen Status des Java-Suchindex zurück."""
+    indexer = get_java_indexer()
+    return indexer.get_stats()
+
+
+@router.get("/index/search")
+async def search_index(
+    q: str = Query(..., description="Volltext-Suchbegriff"),
+    top_k: int = Query(None, ge=1, le=20, description="Anzahl Treffer"),
+):
+    """Sucht im FTS5-Index nach relevanten Java-Dateien."""
+    indexer = get_java_indexer()
+    if not indexer.is_built():
+        raise HTTPException(
+            status_code=404,
+            detail="Kein Index vorhanden. Bitte zuerst POST /api/java/index/build aufrufen.",
+        )
+    k = top_k or settings.index.max_search_results
+    results = indexer.search(q, top_k=k)
+    return {"query": q, "results": results, "count": len(results)}
+
+
+@router.delete("/index")
+async def delete_index():
+    """Löscht den Java-Suchindex vollständig."""
+    indexer = get_java_indexer()
+    indexer.clear()
+    return {"message": "Index gelöscht"}

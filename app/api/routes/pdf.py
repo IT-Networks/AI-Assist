@@ -7,6 +7,7 @@ from typing import Optional
 from app.core.config import settings
 from app.api.schemas import UploadResponse, PDFInfoResponse
 from app.services.pdf_reader import PDFReader
+from app.services.pdf_indexer import get_pdf_indexer
 from app.core.exceptions import PDFReadError
 
 router = APIRouter(prefix="/api/pdf", tags=["pdf"])
@@ -51,11 +52,18 @@ async def upload_pdf(file: UploadFile = File(...)):
         "meta": meta,
     }
 
+    # Index für smarte Kontext-Suche aufbauen
+    try:
+        indexer = get_pdf_indexer()
+        indexed_pages = indexer.index_pdf(pdf_id, text)
+    except Exception:
+        indexed_pages = 0
+
     return UploadResponse(
         id=pdf_id,
         filename=file.filename,
         size_bytes=len(content_bytes),
-        message=f"PDF geladen: {meta['page_count']} Seiten",
+        message=f"PDF geladen: {meta['page_count']} Seiten, {indexed_pages} Seiten indexiert",
     )
 
 
@@ -103,4 +111,8 @@ async def delete_pdf(pdf_id: str):
         raise HTTPException(status_code=404, detail=f"PDF-ID nicht gefunden: {pdf_id}")
     d = _pdf_store.pop(pdf_id)
     Path(d["filepath"]).unlink(missing_ok=True)
+    try:
+        get_pdf_indexer().remove_pdf(pdf_id)
+    except Exception:
+        pass
     return {"message": f"PDF {pdf_id} gelöscht"}

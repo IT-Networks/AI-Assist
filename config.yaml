@@ -29,7 +29,8 @@ java:
 confluence:
   base_url: "https://confluence.example.com"
   username: ""
-  api_token: ""
+  api_token: ""       # Atlassian Cloud: API-Token hier eintragen
+  password: ""        # Atlassian Server/DC: Passwort hier (statt api_token)
   default_space: ""
 
 context:
@@ -40,6 +41,11 @@ uploads:
   directory: "./uploads"
   max_file_size_mb: 50
   cleanup_after_hours: 24
+
+index:
+  directory: "./index"          # Speicherort für SQLite FTS5-Indexe
+  auto_build_on_start: false    # Java-Index beim App-Start automatisch aufbauen
+  max_search_results: 5         # Anzahl relevanter Treffer pro Suche
 
 server:
   host: "0.0.0.0"
