@@ -1,0 +1,132 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Java AI Code Assistant</title>
+  <link rel="stylesheet" href="/static/style.css">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+</head>
+<body>
+
+<!-- Header -->
+<div id="header">
+  <h1>&#9749; Java AI Code Assistant</h1>
+  <label id="stream-toggle">
+    <input type="checkbox" id="stream-cb" checked> Streaming
+  </label>
+  <select id="model-select" title="Modell auswählen"></select>
+  <button class="btn btn-danger" id="clear-btn" title="Session löschen">&#128465; Session</button>
+</div>
+
+<!-- Main -->
+<div id="main">
+
+  <!-- Sidebar -->
+  <div id="sidebar">
+
+    <!-- Java Repository -->
+    <div class="sidebar-section">
+      <div class="sidebar-section-header" onclick="toggleSection('java-body')">
+        &#9749; Java Repository <span id="java-arrow">&#9658;</span>
+      </div>
+      <div class="sidebar-section-body" id="java-body">
+        <!-- Index-Steuerung -->
+        <div class="index-panel">
+          <div style="display:flex;gap:6px;align-items:center;margin-bottom:4px">
+            <button class="sb-btn" style="flex:1;margin:0" onclick="buildJavaIndex()">&#127959; Index aufbauen</button>
+            <button class="sb-btn" style="margin:0;padding:4px 8px" title="Index löschen" onclick="deleteJavaIndex()">&#128465;</button>
+          </div>
+          <div id="index-status" style="font-size:0.75rem;color:var(--text-muted);margin-bottom:6px">Status wird geladen...</div>
+          <label class="sb-label" style="display:flex;align-items:center;gap:6px;cursor:pointer">
+            <input type="checkbox" id="auto-search-cb"> Auto-Suche (relevante Dateien automatisch finden)
+          </label>
+        </div>
+        <button class="sb-btn" id="load-tree-btn" onclick="loadFileTree()">&#128196; Dateibaum laden</button>
+        <input class="sb-input" id="java-search-input" placeholder="Klasse suchen..." onkeydown="if(event.key==='Enter')searchClass()">
+        <button class="sb-btn" onclick="searchClass()">&#128269; Klasse suchen</button>
+        <div id="file-tree"></div>
+        <div id="class-search-results"></div>
+      </div>
+    </div>
+
+    <!-- Server Logs -->
+    <div class="sidebar-section">
+      <div class="sidebar-section-header" onclick="toggleSection('log-body')">
+        &#128196; Server Logs <span id="log-arrow">&#9658;</span>
+      </div>
+      <div class="sidebar-section-body" id="log-body">
+        <label class="sb-label">WLP Log-Datei hochladen:</label>
+        <input type="file" id="log-file-input" accept=".log,.txt" style="display:none" onchange="uploadLog()">
+        <button class="sb-btn" onclick="document.getElementById('log-file-input').click()">&#128228; Log hochladen</button>
+        <div id="log-status"></div>
+      </div>
+    </div>
+
+    <!-- PDF -->
+    <div class="sidebar-section">
+      <div class="sidebar-section-header" onclick="toggleSection('pdf-body')">
+        &#128196; PDFs <span id="pdf-arrow">&#9658;</span>
+      </div>
+      <div class="sidebar-section-body" id="pdf-body">
+        <label class="sb-label">PDF hochladen:</label>
+        <input type="file" id="pdf-file-input" accept=".pdf" style="display:none" onchange="uploadPDF()">
+        <button class="sb-btn" onclick="document.getElementById('pdf-file-input').click()">&#128228; PDF hochladen</button>
+        <div id="pdf-status"></div>
+      </div>
+    </div>
+
+    <!-- Confluence -->
+    <div class="sidebar-section">
+      <div class="sidebar-section-header" onclick="toggleSection('conf-body')">
+        &#127758; Confluence <span id="conf-arrow">&#9658;</span>
+      </div>
+      <div class="sidebar-section-body" id="conf-body">
+        <label class="sb-label">Volltext-Suche:</label>
+        <input class="sb-input" id="conf-search-q" placeholder="Suchbegriff...">
+        <input class="sb-input" id="conf-search-space" placeholder="Space-Key (optional, z.B. DEV)">
+        <input class="sb-input" id="conf-search-labels" placeholder="Labels (optional, kommagetrennt)">
+        <button class="sb-btn" onclick="searchConfluence()">&#128269; Suchen</button>
+        <div id="conf-search-results" class="search-results"></div>
+        <label class="sb-label" style="margin-top:8px">Seite per ID laden:</label>
+        <input class="sb-input" id="conf-page-id" placeholder="Seiten-ID (z.B. 123456)">
+        <button class="sb-btn" onclick="loadConfluencePage()">&#128196; Seite laden</button>
+        <div id="conf-status"></div>
+      </div>
+    </div>
+
+    <!-- Active Context -->
+    <div id="active-context">
+      <h4>Aktiver Kontext</h4>
+      <div id="context-chips">
+        <span style="font-size:0.78rem;color:var(--text-muted)">Kein Kontext ausgewählt</span>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- Chat area -->
+  <div id="chat-area">
+    <div id="messages">
+      <div class="message system">
+        <div class="message-bubble">
+          Willkommen! Wähle links Kontext-Quellen aus und stelle deine Java-Frage.
+        </div>
+      </div>
+    </div>
+    <div id="input-area">
+      <textarea id="message-input" placeholder="Java-Frage stellen..." rows="2"
+        onkeydown="handleInputKey(event)"></textarea>
+      <button id="send-btn" onclick="sendMessage()">Senden</button>
+    </div>
+  </div>
+
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/java.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/xml.min.js"></script>
+<script src="/static/app.js"></script>
+</body>
+</html>

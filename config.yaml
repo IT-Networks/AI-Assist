@@ -1,0 +1,53 @@
+llm:
+  base_url: "http://internal-llm-gateway/v1"
+  api_key: "none"
+  default_model: "gptoss120b"
+  timeout_seconds: 120
+  max_tokens: 4096
+  temperature: 0.2
+
+models:
+  - id: "gptoss120b"
+    display_name: "GPT OSS 120B"
+  - id: "mistral-678b"
+    display_name: "Mistral 678B"
+  - id: "qwen-7b"
+    display_name: "Qwen 7B (Schnell)"
+  - id: "qwen-428b"
+    display_name: "Qwen 428B"
+
+java:
+  repo_path: "/home/user/projects/my-java-app"
+  exclude_dirs:
+    - "target"
+    - ".git"
+    - "node_modules"
+    - ".idea"
+    - ".mvn"
+  max_file_size_kb: 500
+
+confluence:
+  base_url: "https://confluence.example.com"
+  username: ""
+  api_token: ""       # Atlassian Cloud: API-Token hier eintragen
+  password: ""        # Atlassian Server/DC: Passwort hier (statt api_token)
+  default_space: ""
+
+context:
+  max_tokens: 32000
+  max_file_context_kb: 100
+
+uploads:
+  directory: "./uploads"
+  max_file_size_mb: 50
+  cleanup_after_hours: 24
+
+index:
+  directory: "./index"          # Speicherort für SQLite FTS5-Indexe
+  auto_build_on_start: false    # Java-Index beim App-Start automatisch aufbauen
+  max_search_results: 5         # Anzahl relevanter Treffer pro Suche
+
+server:
+  host: "0.0.0.0"
+  port: 8000
+  reload: false
