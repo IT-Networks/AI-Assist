@@ -800,6 +800,8 @@ function addFileToContext(path, name, type, el) {
 }
 
 // ── Handbook ──
+let handbookBuildController = null;
+
 async function loadHandbookStatus() {
   const el = document.getElementById('handbook-status');
   try {
@@ -810,16 +812,131 @@ async function loadHandbookStatus() {
       return;
     }
     const d = await res.json();
-    if (d.is_built) {
-      el.innerHTML = `<span class="status-icon">&#128214;</span><span>${d.service_count} Services indexiert</span>`;
+    if (d.indexed) {
+      el.innerHTML = `<span class="status-icon">&#128214;</span><span>${d.services_count} Services, ${d.indexed_pages} Seiten indexiert</span>`;
       el.classList.add('success');
       await loadHandbookServices();
     } else {
-      el.innerHTML = '<span class="status-icon">&#128214;</span><span>Index nicht aufgebaut</span>';
+      el.innerHTML = `
+        <span class="status-icon">&#128214;</span>
+        <span>Index nicht aufgebaut</span>
+        <button class="sb-btn" style="margin-left:8px" onclick="buildHandbookIndex()">Index aufbauen</button>
+      `;
     }
   } catch {
     el.innerHTML = '<span class="status-icon">&#128214;</span><span>Handbuch nicht verfügbar</span>';
     el.classList.add('error');
+  }
+}
+
+async function buildHandbookIndex(force = false) {
+  const el = document.getElementById('handbook-status');
+
+  el.innerHTML = `
+    <div class="handbook-progress">
+      <div class="progress-header">
+        <span class="status-icon">&#128214;</span>
+        <span id="handbook-progress-phase">Starte Indexierung...</span>
+        <button class="sb-btn btn-danger" onclick="cancelHandbookIndex()" style="margin-left:auto">Abbrechen</button>
+      </div>
+      <div class="progress-bar-container">
+        <div class="progress-bar" id="handbook-progress-bar" style="width:0%"></div>
+      </div>
+      <div class="progress-details" id="handbook-progress-details">
+        <span>0 / 0 Dateien</span>
+      </div>
+    </div>
+  `;
+
+  try {
+    handbookBuildController = new AbortController();
+
+    const res = await fetch(`/api/handbook/index/build?force=${force}&stream=true`, {
+      signal: handbookBuildController.signal
+    });
+
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split('\n');
+      buffer = lines.pop() || '';
+
+      for (const line of lines) {
+        if (line.startsWith('data: ')) {
+          try {
+            const data = JSON.parse(line.slice(6));
+            updateHandbookProgress(data);
+          } catch (e) {
+            console.warn('Handbook progress parse error:', e);
+          }
+        }
+      }
+    }
+
+    // Fertig - Status neu laden
+    handbookBuildController = null;
+    await loadHandbookStatus();
+
+  } catch (e) {
+    if (e.name === 'AbortError') {
+      el.innerHTML = '<span class="status-icon">&#128214;</span><span>Indexierung abgebrochen</span>';
+    } else {
+      el.innerHTML = `<span class="status-icon">&#128214;</span><span style="color:var(--danger)">Fehler: ${e.message}</span>`;
+    }
+    handbookBuildController = null;
+  }
+}
+
+function updateHandbookProgress(data) {
+  const phaseEl = document.getElementById('handbook-progress-phase');
+  const barEl = document.getElementById('handbook-progress-bar');
+  const detailsEl = document.getElementById('handbook-progress-details');
+
+  if (!phaseEl) return;
+
+  const phaseNames = {
+    'scanning': 'Suche Dateien...',
+    'analyzing': 'Analysiere Struktur...',
+    'indexing': 'Indexiere...',
+    'saving': 'Speichere...',
+    'done': 'Fertig!',
+    'cancelled': 'Abgebrochen',
+    'error': 'Fehler'
+  };
+
+  phaseEl.textContent = phaseNames[data.phase] || data.message || data.phase;
+  barEl.style.width = `${data.percent || 0}%`;
+
+  if (data.phase === 'indexing') {
+    const eta = data.estimated_remaining_seconds > 0
+      ? ` (ca. ${Math.ceil(data.estimated_remaining_seconds / 60)} Min. verbleibend)`
+      : '';
+    detailsEl.innerHTML = `
+      <span>${data.processed_files} / ${data.total_files} Dateien${eta}</span>
+      <span>${data.services_found} Services</span>
+      <span>${data.errors} Fehler</span>
+    `;
+  } else if (data.phase === 'done') {
+    detailsEl.innerHTML = `<span style="color:var(--success)">${data.message}</span>`;
+  } else {
+    detailsEl.innerHTML = `<span>${data.message || ''}</span>`;
+  }
+}
+
+async function cancelHandbookIndex() {
+  if (handbookBuildController) {
+    handbookBuildController.abort();
+  }
+  try {
+    await fetch('/api/handbook/index/cancel', { method: 'POST' });
+  } catch (e) {
+    // Ignore
   }
 }
 

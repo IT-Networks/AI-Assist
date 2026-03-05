@@ -1,11 +1,19 @@
 """
 Handbook API Routes - Endpunkte für Handbuch-Suche und -Verwaltung.
+
+Optimiert für große Handbücher (100.000+ Dateien):
+- SSE-Streaming für Index-Progress
+- Abbruch-Möglichkeit
+- Polling-Endpoint für Progress
 """
 
+import asyncio
+import json
 from pathlib import Path
 from typing import List, Optional
 
 from fastapi import APIRouter, HTTPException, Query, BackgroundTasks
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
 from app.core.config import settings
@@ -45,10 +53,10 @@ class HandbookServiceDetail(BaseModel):
 
 
 class HandbookIndexStatus(BaseModel):
-    is_built: bool
+    indexed: bool
     indexed_pages: int
-    services: int
-    fields: int
+    services_count: int
+    fields_count: int
     last_build: Optional[str] = None
     handbook_path: Optional[str] = None
     db_size_kb: float
@@ -83,18 +91,19 @@ async def get_index_status():
     return HandbookIndexStatus(**stats)
 
 
-@router.post("/index/build", response_model=HandbookBuildResult)
+@router.post("/index/build")
 async def build_index(
     force: bool = Query(False, description="Alle Dateien neu indexieren"),
-    background: bool = Query(False, description="Im Hintergrund ausführen"),
-    background_tasks: BackgroundTasks = None
+    stream: bool = Query(True, description="Progress als SSE streamen")
 ):
     """
     Baut den Handbuch-Index auf oder aktualisiert ihn.
 
+    Bei großen Handbüchern (100.000+ Dateien) wird Progress gestreamt.
+
     - force=false: Nur geänderte Dateien neu indexieren (schneller)
     - force=true: Alle Dateien neu indexieren
-    - background=true: Im Hintergrund ausführen, sofort zurückkehren
+    - stream=true: Progress als Server-Sent Events streamen
     """
     if not settings.handbook.enabled:
         raise HTTPException(status_code=404, detail="Handbuch-Feature ist nicht aktiviert")
@@ -111,23 +120,84 @@ async def build_index(
 
     indexer = get_handbook_indexer()
 
-    def do_build():
-        return indexer.build(
+    if stream:
+        # SSE Streaming Response
+        async def progress_generator():
+            try:
+                for progress in indexer.build_with_progress(
+                    handbook_path=str(handbook_path),
+                    functions_subdir=settings.handbook.functions_subdir,
+                    fields_subdir=settings.handbook.fields_subdir,
+                    exclude_patterns=settings.handbook.exclude_patterns,
+                    force=force
+                ):
+                    event_data = json.dumps(progress.to_dict(), ensure_ascii=False)
+                    yield f"data: {event_data}\n\n"
+
+                    # Kurze Pause um nicht zu viele Events zu senden
+                    await asyncio.sleep(0.05)
+
+            except Exception as e:
+                error_data = json.dumps({
+                    "phase": "error",
+                    "message": str(e)
+                })
+                yield f"data: {error_data}\n\n"
+
+        return StreamingResponse(
+            progress_generator(),
+            media_type="text/event-stream",
+            headers={
+                "Cache-Control": "no-cache",
+                "Connection": "keep-alive",
+                "X-Accel-Buffering": "no"  # Nginx buffering deaktivieren
+            }
+        )
+    else:
+        # Synchroner Aufruf (Legacy)
+        result = indexer.build(
             handbook_path=str(handbook_path),
             functions_subdir=settings.handbook.functions_subdir,
             fields_subdir=settings.handbook.fields_subdir,
             exclude_patterns=settings.handbook.exclude_patterns,
             force=force
         )
+        return HandbookBuildResult(**result)
 
-    if background and background_tasks:
-        background_tasks.add_task(do_build)
-        return HandbookBuildResult(
-            indexed=0, skipped=0, services=0, fields=0, errors=0, duration_s=0
-        )
 
-    result = do_build()
-    return HandbookBuildResult(**result)
+@router.get("/index/progress")
+async def get_build_progress():
+    """
+    Gibt den aktuellen Indexierungs-Progress zurück (für Polling).
+
+    Nützlich wenn SSE nicht verwendet wird.
+    """
+    if not settings.handbook.enabled:
+        raise HTTPException(status_code=404, detail="Handbuch-Feature ist nicht aktiviert")
+
+    indexer = get_handbook_indexer()
+    progress = indexer.get_current_progress()
+
+    if progress is None:
+        return {"status": "idle", "message": "Keine Indexierung aktiv"}
+
+    return progress
+
+
+@router.post("/index/cancel")
+async def cancel_build():
+    """
+    Bricht die laufende Indexierung ab.
+
+    Der Abbruch erfolgt nach dem aktuellen Batch.
+    """
+    if not settings.handbook.enabled:
+        raise HTTPException(status_code=404, detail="Handbuch-Feature ist nicht aktiviert")
+
+    indexer = get_handbook_indexer()
+    indexer.cancel_build()
+
+    return {"message": "Abbruch angefordert", "status": "cancelling"}
 
 
 @router.delete("/index")
@@ -147,9 +217,9 @@ async def delete_index():
 
 @router.get("/search", response_model=List[HandbookSearchResult])
 async def search_handbook(
-    q: str = Query(..., min_length=1, description="Suchbegriff"),
-    service: Optional[str] = Query(None, description="Nur in diesem Service suchen"),
-    tab: Optional[str] = Query(None, description="Nur in diesem Tab suchen"),
+    q: str = Query(..., min_length=1, max_length=500, description="Suchbegriff"),
+    service: Optional[str] = Query(None, max_length=200, description="Nur in diesem Service suchen"),
+    tab: Optional[str] = Query(None, max_length=100, description="Nur in diesem Tab suchen"),
     top_k: int = Query(5, ge=1, le=50, description="Maximale Anzahl Ergebnisse")
 ):
     """
@@ -183,8 +253,11 @@ async def search_handbook(
 # ══════════════════════════════════════════════════════════════════════════════
 
 @router.get("/services", response_model=List[HandbookServiceSummary])
-async def list_services():
-    """Listet alle im Handbuch dokumentierten Services auf."""
+async def list_services(
+    limit: int = Query(100, ge=1, le=1000, description="Max. Anzahl"),
+    offset: int = Query(0, ge=0, description="Offset für Pagination")
+):
+    """Listet alle im Handbuch dokumentierten Services auf (mit Pagination)."""
     if not settings.handbook.enabled:
         raise HTTPException(status_code=404, detail="Handbuch-Feature ist nicht aktiviert")
 
@@ -193,7 +266,7 @@ async def list_services():
     if not indexer.is_built():
         raise HTTPException(status_code=400, detail="Handbuch-Index wurde noch nicht aufgebaut")
 
-    services = indexer.list_services()
+    services = indexer.list_services(limit=limit, offset=offset)
     return [HandbookServiceSummary(**s) for s in services]
 
 
@@ -218,7 +291,7 @@ async def get_service(service_id: str):
 
 @router.get("/page", response_model=HandbookPageContent)
 async def get_page_content(
-    path: str = Query(..., description="Relativer Pfad zur Handbuch-Seite")
+    path: str = Query(..., max_length=500, description="Relativer Pfad zur Handbuch-Seite")
 ):
     """Lädt den Textinhalt einer Handbuch-Seite."""
     if not settings.handbook.enabled:

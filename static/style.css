@@ -1711,3 +1711,45 @@ body {
   background: var(--danger);
   color: white;
 }
+
+/* ══════════════════════════════════════════════════════════════════════════════
+   Handbook Progress
+   ══════════════════════════════════════════════════════════════════════════════ */
+
+.handbook-progress {
+  padding: 12px;
+}
+
+.handbook-progress .progress-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.progress-bar-container {
+  height: 8px;
+  background: var(--surface);
+  border-radius: 4px;
+  overflow: hidden;
+  margin-bottom: 8px;
+}
+
+.progress-bar {
+  height: 100%;
+  background: linear-gradient(90deg, var(--accent), var(--success));
+  border-radius: 4px;
+  transition: width 0.3s ease;
+}
+
+.progress-details {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  font-size: 0.8rem;
+  color: var(--text-secondary);
+}
+
+.progress-details span {
+  white-space: nowrap;
+}
