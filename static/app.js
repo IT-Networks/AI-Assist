@@ -1407,6 +1407,7 @@ const settingsState = {
     index: 'Such-Index-Einstellungen',
     server: 'Server-Konfiguration',
     tools: 'Pfade zu Entwickler-Tools',
+    agent_tools: 'Agent-Tools mit Modell-Zuweisungen',
     context: 'Kontext-Limits für LLM',
     uploads: 'Upload-Verzeichnis und Limits'
   }
@@ -1486,6 +1487,11 @@ function renderSettingsSection() {
 
   if (section === 'models') {
     renderModelsSection();
+    return;
+  }
+
+  if (section === 'agent_tools') {
+    renderAgentToolsSection();
     return;
   }
 
@@ -1665,6 +1671,109 @@ function removeArrayItem(fieldId, idx) {
     items[idx].remove();
     markSettingsModified();
   }
+}
+
+async function renderAgentToolsSection() {
+  const form = document.getElementById('settings-form');
+  form.innerHTML = `
+    <div class="settings-section">
+      <h3 class="settings-section-title">AGENT TOOLS</h3>
+      <p class="settings-section-desc">Übersicht aller Agent-Tools. Pro Tool kann ein eigenes LLM-Modell zugewiesen werden. Leeres Feld = Standard-Modell (tool_model oder default_model).</p>
+    </div>
+    <div id="agent-tools-loading" style="text-align:center; padding:20px;">
+      <span class="spinner"></span> Lade Tools...
+    </div>
+  `;
+
+  try {
+    const res = await fetch('/api/settings/agent-tools');
+    const data = await res.json();
+
+    const tools = data.tools || [];
+    const availableModels = data.available_models || [];
+    const defaultModel = data.default_model || '';
+    const globalToolModel = data.tool_model || '';
+
+    // Kategorien gruppieren
+    const categories = {};
+    for (const tool of tools) {
+      const cat = tool.category || 'other';
+      if (!categories[cat]) categories[cat] = [];
+      categories[cat].push(tool);
+    }
+
+    const categoryLabels = {
+      search: 'Suche',
+      file: 'Dateien',
+      knowledge: 'Wissen',
+      analysis: 'Analyse',
+      other: 'Sonstige'
+    };
+
+    let html = `
+      <div class="settings-section">
+        <h3 class="settings-section-title">AGENT TOOLS</h3>
+        <p class="settings-section-desc">
+          Pro Tool kann ein eigenes LLM-Modell zugewiesen werden.<br>
+          <small>Standard-Modell: <strong>${escapeHtml(globalToolModel || defaultModel)}</strong></small>
+        </p>
+      </div>
+    `;
+
+    for (const [cat, catTools] of Object.entries(categories)) {
+      html += `<div class="settings-section" style="margin-top:12px;">
+        <h4 style="margin:0 0 8px; color: var(--accent);">${categoryLabels[cat] || cat}</h4>
+      </div>`;
+
+      for (const tool of catTools) {
+        const fieldId = `tool-model-${tool.name}`;
+        const currentModel = tool.model || '';
+        const writeIcon = tool.is_write_operation ? ' &#9888;' : '';
+
+        html += `
+          <div class="settings-field" style="border-bottom: 1px solid var(--border); padding-bottom: 8px; margin-bottom: 8px;">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;">
+              <label for="${fieldId}" style="font-weight:600;">${escapeHtml(tool.name)}${writeIcon}</label>
+            </div>
+            <div style="font-size:0.85em; color: var(--text-secondary); margin-bottom:6px;">
+              ${escapeHtml(tool.description)}
+            </div>
+            <select id="${fieldId}" data-tool-name="${tool.name}" onchange="markSettingsModified()" style="width:100%;">
+              <option value="">Standard (${escapeHtml(globalToolModel || defaultModel)})</option>
+              ${availableModels.map(m => `<option value="${escapeHtml(m.id)}" ${currentModel === m.id ? 'selected' : ''}>${escapeHtml(m.display_name || m.id)}</option>`).join('')}
+            </select>
+          </div>
+        `;
+      }
+    }
+
+    form.innerHTML = html;
+  } catch (err) {
+    form.innerHTML = `<p style="color:var(--error);">Fehler beim Laden der Tools: ${escapeHtml(err.message)}</p>`;
+  }
+}
+
+async function saveAgentToolModels() {
+  const toolModels = {};
+  document.querySelectorAll('[data-tool-name]').forEach(select => {
+    const toolName = select.dataset.toolName;
+    const modelId = select.value;
+    if (modelId) {
+      toolModels[toolName] = modelId;
+    }
+  });
+
+  const res = await fetch('/api/settings/agent-tools/models', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(toolModels)
+  });
+
+  if (!res.ok) {
+    throw new Error('Fehler beim Speichern der Tool-Modelle');
+  }
+
+  return toolModels;
 }
 
 function renderModelsSection() {
@@ -1958,6 +2067,18 @@ function collectSectionValues(section) {
 
 async function saveCurrentSection() {
   const section = settingsState.currentSection;
+
+  // Agent Tools hat eigenen Save-Endpunkt
+  if (section === 'agent_tools') {
+    try {
+      await saveAgentToolModels();
+      updateSettingsStatus('Tool-Modelle angewendet (nur im Speicher)', 'success');
+    } catch (err) {
+      updateSettingsStatus('Fehler: ' + err.message, 'error');
+    }
+    return;
+  }
+
   const values = collectSectionValues(section);
 
   try {
