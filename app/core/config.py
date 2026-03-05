@@ -19,6 +19,7 @@ class LLMConfig(BaseModel):
     timeout_seconds: int = 120
     max_tokens: int = 4096
     temperature: float = 0.2
+    verify_ssl: bool = True  # False für selbstsignierte Zertifikate
 
 
 class JavaConfig(BaseModel):

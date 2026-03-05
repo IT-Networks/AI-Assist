@@ -324,7 +324,10 @@ class AgentOrchestrator:
             payload["tools"] = tools
             payload["tool_choice"] = "auto"
 
-        async with httpx.AsyncClient(timeout=settings.llm.timeout_seconds) as client:
+        async with httpx.AsyncClient(
+            timeout=settings.llm.timeout_seconds,
+            verify=settings.llm.verify_ssl
+        ) as client:
             response = await client.post(
                 f"{base_url}/chat/completions",
                 headers=headers,

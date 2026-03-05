@@ -35,6 +35,7 @@ class LLMClient:
         self.default_model = settings.llm.default_model
         self.max_tokens = settings.llm.max_tokens
         self.temperature = settings.llm.temperature
+        self.verify_ssl = settings.llm.verify_ssl
 
     def _headers(self) -> dict:
         headers = {"Content-Type": "application/json"}
@@ -55,7 +56,7 @@ class LLMClient:
             "max_tokens": self.max_tokens,
             "stream": False,
         }
-        async with httpx.AsyncClient(timeout=self.timeout) as client:
+        async with httpx.AsyncClient(timeout=self.timeout, verify=self.verify_ssl) as client:
             try:
                 response = await client.post(
                     f"{self.base_url}/chat/completions",
@@ -85,7 +86,7 @@ class LLMClient:
             "max_tokens": self.max_tokens,
             "stream": True,
         }
-        async with httpx.AsyncClient(timeout=self.timeout) as client:
+        async with httpx.AsyncClient(timeout=self.timeout, verify=self.verify_ssl) as client:
             try:
                 async with client.stream(
                     "POST",
@@ -113,5 +114,27 @@ class LLMClient:
             except httpx.RequestError as e:
                 raise LLMError(f"LLM Verbindungsfehler: {e}") from e
 
+    async def list_models(self) -> List[str]:
+        """Listet verfügbare Modelle vom LLM-Server auf."""
+        async with httpx.AsyncClient(timeout=10, verify=self.verify_ssl) as client:
+            try:
+                response = await client.get(
+                    f"{self.base_url}/models",
+                    headers=self._headers()
+                )
+                response.raise_for_status()
+                data = response.json()
+                # OpenAI-Format: {"data": [{"id": "model-name"}, ...]}
+                if "data" in data:
+                    return [m.get("id", "") for m in data["data"] if m.get("id")]
+                return []
+            except Exception:
+                return []
+
 
 llm_client = LLMClient()
+
+
+def get_llm_client() -> LLMClient:
+    """Gibt die LLM-Client Instanz zurück."""
+    return llm_client
