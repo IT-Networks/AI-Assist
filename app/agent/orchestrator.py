@@ -216,7 +216,7 @@ class AgentOrchestrator:
                 response = await self._call_llm_with_tools(
                     messages, tool_schemas, model, is_tool_phase=True
                 )
-                print(f"[agent] LLM response: tool_calls={len(response.get('tool_calls', []))}, content_len={len(response.get('content', ''))}")
+                print(f"[agent] LLM response: tool_calls={len(response.get('tool_calls', []))}, content_len={len(response.get('content') or '')}")
 
                 # Token-Nutzung akkumulieren
                 usage = response.get("usage")
