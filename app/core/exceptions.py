@@ -28,6 +28,11 @@ class ConfluenceError(AIAssistError):
     pass
 
 
+class JiraError(AIAssistError):
+    """Raised when Jira API call fails."""
+    pass
+
+
 class LogParserError(AIAssistError):
     """Raised when log parsing fails."""
     pass

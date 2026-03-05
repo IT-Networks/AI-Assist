@@ -88,6 +88,7 @@ def get_section_schema(section: str) -> Dict[str, Any]:
         "skills": "SkillsConfig",
         "file_operations": "FileOperationsConfig",
         "database": "DatabaseConfig",
+        "jira": "JiraConfig",
     }
 
     if section not in section_classes:
@@ -188,6 +189,7 @@ def _get_section_description(section: str) -> str:
         "skills": "Skill-System-Konfiguration",
         "file_operations": "Datei-Operationen (Read/Write/Edit)",
         "database": "DB2-Datenbankverbindung für Abfragen",
+        "jira": "Jira-Anbindung für Issue-Suche und -Abruf",
     }
     return descriptions.get(section, "")
 

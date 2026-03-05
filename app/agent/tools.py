@@ -1064,6 +1064,193 @@ DESCRIBE_DATABASE_TABLE_TOOL = Tool(
 )
 
 
+# ── Confluence Tools ──
+
+async def search_confluence(query: str, space: str = "", limit: int = 10) -> ToolResult:
+    """Durchsucht Confluence per CQL nach Seiten."""
+    from app.services.confluence_client import ConfluenceClient
+    from app.core.config import settings
+
+    if not settings.confluence.base_url:
+        return ToolResult(success=False, error="Confluence ist nicht konfiguriert (base_url fehlt)")
+
+    try:
+        client = ConfluenceClient()
+        results = await client.search(
+            query=query,
+            space_key=space or settings.confluence.default_space or None,
+            limit=min(limit, 20),
+        )
+
+        if not results:
+            return ToolResult(success=True, data=f"Keine Confluence-Ergebnisse für: {query}")
+
+        output = f"=== Confluence-Suche: {query} ===\n"
+        output += f"{len(results)} Ergebnisse gefunden:\n\n"
+        for r in results:
+            output += f"📄 {r['title']}\n"
+            output += f"   ID: {r['id']} | Space: {r['space']}\n"
+            output += f"   URL: {r['url']}\n"
+            if r.get("excerpt"):
+                excerpt = r["excerpt"][:200].replace("\n", " ")
+                output += f"   {excerpt}\n"
+            output += "\n"
+
+        return ToolResult(success=True, data=output)
+    except Exception as e:
+        return ToolResult(success=False, error=f"Confluence-Fehler: {str(e)}")
+
+
+async def read_confluence_page(page_id: str) -> ToolResult:
+    """Liest den Inhalt einer Confluence-Seite."""
+    from app.services.confluence_client import ConfluenceClient
+    from app.core.config import settings
+
+    if not settings.confluence.base_url:
+        return ToolResult(success=False, error="Confluence ist nicht konfiguriert (base_url fehlt)")
+
+    try:
+        client = ConfluenceClient()
+        page = await client.get_page_by_id(page_id)
+
+        output = f"=== Confluence-Seite ===\n"
+        output += f"Titel: {page['title']}\n"
+        output += f"URL: {page['url']}\n"
+        output += f"Space: {page['space']}\n"
+        output += f"---\n\n"
+        output += page.get("content", "")
+
+        return ToolResult(success=True, data=output)
+    except Exception as e:
+        return ToolResult(success=False, error=f"Confluence-Fehler: {str(e)}")
+
+
+SEARCH_CONFLUENCE_TOOL = Tool(
+    name="search_confluence",
+    description="Durchsucht Confluence nach Seiten per Volltextsuche. Gibt Titel, IDs und Auszüge zurück. Nutze read_confluence_page mit der ID um den vollen Inhalt zu lesen.",
+    category=ToolCategory.KNOWLEDGE,
+    parameters=[
+        ToolParameter("query", "string", "Suchbegriff"),
+        ToolParameter("space", "string", "Optional: Confluence Space Key", required=False, default=""),
+        ToolParameter("limit", "integer", "Maximale Anzahl Ergebnisse", required=False, default=10),
+    ],
+    handler=search_confluence
+)
+
+READ_CONFLUENCE_PAGE_TOOL = Tool(
+    name="read_confluence_page",
+    description="Liest den vollständigen Inhalt einer Confluence-Seite anhand ihrer ID. Die ID erhältst du aus search_confluence.",
+    category=ToolCategory.KNOWLEDGE,
+    parameters=[
+        ToolParameter("page_id", "string", "Confluence Seiten-ID"),
+    ],
+    handler=read_confluence_page
+)
+
+
+# ── Jira Tools ──
+
+async def search_jira(query: str, project: str = "", max_results: int = 15) -> ToolResult:
+    """Durchsucht Jira per JQL oder Freitext."""
+    from app.services.jira_client import get_jira_client
+    from app.core.config import settings
+
+    if not settings.jira.enabled or not settings.jira.base_url:
+        return ToolResult(success=False, error="Jira ist nicht konfiguriert oder deaktiviert")
+
+    try:
+        client = get_jira_client()
+
+        # Wenn die Query kein JQL-Operator enthält, als Textsuche behandeln
+        jql_operators = ["=", "~", "in", "is", "was", "changed", "not", "AND", "OR", "ORDER BY"]
+        is_jql = any(op in query for op in jql_operators)
+
+        if is_jql:
+            jql = query
+        else:
+            # Freitext-Suche
+            proj = project or settings.jira.default_project
+            if proj:
+                jql = f'project = "{proj}" AND text ~ "{query}" ORDER BY updated DESC'
+            else:
+                jql = f'text ~ "{query}" ORDER BY updated DESC'
+
+        results = await client.search(jql=jql, max_results=min(max_results, 50))
+
+        if not results:
+            return ToolResult(success=True, data=f"Keine Jira-Issues gefunden für: {query}")
+
+        output = f"=== Jira-Suche: {query} ===\n"
+        output += f"{len(results)} Issues gefunden:\n\n"
+        for r in results:
+            output += f"🎫 {r['key']}: {r['summary']}\n"
+            output += f"   Status: {r['status']} | Typ: {r['type']} | Priorität: {r['priority']}\n"
+            output += f"   Zugewiesen: {r['assignee']} | Aktualisiert: {r['updated'][:10] if r['updated'] else '-'}\n"
+            output += f"   URL: {r['url']}\n\n"
+
+        return ToolResult(success=True, data=output)
+    except Exception as e:
+        return ToolResult(success=False, error=f"Jira-Fehler: {str(e)}")
+
+
+async def read_jira_issue(issue_key: str) -> ToolResult:
+    """Liest ein einzelnes Jira-Issue mit Details und Kommentaren."""
+    from app.services.jira_client import get_jira_client
+    from app.core.config import settings
+
+    if not settings.jira.enabled or not settings.jira.base_url:
+        return ToolResult(success=False, error="Jira ist nicht konfiguriert oder deaktiviert")
+
+    try:
+        client = get_jira_client()
+        issue = await client.get_issue(issue_key)
+
+        output = f"=== Jira-Issue: {issue['key']} ===\n"
+        output += f"Titel: {issue['summary']}\n"
+        output += f"Typ: {issue['type']} | Status: {issue['status']} | Priorität: {issue['priority']}\n"
+        output += f"Ersteller: {issue['reporter']} | Zugewiesen: {issue['assignee']}\n"
+        output += f"Erstellt: {issue['created'][:10] if issue['created'] else '-'} | "
+        output += f"Aktualisiert: {issue['updated'][:10] if issue['updated'] else '-'}\n"
+        if issue['labels']:
+            output += f"Labels: {', '.join(issue['labels'])}\n"
+        if issue['components']:
+            output += f"Komponenten: {', '.join(issue['components'])}\n"
+        output += f"URL: {issue['url']}\n"
+        output += f"\n--- Beschreibung ---\n{issue['description'] or '(keine Beschreibung)'}\n"
+
+        if issue['comments']:
+            output += f"\n--- Kommentare ({len(issue['comments'])}) ---\n"
+            for c in issue['comments']:
+                output += f"\n[{c['created'][:10] if c['created'] else '?'}] {c['author']}:\n{c['body']}\n"
+
+        return ToolResult(success=True, data=output)
+    except Exception as e:
+        return ToolResult(success=False, error=f"Jira-Fehler: {str(e)}")
+
+
+SEARCH_JIRA_TOOL = Tool(
+    name="search_jira",
+    description="Durchsucht Jira nach Issues. Unterstützt JQL-Queries und Freitext-Suche. Gibt Issue-Keys, Titel, Status und Zuweisungen zurück.",
+    category=ToolCategory.SEARCH,
+    parameters=[
+        ToolParameter("query", "string", "Suchbegriff oder JQL-Query (z.B. 'project=PROJ AND status=Open')"),
+        ToolParameter("project", "string", "Optional: Projekt-Key für Freitext-Suche", required=False, default=""),
+        ToolParameter("max_results", "integer", "Maximale Anzahl Ergebnisse", required=False, default=15),
+    ],
+    handler=search_jira
+)
+
+READ_JIRA_ISSUE_TOOL = Tool(
+    name="read_jira_issue",
+    description="Liest ein einzelnes Jira-Issue mit vollständiger Beschreibung, Details und den letzten Kommentaren.",
+    category=ToolCategory.KNOWLEDGE,
+    parameters=[
+        ToolParameter("issue_key", "string", "Issue-Schlüssel (z.B. 'PROJ-123')"),
+    ],
+    handler=read_jira_issue
+)
+
+
 # ══════════════════════════════════════════════════════════════════════════════
 # Default Registry
 # ══════════════════════════════════════════════════════════════════════════════
@@ -1094,6 +1281,14 @@ def create_default_registry() -> ToolRegistry:
     registry.register(QUERY_DATABASE_TOOL)
     registry.register(LIST_DATABASE_TABLES_TOOL)
     registry.register(DESCRIBE_DATABASE_TABLE_TOOL)
+
+    # Confluence Tools
+    registry.register(SEARCH_CONFLUENCE_TOOL)
+    registry.register(READ_CONFLUENCE_PAGE_TOOL)
+
+    # Jira Tools
+    registry.register(SEARCH_JIRA_TOOL)
+    registry.register(READ_JIRA_ISSUE_TOOL)
 
     return registry
 
