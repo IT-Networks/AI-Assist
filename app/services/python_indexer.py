@@ -24,6 +24,17 @@ class PythonIndexer:
 
     def _init_db(self) -> None:
         with self._connect() as con:
+            # Migration: Alten ASCII-Index auf Unicode umstellen
+            cur = con.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='python_fts'")
+            if cur.fetchone():
+                # Prüfen ob alter Tokenizer verwendet wird (Index neu bauen nötig)
+                cur = con.execute("SELECT sql FROM sqlite_master WHERE name='python_fts'")
+                row = cur.fetchone()
+                if row and "porter ascii" in (row[0] or "").lower():
+                    print("[python_indexer] Migriere FTS5 Index von ASCII auf Unicode...")
+                    con.execute("DROP TABLE IF EXISTS python_fts")
+                    con.execute("DELETE FROM python_files")  # Force rebuild
+
             con.executescript("""
                 CREATE VIRTUAL TABLE IF NOT EXISTS python_fts USING fts5(
                     file_path UNINDEXED,
@@ -32,7 +43,7 @@ class PythonIndexer:
                     function_names,
                     imports,
                     content,
-                    tokenize='porter ascii'
+                    tokenize='unicode61 remove_diacritics 0'
                 );
                 CREATE TABLE IF NOT EXISTS python_files (
                     file_path TEXT PRIMARY KEY,

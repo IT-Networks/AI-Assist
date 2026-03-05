@@ -216,3 +216,15 @@ class ConfluenceClient:
             self._traverse_node(child, lines, indent + 1)
             if child.tail and child.tail.strip():
                 lines.append(child.tail.strip())
+
+
+# Singleton
+_confluence_client: Optional[ConfluenceClient] = None
+
+
+def get_confluence_client() -> ConfluenceClient:
+    """Gibt den Confluence-Client zurück (Singleton)."""
+    global _confluence_client
+    if _confluence_client is None:
+        _confluence_client = ConfluenceClient()
+    return _confluence_client

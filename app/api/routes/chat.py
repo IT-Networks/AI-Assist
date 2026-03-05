@@ -1,4 +1,5 @@
 import json
+import logging
 from typing import Optional
 
 from fastapi import APIRouter, HTTPException
@@ -9,6 +10,8 @@ from app.core import context_manager
 from app.core.context_manager import ContextAttachment
 from app.core.exceptions import LLMError, JavaReaderError
 from app.services.llm_client import llm_client
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/chat", tags=["chat"])
 
@@ -35,8 +38,8 @@ async def _collect_attachments(sources, session_id: str, user_message: str = "")
             if py_indexer.is_built():
                 py_results = py_indexer.search(user_message, top_k=_s.index.max_search_results)
                 python_paths = [r["file_path"] for r in py_results]
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug(f"Python-Index-Suche fehlgeschlagen: {e}")
 
     if python_paths:
         try:
@@ -55,10 +58,10 @@ async def _collect_attachments(sources, session_id: str, user_message: str = "")
                         content=content,
                         priority=1,
                     ))
-                except Exception:
-                    pass
-        except Exception:
-            pass
+                except Exception as e:
+                    logger.debug(f"Python-Datei lesen fehlgeschlagen ({rel_path}): {e}")
+        except Exception as e:
+            logger.debug(f"Python-Reader Initialisierung fehlgeschlagen: {e}")
 
     # Java files – manuell gewählt oder per Auto-Index-Suche
     java_paths = list(sources.java_files)
@@ -71,8 +74,8 @@ async def _collect_attachments(sources, session_id: str, user_message: str = "")
             if indexer.is_built():
                 results = indexer.search(user_message, top_k=_s.index.max_search_results)
                 java_paths = [r["file_path"] for r in results]
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug(f"Java-Index-Suche fehlgeschlagen: {e}")
 
     if java_paths:
         try:
@@ -87,10 +90,10 @@ async def _collect_attachments(sources, session_id: str, user_message: str = "")
                         content=content,
                         priority=1,
                     ))
-                except Exception:
-                    pass
-        except Exception:
-            pass
+                except Exception as e:
+                    logger.debug(f"Java-Datei lesen fehlgeschlagen ({rel_path}): {e}")
+        except Exception as e:
+            logger.debug(f"Java-Reader Initialisierung fehlgeschlagen: {e}")
 
     # POM
     if sources.include_pom:
@@ -108,8 +111,8 @@ async def _collect_attachments(sources, session_id: str, user_message: str = "")
                     content=parser.format_for_context(pom_data),
                     priority=2,
                 ))
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug(f"POM-Parsing fehlgeschlagen: {e}")
 
     # Logs
     if sources.log_id:
@@ -122,8 +125,8 @@ async def _collect_attachments(sources, session_id: str, user_message: str = "")
                     content=log_data["summary"],
                     priority=3,
                 ))
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug(f"Log-Verarbeitung fehlgeschlagen: {e}")
 
     # PDFs – relevante Seiten per Index, sonst Volltext
     for pdf_id in sources.pdf_ids[:3]:
@@ -143,8 +146,8 @@ async def _collect_attachments(sources, session_id: str, user_message: str = "")
                         content = pdf_idx.search(
                             pdf_id, user_message, top_k=_s.index.max_search_results
                         )
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug(f"PDF-Index-Suche fehlgeschlagen ({pdf_id}): {e}")
             # Fallback: gesamter Text (kleine PDFs oder kein Index)
             if not content:
                 content = pdf_data["text"]
@@ -153,22 +156,22 @@ async def _collect_attachments(sources, session_id: str, user_message: str = "")
                 content=content,
                 priority=4,
             ))
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug(f"PDF-Verarbeitung fehlgeschlagen ({pdf_id}): {e}")
 
     # Confluence pages
     for page_id in sources.confluence_page_ids[:3]:
         try:
-            from app.services.confluence_client import ConfluenceClient
-            client = ConfluenceClient()
+            from app.services.confluence_client import get_confluence_client
+            client = get_confluence_client()
             page = await client.get_page_by_id(page_id)
             attachments.append(ContextAttachment(
                 label=f"CONFLUENCE: {page.get('title', page_id)}",
                 content=page.get("content", ""),
                 priority=5,
             ))
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug(f"Confluence-Seite abrufen fehlgeschlagen ({page_id}): {e}")
 
     # Handbuch-Seiten – manuell gewählt oder per Auto-Index-Suche
     handbook_paths = list(sources.handbook_pages) if hasattr(sources, 'handbook_pages') else []
@@ -188,8 +191,8 @@ async def _collect_attachments(sources, session_id: str, user_message: str = "")
                         top_k=_hs.index.max_search_results
                     )
                     handbook_paths = [r["file_path"] for r in hb_results]
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug(f"Handbuch-Index-Suche fehlgeschlagen: {e}")
 
     if handbook_paths:
         try:
@@ -206,10 +209,10 @@ async def _collect_attachments(sources, session_id: str, user_message: str = "")
                                 content=content,
                                 priority=2,  # Hohe Priorität für Handbuch
                             ))
-                    except Exception:
-                        pass
-        except Exception:
-            pass
+                    except Exception as e:
+                        logger.debug(f"Handbuch-Seite lesen fehlgeschlagen ({hb_path}): {e}")
+        except Exception as e:
+            logger.debug(f"Handbuch-Indexer Initialisierung fehlgeschlagen: {e}")
 
     # Skill-Wissen – automatisch in aktiven Skills suchen
     skill_ids = getattr(sources, 'active_skill_ids', [])
@@ -234,8 +237,8 @@ async def _collect_attachments(sources, session_id: str, user_message: str = "")
                         content=knowledge,
                         priority=1,  # Höchste Priorität
                     ))
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug(f"Skill-Wissen abrufen fehlgeschlagen: {e}")
 
     return attachments
 
@@ -252,7 +255,8 @@ def _get_skill_system_prompt(session_id: str, skill_ids: list) -> str:
         for sid in skill_ids:
             skill_mgr.activate_skill(session_id, sid)
         return skill_mgr.build_system_prompt(session_id)
-    except Exception:
+    except Exception as e:
+        logger.debug(f"Skill-System-Prompt Aufbau fehlgeschlagen: {e}")
         return ""
 
 
