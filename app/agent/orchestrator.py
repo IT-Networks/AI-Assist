@@ -18,7 +18,11 @@ import asyncio
 
 from app.agent.tools import ToolRegistry, ToolResult, get_tool_registry
 from app.core.config import settings
+from app.core.token_budget import TokenBudget, create_budget_from_config
+from app.core.conversation_summarizer import get_summarizer
 from app.services.llm_client import SYSTEM_PROMPT
+from app.services.memory_store import get_memory_store
+from app.utils.token_counter import estimate_tokens, estimate_messages_tokens
 
 
 class AgentMode(str, Enum):
@@ -38,6 +42,7 @@ class AgentEventType(str, Enum):
     CANCELLED = "cancelled"            # User hat abgelehnt
     ERROR = "error"                    # Fehler
     USAGE = "usage"                    # Token-Nutzung
+    COMPACTION = "compaction"          # Context wurde komprimiert
     DONE = "done"                      # Fertig
 
 
@@ -86,11 +91,16 @@ class AgentState:
     context_items: List[str] = field(default_factory=list)
     # Konversations-Historie für Multi-Turn Chats
     messages_history: List[Dict[str, str]] = field(default_factory=list)
-    max_history_messages: int = 20  # Letzte N Nachrichten behalten
+    max_history_messages: int = 50  # Erhöht - Summarizer kümmert sich um Kompression
     # Token-Tracking für aktuelle Anfrage
     current_usage: Optional[TokenUsage] = None
     total_prompt_tokens: int = 0
     total_completion_tokens: int = 0
+    # Token Budget Management
+    token_budget: Optional[TokenBudget] = None
+    # Compaction Stats
+    compaction_count: int = 0
+    last_compaction_savings: int = 0
 
 
 class AgentOrchestrator:
@@ -108,6 +118,9 @@ class AgentOrchestrator:
         self.max_iterations = max_iterations
         self.max_tool_calls_per_iter = max_tool_calls_per_iteration
         self._states: Dict[str, AgentState] = {}
+        # Token Management Components
+        self.memory_store = get_memory_store()
+        self.summarizer = get_summarizer()
 
     def _get_state(self, session_id: str) -> AgentState:
         """Holt oder erstellt den State für eine Session."""
@@ -173,10 +186,26 @@ class AgentOrchestrator:
         agent_instructions = self._build_agent_instructions(state.mode)
         system_prompt += f"\n\n{agent_instructions}"
 
+        # Token Budget initialisieren
+        state.token_budget = create_budget_from_config()
+        budget = state.token_budget
+
         # Messages aufbauen
         messages = [
             {"role": "system", "content": system_prompt}
         ]
+        budget.set("system", estimate_tokens(system_prompt))
+
+        # Memory Context laden (relevante Fakten aus vorherigen Sessions)
+        try:
+            memory_context = await self.memory_store.get_context_injection(
+                session_id, user_message, max_tokens=budget.memory_limit
+            )
+            if memory_context:
+                messages.append({"role": "system", "content": memory_context})
+                budget.set("memory", estimate_tokens(memory_context))
+        except Exception as e:
+            print(f"[agent] Memory loading failed: {e}")
 
         # Bisherige Kontext-Items hinzufügen
         if state.context_items:
@@ -185,16 +214,51 @@ class AgentOrchestrator:
                 "role": "system",
                 "content": f"=== KONTEXT AUS VORHERIGEN TOOL-AUFRUFEN ===\n{context_block}"
             })
+            budget.set("context", estimate_tokens(context_block))
 
         # Konversations-Historie hinzufügen (für Multi-Turn)
+        history_tokens = 0
         for hist_msg in state.messages_history[-state.max_history_messages:]:
             messages.append(hist_msg)
+            history_tokens += estimate_tokens(hist_msg.get("content", ""))
+        budget.set("conversation", history_tokens)
 
         # Aktuelle User-Nachricht hinzufügen
         messages.append({"role": "user", "content": user_message})
 
         # User-Nachricht in Historie speichern
         state.messages_history.append({"role": "user", "content": user_message})
+
+        # === COMPACTION CHECK ===
+        # Wenn Budget zu voll, Konversation zusammenfassen
+        if budget.needs_compaction():
+            try:
+                savings_estimate = self.summarizer.estimate_savings(messages)
+                if savings_estimate.get("would_summarize"):
+                    old_tokens = estimate_messages_tokens(messages)
+                    messages = await self.summarizer.summarize_if_needed(
+                        messages,
+                        target_tokens=budget.available_total
+                    )
+                    new_tokens = estimate_messages_tokens(messages)
+                    savings = old_tokens - new_tokens
+
+                    state.compaction_count += 1
+                    state.last_compaction_savings = savings
+
+                    yield AgentEvent(AgentEventType.COMPACTION, {
+                        "savings": savings,
+                        "old_tokens": old_tokens,
+                        "new_tokens": new_tokens,
+                        "compaction_count": state.compaction_count
+                    })
+
+                    # Budget aktualisieren
+                    budget.set("conversation", estimate_messages_tokens([
+                        m for m in messages if m.get("role") not in ("system",)
+                    ]))
+            except Exception as e:
+                print(f"[agent] Compaction failed: {e}")
 
         # Agent-Loop
         has_used_tools = False
@@ -301,7 +365,10 @@ class AgentOrchestrator:
                         "max_tokens": settings.llm.max_tokens,
                         # Session-Gesamtwerte
                         "session_total_prompt": state.total_prompt_tokens,
-                        "session_total_completion": state.total_completion_tokens
+                        "session_total_completion": state.total_completion_tokens,
+                        # Budget-Status für Context-Management
+                        "budget": budget.get_status() if budget else None,
+                        "compaction_count": state.compaction_count
                     }
                     yield AgentEvent(AgentEventType.USAGE, usage_data)
 

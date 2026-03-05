@@ -513,3 +513,166 @@ async def execute_tool(
             "data": result.data,
             "error": result.error
         }
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Memory Management Endpoints
+# ══════════════════════════════════════════════════════════════════════════════
+
+class MemoryRequest(BaseModel):
+    """Request zum Speichern eines Memory-Eintrags."""
+    category: str = Field(..., description="Kategorie: fact, entity, preference, decision")
+    key: str = Field(..., max_length=200, description="Schlüssel/Titel")
+    value: str = Field(..., max_length=2000, description="Inhalt")
+    importance: float = Field(0.5, ge=0.0, le=1.0, description="Wichtigkeit 0-1")
+
+
+@router.get("/memory/{session_id}")
+async def get_memories(
+    session_id: str,
+    category: Optional[str] = None,
+    limit: int = Query(50, ge=1, le=200)
+) -> Dict[str, Any]:
+    """
+    Holt alle Memories einer Session.
+
+    Optional nach Kategorie filtern.
+    """
+    from app.services.memory_store import get_memory_store
+    store = get_memory_store()
+
+    if category:
+        memories = await store.get_by_category(session_id, category, limit)
+    else:
+        memories = await store.get_all(session_id, limit)
+
+    stats = await store.get_stats(session_id)
+
+    return {
+        "session_id": session_id,
+        "memories": [
+            {
+                "id": m.id,
+                "category": m.category,
+                "key": m.key,
+                "value": m.value,
+                "importance": m.importance,
+                "access_count": m.access_count,
+                "created_at": m.created_at
+            }
+            for m in memories
+        ],
+        "stats": stats
+    }
+
+
+@router.post("/memory/{session_id}")
+async def add_memory(session_id: str, request: MemoryRequest) -> Dict[str, Any]:
+    """
+    Speichert einen neuen Memory-Eintrag.
+
+    Bei gleichem (session_id, category, key) wird aktualisiert.
+    """
+    from app.services.memory_store import get_memory_store
+    store = get_memory_store()
+
+    memory_id = await store.remember(
+        session_id=session_id,
+        category=request.category,
+        key=request.key,
+        value=request.value,
+        importance=request.importance
+    )
+
+    return {
+        "success": True,
+        "id": memory_id,
+        "message": f"Memory '{request.key}' gespeichert"
+    }
+
+
+@router.delete("/memory/{session_id}/{memory_id}")
+async def delete_memory(session_id: str, memory_id: str) -> Dict[str, Any]:
+    """Löscht einen einzelnen Memory-Eintrag."""
+    from app.services.memory_store import get_memory_store
+    store = get_memory_store()
+
+    success = await store.forget(memory_id)
+
+    if success:
+        return {"success": True, "message": "Memory gelöscht"}
+    else:
+        raise HTTPException(status_code=404, detail="Memory nicht gefunden")
+
+
+@router.delete("/memory/{session_id}")
+async def clear_memories(session_id: str) -> Dict[str, Any]:
+    """Löscht alle Memories einer Session."""
+    from app.services.memory_store import get_memory_store
+    store = get_memory_store()
+
+    count = await store.forget_session(session_id)
+
+    return {
+        "success": True,
+        "deleted_count": count,
+        "message": f"{count} Memories gelöscht"
+    }
+
+
+@router.get("/memory/{session_id}/search")
+async def search_memories(
+    session_id: str,
+    query: str = Query(..., min_length=1),
+    limit: int = Query(10, ge=1, le=50)
+) -> Dict[str, Any]:
+    """
+    Durchsucht Memories nach relevanten Einträgen.
+
+    Verwendet FTS5-Volltextsuche.
+    """
+    from app.services.memory_store import get_memory_store
+    store = get_memory_store()
+
+    memories = await store.recall(session_id, query, limit)
+
+    return {
+        "session_id": session_id,
+        "query": query,
+        "results": [
+            {
+                "id": m.id,
+                "category": m.category,
+                "key": m.key,
+                "value": m.value,
+                "importance": m.importance
+            }
+            for m in memories
+        ],
+        "count": len(memories)
+    }
+
+
+@router.get("/budget/{session_id}")
+async def get_token_budget(session_id: str) -> Dict[str, Any]:
+    """
+    Gibt den aktuellen Token-Budget-Status zurück.
+
+    Nützlich für UI-Anzeige und Debugging.
+    """
+    orchestrator = get_orchestrator()
+    state = orchestrator._get_state(session_id)
+
+    if state.token_budget:
+        return {
+            "session_id": session_id,
+            "budget": state.token_budget.get_status(),
+            "compaction_count": state.compaction_count,
+            "last_savings": state.last_compaction_savings
+        }
+    else:
+        return {
+            "session_id": session_id,
+            "budget": None,
+            "message": "Kein aktives Budget (Session noch nicht gestartet)"
+        }
