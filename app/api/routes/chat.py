@@ -25,6 +25,41 @@ async def _collect_attachments(sources, session_id: str, user_message: str = "")
     if not sources:
         return attachments
 
+    # Python files – manuell gewählt oder per Auto-Index-Suche
+    python_paths = list(sources.python_files)
+    if sources.auto_python_search and not python_paths:
+        try:
+            from app.services.python_indexer import get_python_indexer
+            from app.core.config import settings as _s
+            py_indexer = get_python_indexer()
+            if py_indexer.is_built():
+                py_results = py_indexer.search(user_message, top_k=_s.index.max_search_results)
+                python_paths = [r["file_path"] for r in py_results]
+        except Exception:
+            pass
+
+    if python_paths:
+        try:
+            from app.services.python_reader import PythonReader
+            from app.core.config import settings as _ps
+            py_reader = PythonReader(
+                _ps.python.repo_path,
+                exclude_dirs=_ps.python.exclude_dirs,
+                max_file_size_kb=_ps.python.max_file_size_kb,
+            )
+            for rel_path in python_paths[:5]:
+                try:
+                    content = py_reader.read_file(rel_path)
+                    attachments.append(ContextAttachment(
+                        label=f"PYTHON-DATEI: {rel_path}",
+                        content=content,
+                        priority=1,
+                    ))
+                except Exception:
+                    pass
+        except Exception:
+            pass
+
     # Java files – manuell gewählt oder per Auto-Index-Suche
     java_paths = list(sources.java_files)
     if sources.auto_java_search and not java_paths:

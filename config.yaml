@@ -47,6 +47,25 @@ index:
   auto_build_on_start: false    # Java-Index beim App-Start automatisch aufbauen
   max_search_results: 5         # Anzahl relevanter Treffer pro Suche
 
+python:
+  repo_path: ""                 # PYTHON_REPO_PATH env var möglich
+  exclude_dirs:
+    - "__pycache__"
+    - ".venv"
+    - ".git"
+    - "node_modules"
+    - ".mypy_cache"
+    - ".pytest_cache"
+    - "dist"
+    - "build"
+  max_file_size_kb: 500
+
+tools:
+  flake8: "/root/.local/bin/flake8"
+  ruff: "/root/.local/bin/ruff"
+  mypy: "/root/.local/bin/mypy"
+  pytest: "/root/.local/bin/pytest"
+
 server:
   host: "0.0.0.0"
   port: 8000

@@ -50,6 +50,48 @@
       </div>
     </div>
 
+    <!-- Python Repository -->
+    <div class="sidebar-section">
+      <div class="sidebar-section-header" onclick="toggleSection('python-body')">
+        &#128013; Python Repository <span id="python-arrow">&#9658;</span>
+      </div>
+      <div class="sidebar-section-body" id="python-body">
+        <!-- Index-Steuerung -->
+        <div class="index-panel">
+          <div style="display:flex;gap:6px;align-items:center;margin-bottom:4px">
+            <button class="sb-btn" style="flex:1;margin:0" onclick="buildPythonIndex()">&#127959; Index aufbauen</button>
+            <button class="sb-btn" style="margin:0;padding:4px 8px" title="Index löschen" onclick="deletePythonIndex()">&#128465;</button>
+          </div>
+          <div id="python-index-status" style="font-size:0.75rem;color:var(--text-muted);margin-bottom:6px">Status wird geladen...</div>
+          <label class="sb-label" style="display:flex;align-items:center;gap:6px;cursor:pointer">
+            <input type="checkbox" id="auto-python-search-cb"> Auto-Suche (relevante Dateien automatisch finden)
+          </label>
+        </div>
+        <button class="sb-btn" onclick="loadPythonFileTree()">&#128196; Dateibaum laden</button>
+        <input class="sb-input" id="python-search-input" placeholder="Symbol suchen..." onkeydown="if(event.key==='Enter')searchPythonSymbol()">
+        <button class="sb-btn" onclick="searchPythonSymbol()">&#128269; Symbol suchen</button>
+        <div id="python-file-tree"></div>
+        <div id="python-search-results"></div>
+        <!-- Validierung & Tests -->
+        <div style="margin-top:8px;border-top:1px solid var(--surface2);padding-top:8px">
+          <label class="sb-label">Validierung &amp; Tests:</label>
+          <div style="display:flex;gap:4px;flex-wrap:wrap">
+            <button class="sb-btn" style="margin:0;flex:1" onclick="runPythonValidation()">&#10003; Validieren</button>
+            <button class="sb-btn" style="margin:0;flex:1" onclick="runPythonTests()">&#129514; Tests</button>
+          </div>
+          <div id="python-validation-status" style="font-size:0.75rem;margin-top:4px"></div>
+        </div>
+        <!-- Neue App generieren -->
+        <div style="margin-top:8px;border-top:1px solid var(--surface2);padding-top:8px">
+          <label class="sb-label">Neue Python-App erstellen:</label>
+          <input class="sb-input" id="python-gen-dir" placeholder="Zielverzeichnis">
+          <textarea class="sb-input" id="python-gen-desc" placeholder="Beschreibung der App..." rows="3" style="resize:vertical;margin-top:4px"></textarea>
+          <button class="sb-btn" onclick="generatePythonApp()">&#10024; App generieren</button>
+          <div id="python-gen-status" style="font-size:0.75rem;margin-top:4px"></div>
+        </div>
+      </div>
+    </div>
+
     <!-- Server Logs -->
     <div class="sidebar-section">
       <div class="sidebar-section-header" onclick="toggleSection('log-body')">
