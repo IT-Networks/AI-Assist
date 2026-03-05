@@ -436,7 +436,7 @@ async function processAgentEvent(event, bubble, msgDiv) {
   switch (type) {
     case 'tool_start':
       // Add tool card to message
-      const toolCard = createToolCard(data.name, data.arguments, 'running');
+      const toolCard = createToolCard(data.name, data.arguments, 'running', data.model);
       bubble.appendChild(toolCard);
       addToolToHistory(data.id, data.name, data.arguments, 'running');
       scrollToBottom();
@@ -545,18 +545,20 @@ function displayTokenUsage(usage) {
   scrollToBottom();
 }
 
-function createToolCard(toolName, args, status) {
+function createToolCard(toolName, args, status, model = null) {
   const card = document.createElement('div');
   card.className = 'tool-call-card';
   card.dataset.toolId = toolName + Date.now();
 
   const statusClass = status === 'running' ? 'running' : (status === 'success' ? 'success' : 'error');
   const statusText = status === 'running' ? 'Läuft...' : (status === 'success' ? 'Fertig' : 'Fehler');
+  const modelBadge = model ? `<span class="tool-call-model">${escapeHtml(model)}</span>` : '';
 
   card.innerHTML = `
     <div class="tool-call-header">
       <span class="tool-call-icon">&#128295;</span>
       <span class="tool-call-name">${escapeHtml(toolName)}</span>
+      ${modelBadge}
       <span class="tool-call-status ${statusClass}">${statusText}</span>
     </div>
     <div class="tool-call-body">
@@ -1414,10 +1416,17 @@ function renderSettingsSection() {
     return;
   }
 
+  // Section-spezifische Beschreibungen
+  const sectionDescriptions = {
+    server: 'Konfiguration des FastAPI-Servers (Host, Port). Änderungen erfordern einen Neustart.',
+    database: 'DB2-Datenbankverbindung für SQL-Abfragen. Der Agent kann Tabellen abfragen (nur SELECT).',
+    llm: 'LLM-Verbindungseinstellungen. tool_model = schnelles Modell für Suche, analysis_model = großes Modell für Antworten.',
+  };
+
   let html = `
     <div class="settings-section">
       <h3 class="settings-section-title">${section.toUpperCase()}</h3>
-      <p class="settings-section-desc">${desc}</p>
+      <p class="settings-section-desc">${sectionDescriptions[section] || desc}</p>
     </div>
   `;
 
@@ -1428,7 +1437,42 @@ function renderSettingsSection() {
   }
 
   html += renderSettingsFields(section, values);
+
+  // Spezielle Buttons für bestimmte Sections
+  if (section === 'database') {
+    html += `
+      <div class="settings-actions-section">
+        <button class="btn btn-secondary" onclick="testDatabaseConnection()">
+          🔌 Verbindung testen
+        </button>
+        <span id="db-test-result" class="test-result"></span>
+      </div>
+    `;
+  }
+
   document.getElementById('settings-form').innerHTML = html;
+}
+
+async function testDatabaseConnection() {
+  const resultEl = document.getElementById('db-test-result');
+  resultEl.textContent = '⏳ Teste Verbindung...';
+  resultEl.className = 'test-result testing';
+
+  try {
+    const res = await fetch('/api/database/test', { method: 'POST' });
+    const data = await res.json();
+
+    if (data.success) {
+      resultEl.textContent = `✓ ${data.message}`;
+      resultEl.className = 'test-result success';
+    } else {
+      resultEl.textContent = `✗ ${data.error}`;
+      resultEl.className = 'test-result error';
+    }
+  } catch (e) {
+    resultEl.textContent = `✗ Fehler: ${e.message}`;
+    resultEl.className = 'test-result error';
+  }
 }
 
 function renderSettingsFields(section, values) {
@@ -1473,6 +1517,13 @@ function renderSettingsFields(section, values) {
           <option value="read_only" ${value === 'read_only' ? 'selected' : ''}>read_only - Nur Lesen</option>
           <option value="write_with_confirm" ${value === 'write_with_confirm' ? 'selected' : ''}>write_with_confirm - Mit Bestätigung</option>
           <option value="autonomous" ${value === 'autonomous' ? 'selected' : ''}>autonomous - Autonom</option>
+        </select>
+      `;
+    } else if (key === 'driver' && section === 'database') {
+      html += `
+        <select id="${fieldId}" data-section="${section}" data-key="${key}" onchange="markSettingsModified()">
+          <option value="jaydebeapi" ${value === 'jaydebeapi' ? 'selected' : ''}>jaydebeapi - JDBC (empfohlen)</option>
+          <option value="ibm_db" ${value === 'ibm_db' ? 'selected' : ''}>ibm_db - Native Driver</option>
         </select>
       `;
     } else {

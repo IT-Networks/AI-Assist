@@ -313,7 +313,8 @@ class AgentOrchestrator:
                     yield AgentEvent(AgentEventType.TOOL_START, {
                         "id": tool_call.id,
                         "name": tool_call.name,
-                        "arguments": tool_call.arguments
+                        "arguments": tool_call.arguments,
+                        "model": last_model or settings.llm.tool_model or settings.llm.default_model
                     })
 
                     # Tool ausführen

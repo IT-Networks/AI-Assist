@@ -1894,3 +1894,49 @@ body {
   color: var(--success);
   font-weight: 500;
 }
+
+/* ══════════════════════════════════════════════════════════════════════════════
+   Settings Section Actions (Connection Test etc.)
+   ══════════════════════════════════════════════════════════════════════════════ */
+
+.settings-actions-section {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 20px;
+  padding-top: 16px;
+  border-top: 1px solid var(--border);
+}
+
+.test-result {
+  font-size: 0.85rem;
+  padding: 4px 12px;
+  border-radius: 4px;
+}
+
+.test-result.testing {
+  color: var(--accent);
+}
+
+.test-result.success {
+  color: var(--success);
+  background: var(--success-bg);
+}
+
+.test-result.error {
+  color: var(--danger);
+  background: var(--danger-bg);
+}
+
+/* ══════════════════════════════════════════════════════════════════════════════
+   Tool Card Model Badge
+   ══════════════════════════════════════════════════════════════════════════════ */
+
+.tool-call-model {
+  font-size: 0.7rem;
+  background: var(--accent-bg);
+  color: var(--accent);
+  padding: 2px 6px;
+  border-radius: 4px;
+  margin-left: 8px;
+}
