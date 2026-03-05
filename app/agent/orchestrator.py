@@ -191,23 +191,37 @@ class AgentOrchestrator:
                     messages, tool_schemas, model, is_tool_phase=True
                 )
 
-                # Antwort-Text yielden
-                if response.get("content"):
-                    yield AgentEvent(AgentEventType.TOKEN, response["content"])
-
                 # Tool-Calls verarbeiten
                 tool_calls = response.get("tool_calls", [])
                 if not tool_calls:
                     # Keine weiteren Tool-Calls -> Analyse-Phase
-                    assistant_response = response.get("content", "")
+                    assistant_response = ""
 
-                    # Wenn Tools verwendet wurden, finale Analyse mit großem Modell
+                    # Wenn Tools verwendet wurden UND ein Analyse-Modell konfiguriert ist
+                    # -> Finale Antwort mit Analyse-Modell generieren (optional mit Streaming)
                     if has_used_tools and settings.llm.analysis_model and not model:
-                        # Letzte Antwort verwerfen, neu generieren mit Analyse-Modell
-                        analysis_response = await self._call_llm_with_tools(
-                            messages, [], None, is_tool_phase=False
-                        )
-                        assistant_response = analysis_response.get("content", assistant_response)
+                        # Streaming für finale Antwort
+                        if settings.llm.streaming:
+                            async for token in self._stream_final_response(messages):
+                                assistant_response += token
+                                yield AgentEvent(AgentEventType.TOKEN, token)
+                        else:
+                            analysis_response = await self._call_llm_with_tools(
+                                messages, [], None, is_tool_phase=False
+                            )
+                            assistant_response = analysis_response.get("content", "")
+                            if assistant_response:
+                                yield AgentEvent(AgentEventType.TOKEN, assistant_response)
+                    else:
+                        # Keine Tool-Phase -> Antwort direkt nutzen oder streamen
+                        if settings.llm.streaming and not response.get("content"):
+                            async for token in self._stream_final_response(messages, model):
+                                assistant_response += token
+                                yield AgentEvent(AgentEventType.TOKEN, token)
+                        else:
+                            assistant_response = response.get("content", "")
+                            if assistant_response:
+                                yield AgentEvent(AgentEventType.TOKEN, assistant_response)
 
                     # Assistant-Antwort in Historie speichern
                     if assistant_response:
@@ -327,6 +341,66 @@ class AgentOrchestrator:
             "response": "Maximale Iterationen erreicht.",
             "tool_calls_count": len(state.tool_calls_history)
         })
+
+    async def _stream_final_response(
+        self,
+        messages: List[Dict],
+        model: Optional[str] = None
+    ) -> AsyncGenerator[str, None]:
+        """
+        Streamt die finale Antwort Token für Token.
+        Verwendet das analysis_model wenn konfiguriert.
+        """
+        import httpx
+
+        # Modell-Auswahl
+        if model:
+            selected_model = model
+        elif settings.llm.analysis_model:
+            selected_model = settings.llm.analysis_model
+        else:
+            selected_model = settings.llm.default_model
+
+        base_url = settings.llm.base_url.rstrip("/")
+
+        headers = {"Content-Type": "application/json"}
+        if settings.llm.api_key and settings.llm.api_key != "none":
+            headers["Authorization"] = f"Bearer {settings.llm.api_key}"
+
+        payload = {
+            "model": selected_model,
+            "messages": messages,
+            "temperature": settings.llm.temperature,
+            "max_tokens": settings.llm.max_tokens,
+            "stream": True,
+        }
+
+        async with httpx.AsyncClient(
+            timeout=settings.llm.timeout_seconds,
+            verify=settings.llm.verify_ssl
+        ) as client:
+            async with client.stream(
+                "POST",
+                f"{base_url}/chat/completions",
+                headers=headers,
+                json=payload
+            ) as response:
+                response.raise_for_status()
+                async for line in response.aiter_lines():
+                    if not line.startswith("data:"):
+                        continue
+                    raw = line[5:].strip()
+                    if raw == "[DONE]":
+                        break
+                    try:
+                        import json as json_module
+                        chunk = json_module.loads(raw)
+                        delta = chunk["choices"][0].get("delta", {})
+                        token = delta.get("content", "")
+                        if token:
+                            yield token
+                    except (ValueError, KeyError, IndexError):
+                        continue
 
     async def _call_llm_with_tools(
         self,

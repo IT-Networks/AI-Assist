@@ -87,6 +87,7 @@ def get_section_schema(section: str) -> Dict[str, Any]:
         "handbook": "HandbookConfig",
         "skills": "SkillsConfig",
         "file_operations": "FileOperationsConfig",
+        "database": "DatabaseConfig",
     }
 
     if section not in section_classes:
@@ -186,6 +187,7 @@ def _get_section_description(section: str) -> str:
         "handbook": "HTML-Handbuch auf Netzlaufwerk",
         "skills": "Skill-System-Konfiguration",
         "file_operations": "Datei-Operationen (Read/Write/Edit)",
+        "database": "DB2-Datenbankverbindung für Abfragen",
     }
     return descriptions.get(section, "")
 
@@ -330,6 +332,7 @@ def _generate_yaml_with_comments(data: Dict[str, Any]) -> str:
         "handbook": "\n# ═══════════════════════════════════════════════════════════════════\n# Handbuch-Integration (HTML auf Netzlaufwerk)",
         "skills": "# Skill-System",
         "file_operations": "# Datei-Operationen (Read/Write/Edit wie Claude Code)",
+        "database": "# DB2-Datenbankverbindung",
     }
 
     lines = []

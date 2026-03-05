@@ -20,6 +20,7 @@ class LLMConfig(BaseModel):
     max_tokens: int = 4096
     temperature: float = 0.2
     verify_ssl: bool = True  # False für selbstsignierte Zertifikate
+    streaming: bool = True  # True für Token-Streaming bei Antworten
     # Modell-Aufteilung für Agent
     tool_model: str = ""  # Schnelles Modell für Tool-Aufrufe/Suche (leer = default_model)
     analysis_model: str = ""  # Größeres Modell für Analyse/Antwort (leer = default_model)
