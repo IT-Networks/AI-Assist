@@ -1408,6 +1408,7 @@ const settingsState = {
     server: 'Server-Konfiguration',
     tools: 'Pfade zu Entwickler-Tools',
     agent_tools: 'Agent-Tools mit Modell-Zuweisungen',
+    jira: 'Jira-Anbindung für Issue-Suche',
     context: 'Kontext-Limits für LLM',
     uploads: 'Upload-Verzeichnis und Limits'
   }

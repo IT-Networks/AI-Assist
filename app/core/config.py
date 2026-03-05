@@ -139,6 +139,16 @@ class DatabaseConfig(BaseModel):
     jdbc_driver_class: str = "com.ibm.db2.jcc.DB2Driver"
 
 
+class JiraConfig(BaseModel):
+    """Konfiguration für Jira-Anbindung."""
+    enabled: bool = False
+    base_url: str = ""  # z.B. https://jira.example.com
+    username: str = ""
+    api_token: str = ""   # Atlassian Cloud API Token (bevorzugt)
+    password: str = ""    # Server/DC Passwort (Fallback)
+    default_project: str = ""  # Standard-Projektschlüssel (z.B. "PROJ")
+
+
 class ContextConfig(BaseModel):
     max_tokens: int = 32000
     max_file_context_kb: int = 100
@@ -169,6 +179,7 @@ class Settings(BaseModel):
     index: IndexConfig = IndexConfig()
     handbook: HandbookConfig = HandbookConfig()
     database: DatabaseConfig = DatabaseConfig()
+    jira: JiraConfig = JiraConfig()
     skills: SkillsConfig = SkillsConfig()
     file_operations: FileOperationsConfig = FileOperationsConfig()
 
