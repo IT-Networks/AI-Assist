@@ -286,29 +286,63 @@ class DB2Client:
     async def get_tables(self, schema: str = None) -> List[str]:
         """Listet verfügbare Tabellen auf."""
         schema = schema or self.schema
+
+        # Wenn kein Schema angegeben, versuche alle User-Schemas zu listen
+        if not schema:
+            # Alle Tabellen außer System-Schemas
+            query = """
+                SELECT TABSCHEMA, TABNAME
+                FROM SYSCAT.TABLES
+                WHERE TYPE = 'T'
+                AND TABSCHEMA NOT LIKE 'SYS%'
+                AND TABSCHEMA NOT IN ('NULLID', 'SQLJ', 'SYSCAT', 'SYSFUN', 'SYSIBM', 'SYSIBMADM', 'SYSPROC', 'SYSPUBLIC', 'SYSSTAT')
+                ORDER BY TABSCHEMA, TABNAME
+                FETCH FIRST 100 ROWS ONLY
+            """
+            result = await self.execute(query)
+            if result.success:
+                return [f"{row[0]}.{row[1]}" for row in result.rows]
+            # Fallback: Fehlermeldung zurückgeben
+            return [f"Fehler: {result.error}. Bitte Schema in config.yaml setzen."]
+
+        # Mit Schema filtern
         query = f"""
             SELECT TABNAME
             FROM SYSCAT.TABLES
-            WHERE TABSCHEMA = '{schema}'
+            WHERE TABSCHEMA = '{schema.upper()}'
             AND TYPE = 'T'
             ORDER BY TABNAME
         """
         result = await self.execute(query)
         if result.success:
+            if not result.rows:
+                return [f"Keine Tabellen im Schema '{schema}' gefunden. Verfügbare Schemas prüfen mit: SELECT DISTINCT TABSCHEMA FROM SYSCAT.TABLES WHERE TYPE='T'"]
             return [row[0] for row in result.rows]
-        return []
+        return [f"Fehler: {result.error}"]
 
     async def describe_table(self, table_name: str, schema: str = None) -> Dict:
         """Gibt Tabellenstruktur zurück."""
         schema = schema or self.schema
+
+        # Wenn Tabellenname Schema enthält (SCHEMA.TABLE)
+        if '.' in table_name and not schema:
+            parts = table_name.split('.', 1)
+            schema = parts[0]
+            table_name = parts[1]
+
+        if not schema:
+            return {"error": "Kein Schema angegeben. Nutze SCHEMA.TABELLE oder setze database.schema in config.yaml"}
+
         query = f"""
             SELECT COLNAME, TYPENAME, LENGTH, SCALE, NULLS, DEFAULT
             FROM SYSCAT.COLUMNS
-            WHERE TABSCHEMA = '{schema}' AND TABNAME = '{table_name.upper()}'
+            WHERE TABSCHEMA = '{schema.upper()}' AND TABNAME = '{table_name.upper()}'
             ORDER BY COLNO
         """
         result = await self.execute(query)
         if result.success:
+            if not result.rows:
+                return {"error": f"Tabelle '{schema}.{table_name}' nicht gefunden"}
             columns = []
             for row in result.rows:
                 columns.append({

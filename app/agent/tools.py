@@ -843,14 +843,25 @@ async def list_database_tables(schema: str = None) -> ToolResult:
         if not client:
             return ToolResult(success=False, error="DB-Client nicht verfügbar")
 
+        effective_schema = schema or client.schema
         tables = await client.get_tables(schema)
 
         if not tables:
-            return ToolResult(success=True, data="Keine Tabellen gefunden")
+            hint = "Kein Schema konfiguriert. " if not effective_schema else ""
+            return ToolResult(
+                success=True,
+                data=f"Keine Tabellen gefunden. {hint}Versuche: query_database(query=\"SELECT DISTINCT TABSCHEMA FROM SYSCAT.TABLES WHERE TYPE='T' FETCH FIRST 20 ROWS ONLY\")"
+            )
 
-        output = f"=== Tabellen im Schema {schema or client.schema} ===\n\n"
+        if effective_schema:
+            output = f"=== Tabellen im Schema {effective_schema} ===\n\n"
+        else:
+            output = f"=== Tabellen (alle Schemas) ===\n\n"
+
         for table in tables:
             output += f"  - {table}\n"
+
+        output += f"\n({len(tables)} Tabellen gefunden)"
 
         return ToolResult(success=True, data=output)
     except Exception as e:
