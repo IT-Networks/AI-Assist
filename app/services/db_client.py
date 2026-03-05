@@ -297,7 +297,8 @@ class DB2Client:
             # Rows holen (mit Limit)
             rows = []
             truncated = False
-            for row in cursor:
+            all_rows = cursor.fetchall()
+            for row in all_rows:
                 rows.append(tuple(row))
                 if len(rows) >= self.max_rows:
                     truncated = True

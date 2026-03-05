@@ -478,12 +478,15 @@ async def add_repo(lang: str, repo: RepoRequest) -> Dict[str, Any]:
     if repo.name in existing_names:
         raise HTTPException(status_code=400, detail=f"Repository '{repo.name}' existiert bereits")
 
-    # Prüfen ob Pfad existiert
+    # Prüfen ob Pfad existiert (Backslashes normalisieren für Windows/UNC-Pfade)
     from pathlib import Path
-    if not Path(repo.path).exists():
+    check_path = repo.path.replace('\\', '/')
+    if not Path(check_path).exists():
         raise HTTPException(status_code=400, detail=f"Pfad existiert nicht: {repo.path}")
 
-    new_repo = RepoEntry(name=repo.name, path=repo.path)
+    # Pfad normalisieren: Backslashes → Forward-Slashes (Windows/UNC-Pfade)
+    normalized_path = repo.path.replace('\\', '/')
+    new_repo = RepoEntry(name=repo.name, path=normalized_path)
     config.repos.append(new_repo)
 
     # Wenn erstes Repo, automatisch aktivieren

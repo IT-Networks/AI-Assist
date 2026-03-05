@@ -1940,3 +1940,117 @@ body {
   border-radius: 4px;
   margin-left: 8px;
 }
+
+/* ══════════════════════════════════════════════════════════════════════════════
+   Repo Selector Bar (Sidebar)
+   ══════════════════════════════════════════════════════════════════════════════ */
+
+.repo-selector-bar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 0 6px;
+}
+
+.repo-selector-label {
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+.repo-selector-bar select {
+  flex: 1;
+  font-size: 0.8rem;
+  padding: 3px 6px;
+  background: var(--bg-secondary);
+  color: var(--text-primary);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+/* ══════════════════════════════════════════════════════════════════════════════
+   Repos Settings Section
+   ══════════════════════════════════════════════════════════════════════════════ */
+
+.repos-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 12px;
+}
+
+.repo-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 10px;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  gap: 8px;
+}
+
+.repo-item-active {
+  border-color: var(--accent);
+  background: var(--accent-bg);
+}
+
+.repo-item-info {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.repo-item-name {
+  font-weight: 500;
+  font-size: 0.9rem;
+}
+
+.repo-active-badge {
+  display: inline-block;
+  font-size: 0.7rem;
+  background: var(--accent);
+  color: #fff;
+  padding: 1px 6px;
+  border-radius: 3px;
+  margin-left: 6px;
+}
+
+.repo-item-path {
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.repo-item-actions {
+  display: flex;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.btn-sm {
+  padding: 3px 8px;
+  font-size: 0.78rem;
+}
+
+.add-repo-form {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.add-repo-form input {
+  width: 100%;
+  padding: 6px 10px;
+  background: var(--bg-secondary);
+  color: var(--text-primary);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  font-size: 0.85rem;
+  box-sizing: border-box;
+}

@@ -325,7 +325,27 @@ async function sendAgentChat(message) {
 
   while (true) {
     const { value, done } = await reader.read();
-    if (done) break;
+    if (done) {
+      // Stream ended – process any remaining data in buffer
+      if (buffer.trim()) {
+        for (const line of buffer.split('\n')) {
+          if (!line.startsWith('data:')) continue;
+          try {
+            const event = JSON.parse(line.slice(5).trim());
+            await processAgentEvent(event, bubble, msgDiv);
+            if (event.type === 'token' && event.data) {
+              fullText += event.data;
+              bubble.innerHTML = marked.parse(fullText);
+              applyHighlight(bubble);
+              scrollToBottom();
+              state.liveTokenCount += countTokensApprox(event.data);
+              updateLiveStatusBar();
+            }
+          } catch (e) { /* ignore */ }
+        }
+      }
+      break;
+    }
 
     buffer += decoder.decode(value, { stream: true });
     const lines = buffer.split('\n');
@@ -769,6 +789,57 @@ function toggleExplorerSection(section) {
   arrow.style.transform = content.classList.contains('open') ? 'rotate(90deg)' : '';
 }
 
+// ── Repo Selector (Sidebar) ──
+
+async function loadRepoSelector(lang) {
+  const selectorDiv = document.getElementById(`${lang}-repo-selector`);
+  const select = document.getElementById(`${lang}-repo-select`);
+  if (!selectorDiv || !select) return;
+
+  try {
+    const res = await fetch(`/api/settings/repos/${lang}`);
+    if (!res.ok) { selectorDiv.style.display = 'none'; return; }
+    const d = await res.json();
+    const repos = d.repos || [];
+    const activeRepo = d.active_repo || '';
+
+    if (repos.length < 2) {
+      // Nur einen Repo → kein Selector nötig
+      selectorDiv.style.display = 'none';
+      return;
+    }
+
+    select.innerHTML = repos.map(r =>
+      `<option value="${escapeHtml(r.name)}" ${r.name === activeRepo ? 'selected' : ''}>${escapeHtml(r.name)}</option>`
+    ).join('');
+    selectorDiv.style.display = 'flex';
+  } catch {
+    selectorDiv.style.display = 'none';
+  }
+}
+
+async function setActiveRepo(lang, name) {
+  try {
+    const res = await fetch(`/api/settings/repos/${lang}/active?name=${encodeURIComponent(name)}`, { method: 'PUT' });
+    if (!res.ok) {
+      const d = await res.json().catch(() => ({}));
+      appendMessage('system', `Fehler beim Wechsel des Repositories: ${d.detail || res.statusText}`);
+      // Selector zurücksetzen
+      loadRepoSelector(lang);
+      return;
+    }
+    // Speichern
+    await fetch('/api/settings/save', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ backup: false }) });
+    appendMessage('system', `${lang === 'java' ? 'Java' : 'Python'}-Repository gewechselt zu: ${name}`);
+    // Index-Status neu laden (zeigt Dateizahl des neuen Repos)
+    if (lang === 'java') loadJavaIndexStatus();
+    else loadPythonIndexStatus();
+  } catch (e) {
+    appendMessage('system', `Fehler: ${e.message}`);
+    loadRepoSelector(lang);
+  }
+}
+
 // ── Java Index ──
 async function loadJavaIndexStatus() {
   const el = document.getElementById('java-index-status');
@@ -788,6 +859,7 @@ async function loadJavaIndexStatus() {
   } catch {
     el.textContent = 'Status nicht verfügbar';
   }
+  loadRepoSelector('java');
 }
 
 async function buildJavaIndex() {
@@ -847,6 +919,7 @@ async function loadPythonIndexStatus() {
   } catch {
     el.textContent = 'Status nicht verfügbar';
   }
+  loadRepoSelector('python');
 }
 
 async function buildPythonIndex() {
@@ -1416,6 +1489,11 @@ function renderSettingsSection() {
     return;
   }
 
+  if (section === 'java' || section === 'python') {
+    renderReposSection(section);
+    return;
+  }
+
   // Section-spezifische Beschreibungen
   const sectionDescriptions = {
     server: 'Konfiguration des FastAPI-Servers (Host, Port). Änderungen erfordern einen Neustart.',
@@ -1652,6 +1730,157 @@ function deleteModel(idx) {
   settingsState.settings.models.splice(idx, 1);
   renderModelsSection();
   markSettingsModified();
+}
+
+// ── Repos Section (Java / Python) ──
+
+async function renderReposSection(lang) {
+  const label = lang === 'java' ? 'Java' : 'Python';
+  const values = settingsState.settings[lang] || {};
+
+  // Repos frisch vom Server laden
+  let repos = [];
+  let activeRepo = values.active_repo || '';
+  try {
+    const res = await fetch(`/api/settings/repos/${lang}`);
+    if (res.ok) {
+      const d = await res.json();
+      repos = d.repos || [];
+      activeRepo = d.active_repo || '';
+    }
+  } catch (e) { /* ignore */ }
+
+  let html = `
+    <div class="settings-section">
+      <h3 class="settings-section-title">${label.toUpperCase()} REPOSITORIES</h3>
+      <p class="settings-section-desc">${settingsState.descriptions[lang]}</p>
+    </div>
+
+    <div class="settings-section">
+      <h4 style="margin-bottom:8px;color:var(--text-muted)">Konfigurierte Repositories</h4>
+      <div class="repos-list" id="${lang}-repos-list">
+  `;
+
+  if (repos.length === 0) {
+    html += `<div style="color:var(--text-muted);font-size:0.85rem;padding:8px 0;">Noch keine Repositories konfiguriert.</div>`;
+  } else {
+    repos.forEach(r => {
+      const isActive = r.name === activeRepo;
+      html += `
+        <div class="repo-item ${isActive ? 'repo-item-active' : ''}" data-name="${escapeHtml(r.name)}">
+          <div class="repo-item-info">
+            <span class="repo-item-name">${escapeHtml(r.name)}</span>
+            ${isActive ? '<span class="repo-active-badge">Aktiv</span>' : ''}
+            <span class="repo-item-path">${escapeHtml(r.path)}</span>
+          </div>
+          <div class="repo-item-actions">
+            ${!isActive ? `<button class="btn btn-secondary btn-sm" onclick="setActiveRepoSettings('${lang}', '${escapeHtml(r.name).replace(/'/g, "\\'")}')">Aktivieren</button>` : ''}
+            <button class="btn btn-danger btn-sm" onclick="deleteRepoSettings('${lang}', '${escapeHtml(r.name).replace(/'/g, "\\'")}')">✕</button>
+          </div>
+        </div>
+      `;
+    });
+  }
+
+  html += `
+      </div>
+    </div>
+
+    <div class="settings-section">
+      <h4 style="margin-bottom:8px;color:var(--text-muted)">Repository hinzufügen</h4>
+      <div class="add-repo-form">
+        <input type="text" id="${lang}-new-repo-name" placeholder="Name (z.B. MeinProjekt)" style="margin-bottom:6px">
+        <input type="text" id="${lang}-new-repo-path" placeholder="Pfad (z.B. /opt/projekte/repo oder //server/share/repo)" style="font-family:var(--font-mono);margin-bottom:6px">
+        <button class="btn btn-primary" onclick="addRepoSettings('${lang}')">+ Hinzufügen</button>
+        <span id="${lang}-repo-msg" class="test-result" style="margin-left:8px"></span>
+      </div>
+    </div>
+
+    <div class="settings-section">
+      <h4 style="margin-bottom:8px;color:var(--text-muted)">Sonstige Einstellungen</h4>
+  `;
+
+  // Generic fields für exclude_dirs, max_file_size_kb
+  const otherValues = {};
+  for (const [k, v] of Object.entries(values)) {
+    if (!['repos', 'active_repo', 'repo_path'].includes(k)) {
+      otherValues[k] = v;
+    }
+  }
+  html += renderSettingsFields(lang, otherValues);
+  html += `</div>`;
+
+  document.getElementById('settings-form').innerHTML = html;
+}
+
+async function setActiveRepoSettings(lang, name) {
+  try {
+    const res = await fetch(`/api/settings/repos/${lang}/active?name=${encodeURIComponent(name)}`, { method: 'PUT' });
+    const d = await res.json();
+    if (!res.ok) throw new Error(d.detail || 'Fehler');
+    updateSettingsStatus(`${name} aktiviert`, 'success');
+    // Sidebar-Selektor aktualisieren
+    loadRepoSelector(lang);
+    renderReposSection(lang);
+  } catch (e) {
+    updateSettingsStatus('Fehler: ' + e.message, 'error');
+  }
+}
+
+async function addRepoSettings(lang) {
+  const nameEl = document.getElementById(`${lang}-new-repo-name`);
+  const pathEl = document.getElementById(`${lang}-new-repo-path`);
+  const msgEl = document.getElementById(`${lang}-repo-msg`);
+
+  const name = nameEl.value.trim();
+  const path = pathEl.value.trim();
+  if (!name || !path) {
+    msgEl.textContent = 'Name und Pfad erforderlich';
+    msgEl.className = 'test-result error';
+    return;
+  }
+
+  msgEl.textContent = '⏳ Wird hinzugefügt...';
+  msgEl.className = 'test-result testing';
+
+  try {
+    const res = await fetch(`/api/settings/repos/${lang}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name, path })
+    });
+    const d = await res.json();
+    if (!res.ok) throw new Error(d.detail || 'Fehler');
+
+    nameEl.value = '';
+    pathEl.value = '';
+    msgEl.textContent = '✓ Hinzugefügt';
+    msgEl.className = 'test-result success';
+    // Jetzt in config.yaml speichern
+    await fetch('/api/settings/save', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ backup: true }) });
+    updateSettingsStatus('Repository hinzugefügt und gespeichert', 'success');
+    loadRepoSelector(lang);
+    renderReposSection(lang);
+  } catch (e) {
+    msgEl.textContent = '✗ ' + e.message;
+    msgEl.className = 'test-result error';
+  }
+}
+
+async function deleteRepoSettings(lang, name) {
+  if (!confirm(`Repository "${name}" wirklich entfernen?`)) return;
+  try {
+    const encodedName = encodeURIComponent(name);
+    const res = await fetch(`/api/settings/repos/${lang}/${encodedName}`, { method: 'DELETE' });
+    const d = await res.json();
+    if (!res.ok) throw new Error(d.detail || 'Fehler');
+    await fetch('/api/settings/save', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ backup: true }) });
+    updateSettingsStatus('Repository entfernt und gespeichert', 'success');
+    loadRepoSelector(lang);
+    renderReposSection(lang);
+  } catch (e) {
+    updateSettingsStatus('Fehler: ' + e.message, 'error');
+  }
 }
 
 function markSettingsModified() {
