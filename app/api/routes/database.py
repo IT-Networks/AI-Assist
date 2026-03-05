@@ -61,7 +61,7 @@ async def test_connection() -> Dict[str, Any]:
         "host": settings.database.host,
         "port": settings.database.port,
         "database": settings.database.database,
-        "schema": settings.database.schema or "(nicht gesetzt)",
+        "schema": settings.database.db_schema or "(nicht gesetzt)",
         "username": settings.database.username,
         "jdbc_url": f"jdbc:db2://{settings.database.host}:{settings.database.port}/{settings.database.database}",
     }
@@ -116,7 +116,7 @@ async def list_tables(schema: Optional[str] = None) -> Dict[str, Any]:
         tables = await client.get_tables(schema)
 
         return {
-            "schema": schema or settings.database.schema,
+            "schema": schema or settings.database.db_schema,
             "tables": tables,
             "count": len(tables)
         }

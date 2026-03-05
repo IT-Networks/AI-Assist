@@ -135,7 +135,7 @@ database:
   host: ""                                 # Hostname des DB2-Servers
   port: 50000                              # Standard DB2-Port
   database: ""                             # Datenbankname
-  schema: ""                               # Standard-Schema
+  db_schema: ""                            # Standard-Schema (z.B. CREATOR bei z/OS)
   username: ""
   password: ""
   # Sicherheit

@@ -468,7 +468,7 @@ def get_db_client() -> Optional[DB2Client]:
             database=settings.database.database,
             username=settings.database.username,
             password=settings.database.password,
-            schema=settings.database.schema,
+            schema=settings.database.db_schema,
             driver=settings.database.driver,
             jdbc_driver_path=settings.database.jdbc_driver_path,
             jdbc_driver_class=settings.database.jdbc_driver_class,

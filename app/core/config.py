@@ -124,7 +124,7 @@ class DatabaseConfig(BaseModel):
     host: str = ""
     port: int = 50000
     database: str = ""
-    schema: str = ""
+    db_schema: str = ""  # Renamed from 'schema' to avoid Pydantic conflict
     username: str = ""
     password: str = ""
     # Sicherheit
