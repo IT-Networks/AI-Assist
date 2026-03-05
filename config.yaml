@@ -70,3 +70,48 @@ server:
   host: "0.0.0.0"
   port: 8000
   reload: false
+
+# ═══════════════════════════════════════════════════════════════════
+# NEUE FEATURES: AI-Assist Evolution
+# ═══════════════════════════════════════════════════════════════════
+
+# Handbuch-Integration (HTML auf Netzlaufwerk)
+handbook:
+  enabled: false                           # true um Handbuch zu aktivieren
+  path: ""                                 # z.B. "//server/share/handbuch" oder "Z:/handbuch"
+  index_on_start: false                    # Automatisch beim Start indexieren
+  exclude_patterns:
+    - "**/archiv/**"
+    - "**/backup/**"
+    - "**/.git/**"
+  functions_subdir: "funktionen"           # Subordner für Service-Funktionen
+  fields_subdir: "felder"                  # Subordner für Feld-Definitionen
+
+# Skill-System
+skills:
+  enabled: true
+  directory: "./skills"                    # Ordner für Skill-Definitionen (YAML)
+  auto_activation: false                   # Automatische Aktivierung basierend auf Keywords
+  max_active_skills: 5                     # Max. gleichzeitig aktive Skills
+
+# Datei-Operationen (Read/Write/Edit wie Claude Code)
+file_operations:
+  enabled: false                           # true um Schreibzugriff zu erlauben
+  default_mode: "read_only"                # read_only | write_with_confirm
+  allowed_paths: []                        # Pfade in denen geschrieben werden darf
+  allowed_extensions:
+    - ".java"
+    - ".py"
+    - ".xml"
+    - ".yaml"
+    - ".yml"
+    - ".json"
+    - ".md"
+    - ".properties"
+  denied_patterns:
+    - "**/node_modules/**"
+    - "**/.git/**"
+    - "**/target/**"
+    - "**/__pycache__/**"
+  backup_enabled: true
+  backup_directory: "./backups"

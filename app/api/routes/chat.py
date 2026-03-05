@@ -170,7 +170,90 @@ async def _collect_attachments(sources, session_id: str, user_message: str = "")
         except Exception:
             pass
 
+    # Handbuch-Seiten – manuell gewählt oder per Auto-Index-Suche
+    handbook_paths = list(sources.handbook_pages) if hasattr(sources, 'handbook_pages') else []
+    auto_handbook = getattr(sources, 'auto_handbook_search', False)
+    handbook_service = getattr(sources, 'handbook_service_filter', None)
+
+    if auto_handbook and not handbook_paths:
+        try:
+            from app.services.handbook_indexer import get_handbook_indexer
+            from app.core.config import settings as _hs
+            if _hs.handbook.enabled:
+                hb_indexer = get_handbook_indexer()
+                if hb_indexer.is_built():
+                    hb_results = hb_indexer.search(
+                        query=user_message,
+                        service_filter=handbook_service,
+                        top_k=_hs.index.max_search_results
+                    )
+                    handbook_paths = [r["file_path"] for r in hb_results]
+        except Exception:
+            pass
+
+    if handbook_paths:
+        try:
+            from app.services.handbook_indexer import get_handbook_indexer
+            from app.core.config import settings as _hs
+            if _hs.handbook.enabled:
+                hb_indexer = get_handbook_indexer()
+                for hb_path in handbook_paths[:5]:
+                    try:
+                        content = hb_indexer.get_page_content(hb_path)
+                        if content:
+                            attachments.append(ContextAttachment(
+                                label=f"HANDBUCH: {hb_path}",
+                                content=content,
+                                priority=2,  # Hohe Priorität für Handbuch
+                            ))
+                    except Exception:
+                        pass
+        except Exception:
+            pass
+
+    # Skill-Wissen – automatisch in aktiven Skills suchen
+    skill_ids = getattr(sources, 'active_skill_ids', [])
+    auto_skill = getattr(sources, 'auto_skill_knowledge', True)
+
+    if skill_ids and auto_skill and user_message:
+        try:
+            from app.services.skill_manager import get_skill_manager
+            from app.core.config import settings as _sk
+            if _sk.skills.enabled:
+                skill_mgr = get_skill_manager()
+                # Skills aktivieren
+                for sid in skill_ids:
+                    skill_mgr.activate_skill(session_id, sid)
+                # Wissen suchen
+                knowledge = skill_mgr.get_knowledge_context(
+                    session_id, user_message, top_k=_sk.index.max_search_results
+                )
+                if knowledge:
+                    attachments.append(ContextAttachment(
+                        label="SKILL-WISSEN",
+                        content=knowledge,
+                        priority=1,  # Höchste Priorität
+                    ))
+        except Exception:
+            pass
+
     return attachments
+
+
+def _get_skill_system_prompt(session_id: str, skill_ids: list) -> str:
+    """Holt den kombinierten System-Prompt aus aktiven Skills."""
+    try:
+        from app.services.skill_manager import get_skill_manager
+        from app.core.config import settings
+        if not settings.skills.enabled:
+            return ""
+        skill_mgr = get_skill_manager()
+        # Skills aktivieren falls noch nicht
+        for sid in skill_ids:
+            skill_mgr.activate_skill(session_id, sid)
+        return skill_mgr.build_system_prompt(session_id)
+    except Exception:
+        return ""
 
 
 @router.post("", response_model=ChatResponse)
@@ -180,10 +263,18 @@ async def chat_non_stream(request: ChatRequest):
         raise HTTPException(status_code=400, detail="Use stream=false for this endpoint or accept text/event-stream")
 
     attachments = await _collect_attachments(request.context_sources, request.session_id, request.message)
+
+    # Skill-System-Prompt hinzufügen
+    skill_ids = []
+    if request.context_sources:
+        skill_ids = getattr(request.context_sources, 'active_skill_ids', [])
+    skill_prompt = _get_skill_system_prompt(request.session_id, skill_ids)
+
     messages = context_manager.build_messages(
         session_id=request.session_id,
         user_message=request.message,
         attachments=attachments,
+        additional_system_prompt=skill_prompt,
     )
 
     try:
@@ -201,10 +292,18 @@ async def chat_non_stream(request: ChatRequest):
 async def chat_stream(request: ChatRequest):
     """Streaming chat endpoint – returns text/event-stream."""
     attachments = await _collect_attachments(request.context_sources, request.session_id, request.message)
+
+    # Skill-System-Prompt hinzufügen
+    skill_ids = []
+    if request.context_sources:
+        skill_ids = getattr(request.context_sources, 'active_skill_ids', [])
+    skill_prompt = _get_skill_system_prompt(request.session_id, skill_ids)
+
     messages = context_manager.build_messages(
         session_id=request.session_id,
         user_message=request.message,
         attachments=attachments,
+        additional_system_prompt=skill_prompt,
     )
 
     async def generate():

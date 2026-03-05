@@ -1,0 +1,61 @@
+# Beispiel-Skill mit Wissensquelle
+# Zeigt wie man eine Textdatei oder PDF als Wissensquelle einbindet.
+
+id: example-with-knowledge
+name: Beispiel mit Wissensquelle
+description: Demonstriert die Verwendung von Wissensquellen in Skills
+version: "1.0"
+type: knowledge
+
+activation:
+  mode: on-demand
+  trigger_words:
+    - beispiel
+    - demo
+
+system_prompt: |
+  Du hast Zugriff auf zusätzliches Wissen aus den beigefügten Dokumenten.
+  Nutze dieses Wissen um Fragen zu beantworten.
+  Wenn du die Antwort nicht im Wissen findest, sage das ehrlich.
+
+# Wissensquellen - hier können PDFs, Markdown oder Text eingebunden werden
+knowledge_sources:
+  # Inline-Text als Wissensquelle
+  - type: text
+    content: |
+      # Beispiel-Dokumentation
+
+      Dies ist ein Beispiel für eine inline Wissensquelle.
+      Der Text wird automatisch in Chunks aufgeteilt und indexiert.
+
+      ## Features
+      - Automatische Indexierung
+      - Volltextsuche
+      - Relevanz-Ranking
+
+      ## Verwendung
+      1. Skill aktivieren
+      2. Frage stellen
+      3. System durchsucht automatisch das Wissen
+
+    chunk_size: 500
+    chunk_overlap: 50
+
+  # Beispiel für eine externe Datei (auskommentiert)
+  # - type: pdf
+  #   path: "data/dokumentation.pdf"
+  #   chunk_size: 1000
+  #   chunk_overlap: 100
+
+  # - type: markdown
+  #   path: "data/readme.md"
+
+tools: []
+
+metadata:
+  author: AI-Assist
+  created: "2026-03-05"
+  tags:
+    - beispiel
+    - demo
+    - knowledge

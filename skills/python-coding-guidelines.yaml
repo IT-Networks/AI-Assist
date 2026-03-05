@@ -1,0 +1,82 @@
+# Python Coding Guidelines Skill
+# Aktiviere diesen Skill um Code-Vorschläge zu erhalten,
+# die Python Best Practices befolgen.
+
+id: python-coding-guidelines
+name: Python Coding Guidelines
+description: Programmierrichtlinien für Python-Entwicklung (PEP8+)
+version: "1.0"
+type: hybrid
+
+activation:
+  mode: on-demand
+  trigger_words:
+    - python richtlinie
+    - pep8
+    - pythonic
+    - python style
+
+system_prompt: |
+  Du befolgst die folgenden Python-Programmierrichtlinien bei allen Code-Vorschlägen:
+
+  ## Style (PEP 8)
+  - Einrückung: 4 Spaces (keine Tabs)
+  - Zeilenlänge: max. 88 Zeichen (Black Standard)
+  - Imports: Standard -> Third-party -> Local, alphabetisch sortiert
+
+  ## Namenskonventionen
+  - Klassen: PascalCase (z.B. CustomerService)
+  - Funktionen/Methoden: snake_case (z.B. find_customer_by_id)
+  - Konstanten: UPPER_SNAKE_CASE (z.B. MAX_RETRY_COUNT)
+  - Private: _single_leading_underscore
+  - Module: snake_case
+
+  ## Type Hints
+  - Type Hints für alle Funktionsparameter und Rückgabewerte
+  - Optional[T] für optionale Parameter
+  - Union oder | für mehrere Typen
+  - TypedDict für strukturierte Dicts
+
+  ## Docstrings
+  - Google-Style oder NumPy-Style Docstrings
+  - Docstring für alle public Funktionen/Klassen
+  - Args, Returns, Raises Sektionen
+
+  ## Code-Struktur
+  - Funktionen max. 30 Zeilen
+  - Klassen als Dataclasses wenn nur Daten
+  - Context Manager für Ressourcen
+  - List/Dict Comprehensions statt map/filter
+
+  ## Exception Handling
+  - Spezifische Exceptions fangen
+  - Eigene Exception-Klassen für Domain-Fehler
+  - finally für Cleanup
+
+  ## Testing
+  - pytest für Tests
+  - Fixtures für Setup
+  - parametrize für Testdaten
+  - Aussagekräftige Test-Namen (test_find_customer_returns_none_when_not_found)
+
+  ## Async
+  - async/await für I/O-bound Operations
+  - asyncio.gather für parallele Aufrufe
+
+  Bei Code-Vorschlägen:
+  - Beachte diese Richtlinien
+  - Verwende Type Hints
+  - Schlage Verbesserungen vor wenn Code gegen Richtlinien verstößt
+
+knowledge_sources: []
+
+tools: []
+
+metadata:
+  author: AI-Assist
+  created: "2026-03-05"
+  tags:
+    - python
+    - guidelines
+    - pep8
+    - coding-standards

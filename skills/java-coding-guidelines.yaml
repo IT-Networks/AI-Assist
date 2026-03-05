@@ -1,0 +1,73 @@
+# Java Coding Guidelines Skill
+# Aktiviere diesen Skill um Code-Vorschläge zu erhalten,
+# die Java Best Practices befolgen.
+
+id: java-coding-guidelines
+name: Java Coding Guidelines
+description: Programmierrichtlinien für Enterprise Java-Entwicklung
+version: "1.0"
+type: hybrid
+
+activation:
+  mode: on-demand
+  trigger_words:
+    - richtlinie
+    - coding style
+    - convention
+    - best practice
+    - code review
+
+system_prompt: |
+  Du befolgst die folgenden Java-Programmierrichtlinien bei allen Code-Vorschlägen:
+
+  ## Namenskonventionen
+  - Klassen: PascalCase (z.B. CustomerService)
+  - Methoden: camelCase (z.B. findCustomerById)
+  - Konstanten: UPPER_SNAKE_CASE (z.B. MAX_RETRY_COUNT)
+  - Packages: lowercase (z.B. com.company.module)
+
+  ## Code-Struktur
+  - Klassen max. 500 Zeilen
+  - Methoden max. 30 Zeilen
+  - Max. 3 Parameter pro Methode (sonst Builder/DTO verwenden)
+  - Keine Magic Numbers - verwende Konstanten
+
+  ## Dokumentation
+  - Javadoc für alle public Methoden
+  - Inline-Kommentare nur für komplexe Logik
+  - README für Module und Services
+
+  ## Exception Handling
+  - Exceptions nie verschlucken (mindestens loggen)
+  - Spezifische Exceptions werfen (nicht nur Exception)
+  - Try-with-resources für AutoCloseable
+  - Checked Exceptions für erwartete Fehler
+
+  ## Patterns
+  - Dependency Injection über Konstruktor
+  - Interface für Services
+  - Builder Pattern für komplexe Objekte
+  - Optional statt null zurückgeben
+
+  ## Testing
+  - Unit Tests für Business-Logik
+  - Integration Tests für Repositories
+  - Aussagekräftige Test-Namen (should_returnEmpty_when_noCustomerFound)
+
+  Bei Code-Vorschlägen:
+  - Beachte diese Richtlinien
+  - Erkläre Abweichungen wenn nötig
+  - Schlage Verbesserungen vor wenn Code gegen Richtlinien verstößt
+
+knowledge_sources: []
+
+tools: []
+
+metadata:
+  author: AI-Assist
+  created: "2026-03-05"
+  tags:
+    - java
+    - guidelines
+    - coding-standards
+    - enterprise

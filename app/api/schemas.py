@@ -11,6 +11,13 @@ class ContextSources(BaseModel):
     confluence_page_ids: List[str] = Field(default_factory=list)
     python_files: List[str] = Field(default_factory=list, description="Relative paths to Python files")
     auto_python_search: bool = False  # FTS-Index nach relevanten Python-Dateien durchsuchen
+    # Handbuch-Integration
+    handbook_pages: List[str] = Field(default_factory=list, description="Relative paths to handbook pages")
+    auto_handbook_search: bool = False  # Handbuch-Index nach relevanten Seiten durchsuchen
+    handbook_service_filter: Optional[str] = None  # Nur in bestimmtem Service suchen
+    # Skill-Integration
+    active_skill_ids: List[str] = Field(default_factory=list, description="IDs der aktiven Skills")
+    auto_skill_knowledge: bool = True  # Automatisch in Skill-Wissensbasen suchen
 
 
 class ChatRequest(BaseModel):

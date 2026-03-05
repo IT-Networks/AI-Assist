@@ -3,172 +3,243 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Java AI Code Assistant</title>
+  <title>AI Code Assistant</title>
   <link rel="stylesheet" href="/static/style.css">
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
 </head>
 <body>
 
 <!-- Header -->
-<div id="header">
-  <h1>&#9749; Java AI Code Assistant</h1>
-  <label id="stream-toggle">
-    <input type="checkbox" id="stream-cb" checked> Streaming
-  </label>
-  <select id="model-select" title="Modell auswählen"></select>
-  <button class="btn btn-danger" id="clear-btn" title="Session löschen">&#128465; Session</button>
-</div>
+<header id="header">
+  <div class="header-left">
+    <h1>AI Code Assistant</h1>
+    <div id="mode-indicator" class="mode-badge mode-read-only" title="Agent-Modus">
+      <span class="mode-icon">&#128274;</span>
+      <span class="mode-text">Nur Lesen</span>
+    </div>
+  </div>
+  <div class="header-center">
+    <div class="skills-dropdown">
+      <button class="header-btn" id="skills-btn" onclick="toggleSkillsDropdown()">
+        <span>&#9889;</span> Skills <span id="active-skills-count">(0)</span>
+      </button>
+      <div class="dropdown-menu" id="skills-dropdown">
+        <div class="dropdown-header">Verfügbare Skills</div>
+        <div id="skills-list">Lade Skills...</div>
+      </div>
+    </div>
+  </div>
+  <div class="header-right">
+    <select id="model-select" title="Modell auswählen"></select>
+    <div class="mode-switch">
+      <label class="mode-option">
+        <input type="radio" name="agent-mode" value="read_only" checked>
+        <span title="Nur Lese-Operationen">&#128274;</span>
+      </label>
+      <label class="mode-option">
+        <input type="radio" name="agent-mode" value="write_with_confirm">
+        <span title="Schreiben mit Bestätigung">&#128221;</span>
+      </label>
+      <label class="mode-option">
+        <input type="radio" name="agent-mode" value="autonomous">
+        <span title="Autonom (Vorsicht!)">&#9888;</span>
+      </label>
+    </div>
+    <button class="header-btn btn-danger" id="clear-btn" title="Session löschen">
+      &#128465; Neu
+    </button>
+  </div>
+</header>
 
-<!-- Main -->
+<!-- Main Layout -->
 <div id="main">
 
-  <!-- Sidebar -->
-  <div id="sidebar">
+  <!-- Left Sidebar - Explorer -->
+  <aside id="sidebar-left" class="sidebar">
+    <div class="sidebar-tabs">
+      <button class="sidebar-tab active" data-panel="explorer-panel">Explorer</button>
+      <button class="sidebar-tab" data-panel="handbook-panel">Handbuch</button>
+      <button class="sidebar-tab" data-panel="search-panel">Suche</button>
+    </div>
 
-    <!-- Java Repository -->
-    <div class="sidebar-section">
-      <div class="sidebar-section-header" onclick="toggleSection('java-body')">
-        &#9749; Java Repository <span id="java-arrow">&#9658;</span>
-      </div>
-      <div class="sidebar-section-body" id="java-body">
-        <!-- Index-Steuerung -->
-        <div class="index-panel">
-          <div style="display:flex;gap:6px;align-items:center;margin-bottom:4px">
-            <button class="sb-btn" style="flex:1;margin:0" onclick="buildJavaIndex()">&#127959; Index aufbauen</button>
-            <button class="sb-btn" style="margin:0;padding:4px 8px" title="Index löschen" onclick="deleteJavaIndex()">&#128465;</button>
+    <!-- Explorer Panel -->
+    <div class="sidebar-panel active" id="explorer-panel">
+      <!-- Java Section -->
+      <div class="explorer-section">
+        <div class="explorer-header" onclick="toggleExplorerSection('java')">
+          <span>&#9749; Java Repository</span>
+          <span class="explorer-arrow" id="java-arrow">&#9658;</span>
+        </div>
+        <div class="explorer-content" id="java-content">
+          <div class="index-status" id="java-index-status">Index wird geladen...</div>
+          <div class="explorer-actions">
+            <button class="sb-btn" onclick="buildJavaIndex()">&#127959; Index</button>
+            <button class="sb-btn" onclick="loadJavaTree()">&#128196; Baum</button>
           </div>
-          <div id="index-status" style="font-size:0.75rem;color:var(--text-muted);margin-bottom:6px">Status wird geladen...</div>
-          <label class="sb-label" style="display:flex;align-items:center;gap:6px;cursor:pointer">
-            <input type="checkbox" id="auto-search-cb"> Auto-Suche (relevante Dateien automatisch finden)
-          </label>
+          <div id="java-tree" class="file-tree"></div>
         </div>
-        <button class="sb-btn" id="load-tree-btn" onclick="loadFileTree()">&#128196; Dateibaum laden</button>
-        <input class="sb-input" id="java-search-input" placeholder="Klasse suchen..." onkeydown="if(event.key==='Enter')searchClass()">
-        <button class="sb-btn" onclick="searchClass()">&#128269; Klasse suchen</button>
-        <div id="file-tree"></div>
-        <div id="class-search-results"></div>
       </div>
-    </div>
 
-    <!-- Python Repository -->
-    <div class="sidebar-section">
-      <div class="sidebar-section-header" onclick="toggleSection('python-body')">
-        &#128013; Python Repository <span id="python-arrow">&#9658;</span>
-      </div>
-      <div class="sidebar-section-body" id="python-body">
-        <!-- Index-Steuerung -->
-        <div class="index-panel">
-          <div style="display:flex;gap:6px;align-items:center;margin-bottom:4px">
-            <button class="sb-btn" style="flex:1;margin:0" onclick="buildPythonIndex()">&#127959; Index aufbauen</button>
-            <button class="sb-btn" style="margin:0;padding:4px 8px" title="Index löschen" onclick="deletePythonIndex()">&#128465;</button>
+      <!-- Python Section -->
+      <div class="explorer-section">
+        <div class="explorer-header" onclick="toggleExplorerSection('python')">
+          <span>&#128013; Python Repository</span>
+          <span class="explorer-arrow" id="python-arrow">&#9658;</span>
+        </div>
+        <div class="explorer-content" id="python-content">
+          <div class="index-status" id="python-index-status">Index wird geladen...</div>
+          <div class="explorer-actions">
+            <button class="sb-btn" onclick="buildPythonIndex()">&#127959; Index</button>
+            <button class="sb-btn" onclick="loadPythonTree()">&#128196; Baum</button>
           </div>
-          <div id="python-index-status" style="font-size:0.75rem;color:var(--text-muted);margin-bottom:6px">Status wird geladen...</div>
-          <label class="sb-label" style="display:flex;align-items:center;gap:6px;cursor:pointer">
-            <input type="checkbox" id="auto-python-search-cb"> Auto-Suche (relevante Dateien automatisch finden)
-          </label>
+          <div id="python-tree" class="file-tree"></div>
         </div>
-        <button class="sb-btn" onclick="loadPythonFileTree()">&#128196; Dateibaum laden</button>
-        <input class="sb-input" id="python-search-input" placeholder="Symbol suchen..." onkeydown="if(event.key==='Enter')searchPythonSymbol()">
-        <button class="sb-btn" onclick="searchPythonSymbol()">&#128269; Symbol suchen</button>
-        <div id="python-file-tree"></div>
-        <div id="python-search-results"></div>
-        <!-- Validierung & Tests -->
-        <div style="margin-top:8px;border-top:1px solid var(--surface2);padding-top:8px">
-          <label class="sb-label">Validierung &amp; Tests:</label>
-          <div style="display:flex;gap:4px;flex-wrap:wrap">
-            <button class="sb-btn" style="margin:0;flex:1" onclick="runPythonValidation()">&#10003; Validieren</button>
-            <button class="sb-btn" style="margin:0;flex:1" onclick="runPythonTests()">&#129514; Tests</button>
-          </div>
-          <div id="python-validation-status" style="font-size:0.75rem;margin-top:4px"></div>
+      </div>
+
+      <!-- PDF Section -->
+      <div class="explorer-section">
+        <div class="explorer-header" onclick="toggleExplorerSection('pdf')">
+          <span>&#128196; PDFs</span>
+          <span class="explorer-arrow" id="pdf-arrow">&#9658;</span>
         </div>
-        <!-- Neue App generieren -->
-        <div style="margin-top:8px;border-top:1px solid var(--surface2);padding-top:8px">
-          <label class="sb-label">Neue Python-App erstellen:</label>
-          <input class="sb-input" id="python-gen-dir" placeholder="Zielverzeichnis">
-          <textarea class="sb-input" id="python-gen-desc" placeholder="Beschreibung der App..." rows="3" style="resize:vertical;margin-top:4px"></textarea>
-          <button class="sb-btn" onclick="generatePythonApp()">&#10024; App generieren</button>
-          <div id="python-gen-status" style="font-size:0.75rem;margin-top:4px"></div>
+        <div class="explorer-content" id="pdf-content">
+          <input type="file" id="pdf-file-input" accept=".pdf" style="display:none" onchange="uploadPDF()">
+          <button class="sb-btn" onclick="document.getElementById('pdf-file-input').click()">
+            &#128228; PDF hochladen
+          </button>
+          <div id="pdf-list" class="item-list"></div>
         </div>
       </div>
     </div>
 
-    <!-- Server Logs -->
-    <div class="sidebar-section">
-      <div class="sidebar-section-header" onclick="toggleSection('log-body')">
-        &#128196; Server Logs <span id="log-arrow">&#9658;</span>
-      </div>
-      <div class="sidebar-section-body" id="log-body">
-        <label class="sb-label">WLP Log-Datei hochladen:</label>
-        <input type="file" id="log-file-input" accept=".log,.txt" style="display:none" onchange="uploadLog()">
-        <button class="sb-btn" onclick="document.getElementById('log-file-input').click()">&#128228; Log hochladen</button>
-        <div id="log-status"></div>
-      </div>
-    </div>
-
-    <!-- PDF -->
-    <div class="sidebar-section">
-      <div class="sidebar-section-header" onclick="toggleSection('pdf-body')">
-        &#128196; PDFs <span id="pdf-arrow">&#9658;</span>
-      </div>
-      <div class="sidebar-section-body" id="pdf-body">
-        <label class="sb-label">PDF hochladen:</label>
-        <input type="file" id="pdf-file-input" accept=".pdf" style="display:none" onchange="uploadPDF()">
-        <button class="sb-btn" onclick="document.getElementById('pdf-file-input').click()">&#128228; PDF hochladen</button>
-        <div id="pdf-status"></div>
+    <!-- Handbook Panel -->
+    <div class="sidebar-panel" id="handbook-panel">
+      <div class="panel-content">
+        <div class="handbook-status" id="handbook-status">
+          <span class="status-icon">&#128214;</span>
+          <span>Handbuch wird geladen...</span>
+        </div>
+        <input class="sb-input" id="handbook-search" placeholder="Service suchen...">
+        <button class="sb-btn" onclick="searchHandbook()">&#128269; Suchen</button>
+        <div id="handbook-results" class="search-results"></div>
+        <div class="service-list" id="handbook-services"></div>
       </div>
     </div>
 
-    <!-- Confluence -->
-    <div class="sidebar-section">
-      <div class="sidebar-section-header" onclick="toggleSection('conf-body')">
-        &#127758; Confluence <span id="conf-arrow">&#9658;</span>
-      </div>
-      <div class="sidebar-section-body" id="conf-body">
-        <label class="sb-label">Volltext-Suche:</label>
-        <input class="sb-input" id="conf-search-q" placeholder="Suchbegriff...">
-        <input class="sb-input" id="conf-search-space" placeholder="Space-Key (optional, z.B. DEV)">
-        <input class="sb-input" id="conf-search-labels" placeholder="Labels (optional, kommagetrennt)">
-        <button class="sb-btn" onclick="searchConfluence()">&#128269; Suchen</button>
-        <div id="conf-search-results" class="search-results"></div>
-        <label class="sb-label" style="margin-top:8px">Seite per ID laden:</label>
-        <input class="sb-input" id="conf-page-id" placeholder="Seiten-ID (z.B. 123456)">
-        <button class="sb-btn" onclick="loadConfluencePage()">&#128196; Seite laden</button>
-        <div id="conf-status"></div>
+    <!-- Search Panel -->
+    <div class="sidebar-panel" id="search-panel">
+      <div class="panel-content">
+        <div class="search-type-tabs">
+          <button class="search-type active" data-type="code">Code</button>
+          <button class="search-type" data-type="handbook">Handbuch</button>
+          <button class="search-type" data-type="skills">Skills</button>
+        </div>
+        <input class="sb-input" id="global-search" placeholder="Suchen...">
+        <button class="sb-btn" onclick="globalSearch()">&#128269; Suchen</button>
+        <div id="global-search-results" class="search-results"></div>
       </div>
     </div>
+  </aside>
 
-    <!-- Active Context -->
-    <div id="active-context">
-      <h4>Aktiver Kontext</h4>
-      <div id="context-chips">
-        <span style="font-size:0.78rem;color:var(--text-muted)">Kein Kontext ausgewählt</span>
-      </div>
-    </div>
-
-  </div>
-
-  <!-- Chat area -->
-  <div id="chat-area">
+  <!-- Center - Chat Area -->
+  <main id="chat-area">
     <div id="messages">
       <div class="message system">
         <div class="message-bubble">
-          Willkommen! Wähle links Kontext-Quellen aus und stelle deine Java-Frage.
+          <strong>Willkommen beim AI Code Assistant!</strong><br>
+          Ich kann Code durchsuchen, das Handbuch nutzen und Dateien bearbeiten.<br>
+          <small>Modus: <span id="welcome-mode">Nur Lesen</span> | Skills aktivieren im Header</small>
         </div>
       </div>
     </div>
+
     <div id="input-area">
-      <textarea id="message-input" placeholder="Java-Frage stellen..." rows="2"
-        onkeydown="handleInputKey(event)"></textarea>
-      <button id="send-btn" onclick="sendMessage()">Senden</button>
+      <div id="active-context-bar">
+        <span class="context-label">Kontext:</span>
+        <div id="context-chips"></div>
+      </div>
+      <div id="input-row">
+        <textarea id="message-input" placeholder="Frage stellen... (Enter zum Senden, Shift+Enter für neue Zeile)" rows="2"></textarea>
+        <button id="send-btn" onclick="sendMessage()">
+          <span class="send-icon">&#10148;</span>
+        </button>
+      </div>
     </div>
-  </div>
+  </main>
+
+  <!-- Right Sidebar - Context & Confirmation -->
+  <aside id="sidebar-right" class="sidebar">
+    <div class="sidebar-tabs">
+      <button class="sidebar-tab active" data-panel="tools-panel">Tools</button>
+      <button class="sidebar-tab" data-panel="confirm-panel">
+        Bestätigung <span class="badge" id="pending-count" style="display:none">1</span>
+      </button>
+    </div>
+
+    <!-- Tools Panel -->
+    <div class="sidebar-panel active" id="tools-panel">
+      <div class="panel-header">
+        <span>Tool-Aktivität</span>
+        <button class="icon-btn" onclick="clearToolHistory()" title="Verlauf löschen">&#128465;</button>
+      </div>
+      <div id="tool-history" class="tool-history">
+        <div class="empty-state">
+          <span>&#128295;</span>
+          <p>Noch keine Tool-Aufrufe</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- Confirmation Panel -->
+    <div class="sidebar-panel" id="confirm-panel">
+      <div class="panel-header">
+        <span>Ausstehende Bestätigung</span>
+      </div>
+      <div id="confirmation-area">
+        <div class="empty-state" id="no-confirmation">
+          <span>&#10003;</span>
+          <p>Keine ausstehenden Bestätigungen</p>
+        </div>
+        <div id="pending-confirmation" style="display:none">
+          <div class="confirm-header">
+            <span class="confirm-icon">&#9888;</span>
+            <span class="confirm-title">Schreib-Operation</span>
+          </div>
+          <div class="confirm-details">
+            <div class="confirm-field">
+              <label>Operation:</label>
+              <span id="confirm-operation">-</span>
+            </div>
+            <div class="confirm-field">
+              <label>Pfad:</label>
+              <span id="confirm-path">-</span>
+            </div>
+          </div>
+          <div class="diff-preview" id="diff-preview">
+            <pre><code id="diff-content"></code></pre>
+          </div>
+          <div class="confirm-actions">
+            <button class="btn btn-success" onclick="confirmOperation(true)">
+              &#10003; Ausführen
+            </button>
+            <button class="btn btn-danger" onclick="confirmOperation(false)">
+              &#10005; Abbrechen
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </aside>
 
 </div>
 
+<!-- Scripts -->
 <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/java.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/python.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/xml.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/diff.min.js"></script>
 <script src="/static/app.js"></script>
 </body>
 </html>

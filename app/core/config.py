@@ -54,6 +54,36 @@ class IndexConfig(BaseModel):
     max_search_results: int = 5
 
 
+class HandbookConfig(BaseModel):
+    """Konfiguration für HTML-Handbuch auf Netzlaufwerk."""
+    enabled: bool = False
+    path: str = ""  # Pfad zum Handbuch-Verzeichnis (kann Netzlaufwerk sein)
+    index_on_start: bool = False  # Automatisch beim Start indexieren
+    exclude_patterns: List[str] = ["**/archiv/**", "**/backup/**", "**/.git/**"]
+    # Struktur-Erkennung
+    functions_subdir: str = "funktionen"  # Subordner für Service-Funktionen
+    fields_subdir: str = "felder"  # Subordner für Feld-Definitionen
+
+
+class SkillsConfig(BaseModel):
+    """Konfiguration für das Skill-System."""
+    enabled: bool = True
+    directory: str = "./skills"
+    auto_activation: bool = False  # Automatische Skill-Aktivierung basierend auf Keywords
+    max_active_skills: int = 5  # Max. gleichzeitig aktive Skills
+
+
+class FileOperationsConfig(BaseModel):
+    """Konfiguration für Datei-Operationen (Read/Write/Edit)."""
+    enabled: bool = False
+    default_mode: str = "read_only"  # read_only | write_with_confirm
+    allowed_paths: List[str] = []  # Erlaubte Pfade für Schreiboperationen
+    allowed_extensions: List[str] = [".java", ".py", ".xml", ".yaml", ".yml", ".json", ".md", ".properties"]
+    denied_patterns: List[str] = ["**/node_modules/**", "**/.git/**", "**/target/**", "**/__pycache__/**"]
+    backup_enabled: bool = True
+    backup_directory: str = "./backups"
+
+
 class ContextConfig(BaseModel):
     max_tokens: int = 32000
     max_file_context_kb: int = 100
@@ -82,6 +112,9 @@ class Settings(BaseModel):
     uploads: UploadsConfig = UploadsConfig()
     server: ServerConfig = ServerConfig()
     index: IndexConfig = IndexConfig()
+    handbook: HandbookConfig = HandbookConfig()
+    skills: SkillsConfig = SkillsConfig()
+    file_operations: FileOperationsConfig = FileOperationsConfig()
 
     def apply_env_overrides(self) -> "Settings":
         if os.getenv("LLM_BASE_URL"):
@@ -100,6 +133,11 @@ class Settings(BaseModel):
             self.confluence.password = os.getenv("CONFLUENCE_PASSWORD")
         if os.getenv("PYTHON_REPO_PATH"):
             self.python.repo_path = os.getenv("PYTHON_REPO_PATH")
+        if os.getenv("HANDBOOK_PATH"):
+            self.handbook.path = os.getenv("HANDBOOK_PATH")
+            self.handbook.enabled = True
+        if os.getenv("SKILLS_DIRECTORY"):
+            self.skills.directory = os.getenv("SKILLS_DIRECTORY")
         return self
 
 
@@ -120,6 +158,9 @@ def load_settings(config_path: str = "config.yaml") -> Settings:
     # Ensure required directories exist
     Path(settings.uploads.directory).mkdir(parents=True, exist_ok=True)
     Path(settings.index.directory).mkdir(parents=True, exist_ok=True)
+    Path(settings.skills.directory).mkdir(parents=True, exist_ok=True)
+    if settings.file_operations.backup_enabled:
+        Path(settings.file_operations.backup_directory).mkdir(parents=True, exist_ok=True)
 
     return settings
 

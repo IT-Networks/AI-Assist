@@ -39,11 +39,12 @@ def build_messages(
     session_id: str,
     user_message: str,
     attachments: Optional[List[ContextAttachment]] = None,
+    additional_system_prompt: Optional[str] = None,
 ) -> List[dict]:
     """
     Assemble the full messages list for the LLM.
     Priority (kept last when trimming):
-      1. System prompt
+      1. System prompt (base + skills)
       2. User message (current)
       3. Attachments (sorted by priority)
       4. Conversation history (oldest trimmed first)
@@ -54,7 +55,14 @@ def build_messages(
     # Build context block from attachments
     context_block = _build_context_block(attachments, max_tokens // 2)
 
-    messages: List[dict] = [{"role": "system", "content": SYSTEM_PROMPT}]
+    # Basis System-Prompt
+    full_system_prompt = SYSTEM_PROMPT
+
+    # Skill-Prompts hinzufügen (falls vorhanden)
+    if additional_system_prompt:
+        full_system_prompt += f"\n\n{additional_system_prompt}"
+
+    messages: List[dict] = [{"role": "system", "content": full_system_prompt}]
 
     if context_block:
         messages.append({"role": "system", "content": context_block})
