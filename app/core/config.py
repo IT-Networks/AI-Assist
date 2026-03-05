@@ -35,6 +35,19 @@ class ConfluenceConfig(BaseModel):
     default_space: str = ""
 
 
+class PythonConfig(BaseModel):
+    repo_path: str = ""
+    exclude_dirs: List[str] = ["__pycache__", ".venv", ".git", "node_modules", ".mypy_cache", ".pytest_cache", "dist", "build"]
+    max_file_size_kb: int = 500
+
+
+class ToolsConfig(BaseModel):
+    flake8: str = "/root/.local/bin/flake8"
+    ruff: str = "/root/.local/bin/ruff"
+    mypy: str = "/root/.local/bin/mypy"
+    pytest: str = "/root/.local/bin/pytest"
+
+
 class IndexConfig(BaseModel):
     directory: str = "./index"
     auto_build_on_start: bool = False
@@ -62,6 +75,8 @@ class Settings(BaseModel):
     llm: LLMConfig = LLMConfig()
     models: List[ModelEntry] = []
     java: JavaConfig = JavaConfig()
+    python: PythonConfig = PythonConfig()
+    tools: ToolsConfig = ToolsConfig()
     confluence: ConfluenceConfig = ConfluenceConfig()
     context: ContextConfig = ContextConfig()
     uploads: UploadsConfig = UploadsConfig()
@@ -83,6 +98,8 @@ class Settings(BaseModel):
             self.confluence.api_token = os.getenv("CONFLUENCE_API_TOKEN")
         if os.getenv("CONFLUENCE_PASSWORD"):
             self.confluence.password = os.getenv("CONFLUENCE_PASSWORD")
+        if os.getenv("PYTHON_REPO_PATH"):
+            self.python.repo_path = os.getenv("PYTHON_REPO_PATH")
         return self
 
 

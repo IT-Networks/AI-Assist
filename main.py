@@ -4,7 +4,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 from pathlib import Path
 
-from app.api.routes import chat, java, logs, pdf, confluence, models
+from app.api.routes import chat, java, logs, pdf, confluence, models, python_routes
 
 
 @asynccontextmanager
@@ -42,6 +42,7 @@ app.include_router(logs.router)
 app.include_router(pdf.router)
 app.include_router(confluence.router)
 app.include_router(models.router)
+app.include_router(python_routes.router)
 
 # Static files (frontend)
 static_dir = Path(__file__).parent / "static"

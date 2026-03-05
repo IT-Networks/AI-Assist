@@ -9,6 +9,8 @@ class ContextSources(BaseModel):
     log_id: Optional[str] = None
     pdf_ids: List[str] = Field(default_factory=list)
     confluence_page_ids: List[str] = Field(default_factory=list)
+    python_files: List[str] = Field(default_factory=list, description="Relative paths to Python files")
+    auto_python_search: bool = False  # FTS-Index nach relevanten Python-Dateien durchsuchen
 
 
 class ChatRequest(BaseModel):
@@ -70,3 +72,37 @@ class ConfluencePageResponse(BaseModel):
     title: str
     url: str
     content: str
+
+
+class ValidationResult(BaseModel):
+    tool: str
+    stdout: str
+    stderr: str
+    returncode: int
+
+
+class ValidationResponse(BaseModel):
+    repo_path: str
+    results: Dict[str, ValidationResult]
+
+
+class TestResponse(BaseModel):
+    stdout: str
+    stderr: str
+    returncode: int
+    passed: int
+    failed: int
+    errors: int
+
+
+class GenerateRequest(BaseModel):
+    target_dir: str
+    description: str
+    session_id: str
+    model: Optional[str] = None
+
+
+class GenerateResponse(BaseModel):
+    files_written: List[str]
+    target_dir: str
+    message: str

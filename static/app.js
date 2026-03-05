@@ -10,6 +10,7 @@ const state = {
     logLabel: null,
     pdfIds: [],      // [{id, label}]
     confluenceIds: [], // [{id, label}]
+    pythonFiles: [], // [{path, label}]
   },
 };
 
@@ -18,6 +19,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   marked.setOptions({ breaks: true, gfm: true });
   await loadModels();
   await loadIndexStatus();
+  await loadPythonIndexStatus();
   document.getElementById("stream-cb").addEventListener("change", e => {
     state.streaming = e.target.checked;
   });
@@ -49,7 +51,7 @@ document.getElementById("clear-btn").addEventListener("click", async () => {
   if (!confirm("Session löschen?")) return;
   await fetch(`/api/chat/${state.sessionId}`, { method: "DELETE" });
   state.sessionId = crypto.randomUUID();
-  state.context = { javaFiles: [], includePom: false, logId: null, logLabel: null, pdfIds: [], confluenceIds: [] };
+  state.context = { javaFiles: [], includePom: false, logId: null, logLabel: null, pdfIds: [], confluenceIds: [], pythonFiles: [] };
   document.getElementById("messages").innerHTML = "";
   renderContextChips();
   appendMessage("system", "Neue Session gestartet.");
@@ -77,6 +79,7 @@ async function sendMessage() {
   sendBtn.innerHTML = '<span class="spinner"></span>';
 
   const autoSearch = document.getElementById("auto-search-cb")?.checked || false;
+  const autoPythonSearch = document.getElementById("auto-python-search-cb")?.checked || false;
   const contextSources = {
     java_files: state.context.javaFiles.map(f => f.path),
     include_pom: state.context.includePom,
@@ -84,6 +87,8 @@ async function sendMessage() {
     log_id: state.context.logId || null,
     pdf_ids: state.context.pdfIds.map(p => p.id),
     confluence_page_ids: state.context.confluenceIds.map(c => c.id),
+    python_files: state.context.pythonFiles.map(f => f.path),
+    auto_python_search: autoPythonSearch,
   };
 
   const payload = {
@@ -436,6 +441,7 @@ function renderContextChips() {
 
   const all = [
     ...state.context.javaFiles.map(f => ({ key: "java:" + f.path, label: f.label, type: "Java", remove: () => { state.context.javaFiles = state.context.javaFiles.filter(x => x.path !== f.path); } })),
+    ...state.context.pythonFiles.map(f => ({ key: "py:" + f.path, label: f.label, type: "Python", remove: () => { state.context.pythonFiles = state.context.pythonFiles.filter(x => x.path !== f.path); } })),
     ...(state.context.logId ? [{ key: "log", label: state.context.logLabel, type: "Log", remove: () => { state.context.logId = null; state.context.logLabel = null; } }] : []),
     ...state.context.pdfIds.map(p => ({ key: "pdf:" + p.id, label: p.label, type: "PDF", remove: () => { state.context.pdfIds = state.context.pdfIds.filter(x => x.id !== p.id); } })),
     ...state.context.confluenceIds.map(c => ({ key: "conf:" + c.id, label: c.label, type: "Confluence", remove: () => { state.context.confluenceIds = state.context.confluenceIds.filter(x => x.id !== c.id); } })),
@@ -452,7 +458,7 @@ function renderContextChips() {
     chip.innerHTML = `
       <span class="chip-label" title="${escapeHtml(item.label)}">${escapeHtml(item.label)}</span>
       <span class="chip-type">${item.type}</span>
-      <span class="chip-remove" title="Entfernen">×</span>
+      <span class="chip-remove" title="Entfernen">&#215;</span>
     `;
     chip.querySelector(".chip-remove").addEventListener("click", () => {
       item.remove();
@@ -519,3 +525,220 @@ document.getElementById("message-input").addEventListener("input", function () {
   this.style.height = "auto";
   this.style.height = Math.min(this.scrollHeight, 150) + "px";
 });
+
+// ── Python file tree ──
+async function loadPythonFileTree() {
+  const container = document.getElementById("python-file-tree");
+  container.innerHTML = '<span style="color:var(--text-muted);font-size:0.8rem">Lade...</span>';
+  try {
+    const res = await fetch("/api/python/tree");
+    if (!res.ok) {
+      const e = await res.json().catch(() => ({ detail: res.statusText }));
+      container.innerHTML = `<span style="color:var(--red);font-size:0.78rem">${e.detail}</span>`;
+      return;
+    }
+    const tree = await res.json();
+    container.innerHTML = "";
+    container.appendChild(renderPythonTreeNode(tree, true));
+  } catch (e) {
+    container.innerHTML = `<span style="color:var(--red);font-size:0.78rem">${e.message}</span>`;
+  }
+}
+
+function renderPythonTreeNode(node, isRoot = false) {
+  if (node.type === "file") {
+    const div = document.createElement("div");
+    div.className = "tree-file";
+    div.dataset.path = node.path;
+    div.title = node.path;
+    div.innerHTML = `<span>&#128013;</span><span>${node.name}</span><span style="color:var(--text-muted);font-size:0.7rem;margin-left:auto">${node.size_kb}KB</span>`;
+    div.addEventListener("click", () => addPythonFileToContext(node.path, node.name, div));
+    return div;
+  }
+
+  const wrapper = document.createElement("div");
+  wrapper.className = "tree-node";
+
+  if (!isRoot) {
+    const label = document.createElement("div");
+    label.className = "tree-dir";
+    label.innerHTML = `<div class="tree-dir-label"><span>&#128193;</span><span>${node.name}</span></div>`;
+    const children = document.createElement("div");
+    children.className = "tree-children";
+    label.addEventListener("click", () => children.classList.toggle("open"));
+    wrapper.appendChild(label);
+    (node.children || []).forEach(child => children.appendChild(renderPythonTreeNode(child)));
+    wrapper.appendChild(children);
+  } else {
+    (node.children || []).forEach(child => wrapper.appendChild(renderPythonTreeNode(child)));
+  }
+
+  return wrapper;
+}
+
+function addPythonFileToContext(path, name, el) {
+  if (state.context.pythonFiles.find(f => f.path === path)) return;
+  state.context.pythonFiles.push({ path, label: name });
+  if (el) el.classList.add("selected");
+  renderContextChips();
+}
+
+async function searchPythonSymbol() {
+  const q = document.getElementById("python-search-input").value.trim();
+  if (!q) return;
+  const container = document.getElementById("python-search-results");
+  container.innerHTML = '<span style="color:var(--text-muted);font-size:0.78rem">Suche...</span>';
+  try {
+    const res = await fetch(`/api/python/search?q=${encodeURIComponent(q)}`);
+    const data = await res.json();
+    if (!data.matches || data.matches.length === 0) {
+      container.innerHTML = '<span style="color:var(--text-muted);font-size:0.78rem">Keine Treffer</span>';
+      return;
+    }
+    container.innerHTML = "";
+    data.matches.forEach(m => {
+      const div = document.createElement("div");
+      div.className = "search-result";
+      div.innerHTML = `<div class="sr-title">&#128013; ${escapeHtml(m.symbol_name)} <small style="color:var(--text-muted)">(${m.type})</small></div><div class="sr-space">${escapeHtml(m.file_path)}:${m.line_no}</div>`;
+      div.addEventListener("click", () => {
+        addPythonFileToContext(m.file_path, m.file_path.split("/").pop(), div);
+        div.style.borderColor = "var(--green)";
+      });
+      container.appendChild(div);
+    });
+  } catch (e) {
+    container.innerHTML = `<span style="color:var(--red);font-size:0.78rem">${e.message}</span>`;
+  }
+}
+
+// ── Python Index ──
+async function loadPythonIndexStatus() {
+  const el = document.getElementById("python-index-status");
+  if (!el) return;
+  try {
+    const res = await fetch("/api/python/index/status");
+    if (!res.ok) { el.textContent = "Status nicht verfügbar"; return; }
+    const d = await res.json();
+    if (d.is_built) {
+      el.textContent = `${d.indexed_files} Dateien indexiert · ${d.last_build}`;
+      el.style.color = "var(--green)";
+    } else {
+      el.textContent = "Kein Index – bitte aufbauen";
+      el.style.color = "var(--text-muted)";
+    }
+  } catch {
+    el.textContent = "Status nicht verfügbar";
+  }
+}
+
+async function buildPythonIndex() {
+  const el = document.getElementById("python-index-status");
+  if (el) { el.textContent = "Index wird aufgebaut..."; el.style.color = "var(--yellow)"; }
+  try {
+    const res = await fetch("/api/python/index/build?background=false", { method: "POST" });
+    const d = await res.json();
+    if (!res.ok) {
+      if (el) { el.textContent = d.detail || "Fehler"; el.style.color = "var(--red)"; }
+      return;
+    }
+    appendMessage("system",
+      `Python-Index aufgebaut: ${d.indexed} Dateien indexiert, ${d.skipped} unverändert, ${d.stale_removed} veraltet entfernt (${d.duration_s}s)`
+    );
+    await loadPythonIndexStatus();
+  } catch (e) {
+    if (el) { el.textContent = e.message; el.style.color = "var(--red)"; }
+  }
+}
+
+async function deletePythonIndex() {
+  if (!confirm("Python-Index wirklich löschen?")) return;
+  await fetch("/api/python/index", { method: "DELETE" });
+  await loadPythonIndexStatus();
+  appendMessage("system", "Python-Index gelöscht.");
+}
+
+// ── Python Validierung ──
+async function runPythonValidation() {
+  const repoPath = prompt("Pfad zum Python-Projekt:", "");
+  if (!repoPath) return;
+  const status = document.getElementById("python-validation-status");
+  status.innerHTML = '<span style="color:var(--text-muted)">Validierung läuft...</span>';
+  try {
+    const res = await fetch(`/api/python/validate?repo_path=${encodeURIComponent(repoPath)}&tools=flake8&tools=ruff&tools=mypy`, { method: "POST" });
+    const d = await res.json();
+    if (!res.ok) {
+      status.innerHTML = `<span style="color:var(--red)">${d.detail || "Fehler"}</span>`;
+      return;
+    }
+    let summary = "";
+    for (const [tool, result] of Object.entries(d.results)) {
+      const ok = result.returncode === 0;
+      summary += `${ok ? "✓" : "✗"} ${tool}: `;
+      if (ok) {
+        summary += "keine Fehler";
+      } else {
+        const lines = result.stdout.trim().split("\n");
+        summary += `${lines.length} Hinweis(e)`;
+      }
+      summary += "\n";
+    }
+    status.innerHTML = `<pre style="font-size:0.72rem;white-space:pre-wrap;margin:0">${escapeHtml(summary)}</pre>`;
+    appendMessage("system", `Validierung abgeschlossen:\n\`\`\`\n${summary}\`\`\``);
+  } catch (e) {
+    status.innerHTML = `<span style="color:var(--red)">${e.message}</span>`;
+  }
+}
+
+async function runPythonTests() {
+  const repoPath = prompt("Pfad zum Python-Projekt:", "");
+  if (!repoPath) return;
+  const status = document.getElementById("python-validation-status");
+  status.innerHTML = '<span style="color:var(--text-muted)">Tests laufen...</span>';
+  try {
+    const res = await fetch(`/api/python/test?repo_path=${encodeURIComponent(repoPath)}`, { method: "POST" });
+    const d = await res.json();
+    if (!res.ok) {
+      status.innerHTML = `<span style="color:var(--red)">${d.detail || "Fehler"}</span>`;
+      return;
+    }
+    const ok = d.returncode === 0;
+    const summary = `${ok ? "✓" : "✗"} ${d.passed} passed, ${d.failed} failed, ${d.errors} errors`;
+    status.innerHTML = `<span style="color:${ok ? "var(--green)" : "var(--red)"}">${summary}</span>`;
+    appendMessage("system", `Test-Ergebnis: **${summary}**\n\n\`\`\`\n${d.stdout.slice(0, 2000)}\n\`\`\``);
+  } catch (e) {
+    status.innerHTML = `<span style="color:var(--red)">${e.message}</span>`;
+  }
+}
+
+// ── Python Code-Generierung ──
+async function generatePythonApp() {
+  const targetDir = document.getElementById("python-gen-dir").value.trim();
+  const description = document.getElementById("python-gen-desc").value.trim();
+  if (!targetDir || !description) {
+    alert("Bitte Zielverzeichnis und Beschreibung angeben.");
+    return;
+  }
+  const status = document.getElementById("python-gen-status");
+  status.innerHTML = '<span style="color:var(--text-muted)">Generierung läuft... (kann einige Sekunden dauern)</span>';
+  try {
+    const res = await fetch("/api/python/generate", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        target_dir: targetDir,
+        description: description,
+        session_id: state.sessionId,
+        model: state.currentModel,
+      }),
+    });
+    const d = await res.json();
+    if (!res.ok) {
+      status.innerHTML = `<span style="color:var(--red)">${d.detail || "Fehler"}</span>`;
+      return;
+    }
+    status.innerHTML = `<span style="color:var(--green)">&#10004; ${d.message}</span>`;
+    appendMessage("system", `App generiert in \`${d.target_dir}\`:\n${d.files_written.map(f => "- " + f).join("\n")}`);
+  } catch (e) {
+    status.innerHTML = `<span style="color:var(--red)">${e.message}</span>`;
+  }
+}
