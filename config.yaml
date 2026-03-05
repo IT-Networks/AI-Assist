@@ -112,6 +112,8 @@ file_operations:
     - ".json"
     - ".md"
     - ".properties"
+    - ".sql"
+    - ".sqlj"
   denied_patterns:
     - "**/node_modules/**"
     - "**/.git/**"
@@ -119,3 +121,22 @@ file_operations:
     - "**/__pycache__/**"
   backup_enabled: true
   backup_directory: "./backups"
+
+# DB2-Datenbankverbindung
+database:
+  enabled: false                           # true um DB-Abfragen zu aktivieren
+  driver: "ibm_db"                         # ibm_db (native) oder jaydebeapi (JDBC)
+  host: ""                                 # Hostname des DB2-Servers
+  port: 50000                              # Standard DB2-Port
+  database: ""                             # Datenbankname
+  schema: ""                               # Standard-Schema
+  username: ""
+  password: ""
+  # Sicherheit
+  require_confirmation: true               # Bestätigung vor jeder Query
+  max_rows: 1000                           # Max. Zeilen pro Abfrage
+  timeout_seconds: 30
+  readonly: true                           # Nur SELECT erlaubt
+  # Für JDBC (jaydebeapi)
+  jdbc_driver_path: ""                     # Pfad zur db2jcc4.jar
+  jdbc_driver_class: "com.ibm.db2.jcc.DB2Driver"

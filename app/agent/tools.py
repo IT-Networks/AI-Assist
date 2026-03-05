@@ -178,6 +178,7 @@ async def search_code(
     """Durchsucht Code-Repositories und liest gefundene Dateien."""
     from app.core.config import settings
     from pathlib import Path
+    import re
 
     results = []
 
@@ -214,6 +215,55 @@ async def search_code(
                     })
         except Exception:
             pass
+
+    # SQL/SQLJ durchsuchen (einfache Dateisuche)
+    if language in ("all", "sql", "sqlj"):
+        repo_paths = []
+        if settings.java.repo_path:
+            repo_paths.append(Path(settings.java.repo_path))
+        if settings.python.repo_path:
+            repo_paths.append(Path(settings.python.repo_path))
+
+        query_lower = query.lower()
+        query_words = query_lower.split()
+
+        for repo_path in repo_paths:
+            if not repo_path.exists():
+                continue
+
+            # Suche SQL und SQLJ Dateien
+            for ext in ("*.sql", "*.sqlj"):
+                for sql_file in repo_path.rglob(ext):
+                    # Skip excluded directories
+                    exclude_dirs = settings.java.exclude_dirs if settings.java.repo_path else []
+                    if any(ex in str(sql_file) for ex in exclude_dirs):
+                        continue
+
+                    try:
+                        content = sql_file.read_text(encoding="utf-8", errors="replace")
+                        content_lower = content.lower()
+
+                        # Prüfen ob Query-Begriffe vorkommen
+                        if any(word in content_lower for word in query_words):
+                            # Relevanten Snippet extrahieren
+                            snippet = ""
+                            for word in query_words:
+                                idx = content_lower.find(word)
+                                if idx >= 0:
+                                    start = max(0, idx - 50)
+                                    end = min(len(content), idx + 150)
+                                    snippet = content[start:end].strip()
+                                    snippet = re.sub(r'\s+', ' ', snippet)
+                                    break
+
+                            results.append({
+                                "language": "sql",
+                                "file_path": str(sql_file.relative_to(repo_path)),
+                                "snippet": snippet,
+                                "repo_path": str(repo_path)
+                            })
+                    except Exception:
+                        pass
 
     if not results:
         return ToolResult(
@@ -462,17 +512,363 @@ async def get_service_info(service_id: str) -> ToolResult:
         return ToolResult(success=False, error=str(e))
 
 
+async def search_pdf(
+    query: str,
+    filename_filter: Optional[str] = None,
+    top_k: int = 5
+) -> ToolResult:
+    """Durchsucht hochgeladene PDF-Dokumente."""
+    from app.core.config import settings
+    from pathlib import Path
+    import re
+
+    uploads_dir = Path(settings.uploads.directory)
+    if not uploads_dir.exists():
+        return ToolResult(success=False, error="Upload-Verzeichnis nicht gefunden")
+
+    try:
+        # PyMuPDF für PDF-Extraktion
+        import fitz  # PyMuPDF
+    except ImportError:
+        return ToolResult(
+            success=False,
+            error="PyMuPDF nicht installiert. Bitte 'pip install PyMuPDF' ausführen."
+        )
+
+    results = []
+    query_lower = query.lower()
+    query_words = query_lower.split()
+
+    # Alle PDFs durchsuchen
+    pdf_files = list(uploads_dir.glob("**/*.pdf"))
+    if filename_filter:
+        pdf_files = [f for f in pdf_files if filename_filter.lower() in f.name.lower()]
+
+    for pdf_path in pdf_files[:20]:  # Max 20 PDFs durchsuchen
+        try:
+            doc = fitz.open(str(pdf_path))
+            file_matches = []
+
+            for page_num, page in enumerate(doc, 1):
+                text = page.get_text()
+                text_lower = text.lower()
+
+                # Prüfen ob Query-Begriffe vorkommen
+                if any(word in text_lower for word in query_words):
+                    # Relevanten Abschnitt extrahieren
+                    for word in query_words:
+                        idx = text_lower.find(word)
+                        if idx >= 0:
+                            start = max(0, idx - 200)
+                            end = min(len(text), idx + 300)
+                            snippet = text[start:end].strip()
+                            snippet = re.sub(r'\s+', ' ', snippet)
+                            file_matches.append({
+                                "page": page_num,
+                                "snippet": snippet
+                            })
+                            break
+
+            doc.close()
+
+            if file_matches:
+                results.append({
+                    "filename": pdf_path.name,
+                    "path": str(pdf_path),
+                    "matches": file_matches[:3]  # Max 3 Matches pro PDF
+                })
+
+        except Exception as e:
+            continue
+
+    if not results:
+        return ToolResult(success=True, data=f"Keine relevanten PDF-Inhalte für '{query}' gefunden.")
+
+    # Formatierte Ausgabe
+    output = f"Gefundene PDF-Inhalte für '{query}':\n\n"
+    for r in results[:top_k]:
+        output += f"=== {r['filename']} ===\n"
+        for match in r['matches']:
+            output += f"[Seite {match['page']}] {match['snippet']}\n\n"
+
+    return ToolResult(success=True, data=output)
+
+
+async def trace_java_references(
+    class_name: str,
+    include_interfaces: bool = True,
+    include_parent_classes: bool = True,
+    max_depth: int = 5
+) -> ToolResult:
+    """
+    Verfolgt Verweise auf andere Klassen in Java-Code.
+    Findet Interfaces, Parent-Klassen und deren Implementierungen.
+    """
+    from app.core.config import settings
+    from pathlib import Path
+    import re
+
+    if not settings.java.repo_path:
+        return ToolResult(success=False, error="Java Repository nicht konfiguriert")
+
+    repo_path = Path(settings.java.repo_path)
+    if not repo_path.exists():
+        return ToolResult(success=False, error=f"Repository nicht gefunden: {repo_path}")
+
+    found_classes = {}
+    visited = set()
+
+    def find_java_file(name: str) -> Optional[Path]:
+        """Findet eine Java-Datei nach Klassennamen."""
+        # Einfache Klasse oder vollqualifizierter Name
+        simple_name = name.split(".")[-1]
+        for java_file in repo_path.rglob(f"{simple_name}.java"):
+            # Prüfen ob in excluded dirs
+            if any(ex in str(java_file) for ex in settings.java.exclude_dirs):
+                continue
+            return java_file
+        return None
+
+    def extract_class_info(file_path: Path) -> Dict:
+        """Extrahiert Klassen-Informationen aus einer Java-Datei."""
+        content = file_path.read_text(encoding="utf-8", errors="replace")
+        info = {
+            "file": str(file_path.relative_to(repo_path)),
+            "extends": None,
+            "implements": [],
+            "content": content[:5000]  # Erste 5000 Zeichen
+        }
+
+        # Extends finden
+        extends_match = re.search(r'\bextends\s+([\w.]+)', content)
+        if extends_match:
+            info["extends"] = extends_match.group(1)
+
+        # Implements finden
+        implements_match = re.search(r'\bimplements\s+([\w.,\s<>]+?)(?:\s*\{|\s+extends)', content)
+        if implements_match:
+            implements_str = implements_match.group(1)
+            info["implements"] = [i.strip() for i in re.split(r',\s*', implements_str) if i.strip()]
+
+        return info
+
+    def trace_hierarchy(name: str, depth: int = 0):
+        """Rekursiv die Klassenhierarchie verfolgen."""
+        if depth >= max_depth or name in visited:
+            return
+        visited.add(name)
+
+        file_path = find_java_file(name)
+        if not file_path:
+            return
+
+        info = extract_class_info(file_path)
+        found_classes[name] = info
+
+        # Parent-Klasse verfolgen
+        if include_parent_classes and info["extends"]:
+            trace_hierarchy(info["extends"], depth + 1)
+
+        # Interfaces verfolgen
+        if include_interfaces:
+            for iface in info["implements"]:
+                # Generics entfernen
+                iface_name = re.sub(r'<.*>', '', iface)
+                trace_hierarchy(iface_name, depth + 1)
+
+    # Start-Klasse finden und Hierarchie verfolgen
+    trace_hierarchy(class_name)
+
+    if not found_classes:
+        return ToolResult(
+            success=False,
+            error=f"Klasse '{class_name}' nicht im Repository gefunden"
+        )
+
+    # Formatierte Ausgabe
+    output = f"=== Java-Klassenhierarchie für {class_name} ===\n\n"
+
+    for name, info in found_classes.items():
+        output += f"### {name}\n"
+        output += f"Datei: {info['file']}\n"
+        if info["extends"]:
+            output += f"Extends: {info['extends']}\n"
+        if info["implements"]:
+            output += f"Implements: {', '.join(info['implements'])}\n"
+        output += f"\n```java\n{info['content']}\n```\n\n"
+
+    return ToolResult(success=True, data=output)
+
+
+async def query_database(
+    query: str,
+    max_rows: int = 100
+) -> ToolResult:
+    """
+    Führt eine SQL-Abfrage auf der DB2-Datenbank aus.
+    BENÖTIGT USER-BESTÄTIGUNG vor Ausführung.
+    Nur SELECT-Statements erlaubt (readonly).
+    """
+    from app.core.config import settings
+
+    if not settings.database.enabled:
+        return ToolResult(success=False, error="Datenbank ist nicht aktiviert")
+
+    try:
+        from app.services.db_client import get_db_client
+        client = get_db_client()
+
+        if not client:
+            return ToolResult(success=False, error="DB-Client konnte nicht initialisiert werden")
+
+        # Query validieren
+        is_valid, error = client.validate_query(query)
+        if not is_valid:
+            return ToolResult(success=False, error=error)
+
+        # Preview erstellen für Bestätigung
+        preview = client.preview_query(query)
+
+        return ToolResult(
+            success=True,
+            requires_confirmation=True,
+            data=f"Datenbank-Abfrage bereit zur Ausführung",
+            confirmation_data={
+                "operation": "query_database",
+                "query": preview.query,
+                "query_type": preview.query_type,
+                "tables": preview.tables,
+                "description": preview.estimated_description,
+                "max_rows": min(max_rows, settings.database.max_rows)
+            }
+        )
+    except Exception as e:
+        return ToolResult(success=False, error=str(e))
+
+
+async def execute_confirmed_query(query: str, max_rows: int = 100) -> ToolResult:
+    """
+    Führt eine bestätigte Datenbank-Abfrage aus.
+    Wird nur nach User-Bestätigung aufgerufen.
+    """
+    from app.core.config import settings
+
+    try:
+        from app.services.db_client import get_db_client
+        client = get_db_client()
+
+        if not client:
+            return ToolResult(success=False, error="DB-Client nicht verfügbar")
+
+        # Überschreibe max_rows temporär
+        original_max = client.max_rows
+        client.max_rows = min(max_rows, settings.database.max_rows)
+
+        result = await client.execute(query)
+
+        client.max_rows = original_max
+
+        if not result.success:
+            return ToolResult(success=False, error=result.error)
+
+        # Formatierte Ausgabe
+        output = f"=== Query-Ergebnis ===\n"
+        output += f"Zeilen: {result.row_count}"
+        if result.truncated:
+            output += f" (begrenzt auf {client.max_rows})"
+        output += "\n\n"
+
+        if result.columns and result.rows:
+            # Header
+            output += " | ".join(result.columns) + "\n"
+            output += "-" * (len(" | ".join(result.columns))) + "\n"
+
+            # Rows
+            for row in result.rows:
+                output += " | ".join(str(v) if v is not None else "NULL" for v in row) + "\n"
+
+        return ToolResult(success=True, data=output)
+    except Exception as e:
+        return ToolResult(success=False, error=str(e))
+
+
+async def list_database_tables(schema: str = None) -> ToolResult:
+    """Listet verfügbare Tabellen in der DB2-Datenbank auf."""
+    from app.core.config import settings
+
+    if not settings.database.enabled:
+        return ToolResult(success=False, error="Datenbank ist nicht aktiviert")
+
+    try:
+        from app.services.db_client import get_db_client
+        client = get_db_client()
+
+        if not client:
+            return ToolResult(success=False, error="DB-Client nicht verfügbar")
+
+        tables = await client.get_tables(schema)
+
+        if not tables:
+            return ToolResult(success=True, data="Keine Tabellen gefunden")
+
+        output = f"=== Tabellen im Schema {schema or client.schema} ===\n\n"
+        for table in tables:
+            output += f"  - {table}\n"
+
+        return ToolResult(success=True, data=output)
+    except Exception as e:
+        return ToolResult(success=False, error=str(e))
+
+
+async def describe_database_table(table_name: str, schema: str = None) -> ToolResult:
+    """Beschreibt die Struktur einer DB2-Tabelle."""
+    from app.core.config import settings
+
+    if not settings.database.enabled:
+        return ToolResult(success=False, error="Datenbank ist nicht aktiviert")
+
+    try:
+        from app.services.db_client import get_db_client
+        client = get_db_client()
+
+        if not client:
+            return ToolResult(success=False, error="DB-Client nicht verfügbar")
+
+        info = await client.describe_table(table_name, schema)
+
+        if "error" in info:
+            return ToolResult(success=False, error=info["error"])
+
+        output = f"=== Tabelle: {info['schema']}.{info['table']} ===\n\n"
+        output += "Spalten:\n"
+
+        for col in info["columns"]:
+            nullable = "NULL" if col["nullable"] else "NOT NULL"
+            type_str = col["type"]
+            if col["length"]:
+                type_str += f"({col['length']}"
+                if col["scale"]:
+                    type_str += f",{col['scale']}"
+                type_str += ")"
+            default = f" DEFAULT {col['default']}" if col["default"] else ""
+            output += f"  {col['name']:30} {type_str:20} {nullable}{default}\n"
+
+        return ToolResult(success=True, data=output)
+    except Exception as e:
+        return ToolResult(success=False, error=str(e))
+
+
 # ══════════════════════════════════════════════════════════════════════════════
 # Tool Definitions
 # ══════════════════════════════════════════════════════════════════════════════
 
 SEARCH_CODE_TOOL = Tool(
     name="search_code",
-    description="Durchsucht Java- und Python-Code nach relevanten Dateien und liest deren Inhalt. Gibt den vollständigen Code der gefundenen Dateien zurück.",
+    description="Durchsucht Java-, Python- und SQL/SQLJ-Code nach relevanten Dateien und liest deren Inhalt. Gibt den vollständigen Code der gefundenen Dateien zurück.",
     category=ToolCategory.SEARCH,
     parameters=[
-        ToolParameter("query", "string", "Suchbegriff (Klassenname, Methode, Konzept)"),
-        ToolParameter("language", "string", "Sprache: 'java', 'python' oder 'all'", required=False, default="all", enum=["java", "python", "all"]),
+        ToolParameter("query", "string", "Suchbegriff (Klassenname, Methode, Tabellenname, Konzept)"),
+        ToolParameter("language", "string", "Sprache: 'java', 'python', 'sql', 'sqlj' oder 'all'", required=False, default="all", enum=["java", "python", "sql", "sqlj", "all"]),
         ToolParameter("top_k", "integer", "Maximale Anzahl Ergebnisse", required=False, default=3),
         ToolParameter("read_files", "boolean", "Ob Dateiinhalt gelesen werden soll (default: true)", required=False, default=True),
     ],
@@ -561,6 +957,64 @@ GET_SERVICE_INFO_TOOL = Tool(
     handler=get_service_info
 )
 
+SEARCH_PDF_TOOL = Tool(
+    name="search_pdf",
+    description="Durchsucht hochgeladene PDF-Dokumente nach relevantem Text.",
+    category=ToolCategory.SEARCH,
+    parameters=[
+        ToolParameter("query", "string", "Suchbegriff"),
+        ToolParameter("filename_filter", "string", "Optional: Nur PDFs mit diesem Namen durchsuchen", required=False),
+        ToolParameter("top_k", "integer", "Maximale Anzahl Ergebnisse", required=False, default=5),
+    ],
+    handler=search_pdf
+)
+
+TRACE_JAVA_REFERENCES_TOOL = Tool(
+    name="trace_java_references",
+    description="Verfolgt Java-Klassenhierarchien und findet Interfaces, Parent-Klassen und deren Implementierungen im Repository.",
+    category=ToolCategory.ANALYSIS,
+    parameters=[
+        ToolParameter("class_name", "string", "Name der Klasse (einfach oder vollqualifiziert)"),
+        ToolParameter("include_interfaces", "boolean", "Interfaces verfolgen", required=False, default=True),
+        ToolParameter("include_parent_classes", "boolean", "Parent-Klassen verfolgen", required=False, default=True),
+        ToolParameter("max_depth", "integer", "Maximale Tiefe der Hierarchie", required=False, default=5),
+    ],
+    handler=trace_java_references
+)
+
+QUERY_DATABASE_TOOL = Tool(
+    name="query_database",
+    description="Führt eine SELECT-Abfrage auf der DB2-Datenbank aus. BENÖTIGT USER-BESTÄTIGUNG vor Ausführung. Nur SELECT-Statements erlaubt.",
+    category=ToolCategory.SEARCH,
+    is_write_operation=True,  # Benötigt Bestätigung
+    parameters=[
+        ToolParameter("query", "string", "SQL SELECT-Query"),
+        ToolParameter("max_rows", "integer", "Maximale Anzahl Zeilen", required=False, default=100),
+    ],
+    handler=query_database
+)
+
+LIST_DATABASE_TABLES_TOOL = Tool(
+    name="list_database_tables",
+    description="Listet alle verfügbaren Tabellen in der DB2-Datenbank auf.",
+    category=ToolCategory.KNOWLEDGE,
+    parameters=[
+        ToolParameter("schema", "string", "Optional: Schema-Name (sonst Standard-Schema)", required=False),
+    ],
+    handler=list_database_tables
+)
+
+DESCRIBE_DATABASE_TABLE_TOOL = Tool(
+    name="describe_database_table",
+    description="Zeigt die Struktur einer DB2-Tabelle (Spalten, Typen, Constraints).",
+    category=ToolCategory.KNOWLEDGE,
+    parameters=[
+        ToolParameter("table_name", "string", "Name der Tabelle"),
+        ToolParameter("schema", "string", "Optional: Schema-Name", required=False),
+    ],
+    handler=describe_database_table
+)
+
 
 # ══════════════════════════════════════════════════════════════════════════════
 # Default Registry
@@ -574,6 +1028,7 @@ def create_default_registry() -> ToolRegistry:
     registry.register(SEARCH_CODE_TOOL)
     registry.register(SEARCH_HANDBOOK_TOOL)
     registry.register(SEARCH_SKILLS_TOOL)
+    registry.register(SEARCH_PDF_TOOL)
 
     # File Tools
     registry.register(READ_FILE_TOOL)
@@ -583,6 +1038,14 @@ def create_default_registry() -> ToolRegistry:
 
     # Knowledge Tools
     registry.register(GET_SERVICE_INFO_TOOL)
+
+    # Analysis Tools
+    registry.register(TRACE_JAVA_REFERENCES_TOOL)
+
+    # Database Tools
+    registry.register(QUERY_DATABASE_TOOL)
+    registry.register(LIST_DATABASE_TABLES_TOOL)
+    registry.register(DESCRIBE_DATABASE_TABLE_TOOL)
 
     return registry
 

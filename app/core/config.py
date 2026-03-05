@@ -82,10 +82,30 @@ class FileOperationsConfig(BaseModel):
     enabled: bool = False
     default_mode: str = "read_only"  # read_only | write_with_confirm
     allowed_paths: List[str] = []  # Erlaubte Pfade für Schreiboperationen
-    allowed_extensions: List[str] = [".java", ".py", ".xml", ".yaml", ".yml", ".json", ".md", ".properties"]
+    allowed_extensions: List[str] = [".java", ".py", ".xml", ".yaml", ".yml", ".json", ".md", ".properties", ".sql", ".sqlj"]
     denied_patterns: List[str] = ["**/node_modules/**", "**/.git/**", "**/target/**", "**/__pycache__/**"]
     backup_enabled: bool = True
     backup_directory: str = "./backups"
+
+
+class DatabaseConfig(BaseModel):
+    """Konfiguration für DB2-Datenbankverbindung."""
+    enabled: bool = False
+    driver: str = "ibm_db"  # ibm_db oder jaydebeapi
+    host: str = ""
+    port: int = 50000
+    database: str = ""
+    schema: str = ""
+    username: str = ""
+    password: str = ""
+    # Sicherheit
+    require_confirmation: bool = True  # Bestätigung vor jeder Query
+    max_rows: int = 1000  # Max. Zeilen pro Abfrage
+    timeout_seconds: int = 30
+    readonly: bool = True  # Nur SELECT erlaubt
+    # Für JDBC (jaydebeapi)
+    jdbc_driver_path: str = ""  # Pfad zur db2jcc4.jar
+    jdbc_driver_class: str = "com.ibm.db2.jcc.DB2Driver"
 
 
 class ContextConfig(BaseModel):
@@ -117,6 +137,7 @@ class Settings(BaseModel):
     server: ServerConfig = ServerConfig()
     index: IndexConfig = IndexConfig()
     handbook: HandbookConfig = HandbookConfig()
+    database: DatabaseConfig = DatabaseConfig()
     skills: SkillsConfig = SkillsConfig()
     file_operations: FileOperationsConfig = FileOperationsConfig()
 

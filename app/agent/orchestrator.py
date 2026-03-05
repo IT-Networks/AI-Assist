@@ -414,6 +414,13 @@ class AgentOrchestrator:
             success = await manager.execute_edit(path, old_string, new_string)
             return ToolResult(success=success, data=f"Datei bearbeitet: {path}")
 
+        elif operation == "query_database":
+            # Bestätigte Datenbank-Abfrage ausführen
+            from app.agent.tools import execute_confirmed_query
+            query = confirmation_data.get("query")
+            max_rows = confirmation_data.get("max_rows", 100)
+            return await execute_confirmed_query(query, max_rows)
+
         else:
             return ToolResult(success=False, error=f"Unbekannte Operation: {operation}")
 
@@ -425,16 +432,21 @@ class AgentOrchestrator:
 Du bist ein intelligenter Assistent mit Zugriff auf Tools.
 
 Verfügbare Tools:
-- search_code: Durchsuche Java/Python Code nach relevanten Dateien
+- search_code: Durchsuche Java/Python/SQL Code nach relevanten Dateien
 - search_handbook: Durchsuche das Handbuch nach Service-Dokumentation
 - search_skills: Durchsuche die Wissensbasen der aktiven Skills
+- search_pdf: Durchsuche hochgeladene PDF-Dokumente
 - read_file: Lese den Inhalt einer Datei
 - list_files: Liste Dateien in einem Verzeichnis auf
 - get_service_info: Hole Service-Details aus dem Handbuch
+- trace_java_references: Verfolge Java-Klassenhierarchien (Interfaces, Parent-Klassen)
+- list_database_tables: Liste Tabellen in der DB2-Datenbank auf
+- describe_database_table: Zeige Spalten und Typen einer DB2-Tabelle
 
 Verwende Tools um Informationen zu sammeln, bevor du antwortest.
-Bei Code-Fragen: Suche zuerst nach relevantem Code.
+Bei Code-Fragen: Suche zuerst nach relevantem Code. Bei komplexen Klassen nutze trace_java_references.
 Bei Handbuch-Fragen: Suche zuerst im Handbuch.
+Bei PDF-Dokumenten: Durchsuche sie mit search_pdf.
 """
 
         if mode == AgentMode.READ_ONLY:
@@ -450,8 +462,9 @@ MODUS: Schreiben mit Bestätigung
 Zusätzliche Tools:
 - write_file: Erstelle oder überschreibe eine Datei (benötigt Bestätigung)
 - edit_file: Bearbeite eine Datei (benötigt Bestätigung)
+- query_database: Führe eine SELECT-Abfrage auf DB2 aus (benötigt Bestätigung)
 
-Der User muss Schreib-Operationen bestätigen bevor sie ausgeführt werden.
+Der User muss Schreib-Operationen und Datenbank-Abfragen bestätigen bevor sie ausgeführt werden.
 """
 
         else:  # AUTONOMOUS
@@ -460,6 +473,7 @@ MODUS: Autonom
 Zusätzliche Tools:
 - write_file: Erstelle oder überschreibe eine Datei
 - edit_file: Bearbeite eine Datei
+- query_database: Führe eine SELECT-Abfrage auf DB2 aus
 
 Du kannst Dateien ohne Bestätigung schreiben/bearbeiten.
 Sei vorsichtig und mache nur notwendige Änderungen.
