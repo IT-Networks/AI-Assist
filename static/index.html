@@ -45,11 +45,65 @@
         <span title="Autonom (Vorsicht!)">&#9888;</span>
       </label>
     </div>
+    <button class="header-btn" id="settings-btn" onclick="openSettings()" title="Einstellungen">
+      &#9881;
+    </button>
     <button class="header-btn btn-danger" id="clear-btn" title="Session löschen">
       &#128465; Neu
     </button>
   </div>
 </header>
+
+<!-- Settings Modal -->
+<div id="settings-modal" class="modal" style="display:none">
+  <div class="modal-overlay" onclick="closeSettings()"></div>
+  <div class="modal-content modal-large">
+    <div class="modal-header">
+      <h2>&#9881; Einstellungen</h2>
+      <button class="modal-close" onclick="closeSettings()">&times;</button>
+    </div>
+    <div class="modal-body">
+      <div class="settings-layout">
+        <!-- Settings Navigation -->
+        <nav class="settings-nav">
+          <button class="settings-nav-item active" data-section="llm">LLM</button>
+          <button class="settings-nav-item" data-section="models">Modelle</button>
+          <button class="settings-nav-item" data-section="java">Java</button>
+          <button class="settings-nav-item" data-section="python">Python</button>
+          <button class="settings-nav-item" data-section="confluence">Confluence</button>
+          <button class="settings-nav-item" data-section="handbook">Handbuch</button>
+          <button class="settings-nav-item" data-section="skills">Skills</button>
+          <button class="settings-nav-item" data-section="file_operations">Datei-Ops</button>
+          <button class="settings-nav-item" data-section="index">Index</button>
+          <button class="settings-nav-item" data-section="server">Server</button>
+        </nav>
+
+        <!-- Settings Content -->
+        <div class="settings-content">
+          <div id="settings-loading" class="settings-loading">
+            <span class="spinner"></span> Lade Einstellungen...
+          </div>
+          <div id="settings-form"></div>
+        </div>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <div class="settings-actions-left">
+        <button class="btn btn-secondary" onclick="reloadSettings()">
+          &#128260; Neu laden
+        </button>
+      </div>
+      <div class="settings-actions-right">
+        <span id="settings-status" class="settings-status"></span>
+        <button class="btn btn-secondary" onclick="closeSettings()">Abbrechen</button>
+        <button class="btn btn-primary" onclick="saveCurrentSection()">Anwenden</button>
+        <button class="btn btn-success" onclick="saveSettingsToFile()">
+          &#128190; Speichern
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
 
 <!-- Main Layout -->
 <div id="main">

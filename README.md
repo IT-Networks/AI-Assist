@@ -25,11 +25,18 @@ Ein lokaler AI-Assistent für Entwickler mit Claude-Code-ähnlicher Architektur.
 - **Java** – Dateibaum, Klassen-Analyse, POM-Abhängigkeiten, Index-Suche
 - **Python** – Symbol-Suche, Validierung (flake8/ruff/mypy), Tests (pytest)
 
+### Settings-UI (Neu)
+- **Frontend-Konfiguration** – Alle Settings über das UI ändern
+- **Live-Anwendung** – Änderungen sofort aktiv (ohne Neustart)
+- **Persistenz** – In config.yaml speichern mit Backup
+- **Modell-Verwaltung** – LLM-Modelle hinzufügen/entfernen
+
 ### Weitere Features
 - **WLP Log Analyse** – Server-Logs hochladen, Fehler extrahieren
 - **PDF Support** – PDFs als Kontext nutzen
 - **Confluence** – Seiten per CQL-Suche finden und laden
 - **Streaming** – Echtzeit-Token-Ausgabe im Browser
+- **Health-Check** – `/api/health` für System-Monitoring
 
 ## Installation
 
@@ -140,6 +147,19 @@ Browser öffnen: **http://localhost:8000**
 | GET | `/api/python/search?q=...` | Symbol suchen |
 | POST | `/api/python/validate` | Code validieren |
 | POST | `/api/python/test` | Tests ausführen |
+
+### Settings (Neu)
+| Methode | Pfad | Beschreibung |
+|---------|------|-------------|
+| GET | `/api/settings` | Alle Settings abrufen |
+| GET | `/api/settings/section/{section}` | Eine Section abrufen |
+| PUT | `/api/settings/section/{section}` | Section aktualisieren |
+| POST | `/api/settings/save` | In config.yaml speichern |
+| POST | `/api/settings/reload` | Aus config.yaml neu laden |
+| GET | `/api/settings/models` | Modelle auflisten |
+| POST | `/api/settings/models` | Modell hinzufügen |
+| DELETE | `/api/settings/models/{id}` | Modell entfernen |
+| GET | `/api/health` | Health-Check aller Subsysteme |
 
 ### Weitere
 | Methode | Pfad | Beschreibung |

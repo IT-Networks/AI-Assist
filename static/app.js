@@ -1043,3 +1043,433 @@ function escapeHtml(str) {
   if (!str) return '';
   return String(str).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 }
+
+
+// ══════════════════════════════════════════════════════════════════════════════
+// Settings Modal
+// ══════════════════════════════════════════════════════════════════════════════
+
+const settingsState = {
+  currentSection: 'llm',
+  settings: null,
+  modified: false,
+  descriptions: {
+    llm: 'LLM-Verbindung und Modell-Einstellungen',
+    models: 'Verfügbare LLM-Modelle für die Auswahl',
+    java: 'Java-Repository-Pfad und Ausschlüsse',
+    python: 'Python-Repository-Pfad und Ausschlüsse',
+    confluence: 'Confluence-Verbindung für Dokumentation',
+    handbook: 'HTML-Handbuch auf Netzlaufwerk',
+    skills: 'Skill-System für Spezialwissen',
+    file_operations: 'Datei-Operationen (Lesen/Schreiben)',
+    index: 'Such-Index-Einstellungen',
+    server: 'Server-Konfiguration',
+    tools: 'Pfade zu Entwickler-Tools',
+    context: 'Kontext-Limits für LLM',
+    uploads: 'Upload-Verzeichnis und Limits'
+  }
+};
+
+async function openSettings() {
+  const modal = document.getElementById('settings-modal');
+  modal.style.display = 'flex';
+  document.body.style.overflow = 'hidden';
+
+  // Setup navigation
+  document.querySelectorAll('.settings-nav-item').forEach(btn => {
+    btn.addEventListener('click', () => {
+      document.querySelectorAll('.settings-nav-item').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      settingsState.currentSection = btn.dataset.section;
+      renderSettingsSection();
+    });
+  });
+
+  await loadSettings();
+}
+
+function closeSettings() {
+  const modal = document.getElementById('settings-modal');
+  modal.style.display = 'none';
+  document.body.style.overflow = '';
+  settingsState.modified = false;
+  updateSettingsStatus('');
+}
+
+async function loadSettings() {
+  showSettingsLoading(true);
+  try {
+    const res = await fetch('/api/settings');
+    const data = await res.json();
+    settingsState.settings = data.settings;
+    renderSettingsSection();
+  } catch (err) {
+    console.error('Settings load error:', err);
+    updateSettingsStatus('Fehler beim Laden', 'error');
+  } finally {
+    showSettingsLoading(false);
+  }
+}
+
+async function reloadSettings() {
+  try {
+    await fetch('/api/settings/reload', { method: 'POST' });
+    await loadSettings();
+    updateSettingsStatus('Neu geladen', 'success');
+    // Auch Modell-Dropdown aktualisieren
+    await loadModels();
+  } catch (err) {
+    updateSettingsStatus('Fehler beim Neuladen', 'error');
+  }
+}
+
+function showSettingsLoading(show) {
+  document.getElementById('settings-loading').style.display = show ? 'flex' : 'none';
+  document.getElementById('settings-form').style.display = show ? 'none' : 'block';
+}
+
+function updateSettingsStatus(msg, type = '') {
+  const el = document.getElementById('settings-status');
+  el.textContent = msg;
+  el.className = 'settings-status ' + type;
+  if (msg) {
+    setTimeout(() => { el.textContent = ''; el.className = 'settings-status'; }, 3000);
+  }
+}
+
+function renderSettingsSection() {
+  const section = settingsState.currentSection;
+  const values = settingsState.settings[section];
+  const desc = settingsState.descriptions[section] || '';
+
+  if (section === 'models') {
+    renderModelsSection();
+    return;
+  }
+
+  let html = `
+    <div class="settings-section">
+      <h3 class="settings-section-title">${section.toUpperCase()}</h3>
+      <p class="settings-section-desc">${desc}</p>
+    </div>
+  `;
+
+  if (!values || typeof values !== 'object') {
+    html += '<p>Keine Einstellungen verfügbar.</p>';
+    document.getElementById('settings-form').innerHTML = html;
+    return;
+  }
+
+  html += renderSettingsFields(section, values);
+  document.getElementById('settings-form').innerHTML = html;
+}
+
+function renderSettingsFields(section, values) {
+  let html = '';
+
+  for (const [key, value] of Object.entries(values)) {
+    const fieldId = `setting-${section}-${key}`;
+    const labelText = formatFieldLabel(key);
+
+    html += `<div class="settings-field">`;
+    html += `<label for="${fieldId}">${labelText}</label>`;
+
+    if (typeof value === 'boolean') {
+      html += `
+        <label class="checkbox-label">
+          <input type="checkbox" id="${fieldId}" data-section="${section}" data-key="${key}"
+            ${value ? 'checked' : ''} onchange="markSettingsModified()">
+          ${value ? 'Aktiviert' : 'Deaktiviert'}
+        </label>
+      `;
+    } else if (Array.isArray(value)) {
+      html += renderArrayField(fieldId, section, key, value);
+    } else if (typeof value === 'number') {
+      html += `
+        <input type="number" id="${fieldId}" data-section="${section}" data-key="${key}"
+          value="${value}" onchange="markSettingsModified()">
+      `;
+    } else if (key.includes('password') || key.includes('api_key') || key.includes('api_token') || key.includes('secret')) {
+      html += `
+        <input type="password" id="${fieldId}" data-section="${section}" data-key="${key}"
+          value="${escapeHtml(value)}" onchange="markSettingsModified()" autocomplete="off">
+      `;
+    } else if (key.includes('path') || key.includes('url') || key.includes('directory')) {
+      html += `
+        <input type="text" id="${fieldId}" data-section="${section}" data-key="${key}"
+          value="${escapeHtml(value)}" onchange="markSettingsModified()"
+          placeholder="${getPlaceholder(key)}" style="font-family: var(--font-mono);">
+      `;
+    } else if (key === 'default_mode') {
+      html += `
+        <select id="${fieldId}" data-section="${section}" data-key="${key}" onchange="markSettingsModified()">
+          <option value="read_only" ${value === 'read_only' ? 'selected' : ''}>read_only - Nur Lesen</option>
+          <option value="write_with_confirm" ${value === 'write_with_confirm' ? 'selected' : ''}>write_with_confirm - Mit Bestätigung</option>
+          <option value="autonomous" ${value === 'autonomous' ? 'selected' : ''}>autonomous - Autonom</option>
+        </select>
+      `;
+    } else {
+      html += `
+        <input type="text" id="${fieldId}" data-section="${section}" data-key="${key}"
+          value="${escapeHtml(value)}" onchange="markSettingsModified()">
+      `;
+    }
+
+    html += `</div>`;
+  }
+
+  return html;
+}
+
+function renderArrayField(fieldId, section, key, values) {
+  let html = `<div class="settings-array" id="${fieldId}-container">`;
+
+  values.forEach((val, idx) => {
+    html += `
+      <div class="settings-array-item">
+        <input type="text" value="${escapeHtml(val)}"
+          data-section="${section}" data-key="${key}" data-index="${idx}"
+          onchange="markSettingsModified()">
+        <button onclick="removeArrayItem('${fieldId}', ${idx})">✕</button>
+      </div>
+    `;
+  });
+
+  html += `
+    <button class="settings-array-add" onclick="addArrayItem('${fieldId}', '${section}', '${key}')">
+      + Hinzufügen
+    </button>
+  </div>`;
+
+  return html;
+}
+
+function addArrayItem(fieldId, section, key) {
+  const container = document.getElementById(fieldId + '-container');
+  const items = container.querySelectorAll('.settings-array-item');
+  const newIdx = items.length;
+
+  const newItem = document.createElement('div');
+  newItem.className = 'settings-array-item';
+  newItem.innerHTML = `
+    <input type="text" value=""
+      data-section="${section}" data-key="${key}" data-index="${newIdx}"
+      onchange="markSettingsModified()">
+    <button onclick="this.parentElement.remove(); markSettingsModified();">✕</button>
+  `;
+
+  container.insertBefore(newItem, container.querySelector('.settings-array-add'));
+  markSettingsModified();
+}
+
+function removeArrayItem(fieldId, idx) {
+  const container = document.getElementById(fieldId + '-container');
+  const items = container.querySelectorAll('.settings-array-item');
+  if (items[idx]) {
+    items[idx].remove();
+    markSettingsModified();
+  }
+}
+
+function renderModelsSection() {
+  const models = settingsState.settings.models || [];
+  const defaultModel = settingsState.settings.llm?.default_model || '';
+
+  let html = `
+    <div class="settings-section">
+      <h3 class="settings-section-title">MODELLE</h3>
+      <p class="settings-section-desc">Verfügbare LLM-Modelle für die Auswahl im Header</p>
+    </div>
+    <div class="models-list">
+  `;
+
+  models.forEach((model, idx) => {
+    const isDefault = model.id === defaultModel;
+    html += `
+      <div class="model-item" data-model-idx="${idx}">
+        <input type="text" value="${escapeHtml(model.id)}" placeholder="model-id"
+          data-field="id" onchange="markSettingsModified()">
+        <input type="text" value="${escapeHtml(model.display_name)}" placeholder="Anzeigename"
+          data-field="display_name" onchange="markSettingsModified()">
+        ${isDefault ? '<span style="color: var(--success);">Standard</span>' : ''}
+        <button class="model-delete" onclick="deleteModel(${idx})">✕</button>
+      </div>
+    `;
+  });
+
+  html += `
+    </div>
+    <div class="add-model-form">
+      <input type="text" id="new-model-id" placeholder="Modell-ID (z.B. gpt-4)">
+      <input type="text" id="new-model-name" placeholder="Anzeigename">
+      <button onclick="addNewModel()">+ Hinzufügen</button>
+    </div>
+  `;
+
+  document.getElementById('settings-form').innerHTML = html;
+}
+
+function addNewModel() {
+  const idInput = document.getElementById('new-model-id');
+  const nameInput = document.getElementById('new-model-name');
+
+  if (!idInput.value.trim()) {
+    updateSettingsStatus('Modell-ID erforderlich', 'error');
+    return;
+  }
+
+  const newModel = {
+    id: idInput.value.trim(),
+    display_name: nameInput.value.trim() || idInput.value.trim()
+  };
+
+  settingsState.settings.models.push(newModel);
+  idInput.value = '';
+  nameInput.value = '';
+  renderModelsSection();
+  markSettingsModified();
+}
+
+function deleteModel(idx) {
+  settingsState.settings.models.splice(idx, 1);
+  renderModelsSection();
+  markSettingsModified();
+}
+
+function markSettingsModified() {
+  settingsState.modified = true;
+  updateSettingsStatus('Ungespeicherte Änderungen', '');
+}
+
+function formatFieldLabel(key) {
+  return key
+    .replace(/_/g, ' ')
+    .replace(/\b\w/g, c => c.toUpperCase());
+}
+
+function getPlaceholder(key) {
+  const placeholders = {
+    'base_url': 'http://localhost:8080/v1',
+    'repo_path': '/pfad/zum/repository',
+    'path': '//server/share/ordner',
+    'directory': './verzeichnis'
+  };
+
+  for (const [k, v] of Object.entries(placeholders)) {
+    if (key.includes(k)) return v;
+  }
+  return '';
+}
+
+function collectSectionValues(section) {
+  if (section === 'models') {
+    const models = [];
+    document.querySelectorAll('.model-item').forEach(item => {
+      const id = item.querySelector('[data-field="id"]').value;
+      const displayName = item.querySelector('[data-field="display_name"]').value;
+      if (id) {
+        models.push({ id, display_name: displayName || id });
+      }
+    });
+    return models;
+  }
+
+  const values = {};
+  const fields = document.querySelectorAll(`[data-section="${section}"]`);
+
+  fields.forEach(field => {
+    const key = field.dataset.key;
+    const idx = field.dataset.index;
+
+    if (idx !== undefined) {
+      // Array field
+      if (!values[key]) values[key] = [];
+      if (field.value.trim()) {
+        values[key][parseInt(idx)] = field.value.trim();
+      }
+    } else if (field.type === 'checkbox') {
+      values[key] = field.checked;
+    } else if (field.type === 'number') {
+      values[key] = parseFloat(field.value) || 0;
+    } else {
+      // Don't send masked passwords unless changed
+      if (field.value !== '********') {
+        values[key] = field.value;
+      }
+    }
+  });
+
+  // Clean up arrays (remove empty slots)
+  for (const key of Object.keys(values)) {
+    if (Array.isArray(values[key])) {
+      values[key] = values[key].filter(v => v !== undefined && v !== '');
+    }
+  }
+
+  return values;
+}
+
+async function saveCurrentSection() {
+  const section = settingsState.currentSection;
+  const values = collectSectionValues(section);
+
+  try {
+    const res = await fetch(`/api/settings/section/${section}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(values)
+    });
+
+    const data = await res.json();
+
+    if (!res.ok) {
+      throw new Error(data.detail || 'Fehler');
+    }
+
+    settingsState.settings[section] = data.values;
+    updateSettingsStatus('Angewendet (nur im Speicher)', 'success');
+
+    // Modell-Dropdown aktualisieren wenn LLM oder Models geändert
+    if (section === 'llm' || section === 'models') {
+      await loadModels();
+    }
+
+  } catch (err) {
+    updateSettingsStatus('Fehler: ' + err.message, 'error');
+  }
+}
+
+async function saveSettingsToFile() {
+  // Erst aktuelle Section speichern
+  await saveCurrentSection();
+
+  try {
+    const res = await fetch('/api/settings/save', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ backup: true })
+    });
+
+    const data = await res.json();
+
+    if (!res.ok) {
+      throw new Error(data.detail || 'Fehler');
+    }
+
+    settingsState.modified = false;
+    updateSettingsStatus('Gespeichert in config.yaml', 'success');
+
+  } catch (err) {
+    updateSettingsStatus('Speichern fehlgeschlagen: ' + err.message, 'error');
+  }
+}
+
+// Keyboard shortcut to close modal
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape') {
+    const modal = document.getElementById('settings-modal');
+    if (modal.style.display === 'flex') {
+      closeSettings();
+    }
+  }
+});

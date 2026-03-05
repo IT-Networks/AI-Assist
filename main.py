@@ -5,7 +5,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 from pathlib import Path
 
-from app.api.routes import chat, java, logs, pdf, confluence, models, python_routes, handbook, skills, agent
+from app.api.routes import chat, java, logs, pdf, confluence, models, python_routes, handbook, skills, agent, settings
 
 
 @asynccontextmanager
@@ -93,6 +93,7 @@ app.include_router(python_routes.router)
 app.include_router(handbook.router)
 app.include_router(skills.router)
 app.include_router(agent.router)
+app.include_router(settings.router)
 
 
 # ══════════════════════════════════════════════════════════════════════════════
