@@ -181,11 +181,14 @@ class AgentOrchestrator:
         state.messages_history.append({"role": "user", "content": user_message})
 
         # Agent-Loop
+        has_used_tools = False
+
         for iteration in range(self.max_iterations):
             try:
                 # LLM aufrufen (nicht-streamend für Tool-Calls)
+                # Tool-Phase: Schnelles Modell für Suche/Tool-Aufrufe
                 response = await self._call_llm_with_tools(
-                    messages, tool_schemas, model
+                    messages, tool_schemas, model, is_tool_phase=True
                 )
 
                 # Antwort-Text yielden
@@ -195,8 +198,16 @@ class AgentOrchestrator:
                 # Tool-Calls verarbeiten
                 tool_calls = response.get("tool_calls", [])
                 if not tool_calls:
-                    # Keine weiteren Tool-Calls -> fertig
+                    # Keine weiteren Tool-Calls -> Analyse-Phase
                     assistant_response = response.get("content", "")
+
+                    # Wenn Tools verwendet wurden, finale Analyse mit großem Modell
+                    if has_used_tools and settings.llm.analysis_model and not model:
+                        # Letzte Antwort verwerfen, neu generieren mit Analyse-Modell
+                        analysis_response = await self._call_llm_with_tools(
+                            messages, [], None, is_tool_phase=False
+                        )
+                        assistant_response = analysis_response.get("content", assistant_response)
 
                     # Assistant-Antwort in Historie speichern
                     if assistant_response:
@@ -231,6 +242,7 @@ class AgentOrchestrator:
                         **tool_call.arguments
                     )
                     tool_call.result = result
+                    has_used_tools = True
 
                     # Bestätigung benötigt?
                     if result.requires_confirmation and state.mode == AgentMode.WRITE_WITH_CONFIRM:
@@ -320,12 +332,30 @@ class AgentOrchestrator:
         self,
         messages: List[Dict],
         tools: List[Dict],
-        model: Optional[str] = None
+        model: Optional[str] = None,
+        is_tool_phase: bool = True
     ) -> Dict:
-        """Ruft das LLM mit Tool-Definitionen auf."""
+        """
+        Ruft das LLM mit Tool-Definitionen auf.
+
+        Args:
+            messages: Chat-Nachrichten
+            tools: Tool-Definitionen (leer für finale Antwort)
+            model: Explizites Modell (überschreibt automatische Auswahl)
+            is_tool_phase: True = Tool-Phase (schnelles Modell), False = Analyse-Phase (großes Modell)
+        """
         import httpx
 
-        model = model or settings.llm.default_model
+        # Modell-Auswahl: Explizit > Phase-spezifisch > Default
+        if model:
+            selected_model = model
+        elif is_tool_phase and tools and settings.llm.tool_model:
+            selected_model = settings.llm.tool_model
+        elif not is_tool_phase and settings.llm.analysis_model:
+            selected_model = settings.llm.analysis_model
+        else:
+            selected_model = settings.llm.default_model
+
         base_url = settings.llm.base_url.rstrip("/")
 
         headers = {"Content-Type": "application/json"}
@@ -333,7 +363,7 @@ class AgentOrchestrator:
             headers["Authorization"] = f"Bearer {settings.llm.api_key}"
 
         payload = {
-            "model": model,
+            "model": selected_model,
             "messages": messages,
             "temperature": settings.llm.temperature,
             "max_tokens": settings.llm.max_tokens,

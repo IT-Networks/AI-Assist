@@ -172,10 +172,12 @@ class ToolRegistry:
 async def search_code(
     query: str,
     language: str = "all",
-    top_k: int = 5
+    top_k: int = 5,
+    read_files: bool = True
 ) -> ToolResult:
-    """Durchsucht Code-Repositories nach relevanten Dateien."""
+    """Durchsucht Code-Repositories und liest gefundene Dateien."""
     from app.core.config import settings
+    from pathlib import Path
 
     results = []
 
@@ -191,6 +193,7 @@ async def search_code(
                         "language": "java",
                         "file_path": r["file_path"],
                         "snippet": r["snippet"],
+                        "repo_path": settings.java.repo_path
                     })
         except Exception:
             pass
@@ -207,6 +210,7 @@ async def search_code(
                         "language": "python",
                         "file_path": r["file_path"],
                         "snippet": r.get("snippet", ""),
+                        "repo_path": settings.python.repo_path
                     })
         except Exception:
             pass
@@ -219,10 +223,27 @@ async def search_code(
 
     # Formatieren
     output = f"Gefundene Code-Dateien für '{query}':\n\n"
+
     for r in results[:top_k]:
         output += f"[{r['language'].upper()}] {r['file_path']}\n"
-        if r.get('snippet'):
-            output += f"  {r['snippet'][:200]}...\n\n"
+
+        # Datei lesen wenn gewünscht
+        if read_files:
+            try:
+                full_path = Path(r['repo_path']) / r['file_path']
+                if full_path.exists():
+                    content = full_path.read_text(encoding="utf-8", errors="replace")
+                    # Auf 10000 Zeichen pro Datei begrenzen
+                    if len(content) > 10000:
+                        content = content[:10000] + "\n... [Datei gekürzt]"
+                    output += f"```{r['language']}\n{content}\n```\n\n"
+                else:
+                    output += f"  [Datei nicht lesbar]\n\n"
+            except Exception as e:
+                output += f"  [Fehler beim Lesen: {e}]\n\n"
+        else:
+            if r.get('snippet'):
+                output += f"  {r['snippet'][:200]}...\n\n"
 
     return ToolResult(success=True, data=output)
 
@@ -293,18 +314,43 @@ async def search_skills(
 
 async def read_file(path: str, encoding: str = "utf-8") -> ToolResult:
     """Liest den Inhalt einer Datei."""
+    from app.core.config import settings
+    from pathlib import Path
+
+    # Versuche den Pfad aufzulösen
+    resolved_path = path
+
+    # Wenn relativer Pfad, versuche in Repos zu finden
+    if not Path(path).is_absolute():
+        # Java Repo
+        if settings.java.repo_path:
+            java_full = Path(settings.java.repo_path) / path
+            if java_full.exists():
+                resolved_path = str(java_full)
+        # Python Repo
+        if not Path(resolved_path).exists() and settings.python.repo_path:
+            python_full = Path(settings.python.repo_path) / path
+            if python_full.exists():
+                resolved_path = str(python_full)
+
     try:
-        from app.services.file_manager import get_file_manager
-        manager = get_file_manager()
-        result = await manager.read_file(path)
+        # Direkt lesen ohne file_manager Permission-Check für Repo-Dateien
+        file_path = Path(resolved_path)
+        if not file_path.exists():
+            return ToolResult(success=False, error=f"Datei nicht gefunden: {path}")
+
+        content = file_path.read_text(encoding=encoding, errors="replace")
+
+        # Auf 50000 Zeichen begrenzen
+        if len(content) > 50000:
+            content = content[:50000] + "\n\n... [Datei gekürzt, zu lang]"
+
         return ToolResult(
             success=True,
-            data=f"=== Datei: {path} ===\n{result.content}"
+            data=f"=== Datei: {path} ===\n{content}"
         )
     except PermissionError as e:
         return ToolResult(success=False, error=f"Zugriff verweigert: {e}")
-    except FileNotFoundError as e:
-        return ToolResult(success=False, error=f"Datei nicht gefunden: {e}")
     except Exception as e:
         return ToolResult(success=False, error=str(e))
 
@@ -422,12 +468,13 @@ async def get_service_info(service_id: str) -> ToolResult:
 
 SEARCH_CODE_TOOL = Tool(
     name="search_code",
-    description="Durchsucht Java- und Python-Code nach relevanten Dateien basierend auf einem Suchbegriff. Gibt Dateipfade und Code-Snippets zurück.",
+    description="Durchsucht Java- und Python-Code nach relevanten Dateien und liest deren Inhalt. Gibt den vollständigen Code der gefundenen Dateien zurück.",
     category=ToolCategory.SEARCH,
     parameters=[
         ToolParameter("query", "string", "Suchbegriff (Klassenname, Methode, Konzept)"),
         ToolParameter("language", "string", "Sprache: 'java', 'python' oder 'all'", required=False, default="all", enum=["java", "python", "all"]),
-        ToolParameter("top_k", "integer", "Maximale Anzahl Ergebnisse", required=False, default=5),
+        ToolParameter("top_k", "integer", "Maximale Anzahl Ergebnisse", required=False, default=3),
+        ToolParameter("read_files", "boolean", "Ob Dateiinhalt gelesen werden soll (default: true)", required=False, default=True),
     ],
     handler=search_code
 )
