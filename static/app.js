@@ -156,20 +156,12 @@ async function createNewChat() {
     state.context = { javaFiles: [], pythonFiles: [], pdfIds: [], handbookServices: [] };
 
     // Reset UI
-    document.getElementById('messages').innerHTML = `
-      <div class="message system">
-        <div class="message-bubble">
-          <strong>Willkommen beim AI Code Assistant!</strong><br>
-          Ich kann Code durchsuchen, das Handbuch nutzen und Dateien bearbeiten.<br>
-          <small>Modus: <span id="welcome-mode">Nur Lesen</span> | Skills aktivieren im Header</small>
-        </div>
-      </div>`;
+    document.getElementById('messages').innerHTML = welcomeHTML();
     updateModeIndicator();
     renderToolHistory();
     renderContextChips();
     hideConfirmationPanel();
     renderChatList();
-    updateChatTitleDisplay();
 
     console.log('New chat created:', chat.id, 'session:', sessionId);
   } catch (e) {
@@ -196,23 +188,12 @@ async function switchToChat(chatId) {
   state.context = JSON.parse(JSON.stringify(chat.context));
 
   // Restore UI
-  document.getElementById('messages').innerHTML = chat.messagesHTML || `
-    <div class="message system">
-      <div class="message-bubble">
-        <strong>Willkommen beim AI Code Assistant!</strong><br>
-        Ich kann Code durchsuchen, das Handbuch nutzen und Dateien bearbeiten.<br>
-        <small>Modus: <span id="welcome-mode">Nur Lesen</span> | Skills aktivieren im Header</small>
-      </div>
-    </div>`;
+  document.getElementById('messages').innerHTML = chat.messagesHTML || welcomeHTML();
   updateModeIndicator();
   renderToolHistory();
   renderContextChips();
 
-  if (chat.pendingConfirmation) {
-    // Restore confirmation state if needed
-  } else {
-    hideConfirmationPanel();
-  }
+  hideConfirmationPanel();
 
   renderChatList();
   updateChatTitleDisplay();
@@ -222,9 +203,7 @@ async function switchToChat(chatId) {
   messages.scrollTop = messages.scrollHeight;
 }
 
-async function deleteChat(chatId, event) {
-  event.stopPropagation();
-
+async function deleteChat(chatId) {
   const chat = chatManager.get(chatId);
   if (!chat) return;
 
@@ -256,35 +235,73 @@ function renderChatList() {
     return;
   }
 
-  // Reverse to show newest first
+  // Newest first
   const sorted = [...chatManager.chats].reverse();
-  listEl.innerHTML = sorted.map(chat => {
+  listEl.innerHTML = '';
+
+  sorted.forEach(chat => {
     const isActive = chat.id === chatManager.activeId;
-    const title = escapeHtml(chat.title);
-    return `<div class="chat-item${isActive ? ' active' : ''}" onclick="switchToChat('${chat.id}')">
-      <span class="chat-item-icon">&#128172;</span>
-      <span class="chat-item-title" title="${title}">${title}</span>
-      <button class="chat-item-delete" onclick="deleteChat('${chat.id}', event)" title="Chat löschen">&#10005;</button>
-    </div>`;
-  }).join('');
+    const item = document.createElement('div');
+    item.className = 'chat-item' + (isActive ? ' active' : '');
+    item.dataset.chatId = chat.id;
+
+    item.innerHTML = `
+      <span class="chat-item-icon">💬</span>
+      <span class="chat-item-title" title="${escapeHtml(chat.title)}">${escapeHtml(chat.title)}</span>
+      <button class="chat-item-rename" title="Umbenennen">✏</button>
+      <button class="chat-item-delete" title="Chat löschen">✕</button>`;
+
+    item.querySelector('.chat-item-title').addEventListener('click', () => switchToChat(chat.id));
+    item.querySelector('.chat-item-icon').addEventListener('click', () => switchToChat(chat.id));
+    item.querySelector('.chat-item-rename').addEventListener('click', (e) => {
+      e.stopPropagation();
+      startInlineRename(chat.id, item);
+    });
+    item.querySelector('.chat-item-delete').addEventListener('click', (e) => {
+      e.stopPropagation();
+      deleteChat(chat.id);
+    });
+
+    listEl.appendChild(item);
+  });
 }
 
-function updateChatTitleDisplay() {
-  const el = document.getElementById('chat-title-display');
-  if (!el) return;
-  const chat = chatManager.getActive();
-  el.textContent = chat ? chat.title : '';
+function startInlineRename(chatId, itemEl) {
+  const chat = chatManager.get(chatId);
+  if (!chat) return;
+
+  const titleEl = itemEl.querySelector('.chat-item-title');
+  const renameBtn = itemEl.querySelector('.chat-item-rename');
+
+  const input = document.createElement('input');
+  input.type = 'text';
+  input.className = 'chat-item-rename-input';
+  input.value = chat.title;
+
+  titleEl.replaceWith(input);
+  renameBtn.style.display = 'none';
+  input.focus();
+  input.select();
+
+  const commit = () => {
+    const newTitle = input.value.trim();
+    if (newTitle) chat.title = newTitle;
+    renderChatList();
+  };
+
+  input.addEventListener('blur', commit);
+  input.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') { e.preventDefault(); input.blur(); }
+    if (e.key === 'Escape') { input.value = chat.title; input.blur(); }
+  });
 }
 
 function renameChatPrompt() {
   const chat = chatManager.getActive();
   if (!chat) return;
-  const newTitle = prompt('Chat umbenennen:', chat.title);
-  if (newTitle && newTitle.trim()) {
-    chat.title = newTitle.trim();
-    renderChatList();
-    updateChatTitleDisplay();
-  }
+  // Find the active item in the list and trigger inline rename
+  const itemEl = document.querySelector(`.chat-item[data-chat-id="${chat.id}"]`);
+  if (itemEl) startInlineRename(chat.id, itemEl);
 }
 
 function updateActiveChatTitle(firstUserMessage) {
@@ -299,6 +316,16 @@ function updateActiveChatTitle(firstUserMessage) {
 
 function escapeHtml(str) {
   return str.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+function welcomeHTML() {
+  return `<div class="message system">
+    <div class="message-bubble">
+      <strong>Willkommen beim AI Code Assistant!</strong><br>
+      Ich kann Code durchsuchen, das Handbuch nutzen und Dateien bearbeiten.<br>
+      <small>Modus: <span id="welcome-mode">Nur Lesen</span> | Skills aktivieren im Header</small>
+    </div>
+  </div>`;
 }
 
 async function setAgentMode(mode) {
