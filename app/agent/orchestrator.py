@@ -451,6 +451,7 @@ class AgentOrchestrator:
                 tool_calls = response.get("tool_calls", [])
                 content = response.get("content", "")
                 finish_reason = response.get("finish_reason", "")
+                native_tools = response.get("native_tools", True)
 
                 print(
                     f"[agent] LLM response: finish_reason={finish_reason!r}, "
@@ -472,7 +473,7 @@ class AgentOrchestrator:
                     if text_tool_calls:
                         print(f"[agent] Text-Parser erkannte {len(text_tool_calls)} Tool-Calls im Content")
                         tool_calls = text_tool_calls
-                        # Content bereinigen (Tool-Call-Strings entfernen)
+                        native_tools = False  # Text-geparst, kein natives tool_calls-Format
                         finish_reason = "tool_calls"
 
                 # Tool-Calls verarbeiten
@@ -659,32 +660,53 @@ class AgentOrchestrator:
                     state.tool_calls_history.append(tool_call)
 
                 # Messages für nächste Iteration aktualisieren
-                # Wichtig: Tool-Results korrekt als role="tool" Messages anhängen
-                # damit das LLM weiß was bereits ausgeführt wurde
-                messages.append({
-                    "role": "assistant",
-                    "content": content or "",
-                    "tool_calls": current_tool_calls_for_messages
-                })
+                def _truncate_result(raw: str, max_chars: int = 20000) -> str:
+                    if len(raw) > max_chars:
+                        return raw[:max_chars] + f"\n\n[HINWEIS: Inhalt bei {max_chars} Zeichen abgeschnitten. Gesamtlänge: {len(raw)} Zeichen. Nutze read_file mit offset-Parameter für weitere Abschnitte.]"
+                    return raw
 
-                for tc in current_tool_calls_for_messages:
-                    tc_id = tc.get("id")
-                    tool_call_obj = next(
-                        (t for t in state.tool_calls_history if t.id == tc_id),
-                        None
-                    )
-                    if tool_call_obj and tool_call_obj.result:
-                        raw_content = tool_call_obj.result.to_context()
-                        max_chars = 20000
-                        if len(raw_content) > max_chars:
-                            truncated = raw_content[:max_chars]
-                            truncated += f"\n\n[HINWEIS: Inhalt bei {max_chars} Zeichen abgeschnitten. Gesamtlänge: {len(raw_content)} Zeichen. Nutze read_file mit offset-Parameter für weitere Abschnitte.]"
-                        else:
-                            truncated = raw_content
+                if native_tools:
+                    # OpenAI-kompatibles Format: role="assistant" mit tool_calls + role="tool" Ergebnisse
+                    # content muss None (nicht "") sein wenn tool_calls vorhanden - Mistral/OpenAI-Anforderung
+                    messages.append({
+                        "role": "assistant",
+                        "content": content if content else None,
+                        "tool_calls": current_tool_calls_for_messages
+                    })
+                    for tc in current_tool_calls_for_messages:
+                        tc_id = tc.get("id")
+                        tool_call_obj = next(
+                            (t for t in state.tool_calls_history if t.id == tc_id),
+                            None
+                        )
+                        if tool_call_obj and tool_call_obj.result:
+                            messages.append({
+                                "role": "tool",
+                                "tool_call_id": tc_id,
+                                "content": _truncate_result(tool_call_obj.result.to_context())
+                            })
+                else:
+                    # Text-basiertes Format (Mistral-Compact, Qwen etc.):
+                    # Kein tool_calls-Feld im assistant-Message, Ergebnisse als user-Message
+                    messages.append({
+                        "role": "assistant",
+                        "content": content or ""
+                    })
+                    results_parts = []
+                    for tc in current_tool_calls_for_messages:
+                        tc_id = tc.get("id")
+                        tool_name = tc.get("function", {}).get("name", "unknown")
+                        tool_call_obj = next(
+                            (t for t in state.tool_calls_history if t.id == tc_id),
+                            None
+                        )
+                        if tool_call_obj and tool_call_obj.result:
+                            result_text = _truncate_result(tool_call_obj.result.to_context())
+                            results_parts.append(f"### Tool-Ergebnis: {tool_name}\n{result_text}")
+                    if results_parts:
                         messages.append({
-                            "role": "tool",
-                            "tool_call_id": tc_id,
-                            "content": truncated
+                            "role": "user",
+                            "content": "Tool-Ergebnisse:\n\n" + "\n\n---\n\n".join(results_parts)
                         })
 
             except Exception as e:
@@ -969,6 +991,7 @@ class AgentOrchestrator:
         return {
             "content": content,
             "tool_calls": tool_calls_in_msg,
+            "native_tools": bool(tool_calls_in_msg),  # True = LLM hat nativ tool_calls geliefert
             "usage": usage,
             "finish_reason": finish_reason
         }

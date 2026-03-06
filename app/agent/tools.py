@@ -905,6 +905,255 @@ async def describe_database_table(table_name: str, schema: str = None) -> ToolRe
 
 
 # ══════════════════════════════════════════════════════════════════════════════
+# SQLJ & Java Debug Tools
+# ══════════════════════════════════════════════════════════════════════════════
+
+async def read_sqlj_file(path: str) -> ToolResult:
+    """
+    Liest eine SQLJ-Datei und extrahiert alle SQL-Statements mit Methoden-Kontext.
+    Gibt strukturierte Liste aller #sql { ... } Blöcke zurück.
+    """
+    import re
+    from pathlib import Path
+    from app.core.config import settings
+
+    # Pfad auflösen
+    file_path = Path(path)
+    if not file_path.is_absolute():
+        for base in [settings.repository.path, "."]:
+            candidate = Path(base) / path
+            if candidate.exists():
+                file_path = candidate
+                break
+
+    if not file_path.exists():
+        return ToolResult(success=False, error=f"SQLJ-Datei nicht gefunden: {path}")
+
+    try:
+        content = file_path.read_text(encoding="utf-8", errors="replace")
+    except Exception as e:
+        return ToolResult(success=False, error=f"Lesefehler: {e}")
+
+    lines = content.splitlines()
+    output = f"=== SQLJ-Datei: {file_path.name} ===\n\n"
+
+    # SQL-Blöcke extrahieren: #sql [optionalCtx] { ... };
+    sql_pattern = re.compile(
+        r'#sql\s*(?:\[\s*\w+\s*\])?\s*\{(.*?)\}\s*;',
+        re.DOTALL | re.IGNORECASE
+    )
+    matches = list(sql_pattern.finditer(content))
+
+    if not matches:
+        output += "Keine SQL-Statements (#sql { ... }) gefunden.\n\n"
+        output += "=== Vollständiger Inhalt ===\n"
+        output += content
+        return ToolResult(success=True, data=output)
+
+    output += f"Gefundene SQL-Blöcke: {len(matches)}\n\n"
+
+    for i, match in enumerate(matches, 1):
+        sql_raw = match.group(1).strip()
+        start_pos = match.start()
+
+        # Zeile des Matches bestimmen
+        line_num = content[:start_pos].count('\n') + 1
+
+        # Umgebende Methode suchen (letzte method-Deklaration vor diesem SQL)
+        method_context = "unbekannte Methode"
+        method_pattern = re.compile(
+            r'(?:public|private|protected|static|\s)+\w+[\w<>, \[\]]*\s+(\w+)\s*\([^)]*\)\s*(?:throws\s+[\w,\s]+)?\s*\{',
+            re.MULTILINE
+        )
+        for m in method_pattern.finditer(content[:start_pos]):
+            method_context = m.group(1)
+
+        # SQL normalisieren (Whitespace vereinfachen)
+        sql_clean = re.sub(r'\s+', ' ', sql_raw).strip()
+
+        # Host-Variablen (:varName) extrahieren
+        host_vars = re.findall(r':(\w+)', sql_clean)
+
+        output += f"--- SQL #{i} (Zeile {line_num}, Methode: {method_context}) ---\n"
+        output += f"```sql\n{sql_clean}\n```\n"
+        if host_vars:
+            output += f"Host-Variablen (SQLJ :var): {', '.join(f':{v}' for v in host_vars)}\n"
+        output += "\n"
+
+    return ToolResult(success=True, data=output)
+
+
+async def debug_java_with_testdata(
+    class_name: str,
+    method_name: str = "",
+    test_parameters: Optional[Dict[str, Any]] = None
+) -> ToolResult:
+    """
+    Debuggt einen Java-Service mit Testdaten:
+    1. Sucht und liest die Java-Klasse
+    2. Findet zugehörige SQLJ-Dateien
+    3. Extrahiert SQL der Zielmethode
+    4. Substituiert Testparameter (SQLJ :varName → Werte)
+    5. Führt SQL gegen die DB aus und zeigt Ergebnisse
+    """
+    import re
+    from pathlib import Path
+    from app.core.config import settings
+
+    if test_parameters is None:
+        test_parameters = {}
+
+    output = f"=== Java Debug: {class_name}"
+    if method_name:
+        output += f".{method_name}()"
+    output += " ===\n\n"
+
+    repo_path = Path(settings.repository.path) if settings.repository.path else Path(".")
+
+    # 1. Java-Klasse finden
+    simple_name = class_name.split(".")[-1]  # com.example.Foo → Foo
+    java_files = list(repo_path.rglob(f"{simple_name}.java"))
+    sqlj_files_same_dir: list = []
+    java_content = ""
+
+    if not java_files:
+        output += f"[WARNUNG] Java-Klasse '{simple_name}.java' nicht im Repository gefunden.\n"
+        output += "Suche nach SQLJ-Dateien mit ähnlichem Namen...\n\n"
+    else:
+        java_file = java_files[0]
+        output += f"**Java-Datei:** {java_file.relative_to(repo_path)}\n\n"
+        try:
+            java_content = java_file.read_text(encoding="utf-8", errors="replace")
+            output += f"```java\n{java_content[:8000]}"
+            if len(java_content) > 8000:
+                output += f"\n... [+{len(java_content)-8000} Zeichen, nutze read_file für vollständigen Inhalt]"
+            output += "\n```\n\n"
+        except Exception as e:
+            output += f"[Lesefehler Java: {e}]\n\n"
+
+        # SQLJ-Dateien im selben Verzeichnis suchen
+        sqlj_files_same_dir = list(java_file.parent.glob("*.sqlj"))
+        # Auch nach SQLJ mit ähnlichem Namen suchen
+        sqlj_files_same_dir += [
+            f for f in repo_path.rglob(f"*{simple_name}*.sqlj")
+            if f not in sqlj_files_same_dir
+        ]
+
+    # Wenn keine SQLJ im selben Verzeichnis, im ganzen Repo suchen
+    if not sqlj_files_same_dir:
+        sqlj_files_same_dir = list(repo_path.rglob("*.sqlj"))
+
+    # 2. SQLJ-Dateien lesen und SQL für Zielmethode extrahieren
+    sql_pattern = re.compile(
+        r'#sql\s*(?:\[\s*\w+\s*\])?\s*\{(.*?)\}\s*;',
+        re.DOTALL | re.IGNORECASE
+    )
+    method_pattern = re.compile(
+        r'(?:public|private|protected|static|\s)+\w+[\w<>, \[\]]*\s+(\w+)\s*\([^)]*\)\s*(?:throws\s+[\w,\s]+)?\s*\{',
+        re.MULTILINE
+    )
+
+    relevant_sql_blocks: list = []
+
+    for sqlj_file in sqlj_files_same_dir[:5]:  # max 5 SQLJ-Dateien
+        try:
+            sqlj_content = sqlj_file.read_text(encoding="utf-8", errors="replace")
+        except Exception:
+            continue
+
+        output += f"**SQLJ-Datei:** {sqlj_file.name}\n"
+
+        for match in sql_pattern.finditer(sqlj_content):
+            sql_raw = match.group(1).strip()
+            sql_clean = re.sub(r'\s+', ' ', sql_raw).strip()
+            start_pos = match.start()
+
+            # Methode des SQL-Blocks bestimmen
+            current_method = ""
+            for m in method_pattern.finditer(sqlj_content[:start_pos]):
+                current_method = m.group(1)
+
+            # Nur Methode filtern wenn angegeben
+            if method_name and current_method.lower() != method_name.lower():
+                continue
+
+            host_vars = re.findall(r':(\w+)', sql_clean)
+            relevant_sql_blocks.append({
+                "file": sqlj_file.name,
+                "method": current_method,
+                "sql": sql_clean,
+                "host_vars": host_vars,
+            })
+
+    if not relevant_sql_blocks:
+        output += f"\nKeine SQL-Statements für Methode '{method_name or 'alle'}' gefunden.\n"
+    else:
+        output += f"\n**Gefundene SQL-Statements:** {len(relevant_sql_blocks)}\n\n"
+
+    # 3. SQL mit Testdaten substituieren und ausführen
+    if relevant_sql_blocks and test_parameters and settings.database.enabled:
+        try:
+            from app.services.db_client import get_db_client
+            db_client = get_db_client()
+        except Exception:
+            db_client = None
+
+        output += "## SQL-Ausführung mit Testdaten\n\n"
+
+        for i, block in enumerate(relevant_sql_blocks, 1):
+            sql = block["sql"]
+            host_vars = block["host_vars"]
+
+            # :varName → SQL-Literal substituieren
+            sql_exec = sql
+            for var in host_vars:
+                val = test_parameters.get(var, test_parameters.get(var.lower()))
+                if val is not None:
+                    if isinstance(val, str):
+                        sql_literal = f"'{val}'"
+                    elif isinstance(val, bool):
+                        sql_literal = "1" if val else "0"
+                    else:
+                        sql_literal = str(val)
+                    sql_exec = re.sub(rf':{var}\b', sql_literal, sql_exec)
+
+            output += f"### SQL #{i} ({block['method']})\n"
+            output += f"Original: `{sql[:200]}...`\n" if len(sql) > 200 else f"Original: `{sql}`\n"
+            output += f"Mit Testdaten: `{sql_exec[:300]}`\n\n"
+
+            if db_client:
+                try:
+                    result = await db_client.execute(sql_exec)
+                    if result.success:
+                        rows = result.data if isinstance(result.data, list) else []
+                        output += f"**Ergebnis:** {len(rows)} Zeile(n)\n"
+                        if rows:
+                            # Header
+                            if isinstance(rows[0], dict):
+                                cols = list(rows[0].keys())
+                                output += "| " + " | ".join(cols) + " |\n"
+                                output += "|" + "|".join(["---"] * len(cols)) + "|\n"
+                                for row in rows[:20]:
+                                    output += "| " + " | ".join(str(row.get(c, "")) for c in cols) + " |\n"
+                            else:
+                                for row in rows[:20]:
+                                    output += f"- {row}\n"
+                    else:
+                        output += f"**DB-Fehler:** {result.error}\n"
+                except Exception as e:
+                    output += f"**Ausführungsfehler:** {e}\n"
+            else:
+                output += "_Datenbank nicht verfügbar - SQL konnte nicht ausgeführt werden._\n"
+            output += "\n"
+    elif relevant_sql_blocks and not test_parameters:
+        output += "\n_Keine Testparameter übergeben - SQL nicht ausgeführt. Übergebe test_parameters um SQL auszuführen._\n"
+    elif relevant_sql_blocks and not settings.database.enabled:
+        output += "\n_Datenbank nicht aktiviert - SQL nicht ausgeführt._\n"
+
+    return ToolResult(success=True, data=output)
+
+
+# ══════════════════════════════════════════════════════════════════════════════
 # Tool Definitions
 # ══════════════════════════════════════════════════════════════════════════════
 
@@ -1013,6 +1262,28 @@ SEARCH_PDF_TOOL = Tool(
         ToolParameter("top_k", "integer", "Maximale Anzahl Ergebnisse", required=False, default=5),
     ],
     handler=search_pdf
+)
+
+READ_SQLJ_FILE_TOOL = Tool(
+    name="read_sqlj_file",
+    description="Liest eine SQLJ-Datei und extrahiert alle SQL-Statements (#sql { ... }) mit Methoden-Kontext und Host-Variablen (:varName). Ideal um SQL zu verstehen das ein Java-Service ausführt.",
+    category=ToolCategory.ANALYSIS,
+    parameters=[
+        ToolParameter("path", "string", "Pfad zur SQLJ-Datei (relativ zum Repository oder absolut)"),
+    ],
+    handler=read_sqlj_file
+)
+
+DEBUG_JAVA_TESTDATA_TOOL = Tool(
+    name="debug_java_with_testdata",
+    description="Debuggt einen Java-Service mit echten Testdaten: Findet die Java-Klasse, liest den Code, sucht zugehörige SQLJ-Dateien, extrahiert SQL der Zielmethode, substituiert Testparameter (:varName → Wert) und führt die SQL-Abfragen gegen die DB aus. Gibt Java-Code + SQL + DB-Ergebnisse zurück.",
+    category=ToolCategory.ANALYSIS,
+    parameters=[
+        ToolParameter("class_name", "string", "Name der Java-Klasse (einfach z.B. 'CustomerService' oder vollqualifiziert 'com.example.CustomerService')"),
+        ToolParameter("method_name", "string", "Name der Methode (optional, filtert SQL auf diese Methode)", required=False, default=""),
+        ToolParameter("test_parameters", "object", "Testdaten als Key-Value-Objekt, z.B. {\"customerId\": \"12345\", \"date\": \"2024-01-01\"}. Keys entsprechen den SQLJ-Host-Variablen (:varName)", required=False, default={}),
+    ],
+    handler=debug_java_with_testdata
 )
 
 TRACE_JAVA_REFERENCES_TOOL = Tool(
@@ -1274,6 +1545,8 @@ def create_default_registry() -> ToolRegistry:
 
     # Analysis Tools
     registry.register(TRACE_JAVA_REFERENCES_TOOL)
+    registry.register(READ_SQLJ_FILE_TOOL)
+    registry.register(DEBUG_JAVA_TESTDATA_TOOL)
 
     # Database Tools
     registry.register(QUERY_DATABASE_TOOL)
