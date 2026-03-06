@@ -574,12 +574,20 @@ class AgentOrchestrator:
                 # Tools ausführen
                 current_tool_calls_for_messages = []
                 for tc in tool_calls[:self.max_tool_calls_per_iter]:
+                    raw_args = tc["function"]["arguments"]
+                    if isinstance(raw_args, str):
+                        try:
+                            parsed_args = json.loads(raw_args)
+                        except json.JSONDecodeError as e:
+                            print(f"[agent] Malformed tool arguments JSON: {e} — raw: {raw_args[:100]}")
+                            parsed_args = {}
+                    else:
+                        parsed_args = raw_args
+
                     tool_call = ToolCall(
                         id=tc.get("id", f"call_{len(state.tool_calls_history)}"),
                         name=tc["function"]["name"],
-                        arguments=json.loads(tc["function"]["arguments"])
-                        if isinstance(tc["function"]["arguments"], str)
-                        else tc["function"]["arguments"]
+                        arguments=parsed_args
                     )
 
                     # Loop-Prävention: read_file max 2x pro Datei erlauben
