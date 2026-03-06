@@ -1003,6 +1003,17 @@ async def debug_java_with_testdata(
     if test_parameters is None:
         test_parameters = {}
 
+    if not class_name or not class_name.strip():
+        return ToolResult(
+            success=False,
+            error=(
+                "class_name fehlt. Bitte den genauen Java-Klassennamen angeben, "
+                "z.B. 'CustomerService' oder 'com.example.CustomerService'. "
+                "Frage den Nutzer nach dem Klassennamen bevor du dieses Tool erneut aufrufst."
+            )
+        )
+
+    class_name = class_name.strip()
     output = f"=== Java Debug: {class_name}"
     if method_name:
         output += f".{method_name}()"
@@ -1276,10 +1287,17 @@ READ_SQLJ_FILE_TOOL = Tool(
 
 DEBUG_JAVA_TESTDATA_TOOL = Tool(
     name="debug_java_with_testdata",
-    description="Debuggt einen Java-Service mit echten Testdaten: Findet die Java-Klasse, liest den Code, sucht zugehörige SQLJ-Dateien, extrahiert SQL der Zielmethode, substituiert Testparameter (:varName → Wert) und führt die SQL-Abfragen gegen die DB aus. Gibt Java-Code + SQL + DB-Ergebnisse zurück.",
+    description=(
+        "Debuggt einen Java-Service mit echten Testdaten. "
+        "WICHTIG: class_name ist ein PFLICHTFELD – rufe dieses Tool NIEMALS auf ohne einen konkreten Klassennamen. "
+        "Falls der Nutzer keinen Klassennamen angegeben hat, frage ZUERST danach bevor du dieses Tool aufrufst. "
+        "Was das Tool tut: Findet die Java-Klasse im Repository, liest den Code, sucht zugehörige SQLJ-Dateien, "
+        "extrahiert SQL-Statements der Zielmethode, substituiert Testparameter (:varName → Wert) "
+        "und führt die SQL-Abfragen gegen die DB aus. Gibt Java-Code + SQL + DB-Ergebnisse zurück."
+    ),
     category=ToolCategory.ANALYSIS,
     parameters=[
-        ToolParameter("class_name", "string", "Name der Java-Klasse (einfach z.B. 'CustomerService' oder vollqualifiziert 'com.example.CustomerService')"),
+        ToolParameter("class_name", "string", "PFLICHT: Name der Java-Klasse (einfach z.B. 'CustomerService' oder vollqualifiziert 'com.example.CustomerService'). Darf nicht leer sein."),
         ToolParameter("method_name", "string", "Name der Methode (optional, filtert SQL auf diese Methode)", required=False, default=""),
         ToolParameter("test_parameters", "object", "Testdaten als Key-Value-Objekt, z.B. {\"customerId\": \"12345\", \"date\": \"2024-01-01\"}. Keys entsprechen den SQLJ-Host-Variablen (:varName)", required=False, default={}),
     ],
