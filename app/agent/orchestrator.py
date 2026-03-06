@@ -103,8 +103,8 @@ class AgentState:
     # Compaction Stats
     compaction_count: int = 0
     last_compaction_savings: int = 0
-    # Loop-Prävention: Welche Dateien wurden in dieser Session gelesen
-    read_files_this_request: Set[str] = field(default_factory=set)
+    # Loop-Prävention: Zählt wie oft eine Datei pro Request gelesen wurde (max 2x erlaubt)
+    read_files_this_request: Dict[str, int] = field(default_factory=dict)
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -128,7 +128,37 @@ def _parse_text_tool_calls(content: str, available_tools: List[Dict]) -> List[Di
     tool_names = {t["function"]["name"] for t in available_tools} if available_tools else set()
     parsed_calls = []
 
-    # Format 1: Mistral [TOOL_CALLS] Format
+    # Format 1a: Mistral 678B Compact Format
+    # [TOOL_CALLS]funcname{"arg": "val"}  (kein Leerzeichen, kein JSON-Array)
+    mistral_compact_matches = re.findall(
+        r'\[TOOL_CALLS\](\w+)(\{.*?\}|\[.*?\])',
+        content,
+        re.DOTALL
+    )
+    if mistral_compact_matches:
+        for name, args_str in mistral_compact_matches:
+            if not tool_names or name in tool_names:
+                try:
+                    args = json.loads(args_str)
+                    parsed_calls.append({
+                        "id": f"call_{uuid.uuid4().hex[:8]}",
+                        "type": "function",
+                        "function": {
+                            "name": name,
+                            "arguments": json.dumps(args) if isinstance(args, dict) else args_str
+                        }
+                    })
+                except json.JSONDecodeError:
+                    parsed_calls.append({
+                        "id": f"call_{uuid.uuid4().hex[:8]}",
+                        "type": "function",
+                        "function": {"name": name, "arguments": args_str}
+                    })
+        if parsed_calls:
+            print(f"[agent] Mistral 678B Compact Format erkannt: {len(parsed_calls)} calls")
+            return parsed_calls
+
+    # Format 1b: Mistral Standard Format
     # [TOOL_CALLS] [{"name": "...", "arguments": {...}}]
     mistral_match = re.search(
         r'\[TOOL_CALLS\]\s*(\[.*?\])',
@@ -152,7 +182,7 @@ def _parse_text_tool_calls(content: str, available_tools: List[Dict]) -> List[Di
                             }
                         })
             if parsed_calls:
-                print(f"[agent] Mistral [TOOL_CALLS] Format erkannt: {len(parsed_calls)} calls")
+                print(f"[agent] Mistral Standard Format erkannt: {len(parsed_calls)} calls")
                 return parsed_calls
         except (json.JSONDecodeError, KeyError):
             pass
@@ -542,20 +572,20 @@ class AgentOrchestrator:
                         else tc["function"]["arguments"]
                     )
 
-                    # Loop-Prävention: read_file auf bereits gelesene Dateien überspringen
+                    # Loop-Prävention: read_file max 2x pro Datei erlauben
                     if tool_call.name == "read_file":
                         file_path = tool_call.arguments.get("path", "")
-                        if file_path in state.read_files_this_request:
-                            print(f"[agent] Loop-Prävention: {file_path} wurde bereits gelesen, überspringe")
-                            # Synthetisches Tool-Result mit Hinweis
+                        read_count = state.read_files_this_request.get(file_path, 0)
+                        if read_count >= 2:
+                            print(f"[agent] Loop-Prävention: {file_path} wurde bereits {read_count}x gelesen, überspringe")
                             messages.append({
                                 "role": "tool",
                                 "tool_call_id": tool_call.id,
-                                "content": f"[HINWEIS] Die Datei '{file_path}' wurde bereits in dieser Sitzung gelesen. Der Inhalt ist oben im Kontext verfügbar."
+                                "content": f"[HINWEIS] Die Datei '{file_path}' wurde bereits {read_count}x gelesen. Bitte nutze den bereits erhaltenen Inhalt aus dem Kontext weiter oder verwende search_code für gezielte Suchen."
                             })
                             current_tool_calls_for_messages.append(tc)
                             continue
-                        state.read_files_this_request.add(file_path)
+                        state.read_files_this_request[file_path] = read_count + 1
 
                     # Pro-Tool Modell ermitteln
                     tool_specific_model = settings.llm.tool_models.get(tool_call.name, "")
@@ -644,10 +674,17 @@ class AgentOrchestrator:
                         None
                     )
                     if tool_call_obj and tool_call_obj.result:
+                        raw_content = tool_call_obj.result.to_context()
+                        max_chars = 20000
+                        if len(raw_content) > max_chars:
+                            truncated = raw_content[:max_chars]
+                            truncated += f"\n\n[HINWEIS: Inhalt bei {max_chars} Zeichen abgeschnitten. Gesamtlänge: {len(raw_content)} Zeichen. Nutze read_file mit offset-Parameter für weitere Abschnitte.]"
+                        else:
+                            truncated = raw_content
                         messages.append({
                             "role": "tool",
                             "tool_call_id": tc_id,
-                            "content": tool_call_obj.result.to_context()[:5000]
+                            "content": truncated
                         })
 
             except Exception as e:
