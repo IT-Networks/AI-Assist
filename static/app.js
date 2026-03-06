@@ -263,30 +263,65 @@ function closeSkillsDropdown(e) {
 }
 
 // ── Chat / Agent Communication ──
+
+// Aktiver AbortController für laufende Anfragen
+let _chatAbortController = null;
+
+function _setStreamingMode(active) {
+  const sendBtn = document.getElementById('send-btn');
+  if (active) {
+    sendBtn.title = 'Anfrage abbrechen';
+    sendBtn.classList.add('cancel-mode');
+    sendBtn.innerHTML = '<span class="cancel-icon">&#9632;</span>';
+    sendBtn.onclick = cancelRequest;
+  } else {
+    sendBtn.title = '';
+    sendBtn.classList.remove('cancel-mode');
+    sendBtn.innerHTML = '<span class="send-icon">&#10148;</span>';
+    sendBtn.onclick = sendMessage;
+  }
+}
+
+async function cancelRequest() {
+  if (_chatAbortController) {
+    _chatAbortController.abort();
+    _chatAbortController = null;
+  }
+  // Backend informieren damit der Generator stoppt
+  try {
+    await fetch(`/api/agent/cancel/${state.sessionId}`, { method: 'POST' });
+  } catch (_) { /* ignore */ }
+  _setStreamingMode(false);
+}
+
 async function sendMessage() {
   const input = document.getElementById('message-input');
   const text = input.value.trim();
   if (!text) return;
 
+  // Verhindere Doppel-Senden während laufender Anfrage
+  if (_chatAbortController) return;
+
   input.value = '';
   input.style.height = 'auto';
   appendMessage('user', text);
 
-  const sendBtn = document.getElementById('send-btn');
-  sendBtn.disabled = true;
-  sendBtn.innerHTML = '<span class="spinner"></span>';
+  _chatAbortController = new AbortController();
+  _setStreamingMode(true);
 
   try {
-    await sendAgentChat(text);
+    await sendAgentChat(text, _chatAbortController.signal);
   } catch (e) {
-    appendMessage('error', 'Fehler: ' + e.message);
+    if (e.name !== 'AbortError') {
+      appendMessage('error', 'Fehler: ' + e.message);
+    }
   } finally {
-    sendBtn.disabled = false;
-    sendBtn.innerHTML = '<span class="send-icon">&#10148;</span>';
+    _chatAbortController = null;
+    _setStreamingMode(false);
   }
 }
 
-async function sendAgentChat(message) {
+async function sendAgentChat(message, abortSignal) {
   const payload = {
     message,
     session_id: state.sessionId,
@@ -298,6 +333,7 @@ async function sendAgentChat(message) {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(payload),
+    signal: abortSignal,
   });
 
   if (!res.ok) {
@@ -324,7 +360,15 @@ async function sendAgentChat(message) {
   let buffer = '';
 
   while (true) {
-    const { value, done } = await reader.read();
+    let value, done;
+    try {
+      ({ value, done } = await reader.read());
+    } catch (e) {
+      // AbortError: User hat abgebrochen - sauber beenden
+      if (e.name === 'AbortError') break;
+      throw e;
+    }
+
     if (done) {
       // Stream ended – process any remaining data in buffer
       if (buffer.trim()) {
@@ -487,7 +531,8 @@ async function processAgentEvent(event, bubble, msgDiv) {
 
     case 'cancelled':
       hideConfirmationPanel();
-      appendMessage('system', `✗ ${data.message}`);
+      stopRequestTimer();
+      appendMessage('system', `⏹ ${data.message || 'Anfrage abgebrochen'}`);
       break;
 
     case 'error':

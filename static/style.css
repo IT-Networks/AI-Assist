@@ -965,6 +965,21 @@ body {
   opacity: 0.85;
 }
 
+#send-btn.cancel-mode {
+  background: var(--error, #e05252);
+  animation: pulse-cancel 1.5s ease-in-out infinite;
+}
+
+#send-btn.cancel-mode:hover {
+  opacity: 1;
+  background: #c0392b;
+}
+
+@keyframes pulse-cancel {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.75; }
+}
+
 /* ══════════════════════════════════════════════════════════════════════════════
    Right Sidebar - Tools & Confirmation
    ══════════════════════════════════════════════════════════════════════════════ */

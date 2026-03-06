@@ -12,7 +12,7 @@ import asyncio
 import json
 from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 import uuid
@@ -72,7 +72,7 @@ class AgentEventData(BaseModel):
 # ══════════════════════════════════════════════════════════════════════════════
 
 @router.post("/chat")
-async def agent_chat(request: AgentChatRequest):
+async def agent_chat(request: AgentChatRequest, http_request: Request):
     """
     Agent-Chat mit Tool-Calling als Server-Sent Events.
 
@@ -112,6 +112,12 @@ async def agent_chat(request: AgentChatRequest):
             )
 
             async for event in gen:
+                # Client-Disconnect erkennen und Anfrage abbrechen
+                if await http_request.is_disconnected():
+                    orchestrator.cancel_request(session_id)
+                    await gen.aclose()
+                    return
+
                 event_data = {
                     "type": event.type.value,
                     "session_id": session_id,
@@ -122,10 +128,11 @@ async def agent_chat(request: AgentChatRequest):
                 # Bei CONFIRM_REQUIRED pausieren wir hier
                 # Das Frontend muss dann /confirm aufrufen
                 if event.type == AgentEventType.CONFIRM_REQUIRED:
-                    # Wir brechen hier ab und warten auf /confirm
                     yield f"data: {json.dumps({'type': 'waiting_for_confirmation', 'session_id': session_id}, ensure_ascii=False)}\n\n"
                     return
 
+        except asyncio.CancelledError:
+            orchestrator.cancel_request(session_id)
         except Exception as e:
             error_event = {
                 "type": "error",
@@ -354,6 +361,17 @@ async def get_session(session_id: str) -> AgentSessionResponse:
         tool_calls_count=len(state.tool_calls_history),
         pending_confirmation=pending
     )
+
+
+@router.post("/cancel/{session_id}")
+async def cancel_request(session_id: str) -> Dict[str, str]:
+    """Bricht die laufende Anfrage einer Session ab."""
+    from app.agent.orchestrator import get_agent_orchestrator
+
+    orchestrator = get_agent_orchestrator()
+    orchestrator.cancel_request(session_id)
+
+    return {"message": f"Anfrage für Session '{session_id}' abgebrochen"}
 
 
 @router.delete("/session/{session_id}")

@@ -105,6 +105,8 @@ class AgentState:
     last_compaction_savings: int = 0
     # Loop-Prävention: Zählt wie oft eine Datei pro Request gelesen wurde (max 2x erlaubt)
     read_files_this_request: Dict[str, int] = field(default_factory=dict)
+    # Abbruch-Flag für laufende Anfragen
+    cancelled: bool = False
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -336,7 +338,9 @@ class AgentOrchestrator:
 
         state = self._get_state(session_id)
         # Gelesene Dateien für diese Anfrage zurücksetzen (Loop-Prävention)
-        state.read_files_this_request = set()
+        state.read_files_this_request = {}
+        # Abbruch-Flag zurücksetzen
+        state.cancelled = False
         include_write_ops = state.mode != AgentMode.READ_ONLY
 
         # System-Prompt bauen
@@ -443,6 +447,11 @@ class AgentOrchestrator:
 
         for iteration in range(self.max_iterations):
             try:
+                # Abbruch prüfen
+                if state.cancelled:
+                    yield AgentEvent(AgentEventType.CANCELLED, {"message": "Anfrage wurde abgebrochen"})
+                    return
+
                 # LLM aufrufen (nicht-streamend für Tool-Calls)
                 print(f"[agent] Iteration {iteration + 1}: Calling LLM with {len(tool_schemas)} tools")
                 response = await self._call_llm_with_tools(
@@ -1125,6 +1134,12 @@ Sei vorsichtig und mache nur notwendige Änderungen.
             state.pending_confirmation.confirmed = confirmed
             return True
         return False
+
+    def cancel_request(self, session_id: str) -> None:
+        """Bricht die laufende Anfrage einer Session ab."""
+        state = self._get_state(session_id)
+        state.cancelled = True
+        print(f"[agent] Anfrage für Session {session_id} abgebrochen")
 
     def clear_session(self, session_id: str) -> None:
         """Löscht den State einer Session."""
