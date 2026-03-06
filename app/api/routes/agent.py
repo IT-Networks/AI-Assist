@@ -428,6 +428,30 @@ async def create_session(
     )
 
 
+@router.get("/sessions")
+async def list_sessions() -> Dict[str, Any]:
+    """Listet alle aktiven Agent-Sessions auf."""
+    from app.agent.orchestrator import get_agent_orchestrator
+
+    orchestrator = get_agent_orchestrator()
+    sessions = []
+    for session_id, session_state in orchestrator._sessions.items():
+        first_msg = ""
+        if session_state.messages_history:
+            for msg in session_state.messages_history:
+                if msg.get("role") == "user":
+                    first_msg = msg.get("content", "")[:80]
+                    break
+        sessions.append({
+            "session_id": session_id,
+            "mode": session_state.mode.value,
+            "message_count": len(session_state.messages_history),
+            "tool_calls_count": len(session_state.tool_calls_history),
+            "first_message": first_msg,
+        })
+    return {"sessions": sessions, "count": len(sessions)}
+
+
 # ══════════════════════════════════════════════════════════════════════════════
 # Tool Information
 # ══════════════════════════════════════════════════════════════════════════════
