@@ -135,6 +135,7 @@ async function createAgentSession() {
   const res = await fetch(`/api/agent/session/new?mode=${state.mode}${skillIds ? '&skill_ids=' + skillIds : ''}`, {
     method: 'POST'
   });
+  if (!res.ok) throw new Error(`Session creation failed: ${res.status}`);
   const data = await res.json();
   return data.session_id;
 }
@@ -196,7 +197,6 @@ async function switchToChat(chatId) {
   hideConfirmationPanel();
 
   renderChatList();
-  updateChatTitleDisplay();
 
   // Scroll to bottom
   const messages = document.getElementById('messages');
@@ -311,7 +311,6 @@ function updateActiveChatTitle(firstUserMessage) {
     ? firstUserMessage.substring(0, 40) + '…'
     : firstUserMessage;
   renderChatList();
-  updateChatTitleDisplay();
 }
 
 function escapeHtml(str) {
