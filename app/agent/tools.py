@@ -159,6 +159,18 @@ class ToolRegistry:
         if not tool.handler:
             return ToolResult(success=False, error=f"Tool {name} hat keinen Handler")
 
+        # Required-Parameter prüfen bevor der Handler aufgerufen wird.
+        # Verhindert dass Python-TypeErrors als kryptische Fehlermeldungen beim LLM ankommen.
+        missing = [p.name for p in tool.parameters if p.required and p.name not in kwargs]
+        if missing:
+            return ToolResult(
+                success=False,
+                error=(
+                    f"Tool '{name}': Pflichtparameter fehlen: {', '.join(missing)}. "
+                    f"Bitte erneut aufrufen und alle Pflichtparameter angeben."
+                )
+            )
+
         try:
             return await tool.handler(**kwargs)
         except Exception as e:
@@ -984,7 +996,7 @@ async def read_sqlj_file(path: str) -> ToolResult:
 
 
 async def debug_java_with_testdata(
-    class_name: str,
+    class_name: str = "",
     method_name: str = "",
     test_parameters: Optional[Dict[str, Any]] = None
 ) -> ToolResult:
@@ -996,6 +1008,18 @@ async def debug_java_with_testdata(
     4. Substituiert Testparameter (SQLJ :varName → Werte)
     5. Führt SQL gegen die DB aus und zeigt Ergebnisse
     """
+    # Explizite Prüfung hier als zweite Verteidigungslinie – gibt dem LLM
+    # eine klare, handlungsanleitende Fehlermeldung statt eines Python-Tracebacks.
+    if not class_name or not class_name.strip():
+        return ToolResult(
+            success=False,
+            error=(
+                "class_name ist ein Pflichtparameter und darf nicht leer sein. "
+                "Bitte frage den Nutzer nach dem genauen Java-Klassennamen "
+                "(z.B. 'CustomerService') und rufe das Tool dann erneut auf."
+            )
+        )
+
     import re
     from pathlib import Path
     from app.core.config import settings
