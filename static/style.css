@@ -811,6 +811,13 @@ body {
   gap: 16px;
 }
 
+/* Jeder Chat hat sein eigenes Pane-Div. display:contents macht es für
+   das CSS-Layout transparent – die Kindelemente verhalten sich wie direkte
+   Kinder von #messages (flex-items, gap, etc.). */
+.messages-pane {
+  display: contents;
+}
+
 /* Messages */
 .message {
   max-width: 85%;
