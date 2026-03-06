@@ -60,7 +60,12 @@ const chatManager = {
   saveCurrentMessages() {
     const chat = this.getActive();
     if (!chat) return;
-    chat.messagesHTML = document.getElementById('messages').innerHTML;
+    // Live-Status-Bar vor dem Speichern entfernen – sie enthält laufende Timer-DOM-Elemente
+    // die nach einem innerHTML-Swap als detached/eingefroren erscheinen würden.
+    const messagesEl = document.getElementById('messages');
+    const liveBar = messagesEl?.querySelector('.live-status-bar:not(.done)');
+    if (liveBar) liveBar.remove();
+    chat.messagesHTML = messagesEl?.innerHTML ?? '';
     chat.toolHistory = [...state.toolHistory];
     chat.context = JSON.parse(JSON.stringify(state.context));
     chat.pendingConfirmation = state.pendingConfirmation;
@@ -173,7 +178,25 @@ async function createNewChat() {
 async function switchToChat(chatId) {
   if (chatId === chatManager.activeId) return;
 
-  // Save current chat state
+  // Laufende Anfrage sauber abbrechen bevor der DOM gewechselt wird.
+  // (bubble, statusBar und Timer referenzieren DOM-Elemente des aktuellen Chats –
+  //  nach dem innerHTML-Swap wären diese Referenzen detached und der Timer eingefroren.)
+  if (_chatAbortController) {
+    _chatAbortController.abort();
+    _chatAbortController = null;
+    const abortedSessionId = state.sessionId;
+    stopRequestTimer();
+    _setStreamingMode(false);
+    state.currentStatusBar = null;
+    // Backend-Cancel feuern und nicht abwarten
+    if (abortedSessionId) {
+      fetch(`/api/agent/cancel/${abortedSessionId}`, { method: 'POST' }).catch(() => {});
+    }
+    // Abbruch-Hinweis im aktuellen Chat vermerken bevor gespeichert wird
+    appendMessage('system', '⏹ Anfrage abgebrochen (Chat-Wechsel)');
+  }
+
+  // Aktuellen Chat-Stand speichern
   chatManager.saveCurrentMessages();
 
   const chat = chatManager.get(chatId);
@@ -182,21 +205,23 @@ async function switchToChat(chatId) {
   // Switch active
   chatManager.activeId = chatId;
 
-  // Restore state
+  // State wiederherstellen
   state.sessionId = chat.sessionId;
   state.toolHistory = [...chat.toolHistory];
   state.pendingConfirmation = chat.pendingConfirmation;
   state.context = JSON.parse(JSON.stringify(chat.context));
+  state.currentStatusBar = null;
 
-  // Restore UI
+  // UI wiederherstellen
   document.getElementById('messages').innerHTML = chat.messagesHTML || welcomeHTML();
   updateModeIndicator();
   renderToolHistory();
   renderContextChips();
-
   hideConfirmationPanel();
-
   renderChatList();
+
+  // Sicherstellen dass Send-Button im richtigen Modus ist
+  _setStreamingMode(false);
 
   // Scroll to bottom
   const messages = document.getElementById('messages');
