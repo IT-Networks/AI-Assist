@@ -13,6 +13,7 @@
 <header id="header">
   <div class="header-left">
     <h1>AI Code Assistant</h1>
+    <span id="chat-title-display" class="chat-title-display" title="Chat-Titel (Doppelklick zum Umbenennen)" ondblclick="renameChatPrompt()"></span>
     <div id="mode-indicator" class="mode-badge mode-read-only" title="Agent-Modus">
       <span class="mode-icon">&#128274;</span>
       <span class="mode-text">Nur Lesen</span>
@@ -114,13 +115,25 @@
   <!-- Left Sidebar - Explorer -->
   <aside id="sidebar-left" class="sidebar">
     <div class="sidebar-tabs">
-      <button class="sidebar-tab active" data-panel="explorer-panel">Explorer</button>
+      <button class="sidebar-tab active" data-panel="chats-panel">Chats</button>
+      <button class="sidebar-tab" data-panel="explorer-panel">Explorer</button>
       <button class="sidebar-tab" data-panel="handbook-panel">Handbuch</button>
       <button class="sidebar-tab" data-panel="search-panel">Suche</button>
     </div>
 
+    <!-- Chats Panel -->
+    <div class="sidebar-panel active" id="chats-panel">
+      <div class="chats-header">
+        <span class="chats-title">Meine Chats</span>
+        <button class="icon-btn" onclick="createNewChat()" title="Neuer Chat">&#43;</button>
+      </div>
+      <div id="chat-list" class="chat-list">
+        <!-- Rendered by JS -->
+      </div>
+    </div>
+
     <!-- Explorer Panel -->
-    <div class="sidebar-panel active" id="explorer-panel">
+    <div class="sidebar-panel" id="explorer-panel">
       <!-- Java Section -->
       <div class="explorer-section">
         <div class="explorer-header" onclick="toggleExplorerSection('java')">

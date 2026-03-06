@@ -5,7 +5,7 @@
 
 // ── State ──
 const state = {
-  sessionId: crypto.randomUUID(),
+  sessionId: null,         // Set by active chat
   currentModel: null,
   mode: 'read_only',
   activeSkills: [],
@@ -23,6 +23,48 @@ const state = {
   requestTimerInterval: null,
   liveTokenCount: 0,
   currentStatusBar: null,
+};
+
+// ── MultiChat State ──
+const chatManager = {
+  chats: [],       // Array of chat objects
+  activeId: null,  // ID of currently shown chat
+
+  createChat(sessionId, title = 'Neuer Chat') {
+    const chat = {
+      id: crypto.randomUUID(),
+      sessionId,
+      title,
+      messagesHTML: '',
+      toolHistory: [],
+      context: { javaFiles: [], pythonFiles: [], pdfIds: [], handbookServices: [] },
+      pendingConfirmation: null,
+      createdAt: Date.now(),
+    };
+    this.chats.push(chat);
+    return chat;
+  },
+
+  getActive() {
+    return this.chats.find(c => c.id === this.activeId) || null;
+  },
+
+  get(chatId) {
+    return this.chats.find(c => c.id === chatId) || null;
+  },
+
+  remove(chatId) {
+    this.chats = this.chats.filter(c => c.id !== chatId);
+  },
+
+  saveCurrentMessages() {
+    const chat = this.getActive();
+    if (!chat) return;
+    chat.messagesHTML = document.getElementById('messages').innerHTML;
+    chat.toolHistory = [...state.toolHistory];
+    chat.context = JSON.parse(JSON.stringify(state.context));
+    chat.pendingConfirmation = state.pendingConfirmation;
+  },
 };
 
 // ── Initialization ──
@@ -43,8 +85,8 @@ document.addEventListener('DOMContentLoaded', async () => {
     loadHandbookStatus(),
   ]);
 
-  // Create new agent session
-  await createAgentSession();
+  // Create initial chat
+  await createNewChat();
 });
 
 // ── UI Setup ──
@@ -89,17 +131,174 @@ function setupInputHandlers() {
 
 // ── Agent Session Management ──
 async function createAgentSession() {
+  const skillIds = state.activeSkills.join(',');
+  const res = await fetch(`/api/agent/session/new?mode=${state.mode}${skillIds ? '&skill_ids=' + skillIds : ''}`, {
+    method: 'POST'
+  });
+  const data = await res.json();
+  return data.session_id;
+}
+
+// ── MultiChat Functions ──
+async function createNewChat() {
+  // Save current chat messages before switching
+  chatManager.saveCurrentMessages();
+
   try {
-    const skillIds = state.activeSkills.join(',');
-    const res = await fetch(`/api/agent/session/new?mode=${state.mode}${skillIds ? '&skill_ids=' + skillIds : ''}`, {
-      method: 'POST'
-    });
-    const data = await res.json();
-    state.sessionId = data.session_id;
-    console.log('Agent session created:', state.sessionId);
+    const sessionId = await createAgentSession();
+    const chat = chatManager.createChat(sessionId);
+    chatManager.activeId = chat.id;
+
+    // Apply to state
+    state.sessionId = sessionId;
+    state.toolHistory = [];
+    state.pendingConfirmation = null;
+    state.context = { javaFiles: [], pythonFiles: [], pdfIds: [], handbookServices: [] };
+
+    // Reset UI
+    document.getElementById('messages').innerHTML = `
+      <div class="message system">
+        <div class="message-bubble">
+          <strong>Willkommen beim AI Code Assistant!</strong><br>
+          Ich kann Code durchsuchen, das Handbuch nutzen und Dateien bearbeiten.<br>
+          <small>Modus: <span id="welcome-mode">Nur Lesen</span> | Skills aktivieren im Header</small>
+        </div>
+      </div>`;
+    updateModeIndicator();
+    renderToolHistory();
+    renderContextChips();
+    hideConfirmationPanel();
+    renderChatList();
+    updateChatTitleDisplay();
+
+    console.log('New chat created:', chat.id, 'session:', sessionId);
   } catch (e) {
-    console.error('Failed to create agent session:', e);
+    console.error('Failed to create new chat:', e);
   }
+}
+
+async function switchToChat(chatId) {
+  if (chatId === chatManager.activeId) return;
+
+  // Save current chat state
+  chatManager.saveCurrentMessages();
+
+  const chat = chatManager.get(chatId);
+  if (!chat) return;
+
+  // Switch active
+  chatManager.activeId = chatId;
+
+  // Restore state
+  state.sessionId = chat.sessionId;
+  state.toolHistory = [...chat.toolHistory];
+  state.pendingConfirmation = chat.pendingConfirmation;
+  state.context = JSON.parse(JSON.stringify(chat.context));
+
+  // Restore UI
+  document.getElementById('messages').innerHTML = chat.messagesHTML || `
+    <div class="message system">
+      <div class="message-bubble">
+        <strong>Willkommen beim AI Code Assistant!</strong><br>
+        Ich kann Code durchsuchen, das Handbuch nutzen und Dateien bearbeiten.<br>
+        <small>Modus: <span id="welcome-mode">Nur Lesen</span> | Skills aktivieren im Header</small>
+      </div>
+    </div>`;
+  updateModeIndicator();
+  renderToolHistory();
+  renderContextChips();
+
+  if (chat.pendingConfirmation) {
+    // Restore confirmation state if needed
+  } else {
+    hideConfirmationPanel();
+  }
+
+  renderChatList();
+  updateChatTitleDisplay();
+
+  // Scroll to bottom
+  const messages = document.getElementById('messages');
+  messages.scrollTop = messages.scrollHeight;
+}
+
+async function deleteChat(chatId, event) {
+  event.stopPropagation();
+
+  const chat = chatManager.get(chatId);
+  if (!chat) return;
+
+  // Delete backend session
+  await fetch(`/api/agent/session/${chat.sessionId}`, { method: 'DELETE' }).catch(() => {});
+
+  const wasActive = chatId === chatManager.activeId;
+  chatManager.remove(chatId);
+
+  if (wasActive) {
+    if (chatManager.chats.length === 0) {
+      // Create new chat if none left
+      await createNewChat();
+    } else {
+      // Switch to last chat
+      await switchToChat(chatManager.chats[chatManager.chats.length - 1].id);
+    }
+  } else {
+    renderChatList();
+  }
+}
+
+function renderChatList() {
+  const listEl = document.getElementById('chat-list');
+  if (!listEl) return;
+
+  if (chatManager.chats.length === 0) {
+    listEl.innerHTML = '<div class="chat-list-empty">Keine Chats</div>';
+    return;
+  }
+
+  // Reverse to show newest first
+  const sorted = [...chatManager.chats].reverse();
+  listEl.innerHTML = sorted.map(chat => {
+    const isActive = chat.id === chatManager.activeId;
+    const title = escapeHtml(chat.title);
+    return `<div class="chat-item${isActive ? ' active' : ''}" onclick="switchToChat('${chat.id}')">
+      <span class="chat-item-icon">&#128172;</span>
+      <span class="chat-item-title" title="${title}">${title}</span>
+      <button class="chat-item-delete" onclick="deleteChat('${chat.id}', event)" title="Chat löschen">&#10005;</button>
+    </div>`;
+  }).join('');
+}
+
+function updateChatTitleDisplay() {
+  const el = document.getElementById('chat-title-display');
+  if (!el) return;
+  const chat = chatManager.getActive();
+  el.textContent = chat ? chat.title : '';
+}
+
+function renameChatPrompt() {
+  const chat = chatManager.getActive();
+  if (!chat) return;
+  const newTitle = prompt('Chat umbenennen:', chat.title);
+  if (newTitle && newTitle.trim()) {
+    chat.title = newTitle.trim();
+    renderChatList();
+    updateChatTitleDisplay();
+  }
+}
+
+function updateActiveChatTitle(firstUserMessage) {
+  const chat = chatManager.getActive();
+  if (!chat || chat.title !== 'Neuer Chat') return;
+  chat.title = firstUserMessage.length > 40
+    ? firstUserMessage.substring(0, 40) + '…'
+    : firstUserMessage;
+  renderChatList();
+  updateChatTitleDisplay();
+}
+
+function escapeHtml(str) {
+  return str.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 }
 
 async function setAgentMode(mode) {
@@ -305,6 +504,9 @@ async function sendMessage() {
   input.value = '';
   input.style.height = 'auto';
   appendMessage('user', text);
+
+  // Update chat title from first message
+  updateActiveChatTitle(text);
 
   _chatAbortController = new AbortController();
   _setStreamingMode(true);
@@ -802,27 +1004,7 @@ function scrollToBottom() {
 
 // ── Session ──
 document.getElementById('clear-btn').addEventListener('click', async () => {
-  if (!confirm('Session löschen und neu starten?')) return;
-
-  // Clear old session
-  await fetch(`/api/agent/session/${state.sessionId}`, { method: 'DELETE' }).catch(() => {});
-
-  // Reset state
-  state.sessionId = crypto.randomUUID();
-  state.toolHistory = [];
-  state.pendingConfirmation = null;
-  state.context = { javaFiles: [], pythonFiles: [], pdfIds: [], handbookServices: [] };
-
-  // Reset UI
-  document.getElementById('messages').innerHTML = '';
-  renderToolHistory();
-  renderContextChips();
-  hideConfirmationPanel();
-
-  // Create new session
-  await createAgentSession();
-
-  appendMessage('system', 'Neue Session gestartet.');
+  await createNewChat();
 });
 
 // ── Explorer Sections ──
