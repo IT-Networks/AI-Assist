@@ -1,3 +1,4 @@
+import asyncio
 import json
 from typing import AsyncGenerator, List, Optional
 
@@ -54,6 +55,17 @@ Wenn du mehrere Python-Dateien erstellst, nutze immer dieses Format:
 === END FILE ===
 """
 
+_RETRY_DELAYS = [2, 4, 8]  # Exponential Backoff in Sekunden
+
+
+def _is_retryable(exc: Exception) -> bool:
+    """Prüft ob eine Exception einen Retry rechtfertigt."""
+    if isinstance(exc, httpx.RequestError):
+        return True
+    if isinstance(exc, httpx.HTTPStatusError):
+        return exc.response.status_code >= 500
+    return False
+
 
 class LLMClient:
     def __init__(self):
@@ -84,22 +96,34 @@ class LLMClient:
             "max_tokens": self.max_tokens,
             "stream": False,
         }
-        client = _get_http_client()
-        try:
-            response = await client.post(
-                f"{self.base_url}/chat/completions",
-                headers=self._headers(),
-                json=payload,
-            )
-            response.raise_for_status()
-            data = response.json()
-            return data["choices"][0]["message"]["content"]
-        except httpx.HTTPStatusError as e:
-            raise LLMError(f"LLM API Fehler {e.response.status_code}: {e.response.text}") from e
-        except httpx.RequestError as e:
-            raise LLMError(f"LLM Verbindungsfehler: {e}") from e
-        except (KeyError, IndexError) as e:
-            raise LLMError(f"Unerwartetes LLM-Antwortformat: {e}") from e
+        last_exc = None
+        for attempt, delay in enumerate([0] + _RETRY_DELAYS):
+            if delay:
+                await asyncio.sleep(delay)
+            try:
+                client = _get_http_client()
+                response = await client.post(
+                    f"{self.base_url}/chat/completions",
+                    headers=self._headers(),
+                    json=payload,
+                )
+                response.raise_for_status()
+                data = response.json()
+                return data["choices"][0]["message"]["content"]
+            except Exception as e:
+                last_exc = e
+                if _is_retryable(e) and attempt < len(_RETRY_DELAYS):
+                    print(f"[llm] Retry {attempt + 1} nach Fehler: {e}")
+                    continue
+                break
+
+        if isinstance(last_exc, httpx.HTTPStatusError):
+            raise LLMError(f"LLM API Fehler {last_exc.response.status_code}: {last_exc.response.text}") from last_exc
+        if isinstance(last_exc, httpx.RequestError):
+            raise LLMError(f"LLM Verbindungsfehler: {last_exc}") from last_exc
+        if isinstance(last_exc, (KeyError, IndexError)):
+            raise LLMError(f"Unerwartetes LLM-Antwortformat: {last_exc}") from last_exc
+        raise LLMError(f"LLM Fehler: {last_exc}") from last_exc
 
     async def chat_stream(
         self,
@@ -114,33 +138,49 @@ class LLMClient:
             "max_tokens": self.max_tokens,
             "stream": True,
         }
-        client = _get_http_client()
-        try:
-            async with client.stream(
-                "POST",
-                f"{self.base_url}/chat/completions",
-                headers=self._headers(),
-                json=payload,
-            ) as response:
-                response.raise_for_status()
-                async for line in response.aiter_lines():
-                    if not line.startswith("data:"):
-                        continue
-                    raw = line[5:].strip()
-                    if raw == "[DONE]":
-                        break
-                    try:
-                        chunk = json.loads(raw)
-                        delta = chunk["choices"][0].get("delta", {})
-                        token = delta.get("content", "")
-                        if token:
-                            yield token
-                    except (json.JSONDecodeError, KeyError, IndexError):
-                        continue
-        except httpx.HTTPStatusError as e:
-            raise LLMError(f"LLM API Fehler {e.response.status_code}: {e.response.text}") from e
-        except httpx.RequestError as e:
-            raise LLMError(f"LLM Verbindungsfehler: {e}") from e
+        last_exc = None
+        for attempt, delay in enumerate([0] + _RETRY_DELAYS):
+            if delay:
+                await asyncio.sleep(delay)
+            try:
+                client = _get_http_client()
+                async with client.stream(
+                    "POST",
+                    f"{self.base_url}/chat/completions",
+                    headers=self._headers(),
+                    json=payload,
+                ) as response:
+                    response.raise_for_status()
+                    async for line in response.aiter_lines():
+                        if not line.startswith("data:"):
+                            continue
+                        raw = line[5:].strip()
+                        if raw == "[DONE]":
+                            return
+                        try:
+                            chunk = json.loads(raw)
+                            delta = chunk["choices"][0].get("delta", {})
+                            token = delta.get("content", "")
+                            if token:
+                                yield token
+                        except (json.JSONDecodeError, KeyError, IndexError):
+                            continue
+                    return  # Stream erfolgreich abgeschlossen
+            except httpx.HTTPStatusError as e:
+                last_exc = e
+                if e.response.status_code >= 500 and attempt < len(_RETRY_DELAYS):
+                    print(f"[llm] Stream Retry {attempt + 1} nach HTTP {e.response.status_code}")
+                    continue
+                raise LLMError(f"LLM API Fehler {e.response.status_code}: {e.response.text}") from e
+            except httpx.RequestError as e:
+                last_exc = e
+                if attempt < len(_RETRY_DELAYS):
+                    print(f"[llm] Stream Retry {attempt + 1} nach Verbindungsfehler: {e}")
+                    continue
+                raise LLMError(f"LLM Verbindungsfehler: {e}") from e
+
+        if last_exc:
+            raise LLMError(f"LLM Streaming fehlgeschlagen nach {len(_RETRY_DELAYS)} Versuchen: {last_exc}") from last_exc
 
     async def list_models(self) -> List[str]:
         """Listet verfügbare Modelle vom LLM-Server auf."""
