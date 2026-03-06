@@ -10,17 +10,19 @@ Der Orchestrator:
 6. Wiederholt bis fertig oder max_iterations erreicht
 """
 
+import asyncio
 import json
+import re
+import uuid
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, AsyncGenerator, Dict, List, Optional, Set
-import asyncio
 
 from app.agent.tools import ToolRegistry, ToolResult, get_tool_registry
 from app.core.config import settings
 from app.core.token_budget import TokenBudget, create_budget_from_config
 from app.core.conversation_summarizer import get_summarizer
-from app.services.llm_client import SYSTEM_PROMPT, _get_http_client
+from app.services.llm_client import SYSTEM_PROMPT, _get_http_client, _RETRY_DELAYS, _is_retryable
 from app.services.memory_store import get_memory_store
 from app.utils.token_counter import estimate_tokens, estimate_messages_tokens
 
@@ -101,6 +103,147 @@ class AgentState:
     # Compaction Stats
     compaction_count: int = 0
     last_compaction_savings: int = 0
+    # Loop-Prävention: Welche Dateien wurden in dieser Session gelesen
+    read_files_this_request: Set[str] = field(default_factory=set)
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Text-basierter Tool-Call-Parser (Fallback für Modelle ohne natives Tool-Calling)
+# ══════════════════════════════════════════════════════════════════════════════
+
+def _parse_text_tool_calls(content: str, available_tools: List[Dict]) -> List[Dict]:
+    """
+    Parst Tool-Calls aus dem Text-Content von Modellen, die kein natives
+    Tool-Calling unterstützen (z.B. Mistral, Qwen, OpenHermes).
+
+    Unterstützte Formate:
+    1. Mistral: [TOOL_CALLS] [{"name": "func", "arguments": {...}}]
+    2. XML:     <tool_call>{"name": "func", "arguments": {...}}</tool_call>
+    3. OpenHermes: <functioncall>{"name": "func", "arguments": {...}}</functioncall>
+    4. JSON-Block: ```json\n{"tool": "func", ...}\n```
+    """
+    if not content:
+        return []
+
+    tool_names = {t["function"]["name"] for t in available_tools} if available_tools else set()
+    parsed_calls = []
+
+    # Format 1: Mistral [TOOL_CALLS] Format
+    # [TOOL_CALLS] [{"name": "...", "arguments": {...}}]
+    mistral_match = re.search(
+        r'\[TOOL_CALLS\]\s*(\[.*?\])',
+        content,
+        re.DOTALL
+    )
+    if mistral_match:
+        try:
+            calls = json.loads(mistral_match.group(1))
+            if isinstance(calls, list):
+                for call in calls:
+                    name = call.get("name") or call.get("function")
+                    args = call.get("arguments") or call.get("parameters") or {}
+                    if name and (not tool_names or name in tool_names):
+                        parsed_calls.append({
+                            "id": f"call_{uuid.uuid4().hex[:8]}",
+                            "type": "function",
+                            "function": {
+                                "name": name,
+                                "arguments": json.dumps(args) if isinstance(args, dict) else args
+                            }
+                        })
+            if parsed_calls:
+                print(f"[agent] Mistral [TOOL_CALLS] Format erkannt: {len(parsed_calls)} calls")
+                return parsed_calls
+        except (json.JSONDecodeError, KeyError):
+            pass
+
+    # Format 2: XML <tool_call> oder <functioncall>
+    xml_patterns = [
+        r'<tool_call>(.*?)</tool_call>',
+        r'<functioncall>(.*?)</functioncall>',
+        r'<function_calls>(.*?)</function_calls>',
+        r'<invoke>(.*?)</invoke>',
+    ]
+    for pattern in xml_patterns:
+        matches = re.findall(pattern, content, re.DOTALL)
+        for match in matches:
+            try:
+                call = json.loads(match.strip())
+                name = call.get("name") or call.get("function") or call.get("tool_name")
+                args = call.get("arguments") or call.get("parameters") or call.get("kwargs") or {}
+                if name and (not tool_names or name in tool_names):
+                    parsed_calls.append({
+                        "id": f"call_{uuid.uuid4().hex[:8]}",
+                        "type": "function",
+                        "function": {
+                            "name": name,
+                            "arguments": json.dumps(args) if isinstance(args, dict) else args
+                        }
+                    })
+            except (json.JSONDecodeError, KeyError):
+                continue
+    if parsed_calls:
+        print(f"[agent] XML Tool-Call Format erkannt: {len(parsed_calls)} calls")
+        return parsed_calls
+
+    # Format 3: JSON-Codeblock mit Tool-Call Struktur
+    json_blocks = re.findall(r'```(?:json)?\s*\n(.*?)\n```', content, re.DOTALL)
+    for block in json_blocks:
+        try:
+            data = json.loads(block.strip())
+            # Prüfe ob es ein Tool-Call ist
+            name = None
+            args = {}
+            if isinstance(data, dict):
+                if "name" in data and ("arguments" in data or "parameters" in data):
+                    name = data["name"]
+                    args = data.get("arguments") or data.get("parameters") or {}
+                elif "tool" in data:
+                    name = data["tool"]
+                    args = data.get("input") or data.get("arguments") or {}
+            if name and (not tool_names or name in tool_names):
+                parsed_calls.append({
+                    "id": f"call_{uuid.uuid4().hex[:8]}",
+                    "type": "function",
+                    "function": {
+                        "name": name,
+                        "arguments": json.dumps(args) if isinstance(args, dict) else args
+                    }
+                })
+        except (json.JSONDecodeError, KeyError):
+            continue
+    if parsed_calls:
+        print(f"[agent] JSON-Block Tool-Call Format erkannt: {len(parsed_calls)} calls")
+        return parsed_calls
+
+    # Format 4: Inline JSON mit bekanntem Tool-Namen
+    # Suche nach {"name": "known_tool", ...} direkt im Text
+    if tool_names:
+        inline_matches = re.findall(r'\{[^{}]*"name"\s*:\s*"([^"]+)"[^{}]*\}', content)
+        for match_name in inline_matches:
+            if match_name in tool_names:
+                # Versuche den vollständigen JSON-Block zu extrahieren
+                pattern = r'\{[^{}]*"name"\s*:\s*"' + re.escape(match_name) + r'"[^{}]*\}'
+                full_matches = re.findall(pattern, content, re.DOTALL)
+                for fm in full_matches:
+                    try:
+                        call = json.loads(fm)
+                        args = call.get("arguments") or call.get("parameters") or {}
+                        parsed_calls.append({
+                            "id": f"call_{uuid.uuid4().hex[:8]}",
+                            "type": "function",
+                            "function": {
+                                "name": match_name,
+                                "arguments": json.dumps(args) if isinstance(args, dict) else args
+                            }
+                        })
+                    except (json.JSONDecodeError, KeyError):
+                        continue
+        if parsed_calls:
+            print(f"[agent] Inline JSON Tool-Call Format erkannt: {len(parsed_calls)} calls")
+            return parsed_calls
+
+    return []
 
 
 class AgentOrchestrator:
@@ -162,6 +305,8 @@ class AgentOrchestrator:
         from app.services.skill_manager import get_skill_manager
 
         state = self._get_state(session_id)
+        # Gelesene Dateien für diese Anfrage zurücksetzen (Loop-Prävention)
+        state.read_files_this_request = set()
         include_write_ops = state.mode != AgentMode.READ_ONLY
 
         # System-Prompt bauen
@@ -207,16 +352,10 @@ class AgentOrchestrator:
         except Exception as e:
             print(f"[agent] Memory loading failed: {e}")
 
-        # Bisherige Kontext-Items hinzufügen
-        if state.context_items:
-            context_block = "\n\n".join(state.context_items[-10:])  # Letzte 10
-            messages.append({
-                "role": "system",
-                "content": f"=== KONTEXT AUS VORHERIGEN TOOL-AUFRUFEN ===\n{context_block}"
-            })
-            budget.set("context", estimate_tokens(context_block))
-
         # Konversations-Historie hinzufügen (für Multi-Turn)
+        # context_items werden NICHT als separate System-Message eingefügt,
+        # da Tool-Results bereits korrekt als role="tool" Messages im Verlauf erscheinen.
+        # Das verhindert Dopplung und reduziert LLM-Loop-Verhalten.
         history_tokens = 0
         for hist_msg in state.messages_history[-state.max_history_messages:]:
             messages.append(hist_msg)
@@ -275,12 +414,18 @@ class AgentOrchestrator:
         for iteration in range(self.max_iterations):
             try:
                 # LLM aufrufen (nicht-streamend für Tool-Calls)
-                # Tool-Phase: Schnelles Modell für Suche/Tool-Aufrufe
                 print(f"[agent] Iteration {iteration + 1}: Calling LLM with {len(tool_schemas)} tools")
                 response = await self._call_llm_with_tools(
                     messages, tool_schemas, model, is_tool_phase=True
                 )
-                print(f"[agent] LLM response: tool_calls={len(response.get('tool_calls', []))}, content_len={len(response.get('content') or '')}")
+                tool_calls = response.get("tool_calls", [])
+                content = response.get("content", "")
+                finish_reason = response.get("finish_reason", "")
+
+                print(
+                    f"[agent] LLM response: finish_reason={finish_reason!r}, "
+                    f"tool_calls={len(tool_calls)}, content_len={len(content or '')}"
+                )
 
                 # Token-Nutzung akkumulieren
                 usage = response.get("usage")
@@ -290,8 +435,17 @@ class AgentOrchestrator:
                     last_finish_reason = usage.finish_reason
                     last_model = usage.model
 
+                # Fallback: Text-Tool-Call-Parser für Modelle ohne natives Tool-Calling
+                # (z.B. Mistral-678B gibt Tool-Calls manchmal als Text zurück)
+                if not tool_calls and content:
+                    text_tool_calls = _parse_text_tool_calls(content, tool_schemas)
+                    if text_tool_calls:
+                        print(f"[agent] Text-Parser erkannte {len(text_tool_calls)} Tool-Calls im Content")
+                        tool_calls = text_tool_calls
+                        # Content bereinigen (Tool-Call-Strings entfernen)
+                        finish_reason = "tool_calls"
+
                 # Tool-Calls verarbeiten
-                tool_calls = response.get("tool_calls", [])
                 if not tool_calls:
                     # Keine weiteren Tool-Calls -> Finale Antwort generieren
                     assistant_response = ""
@@ -299,8 +453,7 @@ class AgentOrchestrator:
 
                     # Entscheiden ob wir streamen oder die vorhandene Antwort nutzen
                     should_stream = settings.llm.streaming
-                    # Wenn wir bereits eine Antwort haben und NICHT streamen wollen
-                    existing_content = response.get("content", "")
+                    existing_content = content
 
                     # Wenn ein separates Analyse-Modell konfiguriert ist, muss neu angefragt werden
                     needs_new_request = (has_used_tools and settings.llm.analysis_model and not model)
@@ -333,7 +486,6 @@ class AgentOrchestrator:
                         assistant_response = existing_content
                         final_usage = usage
                         if assistant_response:
-                            # Bei langem Content als Stream simulieren
                             yield AgentEvent(AgentEventType.TOKEN, assistant_response)
 
                     # Finale Token-Nutzung akkumulieren
@@ -380,12 +532,30 @@ class AgentOrchestrator:
                     return
 
                 # Tools ausführen
+                current_tool_calls_for_messages = []
                 for tc in tool_calls[:self.max_tool_calls_per_iter]:
                     tool_call = ToolCall(
                         id=tc.get("id", f"call_{len(state.tool_calls_history)}"),
                         name=tc["function"]["name"],
                         arguments=json.loads(tc["function"]["arguments"])
+                        if isinstance(tc["function"]["arguments"], str)
+                        else tc["function"]["arguments"]
                     )
+
+                    # Loop-Prävention: read_file auf bereits gelesene Dateien überspringen
+                    if tool_call.name == "read_file":
+                        file_path = tool_call.arguments.get("path", "")
+                        if file_path in state.read_files_this_request:
+                            print(f"[agent] Loop-Prävention: {file_path} wurde bereits gelesen, überspringe")
+                            # Synthetisches Tool-Result mit Hinweis
+                            messages.append({
+                                "role": "tool",
+                                "tool_call_id": tool_call.id,
+                                "content": f"[HINWEIS] Die Datei '{file_path}' wurde bereits in dieser Sitzung gelesen. Der Inhalt ist oben im Kontext verfügbar."
+                            })
+                            current_tool_calls_for_messages.append(tc)
+                            continue
+                        state.read_files_this_request.add(file_path)
 
                     # Pro-Tool Modell ermitteln
                     tool_specific_model = settings.llm.tool_models.get(tool_call.name, "")
@@ -405,6 +575,7 @@ class AgentOrchestrator:
                     )
                     tool_call.result = result
                     has_used_tools = True
+                    current_tool_calls_for_messages.append(tc)
 
                     # Bestätigung benötigt?
                     if result.requires_confirmation and state.mode == AgentMode.WRITE_WITH_CONFIRM:
@@ -452,32 +623,31 @@ class AgentOrchestrator:
                             "id": tool_call.id,
                             "name": tool_call.name,
                             "success": result.success,
-                            "data": result.to_context()[:2000]  # Truncate
+                            "data": result.to_context()[:2000]  # Truncate für Frontend
                         })
-
-                        # Kontext speichern
-                        if result.success:
-                            state.context_items.append(result.to_context())
 
                     state.tool_calls_history.append(tool_call)
 
                 # Messages für nächste Iteration aktualisieren
+                # Wichtig: Tool-Results korrekt als role="tool" Messages anhängen
+                # damit das LLM weiß was bereits ausgeführt wurde
                 messages.append({
                     "role": "assistant",
-                    "content": response.get("content", ""),
-                    "tool_calls": tool_calls
+                    "content": content or "",
+                    "tool_calls": current_tool_calls_for_messages
                 })
 
-                for tc in tool_calls:
-                    tool_call = next(
-                        (t for t in state.tool_calls_history if t.id == tc.get("id")),
+                for tc in current_tool_calls_for_messages:
+                    tc_id = tc.get("id")
+                    tool_call_obj = next(
+                        (t for t in state.tool_calls_history if t.id == tc_id),
                         None
                     )
-                    if tool_call and tool_call.result:
+                    if tool_call_obj and tool_call_obj.result:
                         messages.append({
                             "role": "tool",
-                            "tool_call_id": tc.get("id"),
-                            "content": tool_call.result.to_context()[:5000]
+                            "tool_call_id": tc_id,
+                            "content": tool_call_obj.result.to_context()[:5000]
                         })
 
             except Exception as e:
@@ -510,6 +680,7 @@ class AgentOrchestrator:
     ) -> Dict:
         """
         Streamt die finale Antwort und tracked Token-Nutzung.
+        Mit Retry-Logik für Verbindungsabbrüche.
 
         Returns:
             Dict mit "tokens" (AsyncGenerator) und "usage" (TokenUsage nach Abschluss)
@@ -551,53 +722,67 @@ class AgentOrchestrator:
         async def token_generator():
             completion_tokens = 0
             completion_chars = 0
-            client = _get_http_client()
-            async with client.stream(
-                "POST",
-                f"{base_url}/chat/completions",
-                headers=headers,
-                json=payload
-            ) as response:
-                response.raise_for_status()
-                async for line in response.aiter_lines():
-                    if not line.startswith("data:"):
+            last_exc = None
+            for attempt, delay in enumerate([0] + _RETRY_DELAYS):
+                if delay:
+                    print(f"[agent] Stream Retry {attempt} nach {delay}s")
+                    await asyncio.sleep(delay)
+                try:
+                    client = _get_http_client()
+                    async with client.stream(
+                        "POST",
+                        f"{base_url}/chat/completions",
+                        headers=headers,
+                        json=payload
+                    ) as response:
+                        response.raise_for_status()
+                        async for line in response.aiter_lines():
+                            if not line.startswith("data:"):
+                                continue
+                            raw = line[5:].strip()
+                            if raw == "[DONE]":
+                                break
+                            try:
+                                import json as json_module
+                                chunk = json_module.loads(raw)
+
+                                # Check for usage in final chunk (OpenAI stream_options)
+                                if "usage" in chunk and chunk["usage"]:
+                                    usage_data = chunk["usage"]
+                                    usage_container["usage"] = TokenUsage(
+                                        prompt_tokens=usage_data.get("prompt_tokens", 0),
+                                        completion_tokens=usage_data.get("completion_tokens", 0),
+                                        total_tokens=usage_data.get("total_tokens", 0),
+                                        finish_reason=usage_container["finish_reason"],
+                                        model=selected_model,
+                                        truncated=(usage_container["finish_reason"] == "length")
+                                    )
+
+                                choices = chunk.get("choices", [])
+                                if choices:
+                                    choice = choices[0]
+                                    delta = choice.get("delta", {})
+                                    token = delta.get("content", "")
+
+                                    # finish_reason extrahieren
+                                    if choice.get("finish_reason"):
+                                        usage_container["finish_reason"] = choice["finish_reason"]
+
+                                    if token:
+                                        completion_chars += len(token)
+                                        completion_tokens = completion_chars // 4  # ~4 chars per token
+                                        yield token
+
+                            except (ValueError, KeyError, IndexError):
+                                continue
+                    return  # Erfolgreich abgeschlossen
+                except Exception as e:
+                    last_exc = e
+                    if _is_retryable(e) and attempt < len(_RETRY_DELAYS):
+                        print(f"[agent] Stream unterbrochen: {e}, Retry {attempt + 1}")
                         continue
-                    raw = line[5:].strip()
-                    if raw == "[DONE]":
-                        break
-                    try:
-                        import json as json_module
-                        chunk = json_module.loads(raw)
-
-                        # Check for usage in final chunk (OpenAI stream_options)
-                        if "usage" in chunk and chunk["usage"]:
-                            usage_data = chunk["usage"]
-                            usage_container["usage"] = TokenUsage(
-                                prompt_tokens=usage_data.get("prompt_tokens", 0),
-                                completion_tokens=usage_data.get("completion_tokens", 0),
-                                total_tokens=usage_data.get("total_tokens", 0),
-                                finish_reason=usage_container["finish_reason"],
-                                model=selected_model,
-                                truncated=(usage_container["finish_reason"] == "length")
-                            )
-
-                        choices = chunk.get("choices", [])
-                        if choices:
-                            choice = choices[0]
-                            delta = choice.get("delta", {})
-                            token = delta.get("content", "")
-
-                            # finish_reason extrahieren
-                            if choice.get("finish_reason"):
-                                usage_container["finish_reason"] = choice["finish_reason"]
-
-                            if token:
-                                completion_chars += len(token)
-                                completion_tokens = completion_chars // 4  # ~4 chars per token
-                                yield token
-
-                    except (ValueError, KeyError, IndexError):
-                        continue
+                    print(f"[agent] Stream Fehler (kein Retry): {e}")
+                    break
 
             # Fallback: Wenn kein Usage vom Server, schätzen wir basierend auf Zeichenzahl
             if not usage_container["usage"]:
@@ -624,6 +809,7 @@ class AgentOrchestrator:
     ) -> Dict:
         """
         Ruft das LLM mit Tool-Definitionen auf.
+        Mit Retry-Logik für Verbindungsabbrüche und 5xx Fehler.
 
         Args:
             messages: Chat-Nachrichten
@@ -633,15 +819,12 @@ class AgentOrchestrator:
         """
 
         # Modell-Auswahl: Pro-Tool > Phase-spezifisch > Explizit (Header-Dropdown) > Default
-        # Pro-Tool und Phase-spezifische Modelle haben Vorrang, da sie bewusst konfiguriert wurden
         selected_model = None
 
-        # 1. Pro-Tool Modell prüfen (wenn letzte Iteration ein bestimmtes Tool aufgerufen hat)
+        # 1. Pro-Tool Modell prüfen
         if is_tool_phase and settings.llm.tool_models:
-            # Prüfe ob in den Messages ein Tool-Result mit zugewiesenem Modell vorliegt
             for msg in reversed(messages):
                 if msg.get("role") == "tool":
-                    # Tool-Name aus dem zugehörigen Assistant-Message extrahieren
                     tool_call_id = msg.get("tool_call_id", "")
                     for prev_msg in messages:
                         for tc in prev_msg.get("tool_calls", []):
@@ -689,14 +872,32 @@ class AgentOrchestrator:
             payload["tools"] = tools
             payload["tool_choice"] = "auto"
 
-        client = _get_http_client()
-        response = await client.post(
-            f"{base_url}/chat/completions",
-            headers=headers,
-            json=payload
-        )
-        response.raise_for_status()
-        data = response.json()
+        last_exc = None
+        data = None
+        for attempt, delay in enumerate([0] + _RETRY_DELAYS):
+            if delay:
+                print(f"[agent] LLM Retry {attempt} nach {delay}s (Modell: {selected_model})")
+                await asyncio.sleep(delay)
+            try:
+                client = _get_http_client()
+                response = await client.post(
+                    f"{base_url}/chat/completions",
+                    headers=headers,
+                    json=payload
+                )
+                response.raise_for_status()
+                data = response.json()
+                break  # Erfolg
+            except Exception as e:
+                last_exc = e
+                if _is_retryable(e) and attempt < len(_RETRY_DELAYS):
+                    print(f"[agent] LLM Fehler (Retry {attempt + 1}): {e}")
+                    continue
+                # Nicht wiederholbarer Fehler
+                raise
+
+        if data is None:
+            raise last_exc or RuntimeError("LLM Aufruf fehlgeschlagen")
 
         # Debug: Rohe Antwort prüfen
         if "choices" not in data or not data["choices"]:
@@ -705,11 +906,17 @@ class AgentOrchestrator:
 
         choice = data["choices"][0]
         message = choice.get("message", {})
-
-        # Debug: Tool-Calls in der Antwort
-        if "tool_calls" in message:
-            print(f"[agent] LLM returned {len(message['tool_calls'])} tool calls")
         finish_reason = choice.get("finish_reason", "")
+        tool_calls_in_msg = message.get("tool_calls", [])
+        content = message.get("content", "")
+
+        # Debug für Modelle mit Text-basierten Tool-Calls
+        if finish_reason == "tool_calls" and not tool_calls_in_msg:
+            print(
+                f"[agent] WARNING: finish_reason='tool_calls' aber keine tool_calls im message-Objekt!\n"
+                f"  Modell: {selected_model}\n"
+                f"  Content (erste 500 Zeichen): {(content or '')[:500]}"
+            )
 
         # Token-Nutzung extrahieren
         usage_data = data.get("usage", {})
@@ -723,8 +930,8 @@ class AgentOrchestrator:
         )
 
         return {
-            "content": message.get("content", ""),
-            "tool_calls": message.get("tool_calls", []),
+            "content": content,
+            "tool_calls": tool_calls_in_msg,
             "usage": usage,
             "finish_reason": finish_reason
         }
@@ -750,7 +957,6 @@ class AgentOrchestrator:
             return ToolResult(success=success, data=f"Datei bearbeitet: {path}")
 
         elif operation == "query_database":
-            # Bestätigte Datenbank-Abfrage ausführen
             from app.agent.tools import execute_confirmed_query
             query = confirmation_data.get("query")
             max_rows = confirmation_data.get("max_rows", 100)
@@ -761,7 +967,6 @@ class AgentOrchestrator:
 
     def _build_agent_instructions(self, mode: AgentMode) -> str:
         """Baut die Agent-Instruktionen für den System-Prompt."""
-        # Dynamisch prüfen welche Features aktiv sind
         db_available = settings.database.enabled
         handbook_available = settings.handbook.enabled
 
@@ -811,6 +1016,7 @@ Verwende die passenden Tools um Informationen zu sammeln, bevor du antwortest.
 - Bei Handbuch-Fragen: Suche zuerst im Handbuch.
 - Bei PDF-Dokumenten: Durchsuche sie mit search_pdf.
 - Bei Datenbank-Fragen: Nutze list_database_tables und describe_database_table um die Struktur zu verstehen.
+- Lese jede Datei nur EINMAL - der Inhalt bleibt im Kontext verfügbar.
 """
 
         if mode == AgentMode.READ_ONLY:
