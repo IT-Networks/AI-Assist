@@ -18,11 +18,7 @@ const state = {
     pdfIds: [],
     handbookServices: [],
   },
-  // Live-Tracking für Anfragen
-  requestStartTime: null,
-  requestTimerInterval: null,
-  liveTokenCount: 0,
-  currentStatusBar: null,
+  // Streaming-State ist jetzt pro-Chat in chat.streamingState
 };
 
 // ── MultiChat State ──
@@ -31,11 +27,22 @@ const chatManager = {
   activeId: null,  // ID of currently shown chat
 
   createChat(sessionId, title = 'Neuer Chat') {
+    const id = crypto.randomUUID();
+    // Jeder Chat bekommt ein eigenes, persistentes DOM-Pane.
+    // Es wird nie als innerHTML serialisiert – stattdessen per removeChild/appendChild
+    // in und aus #messages getauscht. Laufende Stream-Referenzen (bubble, statusBar)
+    // bleiben dadurch immer gültig, auch wenn der Chat im Hintergrund läuft.
+    const pane = document.createElement('div');
+    pane.className = 'messages-pane';
+    pane.innerHTML = welcomeHTML();
     const chat = {
-      id: crypto.randomUUID(),
+      id,
       sessionId,
       title,
-      messagesHTML: '',
+      pane,
+      // streamingState ist null wenn idle, sonst:
+      // { abortController, statusBar, startTime, liveTokenCount, timerInterval }
+      streamingState: null,
       toolHistory: [],
       context: { javaFiles: [], pythonFiles: [], pdfIds: [], handbookServices: [] },
       pendingConfirmation: null,
@@ -57,10 +64,10 @@ const chatManager = {
     this.chats = this.chats.filter(c => c.id !== chatId);
   },
 
-  saveCurrentMessages() {
+  // Speichert nicht-DOM-State des aktiven Chats zurück ins Chat-Objekt
+  saveActiveState() {
     const chat = this.getActive();
     if (!chat) return;
-    chat.messagesHTML = document.getElementById('messages').innerHTML;
     chat.toolHistory = [...state.toolHistory];
     chat.context = JSON.parse(JSON.stringify(state.context));
     chat.pendingConfirmation = state.pendingConfirmation;
@@ -142,28 +149,11 @@ async function createAgentSession() {
 
 // ── MultiChat Functions ──
 async function createNewChat() {
-  // Save current chat messages before switching
-  chatManager.saveCurrentMessages();
-
   try {
     const sessionId = await createAgentSession();
     const chat = chatManager.createChat(sessionId);
-    chatManager.activeId = chat.id;
-
-    // Apply to state
-    state.sessionId = sessionId;
-    state.toolHistory = [];
-    state.pendingConfirmation = null;
-    state.context = { javaFiles: [], pythonFiles: [], pdfIds: [], handbookServices: [] };
-
-    // Reset UI
-    document.getElementById('messages').innerHTML = welcomeHTML();
-    updateModeIndicator();
-    renderToolHistory();
-    renderContextChips();
-    hideConfirmationPanel();
-    renderChatList();
-
+    // switchToChat übernimmt Pane-Swap, State-Restore und UI-Updates
+    await switchToChat(chat.id);
     console.log('New chat created:', chat.id, 'session:', sessionId);
   } catch (e) {
     console.error('Failed to create new chat:', e);
@@ -173,52 +163,83 @@ async function createNewChat() {
 async function switchToChat(chatId) {
   if (chatId === chatManager.activeId) return;
 
-  // Save current chat state
-  chatManager.saveCurrentMessages();
+  const outgoingChat = chatManager.getActive();
+  const incomingChat = chatManager.get(chatId);
+  if (!incomingChat) return;
 
-  const chat = chatManager.get(chatId);
-  if (!chat) return;
+  const messagesContainer = document.getElementById('messages');
 
-  // Switch active
+  if (outgoingChat) {
+    // Nicht-DOM-State des ausgehenden Chats sichern
+    chatManager.saveActiveState();
+    // Pane aus DOM entfernen – alle DOM-Referenzen (bubble, statusBar) bleiben
+    // im Speicher gültig. Ein laufender Stream schreibt weiter ins detachte Pane.
+    if (outgoingChat.pane.parentNode === messagesContainer) {
+      messagesContainer.removeChild(outgoingChat.pane);
+    }
+    // Cancel-Button gehört jetzt niemandem mehr – wird unten neu gesetzt
+    _chatAbortController = null;
+  } else {
+    // Erster Switch: statisches HTML aus dem initialen Seitenload leeren
+    messagesContainer.innerHTML = '';
+  }
+
+  // Aktiven Chat umschalten
   chatManager.activeId = chatId;
 
-  // Restore state
-  state.sessionId = chat.sessionId;
-  state.toolHistory = [...chat.toolHistory];
-  state.pendingConfirmation = chat.pendingConfirmation;
-  state.context = JSON.parse(JSON.stringify(chat.context));
+  // State des eingehenden Chats wiederherstellen
+  state.sessionId = incomingChat.sessionId;
+  state.toolHistory = [...incomingChat.toolHistory];
+  state.pendingConfirmation = incomingChat.pendingConfirmation;
+  state.context = JSON.parse(JSON.stringify(incomingChat.context));
 
-  // Restore UI
-  document.getElementById('messages').innerHTML = chat.messagesHTML || welcomeHTML();
+  // Pane des eingehenden Chats in den DOM hängen (inklusive aller laufenden DOM-Updates)
+  messagesContainer.appendChild(incomingChat.pane);
+
+  // Cancel-Button: aktiv wenn eingehender Chat gerade streamt
+  if (incomingChat.streamingState) {
+    _chatAbortController = incomingChat.streamingState.abortController;
+    _setStreamingMode(true);
+  } else {
+    _chatAbortController = null;
+    _setStreamingMode(false);
+  }
+
   updateModeIndicator();
   renderToolHistory();
   renderContextChips();
-
   hideConfirmationPanel();
-
   renderChatList();
 
-  // Scroll to bottom
-  const messages = document.getElementById('messages');
-  messages.scrollTop = messages.scrollHeight;
+  messagesContainer.scrollTop = messagesContainer.scrollHeight;
 }
 
 async function deleteChat(chatId) {
   const chat = chatManager.get(chatId);
   if (!chat) return;
 
-  // Delete backend session
+  // Laufenden Stream für diesen Chat abbrechen
+  if (chat.streamingState) {
+    chat.streamingState.abortController?.abort();
+    if (chat.streamingState.timerInterval) clearInterval(chat.streamingState.timerInterval);
+    chat.streamingState = null;
+    fetch(`/api/agent/cancel/${chat.sessionId}`, { method: 'POST' }).catch(() => {});
+  }
+
+  // Pane aus DOM entfernen falls sichtbar
+  if (chat.pane.parentNode) chat.pane.parentNode.removeChild(chat.pane);
+
   await fetch(`/api/agent/session/${chat.sessionId}`, { method: 'DELETE' }).catch(() => {});
 
   const wasActive = chatId === chatManager.activeId;
   chatManager.remove(chatId);
 
   if (wasActive) {
+    _chatAbortController = null;
+    _setStreamingMode(false);
     if (chatManager.chats.length === 0) {
-      // Create new chat if none left
       await createNewChat();
     } else {
-      // Switch to last chat
       await switchToChat(chatManager.chats[chatManager.chats.length - 1].id);
     }
   } else {
@@ -508,11 +529,10 @@ function _setStreamingMode(active) {
 }
 
 async function cancelRequest() {
-  if (_chatAbortController) {
-    _chatAbortController.abort();
-    _chatAbortController = null;
-  }
-  // Backend informieren damit der Generator stoppt
+  const activeChat = chatManager.getActive();
+  const ac = activeChat?.streamingState?.abortController ?? _chatAbortController;
+  if (ac) ac.abort();
+  _chatAbortController = null;
   try {
     await fetch(`/api/agent/cancel/${state.sessionId}`, { method: 'POST' });
   } catch (_) { /* ignore */ }
@@ -524,35 +544,47 @@ async function sendMessage() {
   const text = input.value.trim();
   if (!text) return;
 
-  // Verhindere Doppel-Senden während laufender Anfrage
-  if (_chatAbortController) return;
+  const activeChat = chatManager.getActive();
+  // Verhindere Doppel-Senden wenn dieser Chat bereits streamt
+  if (activeChat?.streamingState || _chatAbortController) return;
 
   input.value = '';
   input.style.height = 'auto';
   appendMessage('user', text);
 
-  // Update chat title from first message
   updateActiveChatTitle(text);
 
-  _chatAbortController = new AbortController();
+  const ac = new AbortController();
+  activeChat.streamingState = {
+    abortController: ac,
+    statusBar: null,
+    startTime: null,
+    liveTokenCount: 0,
+    timerInterval: null,
+  };
+  _chatAbortController = ac;
   _setStreamingMode(true);
 
   try {
-    await sendAgentChat(text, _chatAbortController.signal);
+    await sendAgentChat(text, ac.signal, activeChat);
   } catch (e) {
     if (e.name !== 'AbortError') {
-      appendMessage('error', 'Fehler: ' + e.message);
+      appendMessageToPane(activeChat.pane, 'error', 'Fehler: ' + e.message);
     }
   } finally {
-    _chatAbortController = null;
-    _setStreamingMode(false);
+    activeChat.streamingState = null;
+    // _chatAbortController nur zurücksetzen wenn dieser Chat noch aktiv ist
+    if (chatManager.activeId === activeChat.id) {
+      _chatAbortController = null;
+      _setStreamingMode(false);
+    }
   }
 }
 
-async function sendAgentChat(message, abortSignal) {
+async function sendAgentChat(message, abortSignal, chat) {
   const payload = {
     message,
-    session_id: state.sessionId,
+    session_id: chat.sessionId,
     model: state.currentModel,
     skill_ids: state.activeSkills.length > 0 ? state.activeSkills : null,
   };
@@ -566,22 +598,21 @@ async function sendAgentChat(message, abortSignal) {
 
   if (!res.ok) {
     const err = await res.json().catch(() => ({ detail: res.statusText }));
-    stopRequestTimer();
+    stopChatTimer(chat);
     throw new Error(err.detail || res.statusText);
   }
 
-  // Process SSE stream
-  const msgDiv = appendMessage('assistant', '');
+  // Nachrichten-Div im Chat-Pane erstellen (funktioniert auch wenn Pane detached ist)
+  const msgDiv = appendMessageToPane(chat.pane, 'assistant', '');
   const bubble = msgDiv.querySelector('.message-bubble');
   let fullText = '';
-  let currentToolCard = null;
 
-  // Live-Status-Bar erstellen und Timer starten
-  startRequestTimer();
+  // Status-Bar und Timer per-Chat starten
   const statusBar = createLiveStatusBar();
   msgDiv.appendChild(statusBar);
-  state.currentStatusBar = statusBar;
-  state.liveTokenCount = 0;
+  chat.streamingState.statusBar = statusBar;
+  chat.streamingState.liveTokenCount = 0;
+  startChatTimer(chat);
 
   const reader = res.body.getReader();
   const decoder = new TextDecoder();
@@ -592,26 +623,24 @@ async function sendAgentChat(message, abortSignal) {
     try {
       ({ value, done } = await reader.read());
     } catch (e) {
-      // AbortError: User hat abgebrochen - sauber beenden
       if (e.name === 'AbortError') break;
       throw e;
     }
 
     if (done) {
-      // Stream ended – process any remaining data in buffer
       if (buffer.trim()) {
         for (const line of buffer.split('\n')) {
           if (!line.startsWith('data:')) continue;
           try {
             const event = JSON.parse(line.slice(5).trim());
-            await processAgentEvent(event, bubble, msgDiv);
+            await processAgentEvent(event, bubble, msgDiv, chat);
             if (event.type === 'token' && event.data) {
               fullText += event.data;
               bubble.innerHTML = marked.parse(fullText);
               applyHighlight(bubble);
-              scrollToBottom();
-              state.liveTokenCount += countTokensApprox(event.data);
-              updateLiveStatusBar();
+              if (document.contains(chat.pane)) scrollToBottom();
+              chat.streamingState.liveTokenCount += countTokensApprox(event.data);
+              updateChatStatusBar(chat);
             }
           } catch (e) { /* ignore */ }
         }
@@ -625,19 +654,16 @@ async function sendAgentChat(message, abortSignal) {
 
     for (const line of lines) {
       if (!line.startsWith('data:')) continue;
-
       try {
         const event = JSON.parse(line.slice(5).trim());
-        await processAgentEvent(event, bubble, msgDiv);
-
+        await processAgentEvent(event, bubble, msgDiv, chat);
         if (event.type === 'token' && event.data) {
           fullText += event.data;
           bubble.innerHTML = marked.parse(fullText);
           applyHighlight(bubble);
-          scrollToBottom();
-          // Live-Token-Count aktualisieren (approximativ)
-          state.liveTokenCount += countTokensApprox(event.data);
-          updateLiveStatusBar();
+          if (document.contains(chat.pane)) scrollToBottom();
+          chat.streamingState.liveTokenCount += countTokensApprox(event.data);
+          updateChatStatusBar(chat);
         }
       } catch (e) {
         // Ignore parse errors for partial chunks
@@ -645,15 +671,13 @@ async function sendAgentChat(message, abortSignal) {
     }
   }
 
-  // Timer stoppen
-  stopRequestTimer();
+  stopChatTimer(chat);
 
-  // Final render
   if (fullText) {
     bubble.innerHTML = marked.parse(fullText);
     applyHighlight(bubble);
   }
-  scrollToBottom();
+  if (document.contains(chat.pane)) scrollToBottom();
 }
 
 // ── Live Status Bar ──
@@ -677,44 +701,44 @@ function createLiveStatusBar() {
   return statusBar;
 }
 
-function startRequestTimer() {
-  state.requestStartTime = Date.now();
-  state.requestTimerInterval = setInterval(updateLiveStatusBar, 100);
+// ── Per-Chat Timer (läuft auch wenn Pane detached ist) ──
+
+function startChatTimer(chat) {
+  if (!chat.streamingState) return;
+  chat.streamingState.startTime = Date.now();
+  // Interval hält eine Closure auf chat – kein globaler State nötig
+  chat.streamingState.timerInterval = setInterval(() => updateChatStatusBar(chat), 100);
 }
 
-function stopRequestTimer() {
-  if (state.requestTimerInterval) {
-    clearInterval(state.requestTimerInterval);
-    state.requestTimerInterval = null;
+function stopChatTimer(chat) {
+  const ss = chat.streamingState;
+  if (!ss) return;
+  if (ss.timerInterval) {
+    clearInterval(ss.timerInterval);
+    ss.timerInterval = null;
   }
-  // Status-Bar auf "Fertig" setzen
-  if (state.currentStatusBar) {
-    const indicator = state.currentStatusBar.querySelector('.status-indicator');
-    if (indicator) {
-      indicator.innerHTML = `<span class="status-done">✓</span><span>Fertig</span>`;
-    }
-    state.currentStatusBar.classList.add('done');
+  if (ss.statusBar) {
+    const indicator = ss.statusBar.querySelector('.status-indicator');
+    if (indicator) indicator.innerHTML = `<span class="status-done">✓</span><span>Fertig</span>`;
+    ss.statusBar.classList.add('done');
   }
 }
 
-function updateLiveStatusBar() {
-  if (!state.currentStatusBar || !state.requestStartTime) return;
+function updateChatStatusBar(chat) {
+  const ss = chat.streamingState;
+  if (!ss?.statusBar || !ss.startTime) return;
 
-  const elapsed = Date.now() - state.requestStartTime;
+  const elapsed = Date.now() - ss.startTime;
   const seconds = Math.floor(elapsed / 1000);
   const minutes = Math.floor(seconds / 60);
   const secs = seconds % 60;
   const ms = Math.floor((elapsed % 1000) / 100);
 
-  const timerEl = state.currentStatusBar.querySelector('.timer-value');
-  if (timerEl) {
-    timerEl.textContent = `${minutes}:${secs.toString().padStart(2, '0')}.${ms}`;
-  }
+  const timerEl = ss.statusBar.querySelector('.timer-value');
+  if (timerEl) timerEl.textContent = `${minutes}:${secs.toString().padStart(2, '0')}.${ms}`;
 
-  const tokensEl = state.currentStatusBar.querySelector('.tokens-value');
-  if (tokensEl) {
-    tokensEl.textContent = `~${state.liveTokenCount} tokens`;
-  }
+  const tokensEl = ss.statusBar.querySelector('.tokens-value');
+  if (tokensEl) tokensEl.textContent = `~${ss.liveTokenCount} tokens`;
 }
 
 function countTokensApprox(text) {
@@ -722,77 +746,77 @@ function countTokensApprox(text) {
   return Math.ceil(text.length / 4);
 }
 
-async function processAgentEvent(event, bubble, msgDiv) {
-  const { type, data, session_id } = event;
+async function processAgentEvent(event, bubble, msgDiv, chat) {
+  const { type, data } = event;
+  const isActive = chat.id === chatManager.activeId;
 
   switch (type) {
-    case 'tool_start':
-      // Add tool card to message
+    case 'tool_start': {
       const toolCard = createToolCard(data.name, data.arguments, 'running', data.model);
       bubble.appendChild(toolCard);
-      addToolToHistory(data.id, data.name, data.arguments, 'running');
-      scrollToBottom();
+      // Tool-History per-Chat pflegen, bei aktivem Chat in state spiegeln
+      chat.toolHistory.unshift({ id: data.id, name: data.name, args: data.arguments, status: 'running', result: null });
+      if (isActive) { state.toolHistory = [...chat.toolHistory]; renderToolHistory(); }
+      if (document.contains(chat.pane)) scrollToBottom();
       break;
-
-    case 'tool_result':
-      // Update tool card
-      updateToolCard(data.id, data.success ? 'success' : 'error', data.data);
-      updateToolHistory(data.id, data.success ? 'success' : 'error', data.data);
+    }
+    case 'tool_result': {
+      updateToolCard(data.id, data.success ? 'success' : 'error', data.data, chat.pane);
+      const tool = chat.toolHistory[0];
+      if (tool) { tool.status = data.success ? 'success' : 'error'; tool.result = data.data; }
+      if (isActive) { state.toolHistory = [...chat.toolHistory]; renderToolHistory(); }
       break;
-
+    }
     case 'confirm_required':
-      // Show confirmation panel
-      showConfirmationPanel(data);
-      state.pendingConfirmation = data;
-      // Switch to confirm tab
-      switchRightPanel('confirm-panel');
+      chat.pendingConfirmation = data;
+      if (isActive) {
+        state.pendingConfirmation = data;
+        showConfirmationPanel(data);
+        switchRightPanel('confirm-panel');
+      }
       break;
 
     case 'waiting_for_confirmation':
-      appendMessage('system', 'Warte auf Bestätigung für Schreib-Operation...');
+      appendMessageToPane(chat.pane, 'system', 'Warte auf Bestätigung für Schreib-Operation...');
       break;
 
     case 'confirmed':
-      hideConfirmationPanel();
-      appendMessage('system', `✓ ${data.message}`);
+      chat.pendingConfirmation = null;
+      if (isActive) { state.pendingConfirmation = null; hideConfirmationPanel(); }
+      appendMessageToPane(chat.pane, 'system', `✓ ${data.message}`);
       break;
 
     case 'cancelled':
-      hideConfirmationPanel();
-      stopRequestTimer();
-      appendMessage('system', `⏹ ${data.message || 'Anfrage abgebrochen'}`);
+      if (isActive) hideConfirmationPanel();
+      stopChatTimer(chat);
+      appendMessageToPane(chat.pane, 'system', `⏹ ${data.message || 'Anfrage abgebrochen'}`);
       break;
 
     case 'error':
-      appendMessage('error', data.error || 'Unbekannter Fehler');
+      appendMessageToPane(chat.pane, 'error', data.error || 'Unbekannter Fehler');
       break;
 
     case 'usage':
-      // Token-Nutzung anzeigen
-      displayTokenUsage(data);
+      displayTokenUsage(data, chat);
       break;
 
     case 'done':
-      // Chat complete - Nutzung aus done-Event falls vorhanden
-      if (data.usage) {
-        displayTokenUsage(data.usage);
-      }
+      if (data.usage) displayTokenUsage(data.usage, chat);
       break;
   }
 }
 
-function displayTokenUsage(usage) {
-  // Aktualisiere die vorhandene Status-Bar statt neue zu erstellen
-  if (state.currentStatusBar) {
-    const statusBar = state.currentStatusBar;
+function displayTokenUsage(usage, chat) {
+  const ss = chat.streamingState;
+  if (ss?.statusBar) {
+    const statusBar = ss.statusBar;
     statusBar.classList.add('done', 'final');
 
     const truncatedWarning = usage.truncated
       ? `<div class="truncated-warning">⚠️ Abgebrochen wegen max_tokens (${usage.max_tokens})</div>`
       : '';
 
-    // Berechne verstrichene Zeit
-    const elapsed = state.requestStartTime ? Date.now() - state.requestStartTime : 0;
+    const elapsed = ss.startTime ? Date.now() - ss.startTime : 0;
     const seconds = (elapsed / 1000).toFixed(1);
 
     statusBar.innerHTML = `
@@ -811,12 +835,12 @@ function displayTokenUsage(usage) {
       </div>
     `;
 
-    state.currentStatusBar = null;
-    scrollToBottom();
+    ss.statusBar = null;
+    if (document.contains(chat.pane)) scrollToBottom();
     return;
   }
 
-  // Fallback: Neue Anzeige erstellen wenn keine Status-Bar vorhanden
+  // Fallback: Token-Anzeige direkt ins Chat-Pane hängen
   const usageDiv = document.createElement('div');
   usageDiv.className = 'token-usage';
 
@@ -833,9 +857,8 @@ function displayTokenUsage(usage) {
     </div>
   `;
 
-  const messages = document.getElementById('messages');
-  messages.appendChild(usageDiv);
-  scrollToBottom();
+  chat.pane.appendChild(usageDiv);
+  if (document.contains(chat.pane)) scrollToBottom();
 }
 
 function createToolCard(toolName, args, status, model = null) {
@@ -863,9 +886,10 @@ function createToolCard(toolName, args, status, model = null) {
   return card;
 }
 
-function updateToolCard(toolId, status, result) {
-  // Find by tool name (simplified)
-  const cards = document.querySelectorAll('.tool-call-card');
+function updateToolCard(toolId, status, result, pane) {
+  // Im Chat-Pane suchen (funktioniert auch wenn Pane detached ist)
+  const root = pane || document;
+  const cards = root.querySelectorAll('.tool-call-card');
   const card = cards[cards.length - 1]; // Last card
 
   if (card) {
@@ -997,7 +1021,12 @@ function switchRightPanel(panelId) {
 
 // ── Messages ──
 function appendMessage(role, text) {
-  const messages = document.getElementById('messages');
+  // Schreibt in den aktiven Chat-Pane (Fallback: #messages)
+  const pane = chatManager.getActive()?.pane || document.getElementById('messages');
+  return appendMessageToPane(pane, role, text);
+}
+
+function appendMessageToPane(pane, role, text) {
   const div = document.createElement('div');
   div.className = `message ${role}`;
 
@@ -1012,8 +1041,9 @@ function appendMessage(role, text) {
   }
 
   div.appendChild(bubble);
-  messages.appendChild(div);
-  scrollToBottom();
+  pane.appendChild(div);
+  // Nur scrollen wenn Pane gerade sichtbar (im DOM) ist
+  if (document.contains(pane)) scrollToBottom();
   return div;
 }
 
