@@ -4,19 +4,22 @@ Ein lokaler AI-Assistent für Entwickler mit Claude-Code-ähnlicher Architektur.
 
 ## Features
 
-### Agent-System (Neu)
+### Agent-System
 - **Tool-Calling** – Agent kann automatisch Tools aufrufen um Informationen zu sammeln
 - **3 Modi** – `read_only`, `write_with_confirm`, `autonomous`
-- **8 Tools** – Code-Suche, Handbuch, Skills, Datei-Operationen
+- **8+ Tools** – Code-Suche, Handbuch, Skills, Datei-Operationen, Datenquellen
 - **Bestätigungs-Workflow** – Diff-Preview vor Schreib-Operationen
+- **Token-Budget** – Verhindert unkontrolliertes Kontextwachstum
+- **Kontext-Kompression** – Automatische Zusammenfassung langer Konversationen
 
-### Skill-System (Neu)
+### Skill-System
 - **YAML-basierte Skills** – Prompts + Wissensquellen kombinieren
 - **PDF-zu-Skill** – PDFs als Wissensbasis einbinden
 - **Aktivierung pro Session** – Skills on-demand aktivieren
 - **Volltextsuche** – SQLite FTS5 für Skill-Inhalte
+- **Automatische Aktivierung** – Trigger-Wörter für auto-Aktivierung
 
-### Handbuch-Integration (Neu)
+### Handbuch-Integration
 - **HTML-Parsing** – Services, Tabs, Felder aus HTML-Handbuch
 - **Netzlaufwerk-Support** – Pfade wie `//server/share/handbuch`
 - **Service-Suche** – Volltextsuche über alle Dokumentation
@@ -25,16 +28,18 @@ Ein lokaler AI-Assistent für Entwickler mit Claude-Code-ähnlicher Architektur.
 - **Java** – Dateibaum, Klassen-Analyse, POM-Abhängigkeiten, Index-Suche
 - **Python** – Symbol-Suche, Validierung (flake8/ruff/mypy), Tests (pytest)
 
-### Settings-UI (Neu)
+### Settings-UI
 - **Frontend-Konfiguration** – Alle Settings über das UI ändern
 - **Live-Anwendung** – Änderungen sofort aktiv (ohne Neustart)
 - **Persistenz** – In config.yaml speichern mit Backup
-- **Modell-Verwaltung** – LLM-Modelle hinzufügen/entfernen
+- **Modell-Verwaltung** – LLM-Modelle hinzufügen/entfernen, pro Tool konfigurierbar
 
 ### Weitere Features
 - **WLP Log Analyse** – Server-Logs hochladen, Fehler extrahieren
 - **PDF Support** – PDFs als Kontext nutzen
-- **Confluence** – Seiten per CQL-Suche finden und laden
+- **Confluence/Jira** – Seiten per CQL-Suche finden und laden
+- **DB2-Datenbank** – Read-only Datenbankabfragen (optional)
+- **Externe Datenquellen** – Generische HTTP-APIs einbinden
 - **Streaming** – Echtzeit-Token-Ausgabe im Browser
 - **Health-Check** – `/api/health` für System-Monitoring
 
@@ -57,7 +62,9 @@ Passe `config.yaml` an:
 llm:
   base_url: "http://dein-llm-server/v1"
   api_key: "dein-api-key"
-  default_model: "gptoss120b"
+  default_model: "mistral-678b"       # Haupt-Modell für Antworten
+  tool_model: "gptoss120b"            # Schnelles Modell für Tool-Calls
+  analysis_model: ""                  # Großes Modell für finale Analyse (leer = default_model)
 
 # Code-Repositories (optional)
 java:
@@ -95,9 +102,60 @@ uvicorn main:app --host 0.0.0.0 --port 8000 --reload
 
 Browser öffnen: **http://localhost:8000**
 
+## Modelle & Prompting-Hinweise
+
+Das System unterstützt mehrere Modelle, die über die Settings-UI oder `config.yaml` verwaltet werden. Modelle können global gesetzt oder **pro Tool individuell konfiguriert** werden.
+
+### Konfigurierte Modelle
+
+| Modell-ID | Anzeigename | Empfohlene Verwendung |
+|-----------|-------------|----------------------|
+| `mistral-678b` | Mistral 678B | Hauptverarbeitung, komplexe Analysen |
+| `gptoss120b` | GPT OSS 120B | Tool-Calls, strukturierte Ausgaben |
+| `qwen-7b` | Qwen 7B | Schnelle Tool-Calls, einfache Suchen |
+| `qwen-428b` | Qwen 428B | Komplexe Tool-Calls, Zwischen-Analysen |
+
+### Prompting-Unterschiede je Modell
+
+#### Mistral Instruct 678B (Hauptverarbeitung)
+- Reagiert sehr gut auf **strukturierte System-Prompts** mit klaren Rollenangaben
+- Unterstützt Tool-Calling zuverlässig auch über mehrere Runden
+- Versteht deutschsprachige Prompts problemlos
+- System-Prompts dürfen ausführlich sein – das Modell nutzt den Kontext effektiv
+- Empfehlung: Skill-System-Prompts mit Abschnitten und Aufzählungen strukturieren
+
+#### GPT OSS 120B (Tool-Calls)
+- Sehr zuverlässig bei Tool-Selektion und Parameter-Extraktion
+- Verarbeitet komplexe Tool-Schemas mit vielen Parametern sicher
+- Ideal für strukturierte Ausgaben (JSON, XML) und Multi-Tool-Workflows
+
+#### Qwen 7B (schnelle Tool-Calls)
+- **Kürzere, direktere Prompts** sind effizienter – System-Prompt unter ~500 Token halten
+- Tool-Definitionen vereinfachen: kurze `description`, maximal 3–4 Tools gleichzeitig
+- Weniger zuverlässig bei komplexen Parametern oder verschachtelten Tool-Calls
+- Ideal für: einfache Suchen, schnelle Code-Lookups, eindeutige Abfragen
+- Bei zu langem Kontext kann das Modell die Tool-Auswahl "vergessen"
+
+#### Qwen 480B (komplexe Tool-Calls)
+- Ähnlich leistungsfähig wie große Frontier-Modelle
+- Verarbeitet längere Prompts und komplexere Tool-Schemas zuverlässig
+- Gute Wahl wenn Qwen 7B zu unzuverlässig aber GPT OSS zu langsam ist
+
+### Modell-Aufteilung in config.yaml
+
+```yaml
+llm:
+  default_model: "mistral-678b"     # Für finale Antworten/Analysen
+  tool_model: "gptoss120b"          # Für alle Tool-Calls im Agent-Loop
+  analysis_model: ""                # Leer = default_model wird verwendet
+```
+
+**Tipp:** Wenn einzelne Tools mit einem bestimmten Modell besser funktionieren,
+kann das über die Settings-UI pro Tool konfiguriert werden.
+
 ## API-Endpunkte
 
-### Agent (Neu)
+### Agent
 | Methode | Pfad | Beschreibung |
 |---------|------|-------------|
 | POST | `/api/agent/chat` | Agent-Chat mit Tool-Calling (SSE) |
@@ -108,7 +166,7 @@ Browser öffnen: **http://localhost:8000**
 | GET | `/api/agent/tools` | Verfügbare Tools auflisten |
 | POST | `/api/agent/session/new` | Neue Session erstellen |
 
-### Skills (Neu)
+### Skills
 | Methode | Pfad | Beschreibung |
 |---------|------|-------------|
 | GET | `/api/skills` | Alle Skills auflisten |
@@ -117,7 +175,7 @@ Browser öffnen: **http://localhost:8000**
 | POST | `/api/skills/from-pdf` | Skill aus PDF erstellen |
 | GET | `/api/skills/search/knowledge` | Skill-Wissen durchsuchen |
 
-### Handbuch (Neu)
+### Handbuch
 | Methode | Pfad | Beschreibung |
 |---------|------|-------------|
 | GET | `/api/handbook/status` | Index-Status |
@@ -148,7 +206,7 @@ Browser öffnen: **http://localhost:8000**
 | POST | `/api/python/validate` | Code validieren |
 | POST | `/api/python/test` | Tests ausführen |
 
-### Settings (Neu)
+### Settings
 | Methode | Pfad | Beschreibung |
 |---------|------|-------------|
 | GET | `/api/settings` | Alle Settings abrufen |
@@ -238,33 +296,40 @@ AI-Assist/
 ├── config.yaml                  # Hauptkonfiguration
 ├── requirements.txt
 ├── app/
-│   ├── agent/                   # NEU: Agent-System
+│   ├── agent/                   # Agent-System
 │   │   ├── orchestrator.py      # Agent-Loop mit Tool-Calling
-│   │   └── tools.py             # Tool-Definitionen
+│   │   ├── tools.py             # Tool-Definitionen
+│   │   ├── datasource_tools.py  # Datenquellen-Tools
+│   │   └── entity_tracker.py   # Entity-Tracking
 │   ├── api/routes/
-│   │   ├── agent.py             # NEU: Agent-Endpunkte
-│   │   ├── skills.py            # NEU: Skill-Endpunkte
-│   │   ├── handbook.py          # NEU: Handbuch-Endpunkte
-│   │   ├── chat.py              # LLM Chat
+│   │   ├── agent.py             # Agent-Endpunkte (SSE)
+│   │   ├── skills.py            # Skill-Endpunkte
+│   │   ├── handbook.py          # Handbuch-Endpunkte
+│   │   ├── settings.py          # Settings-UI
+│   │   ├── chat.py              # LLM Chat (Legacy)
 │   │   ├── java.py              # Java-Repo
 │   │   ├── python_routes.py     # Python-Repo
 │   │   └── ...
 │   ├── models/
-│   │   └── skill.py             # NEU: Skill-Datenmodelle
+│   │   └── skill.py             # Skill-Datenmodelle
 │   ├── services/
-│   │   ├── skill_manager.py     # NEU: Skill-Verwaltung
-│   │   ├── handbook_indexer.py  # NEU: Handbuch-Index
-│   │   ├── file_manager.py      # NEU: Datei-Operationen
-│   │   ├── llm_client.py
+│   │   ├── skill_manager.py     # Skill-Verwaltung
+│   │   ├── handbook_indexer.py  # Handbuch-Index
+│   │   ├── file_manager.py      # Datei-Operationen
+│   │   ├── llm_client.py        # LLM-Kommunikation
 │   │   └── ...
 │   ├── core/
-│   │   ├── config.py
+│   │   ├── config.py            # Pydantic-Konfigurationsmodelle
+│   │   ├── token_budget.py      # Token-Budget-Verwaltung
+│   │   ├── context_manager.py   # Kontext-Zusammenstellung
 │   │   └── ...
 │   └── utils/
-├── skills/                      # NEU: Skill-Definitionen
+├── skills/                      # Skill-Definitionen (YAML)
 │   ├── java-coding-guidelines.yaml
 │   ├── python-coding-guidelines.yaml
-│   └── example-with-knowledge.yaml
+│   ├── java-debug.yaml
+│   ├── junit-generator.yaml
+│   └── fehler-analyse.yaml
 ├── static/
 │   ├── index.html               # IDE-ähnliches Frontend
 │   ├── style.css
