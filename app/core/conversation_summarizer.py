@@ -30,18 +30,23 @@ class ConversationSummarizer:
     # Max Tokens für Summary
     MAX_SUMMARY_TOKENS = 800
 
-    SUMMARY_PROMPT = """Fasse diese Konversation prägnant zusammen.
+    SUMMARY_PROMPT = """Fasse diese Konversation zusammen.
 
-WICHTIG - Behalte:
-- Getroffene Entscheidungen
-- Genannte Dateien, Klassen, Tabellen
-- Offene Aufgaben oder Probleme
+SCHRITT 1 - Strukturierter Block (IMMER zuerst, exakt dieses Format, leere Felder weglassen):
+```json
+{{
+  "entities": {{
+    "KlassenOderServiceName": {{"java": "Pfad/zur/Datei.java", "handbuch": "entry_id_oder_name", "pdf": "Seite N", "confluence": "Seitentitel"}}
+  }},
+  "decisions": ["Getroffene Entscheidung 1"],
+  "open_issues": ["Offenes Problem 1"]
+}}
+```
+
+SCHRITT 2 - Freitext-Zusammenfassung (max 5 Stichpunkte):
 - Wichtige technische Details
-
-FORMAT:
-- Stichpunkte
-- Maximal 5-7 Punkte
-- Keine Wiederholungen
+- Analysierte Fehler oder Befunde
+- Offene Aufgaben
 
 KONVERSATION:
 {conversation}

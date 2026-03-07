@@ -80,12 +80,30 @@ def build_messages(
     return messages
 
 
+def _build_synthesis_header(attachments: List[ContextAttachment]) -> str:
+    """Zeigt dem LLM explizit welche Quell-Typen kombiniert werden."""
+    source_types = []
+    seen = set()
+    for att in attachments:
+        # Label-Format: "DATEI: Pfad", "HANDBUCH: Name", "PDF: Datei", etc.
+        source_type = att.label.split(":")[0].strip("[] ").upper()
+        if source_type and source_type not in seen:
+            source_types.append(source_type)
+            seen.add(source_type)
+    if len(source_types) < 2:
+        return ""
+    return f"[Kombinierte Quellen: {', '.join(source_types)} — können zusammengehörige Themen behandeln]\n"
+
+
 def _build_context_block(attachments: List[ContextAttachment], max_tokens: int) -> str:
     if not attachments:
         return ""
 
+    synthesis = _build_synthesis_header(attachments)
     parts = ["=== BEIGEFÜGTER KONTEXT ===\n"]
-    used_tokens = estimate_tokens(parts[0])
+    if synthesis:
+        parts.append(synthesis)
+    used_tokens = estimate_tokens("".join(parts))
     max_per_item = max_tokens // max(len(attachments), 1)
 
     for att in attachments:

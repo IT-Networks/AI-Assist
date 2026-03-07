@@ -18,6 +18,7 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, AsyncGenerator, Dict, List, Optional, Set
 
+from app.agent.entity_tracker import EntityTracker
 from app.agent.tools import ToolRegistry, ToolResult, get_tool_registry
 from app.core.config import settings
 from app.core.token_budget import TokenBudget, create_budget_from_config
@@ -107,6 +108,8 @@ class AgentState:
     read_files_this_request: Dict[str, int] = field(default_factory=dict)
     # Abbruch-Flag für laufende Anfragen
     cancelled: bool = False
+    # Entity Tracker: Verfolgt gefundene Entitäten und ihre Quellen (Java ↔ Handbuch ↔ PDF)
+    entity_tracker: EntityTracker = field(default_factory=EntityTracker)
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -386,6 +389,12 @@ class AgentOrchestrator:
         except Exception as e:
             print(f"[agent] Memory loading failed: {e}")
 
+        # Entity-Kontext: Bekannte Entitäten aus dieser Session (Java ↔ Handbuch ↔ PDF)
+        entity_hint = state.entity_tracker.get_context_hint()
+        if entity_hint:
+            messages.append({"role": "system", "content": entity_hint})
+            budget.set("memory", budget.used_memory + estimate_tokens(entity_hint))
+
         # Konversations-Historie hinzufügen (für Multi-Turn)
         # context_items werden NICHT als separate System-Message eingefügt,
         # da Tool-Results bereits korrekt als role="tool" Messages im Verlauf erscheinen.
@@ -625,6 +634,18 @@ class AgentOrchestrator:
                     has_used_tools = True
                     current_tool_calls_for_messages.append(tc)
 
+                    # Entity Tracker: Entitäten aus Tool-Result extrahieren
+                    if result.success:
+                        _source_path = (
+                            tool_call.arguments.get("path", "")
+                            or tool_call.arguments.get("query", "")
+                        )
+                        state.entity_tracker.extract_from_tool_result(
+                            tool_name=tool_call.name,
+                            result_text=result.to_context(),
+                            source_path=_source_path
+                        )
+
                     # Bestätigung benötigt?
                     if result.requires_confirmation and state.mode == AgentMode.WRITE_WITH_CONFIRM:
                         state.pending_confirmation = tool_call
@@ -725,6 +746,21 @@ class AgentOrchestrator:
                             "role": "user",
                             "content": "Tool-Ergebnisse:\n\n" + "\n\n---\n\n".join(results_parts)
                         })
+
+                # Proaktive Cross-Source-Anreicherung:
+                # Wenn search_code eine Java-Klasse findet, automatisch search_handbook aufrufen
+                # und umgekehrt — nur wenn die Quelle noch nicht bekannt ist.
+                if current_tool_calls_for_messages:
+                    last_tc = state.tool_calls_history[-1] if state.tool_calls_history else None
+                    if last_tc and last_tc.result and last_tc.result.success:
+                        enrichments = await self._enrich_from_entity_tracker(
+                            state, last_tc.name, last_tc.result.to_context()
+                        )
+                        if enrichments:
+                            messages.append({
+                                "role": "system",
+                                "content": "=== AUTO-QUERVERWEISE ===\n" + "\n\n".join(enrichments)
+                            })
 
             except Exception as e:
                 yield AgentEvent(AgentEventType.ERROR, {"error": str(e)})
@@ -1012,6 +1048,53 @@ class AgentOrchestrator:
             "usage": usage,
             "finish_reason": finish_reason
         }
+
+    async def _enrich_from_entity_tracker(
+        self,
+        state: AgentState,
+        last_tool_name: str,
+        result_text: str
+    ) -> List[str]:
+        """
+        Proaktive Cross-Source-Anreicherung nach einem Tool-Result.
+
+        Wenn search_code eine Java-Klasse findet → search_handbook (wenn noch kein Eintrag)
+        Wenn search_handbook einen Service findet → search_code (wenn noch kein Code)
+
+        Gibt Anreicherungs-Texte zurück (werden als AUTO-QUERVERWEISE eingefügt).
+        """
+        # Nur für Code/Handbuch-Suchergebnisse relevant
+        if last_tool_name not in ("search_code", "read_file", "search_handbook", "get_service_info"):
+            return []
+
+        candidates = state.entity_tracker.get_entities_for_enrichment(last_tool_name, result_text)
+        if not candidates:
+            return []
+
+        enrichments = []
+        for entity in candidates[:2]:  # Max 2 Entitäten pro Iteration
+            try:
+                if last_tool_name in ("search_code", "read_file") and "handbuch" not in entity.sources:
+                    # Java-Klasse gefunden → Handbuch-Eintrag suchen
+                    hw_result = await self.tools.execute("search_handbook", query=entity.name, top_k=1)
+                    if hw_result.success and hw_result.data and len(hw_result.data) > 50:
+                        entity.sources["handbuch"] = entity.name
+                        enrichments.append(
+                            f"[Handbuch-Querverweis für {entity.name}]\n{hw_result.data[:1500]}"
+                        )
+
+                elif last_tool_name in ("search_handbook", "get_service_info") and "java" not in entity.sources:
+                    # Handbuch-Service gefunden → Java-Code suchen
+                    java_result = await self.tools.execute("search_code", query=entity.name, top_k=1)
+                    if java_result.success and java_result.data and len(java_result.data) > 50:
+                        entity.sources["java"] = entity.name
+                        enrichments.append(
+                            f"[Java-Querverweis für {entity.name}]\n{java_result.data[:1500]}"
+                        )
+            except Exception as e:
+                print(f"[entity_enrichment] Fehler bei Anreicherung für {entity.name}: {e}")
+
+        return enrichments
 
     async def _execute_confirmed_operation(self, confirmation_data: Dict) -> ToolResult:
         """Führt eine bestätigte Operation aus."""

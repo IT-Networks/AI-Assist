@@ -66,11 +66,29 @@ class ContextCompactor:
         r"'[^']{1,50}'",                      # Kurze Strings
     ]
 
+    def _compute_relevance(self, item: ContextItem, recent_texts: List[str]) -> float:
+        """
+        Berechnet wie relevant ein Item für die letzten N Nachrichten ist.
+
+        Zählt wie viele Wörter aus dem Item-Inhalt in den letzten Messages vorkommen.
+        Items die gerade diskutiert werden, erhalten einen höheren Relevanz-Score
+        und werden bei der Kompaktierung bevorzugt behalten.
+        """
+        if not recent_texts:
+            return 0.0
+        item_words = {w for w in item.content.lower().split() if len(w) > 4}
+        if not item_words:
+            return 0.0
+        recent_text = " ".join(recent_texts).lower()
+        hits = sum(1 for w in item_words if w in recent_text)
+        return hits / len(item_words)
+
     def compact(
         self,
         items: List[ContextItem],
         target_tokens: int,
-        preserve_recent: int = 3
+        preserve_recent: int = 3,
+        recent_messages: Optional[List[str]] = None
     ) -> List[ContextItem]:
         """
         Komprimiert Items auf target_tokens.
@@ -79,6 +97,7 @@ class ContextCompactor:
             items: Liste der Context-Items
             target_tokens: Ziel-Token-Budget
             preserve_recent: Anzahl der neuesten Items die nicht gekürzt werden
+            recent_messages: Letzte User/Assistant-Nachrichten für Relevanz-Scoring
 
         Returns:
             Komprimierte Liste von Items
@@ -88,15 +107,27 @@ class ContextCompactor:
         if current_tokens <= target_tokens:
             return items
 
+        # Relevanz-Scores berechnen (letzten 4 Nachrichten)
+        recent_texts = (recent_messages or [])[-4:]
+        relevance_scores = {
+            id(item): self._compute_relevance(item, recent_texts)
+            for item in items
+        }
+
         # Sortiere nach Priorität (höhere Prio = niedrigere Zahl = wichtiger)
-        sorted_items = sorted(items, key=lambda x: (x.priority, -x.age))
+        # Bei gleicher Priorität: relevante Items zuletzt entfernen
+        sorted_items = sorted(
+            items,
+            key=lambda x: (x.priority, -relevance_scores[id(x)], -x.age)
+        )
 
         # Phase 1: Alte, niedrig-priorisierte Items komplett entfernen
+        # Items mit hoher Relevanz zur aktuellen Konversation werden bevorzugt behalten
         while current_tokens > target_tokens and len(sorted_items) > preserve_recent:
-            # Entferne Item mit niedrigster Priorität (höchste Zahl)
+            # Entferne Item mit niedrigster Priorität (höchste Zahl) und geringster Relevanz
             to_remove = max(
                 sorted_items[:-preserve_recent],
-                key=lambda x: (x.priority, x.age)
+                key=lambda x: (x.priority, x.age, -relevance_scores[id(x)])
             )
             current_tokens -= to_remove.tokens
             sorted_items.remove(to_remove)
