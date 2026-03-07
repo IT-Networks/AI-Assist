@@ -208,6 +208,7 @@ class ServerConfig(BaseModel):
     host: str = "0.0.0.0"
     port: int = 8000
     reload: bool = False
+    chats_directory: str = "./chats"
 
 
 class SubAgentsConfig(BaseModel):
@@ -291,6 +292,7 @@ def load_settings(config_path: str = "config.yaml") -> Settings:
     Path(settings.uploads.directory).mkdir(parents=True, exist_ok=True)
     Path(settings.index.directory).mkdir(parents=True, exist_ok=True)
     Path(settings.skills.directory).mkdir(parents=True, exist_ok=True)
+    Path(settings.server.chats_directory).mkdir(parents=True, exist_ok=True)
     if settings.file_operations.backup_enabled:
         Path(settings.file_operations.backup_directory).mkdir(parents=True, exist_ok=True)
 

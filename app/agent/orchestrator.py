@@ -115,6 +115,8 @@ class AgentState:
     cancelled: bool = False
     # Entity Tracker: Verfolgt gefundene Entitäten und ihre Quellen (Java ↔ Handbuch ↔ PDF)
     entity_tracker: EntityTracker = field(default_factory=EntityTracker)
+    # Chat-Titel (wird aus erster User-Nachricht abgeleitet oder manuell gesetzt)
+    title: str = ""
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -306,9 +308,23 @@ class AgentOrchestrator:
         self.summarizer = get_summarizer()
 
     def _get_state(self, session_id: str) -> AgentState:
-        """Holt oder erstellt den State für eine Session."""
+        """Holt oder erstellt den State für eine Session. Stellt bei Bedarf vom Disk wieder her."""
         if session_id not in self._states:
-            self._states[session_id] = AgentState(session_id=session_id)
+            state = AgentState(session_id=session_id)
+            # Gespeicherten Chat vom Disk laden (Server-Neustart)
+            try:
+                from app.services.chat_store import load_chat
+                saved = load_chat(session_id)
+                if saved:
+                    state.messages_history = saved.get("messages_history", [])
+                    state.title = saved.get("title", "")
+                    try:
+                        state.mode = AgentMode(saved.get("mode", "read_only"))
+                    except ValueError:
+                        pass
+            except Exception:
+                pass
+            self._states[session_id] = state
         return self._states[session_id]
 
     def set_mode(self, session_id: str, mode: AgentMode) -> None:
@@ -546,6 +562,10 @@ class AgentOrchestrator:
         # User-Nachricht in Historie speichern
         state.messages_history.append({"role": "user", "content": user_message})
 
+        # Auto-Titel aus erster User-Nachricht ableiten
+        if not state.title:
+            state.title = user_message[:60] + ("…" if len(user_message) > 60 else "")
+
         # === COMPACTION CHECK ===
         # Wenn Budget zu voll, Konversation zusammenfassen
         if budget.needs_compaction():
@@ -701,6 +721,17 @@ class AgentOrchestrator:
                             "role": "assistant",
                             "content": assistant_response
                         })
+                        # Chat auf Disk persistieren
+                        try:
+                            from app.services.chat_store import save_chat
+                            save_chat(
+                                session_id=session_id,
+                                title=state.title or "Chat",
+                                messages_history=state.messages_history,
+                                mode=state.mode.value,
+                            )
+                        except Exception:
+                            pass
 
                     # Token-Nutzung als Event senden
                     usage_data = {
@@ -1380,8 +1411,13 @@ Sei vorsichtig und mache nur notwendige Änderungen.
         print(f"[agent] Anfrage für Session {session_id} abgebrochen")
 
     def clear_session(self, session_id: str) -> None:
-        """Löscht den State einer Session."""
+        """Löscht den State einer Session (Speicher + Disk)."""
         self._states.pop(session_id, None)
+        try:
+            from app.services.chat_store import delete_chat
+            delete_chat(session_id)
+        except Exception:
+            pass
 
 
 # ══════════════════════════════════════════════════════════════════════════════

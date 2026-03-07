@@ -92,8 +92,8 @@ document.addEventListener('DOMContentLoaded', async () => {
     loadHandbookStatus(),
   ]);
 
-  // Create initial chat
-  await createNewChat();
+  // Gespeicherte Chats laden oder neuen Chat erstellen
+  await loadPersistedChats();
 });
 
 // ── UI Setup ──
@@ -148,6 +148,30 @@ async function createAgentSession() {
 }
 
 // ── MultiChat Functions ──
+async function loadPersistedChats() {
+  try {
+    const res = await fetch('/api/agent/chats');
+    if (!res.ok) throw new Error('chats endpoint failed');
+    const { chats } = await res.json();
+    if (!chats || chats.length === 0) {
+      await createNewChat();
+      return;
+    }
+    // Chats in Reihenfolge (älteste zuerst) anlegen, needsRestore markieren
+    for (const c of chats) {
+      const chat = chatManager.createChat(c.session_id, c.title || 'Chat');
+      chat.needsRestore = true;
+    }
+    // Neuesten Chat aktivieren (letzter in der sortierten Liste)
+    const last = chatManager.chats[chatManager.chats.length - 1];
+    await switchToChat(last.id);
+    renderChatList();
+  } catch (e) {
+    console.error('Failed to load persisted chats:', e);
+    await createNewChat();
+  }
+}
+
 async function createNewChat() {
   try {
     const sessionId = await createAgentSession();
@@ -192,6 +216,26 @@ async function switchToChat(chatId) {
   state.toolHistory = [...incomingChat.toolHistory];
   state.pendingConfirmation = incomingChat.pendingConfirmation;
   state.context = JSON.parse(JSON.stringify(incomingChat.context));
+
+  // Nachrichten-Historie vom Server laden wenn Chat vom Disk wiederhergestellt wird
+  if (incomingChat.needsRestore) {
+    incomingChat.needsRestore = false;
+    incomingChat.pane.innerHTML = '';
+    try {
+      const res = await fetch(`/api/agent/session/${incomingChat.sessionId}/history`);
+      if (res.ok) {
+        const { messages } = await res.json();
+        for (const msg of messages) {
+          if (msg.role === 'user' || msg.role === 'assistant') {
+            appendMessageToPane(incomingChat.pane, msg.role, msg.content);
+          }
+        }
+      }
+    } catch (e) {
+      incomingChat.pane.innerHTML = welcomeHTML();
+      console.error('Failed to restore chat history:', e);
+    }
+  }
 
   // Pane des eingehenden Chats in den DOM hängen (inklusive aller laufenden DOM-Updates)
   messagesContainer.appendChild(incomingChat.pane);
@@ -306,7 +350,14 @@ function startInlineRename(chatId, itemEl) {
 
   const commit = () => {
     const newTitle = input.value.trim();
-    if (newTitle) chat.title = newTitle;
+    if (newTitle && newTitle !== chat.title) {
+      chat.title = newTitle;
+      fetch(`/api/agent/session/${chat.sessionId}/title`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ title: newTitle }),
+      }).catch(() => {});
+    }
     renderChatList();
   };
 
@@ -331,6 +382,12 @@ function updateActiveChatTitle(firstUserMessage) {
   chat.title = firstUserMessage.length > 40
     ? firstUserMessage.substring(0, 40) + '…'
     : firstUserMessage;
+  // Titel auch auf dem Server persistieren
+  fetch(`/api/agent/session/${chat.sessionId}/title`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ title: chat.title }),
+  }).catch(() => {});
   renderChatList();
 }
 
