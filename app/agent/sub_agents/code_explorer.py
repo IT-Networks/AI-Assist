@@ -24,4 +24,5 @@ class CodeExplorerAgent(SubAgent):
         "list_files",
         "trace_java_references",
         "read_sqlj_file",
+        "debug_java_with_testdata",
     ]

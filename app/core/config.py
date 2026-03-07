@@ -224,6 +224,7 @@ class SubAgentsConfig(BaseModel):
             "jira_agent",
             "database_agent",
             "knowledge_agent",
+            "datasource_agent",
         ]
     )
 

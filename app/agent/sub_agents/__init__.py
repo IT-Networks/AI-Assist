@@ -5,6 +5,7 @@ from app.agent.sub_agents.wiki_agent import WikiAgent
 from app.agent.sub_agents.jira_agent import JiraAgent
 from app.agent.sub_agents.database_agent import DatabaseAgent
 from app.agent.sub_agents.knowledge_agent import KnowledgeAgent
+from app.agent.sub_agents.datasource_agent import DatasourceAgent
 from app.agent.sub_agent import SubAgentDispatcher
 
 _dispatcher_instance = None
@@ -20,6 +21,7 @@ def get_sub_agent_dispatcher() -> SubAgentDispatcher:
             "jira_agent": JiraAgent(),
             "database_agent": DatabaseAgent(),
             "knowledge_agent": KnowledgeAgent(),
+            "datasource_agent": DatasourceAgent(),
         }
         _dispatcher_instance = SubAgentDispatcher(agents)
     return _dispatcher_instance
@@ -31,6 +33,7 @@ __all__ = [
     "JiraAgent",
     "DatabaseAgent",
     "KnowledgeAgent",
+    "DatasourceAgent",
     "SubAgentDispatcher",
     "get_sub_agent_dispatcher",
 ]

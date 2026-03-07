@@ -325,8 +325,10 @@ _KEYWORD_ROUTING: Dict[str, List[str]] = {
                        "task", "fehler", "fehlermeldung"],
     "database_agent": ["tabelle", "sql", "datenbank", "db", "schema", "query", "abfrage",
                        "spalte", "select", "db2", "table", "record", "datensatz"],
-    "knowledge_agent":["handbuch", "service", "pdf", "skill", "wissen", "konzept",
-                       "prozess", "vorgang", "field", "feld"],
+    "knowledge_agent":  ["handbuch", "service", "pdf", "skill", "wissen", "konzept",
+                         "prozess", "vorgang", "field", "feld"],
+    "datasource_agent": ["jenkins", "github", "gitlab", "pipeline", "build", "deployment",
+                         "api", "rest", "endpoint", "datenquelle", "datasource", "service-api"],
 }
 
 _INTENT_PROMPT = """\
@@ -339,6 +341,7 @@ Verfügbare Agenten:
 - jira_agent: Jira-Tickets, Bugs, User Stories, Aufgaben
 - database_agent: DB2-Tabellen, SQL-Abfragen, Datenbankschema
 - knowledge_agent: Internes Handbuch, PDF-Dokumente, Skill-Wissensbasis
+- datasource_agent: Konfigurierte interne REST-APIs, Jenkins-Jobs, GitHub, Deployment-Pipelines
 
 Anfrage: "{query}"
 

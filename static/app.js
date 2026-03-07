@@ -952,11 +952,12 @@ function updateToolCard(toolId, status, result, pane) {
 // ── Sub-Agent Cards ──
 
 const _SA_DISPLAY_NAMES = {
-  code_explorer:   'Code Explorer',
-  wiki_agent:      'Wiki Agent',
-  jira_agent:      'Jira Agent',
-  database_agent:  'Database Agent',
-  knowledge_agent: 'Knowledge Agent',
+  code_explorer:    'Code Explorer',
+  wiki_agent:       'Wiki Agent',
+  jira_agent:       'Jira Agent',
+  database_agent:   'Database Agent',
+  knowledge_agent:  'Knowledge Agent',
+  datasource_agent: 'Datenquellen-Agent',
 };
 
 function _saLabel(agentId) {
@@ -2320,11 +2321,12 @@ function deleteModel(idx) {
 // ── Sub-Agenten Section ──
 
 const ALL_SUB_AGENTS = [
-  { id: 'code_explorer',  label: 'Code Explorer',   desc: 'Java/Python Quellcode, Klassen, Methoden' },
-  { id: 'wiki_agent',     label: 'Wiki Agent',       desc: 'Confluence-Wiki, Architektur, Dokumentation' },
-  { id: 'jira_agent',     label: 'Jira Agent',       desc: 'Tickets, Bugs, User Stories' },
-  { id: 'database_agent', label: 'Database Agent',   desc: 'DB2-Tabellen, SQL-Schema' },
-  { id: 'knowledge_agent',label: 'Knowledge Agent',  desc: 'Handbuch, PDFs, Skills' },
+  { id: 'code_explorer',    label: 'Code Explorer',      desc: 'Java/Python Quellcode, Klassen, Methoden' },
+  { id: 'wiki_agent',       label: 'Wiki Agent',          desc: 'Confluence-Wiki, Architektur, Dokumentation' },
+  { id: 'jira_agent',       label: 'Jira Agent',          desc: 'Tickets, Bugs, User Stories' },
+  { id: 'database_agent',   label: 'Database Agent',      desc: 'DB2-Tabellen, SQL-Schema' },
+  { id: 'knowledge_agent',  label: 'Knowledge Agent',     desc: 'Handbuch, PDFs, Skills' },
+  { id: 'datasource_agent', label: 'Datenquellen-Agent',  desc: 'Jenkins, GitHub, interne REST-APIs (ds_*)' },
 ];
 
 function renderSubAgentsSection() {
