@@ -1242,9 +1242,9 @@ function createPlanCard(planText, chat) {
 
   const body = document.createElement('div');
   body.className = 'plan-card-body';
-  // Markdown-ähnliche Formatierung: einfache Codeblöcke und Zeilenumbrüche
+  // white-space: pre-wrap im CSS übernimmt Zeilenumbrüche; nur Inline-Code ersetzen
   const escaped = escapeHtml(planText);
-  body.innerHTML = escaped.replace(/`([^`]+)`/g, '<code>$1</code>').replace(/\n/g, '<br>');
+  body.innerHTML = escaped.replace(/`([^`]+)`/g, '<code>$1</code>');
 
   const footer = document.createElement('div');
   footer.className = 'plan-card-footer';
@@ -1283,12 +1283,11 @@ async function approvePlan(card, chat) {
     card.querySelector('.plan-btn-approve').textContent = '✓ Plan genehmigt';
     card.querySelector('.plan-btn-reject').style.display = 'none';
 
-    // Neue Chat-Anfrage starten um die Ausführung zu beginnen
-    const executionMessage = 'Bitte führe den genehmigten Plan jetzt aus.';
-    const activeChat = chatManager.getActive();
-    if (activeChat) {
-      await sendMessage(executionMessage, activeChat);
-    }
+    // Neue Chat-Anfrage starten: Input befüllen und sendMessage() aufrufen
+    // sendMessage() liest aus #message-input, prüft Guards und sendet die Anfrage
+    const input = document.getElementById('message-input');
+    input.value = 'Bitte führe den genehmigten Plan jetzt aus.';
+    await sendMessage();
   } catch (e) {
     appendMessage('error', 'Plan-Genehmigung fehlgeschlagen: ' + e.message);
   }

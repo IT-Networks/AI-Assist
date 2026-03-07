@@ -141,9 +141,8 @@ async def agent_chat(request: AgentChatRequest, http_request: Request):
                     yield f"data: {json.dumps({'type': 'waiting_for_confirmation', 'session_id': session_id}, ensure_ascii=False)}\n\n"
                     return
 
-                # Bei PLAN_READY SSE-Stream beenden – das DONE-Event wurde bereits gesendet
-                if event.type == AgentEventType.PLAN_READY:
-                    return
+                # PLAN_READY: Stream NICHT schließen – nachfolgende USAGE/DONE Events
+                # werden noch benötigt um die Status-Bar zu finalisieren.
 
         except asyncio.CancelledError:
             orchestrator.cancel_request(session_id)

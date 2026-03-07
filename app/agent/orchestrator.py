@@ -701,13 +701,39 @@ class AgentOrchestrator:
                     # vollständige Antwort holen und [PLAN]...[/PLAN]-Block extrahieren.
                     if state.mode == AgentMode.PLAN_THEN_EXECUTE and not state.plan_approved:
                         plan_response = existing_content
-                        plan_usage = usage
+                        # Nur neue Requests zählen – usage wurde im Loop bereits akkumuliert.
+                        # Wenn existing_content leer ist, muss ein neuer LLM-Call gemacht werden.
+                        extra_plan_usage: Optional[TokenUsage] = None
                         if not plan_response:
                             plan_resp = await self._call_llm_with_tools(
                                 messages, [], None, is_tool_phase=False
                             )
                             plan_response = plan_resp.get("content", "")
-                            plan_usage = plan_resp.get("usage")
+                            extra_plan_usage = plan_resp.get("usage")  # Noch nicht gezählt
+
+                        # Token-Nutzung für neuen Call akkumulieren (nur wenn neu)
+                        if extra_plan_usage and isinstance(extra_plan_usage, TokenUsage):
+                            request_prompt_tokens += extra_plan_usage.prompt_tokens
+                            request_completion_tokens += extra_plan_usage.completion_tokens
+                            last_finish_reason = extra_plan_usage.finish_reason
+                            last_model = extra_plan_usage.model
+
+                        state.total_prompt_tokens += request_prompt_tokens
+                        state.total_completion_tokens += request_completion_tokens
+
+                        usage_data = {
+                            "prompt_tokens": request_prompt_tokens,
+                            "completion_tokens": request_completion_tokens,
+                            "total_tokens": request_prompt_tokens + request_completion_tokens,
+                            "finish_reason": last_finish_reason,
+                            "model": last_model,
+                            "truncated": last_finish_reason == "length",
+                            "max_tokens": settings.llm.max_tokens,
+                            "session_total_prompt": state.total_prompt_tokens,
+                            "session_total_completion": state.total_completion_tokens,
+                            "budget": budget.get_status() if budget else None,
+                            "compaction_count": state.compaction_count,
+                        }
 
                         plan_match = re.search(r'\[PLAN\](.*?)\[/PLAN\]', plan_response, re.DOTALL)
                         if plan_match:
@@ -730,28 +756,6 @@ class AgentOrchestrator:
                             except Exception:
                                 pass
 
-                            # Token-Nutzung
-                            if plan_usage and isinstance(plan_usage, TokenUsage):
-                                request_prompt_tokens += plan_usage.prompt_tokens
-                                request_completion_tokens += plan_usage.completion_tokens
-                                last_finish_reason = plan_usage.finish_reason
-                                last_model = plan_usage.model
-                            state.total_prompt_tokens += request_prompt_tokens
-                            state.total_completion_tokens += request_completion_tokens
-
-                            usage_data = {
-                                "prompt_tokens": request_prompt_tokens,
-                                "completion_tokens": request_completion_tokens,
-                                "total_tokens": request_prompt_tokens + request_completion_tokens,
-                                "finish_reason": last_finish_reason,
-                                "model": last_model,
-                                "truncated": last_finish_reason == "length",
-                                "max_tokens": settings.llm.max_tokens,
-                                "session_total_prompt": state.total_prompt_tokens,
-                                "session_total_completion": state.total_completion_tokens,
-                                "budget": budget.get_status() if budget else None,
-                                "compaction_count": state.compaction_count,
-                            }
                             yield AgentEvent(AgentEventType.PLAN_READY, {
                                 "plan": plan_text,
                                 "full_response": plan_response,
@@ -764,33 +768,13 @@ class AgentOrchestrator:
                                 "usage": usage_data,
                             })
                             return
-                        # Kein [PLAN]-Block → normale Antwort (Fallback)
+                        # Kein [PLAN]-Block → als normale Antwort ausgeben (Fallback)
                         if plan_response:
                             yield AgentEvent(AgentEventType.TOKEN, plan_response)
-                        if plan_usage and isinstance(plan_usage, TokenUsage):
-                            request_prompt_tokens += plan_usage.prompt_tokens
-                            request_completion_tokens += plan_usage.completion_tokens
-                            last_finish_reason = plan_usage.finish_reason
-                            last_model = plan_usage.model
-                        state.total_prompt_tokens += request_prompt_tokens
-                        state.total_completion_tokens += request_completion_tokens
                         state.messages_history.append({
                             "role": "assistant",
                             "content": plan_response
                         })
-                        usage_data = {
-                            "prompt_tokens": request_prompt_tokens,
-                            "completion_tokens": request_completion_tokens,
-                            "total_tokens": request_prompt_tokens + request_completion_tokens,
-                            "finish_reason": last_finish_reason,
-                            "model": last_model,
-                            "truncated": last_finish_reason == "length",
-                            "max_tokens": settings.llm.max_tokens,
-                            "session_total_prompt": state.total_prompt_tokens,
-                            "session_total_completion": state.total_completion_tokens,
-                            "budget": budget.get_status() if budget else None,
-                            "compaction_count": state.compaction_count,
-                        }
                         yield AgentEvent(AgentEventType.USAGE, usage_data)
                         yield AgentEvent(AgentEventType.DONE, {
                             "response": plan_response,
