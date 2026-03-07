@@ -400,7 +400,8 @@ class AgentOrchestrator:
         self,
         session_id: str,
         user_message: str,
-        model: Optional[str] = None
+        model: Optional[str] = None,
+        context_selection: Optional[Any] = None,
     ) -> AsyncGenerator[AgentEvent, Optional[bool]]:
         """
         Verarbeitet eine User-Nachricht im Agent-Loop.
@@ -412,6 +413,7 @@ class AgentOrchestrator:
             session_id: Session-ID
             user_message: Nachricht des Users
             model: Optional: LLM-Modell
+            context_selection: Optional: Manuell ausgewählte Kontext-Elemente (ContextSelection)
 
         Yields:
             AgentEvent für jeden Schritt
@@ -474,6 +476,31 @@ class AgentOrchestrator:
         if entity_hint:
             messages.append({"role": "system", "content": entity_hint})
             budget.set("memory", budget.used_memory + estimate_tokens(entity_hint))
+
+        # Manuell vom Nutzer ausgewählte Kontext-Elemente (Explorer-Chips)
+        if context_selection:
+            hint_parts = []
+            if getattr(context_selection, "java_files", None):
+                paths = ", ".join(context_selection.java_files[:20])
+                hint_parts.append(f"Java-Dateien: {paths}")
+            if getattr(context_selection, "python_files", None):
+                paths = ", ".join(context_selection.python_files[:20])
+                hint_parts.append(f"Python-Dateien: {paths}")
+            if getattr(context_selection, "pdf_ids", None):
+                ids = ", ".join(context_selection.pdf_ids[:10])
+                hint_parts.append(f"PDF-Dokumente (IDs): {ids}")
+            if getattr(context_selection, "handbook_services", None):
+                ids = ", ".join(context_selection.handbook_services[:10])
+                hint_parts.append(f"Handbuch-Services: {ids}")
+            if hint_parts:
+                ctx_msg = (
+                    "Der Nutzer hat folgende Elemente explizit als Kontext ausgewählt. "
+                    "Beziehe dich bevorzugt auf diese Quellen:\n"
+                    + "\n".join(f"- {p}" for p in hint_parts)
+                )
+                messages.append({"role": "system", "content": ctx_msg})
+                budget.set("memory", budget.used_memory + estimate_tokens(ctx_msg))
+                print(f"[agent] Nutzer-Kontext injiziert: {hint_parts}")
 
         # Konversations-Historie hinzufügen (für Multi-Turn)
         # context_items werden NICHT als separate System-Message eingefügt,

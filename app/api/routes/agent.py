@@ -27,12 +27,21 @@ router = APIRouter(prefix="/api/agent", tags=["agent"])
 # Request/Response Models
 # ══════════════════════════════════════════════════════════════════════════════
 
+class ContextSelection(BaseModel):
+    """Vom Nutzer manuell ausgewählte Kontext-Elemente."""
+    java_files: List[str] = Field(default_factory=list, description="Ausgewählte Java-Dateipfade")
+    python_files: List[str] = Field(default_factory=list, description="Ausgewählte Python-Dateipfade")
+    pdf_ids: List[str] = Field(default_factory=list, description="Ausgewählte PDF-IDs")
+    handbook_services: List[str] = Field(default_factory=list, description="Ausgewählte Handbuch-Service-IDs")
+
+
 class AgentChatRequest(BaseModel):
     """Anfrage für Agent-Chat."""
     message: str = Field(..., min_length=1, max_length=100000, description="User-Nachricht (max 100k Zeichen)")
     session_id: Optional[str] = Field(None, max_length=100, description="Session-ID (neu wenn leer)")
     model: Optional[str] = Field(None, max_length=100, description="LLM-Modell")
     skill_ids: Optional[List[str]] = Field(None, max_length=20, description="Skill-IDs zum Aktivieren (max 20)")
+    context: Optional[ContextSelection] = Field(None, description="Manuell ausgewählte Kontext-Elemente")
 
 
 class AgentModeRequest(BaseModel):
@@ -108,7 +117,8 @@ async def agent_chat(request: AgentChatRequest, http_request: Request):
             gen = orchestrator.process(
                 session_id=session_id,
                 user_message=request.message,
-                model=request.model
+                model=request.model,
+                context_selection=request.context,
             )
 
             async for event in gen:
@@ -179,7 +189,8 @@ async def agent_chat_sync(request: AgentChatRequest) -> Dict[str, Any]:
         gen = orchestrator.process(
             session_id=session_id,
             user_message=request.message,
-            model=request.model
+            model=request.model,
+            context_selection=request.context,
         )
 
         async for event in gen:
@@ -702,7 +713,8 @@ async def get_token_budget(session_id: str) -> Dict[str, Any]:
 
     Nützlich für UI-Anzeige und Debugging.
     """
-    orchestrator = get_orchestrator()
+    from app.agent.orchestrator import get_agent_orchestrator
+    orchestrator = get_agent_orchestrator()
     state = orchestrator._get_state(session_id)
 
     if state.token_budget:

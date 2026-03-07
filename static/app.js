@@ -582,11 +582,18 @@ async function sendMessage() {
 }
 
 async function sendAgentChat(message, abortSignal, chat) {
+  const ctx = chat.context || state.context;
   const payload = {
     message,
     session_id: chat.sessionId,
     model: state.currentModel,
     skill_ids: state.activeSkills.length > 0 ? state.activeSkills : null,
+    context: {
+      java_files: ctx.javaFiles.map(f => f.path),
+      python_files: ctx.pythonFiles.map(f => f.path),
+      pdf_ids: ctx.pdfIds.map(p => p.id),
+      handbook_services: ctx.handbookServices.map(s => s.id),
+    },
   };
 
   const res = await fetch('/api/agent/chat', {
@@ -812,6 +819,12 @@ async function processAgentEvent(event, bubble, msgDiv, chat) {
       break;
     }
 
+    case 'compaction': {
+      const saved = data.savings ? ` (−${data.savings} Tokens)` : '';
+      appendMessageToPane(chat.pane, 'system', `♻ Konversation komprimiert${saved}`);
+      break;
+    }
+
     case 'error':
       appendMessageToPane(chat.pane, 'error', data.error || 'Unbekannter Fehler');
       break;
@@ -988,11 +1001,10 @@ function addToolToHistory(id, name, args, status) {
 }
 
 function updateToolHistory(id, status, result) {
-  const tool = state.toolHistory.find(t => t.name === id || state.toolHistory[0]?.name === id);
-  if (tool || state.toolHistory.length > 0) {
-    const target = tool || state.toolHistory[0];
-    target.status = status;
-    target.result = result;
+  const tool = state.toolHistory.find(t => t.id === id) || state.toolHistory[0];
+  if (tool) {
+    tool.status = status;
+    tool.result = result;
     renderToolHistory();
   }
 }
@@ -1539,7 +1551,7 @@ async function loadHandbookServices() {
     }
 
     container.innerHTML = services.slice(0, 20).map(s => `
-      <div class="service-item" onclick="addServiceToContext('${s.service_id}', '${escapeHtml(s.service_name)}')">
+      <div class="service-item" onclick="addServiceToContext('${escapeHtml(s.service_id)}', '${escapeHtml(s.service_name)}')">
         <div class="service-name">${escapeHtml(s.service_name)}</div>
         <div class="service-id">${escapeHtml(s.service_id)}</div>
       </div>
@@ -1566,7 +1578,7 @@ async function searchHandbook() {
     }
 
     container.innerHTML = results.map(r => `
-      <div class="search-result" onclick="addServiceToContext('${r.service_id}', '${escapeHtml(r.title)}')">
+      <div class="search-result" onclick="addServiceToContext('${escapeHtml(r.service_id)}', '${escapeHtml(r.title)}')">
         <div class="search-result-title">${escapeHtml(r.title)}</div>
         <div class="search-result-path">${escapeHtml(r.service_name || '')}</div>
         <div class="search-result-snippet">${escapeHtml((r.snippet || '').slice(0, 100))}</div>
