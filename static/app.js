@@ -1976,8 +1976,20 @@ async function renderAgentToolsSection() {
   `;
 
   try {
-    const res = await fetch('/api/settings/agent-tools');
-    const data = await res.json();
+    const [toolsRes, dsRes] = await Promise.all([
+      fetch('/api/settings/agent-tools'),
+      fetch('/api/datasources'),
+    ]);
+    const data = await toolsRes.json();
+    const dsData = dsRes.ok ? await dsRes.json() : { sources: [] };
+
+    // Build lookup: tool-name → datasource id
+    const dsById = {};
+    for (const src of (dsData.sources || [])) {
+      // replicate _slugify + get_datasource_tool_name logic
+      const slug = src.name.toLowerCase().replace(/[^a-z0-9_]/g, '_').replace(/_+/g, '_').replace(/^_|_$/g, '').slice(0, 40) || 'unnamed';
+      dsById[`ds_${slug}`] = src.id;
+    }
 
     const tools = data.tools || [];
     const availableModels = data.available_models || [];
@@ -2019,11 +2031,16 @@ async function renderAgentToolsSection() {
         const fieldId = `tool-model-${tool.name}`;
         const currentModel = tool.model || '';
         const writeIcon = tool.is_write_operation ? ' &#9888;' : '';
+        const isDsTool = tool.name.startsWith('ds_') && dsById[tool.name];
+        const dsEditBtn = isDsTool
+          ? `<button class="btn btn-xs btn-secondary" onclick="openDatasourceEdit('${dsById[tool.name]}')" title="Datenquelle bearbeiten">✏ Datenquelle</button>`
+          : '';
 
         html += `
           <div class="settings-field" style="border-bottom: 1px solid var(--border); padding-bottom: 8px; margin-bottom: 8px;">
             <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;">
               <label for="${fieldId}" style="font-weight:600;">${escapeHtml(tool.name)}${writeIcon}</label>
+              ${dsEditBtn}
             </div>
             <div style="font-size:0.85em; color: var(--text-secondary); margin-bottom:6px;">
               ${escapeHtml(tool.description)}
@@ -2041,6 +2058,21 @@ async function renderAgentToolsSection() {
   } catch (err) {
     form.innerHTML = `<p style="color:var(--error);">Fehler beim Laden der Tools: ${escapeHtml(err.message)}</p>`;
   }
+}
+
+function openDatasourceEdit(sourceId) {
+  // Switch to data_sources settings section and open edit form
+  document.querySelectorAll('.settings-nav-item').forEach(btn => {
+    btn.classList.toggle('active', btn.dataset.section === 'data_sources');
+  });
+  settingsState.currentSection = 'data_sources';
+  renderDataSourcesSection().then(() => {
+    dsShowForm(sourceId);
+    // Scroll form into view
+    setTimeout(() => {
+      document.getElementById('ds-edit-form')?.scrollIntoView({ behavior: 'smooth' });
+    }, 100);
+  });
 }
 
 async function saveAgentToolModels() {
@@ -2366,6 +2398,12 @@ async function saveCurrentSection() {
     } catch (err) {
       updateSettingsStatus('Fehler: ' + err.message, 'error');
     }
+    return;
+  }
+
+  // Datenquellen haben eigene Speicher-Buttons (kein generischer Save)
+  if (section === 'data_sources') {
+    updateSettingsStatus('Datenquellen werden direkt über die Formular-Buttons gespeichert', 'success');
     return;
   }
 
