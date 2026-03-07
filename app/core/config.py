@@ -230,6 +230,159 @@ class SubAgentsConfig(BaseModel):
     )
 
 
+# ══════════════════════════════════════════════════════════════════════════════
+# MQ Series
+# ══════════════════════════════════════════════════════════════════════════════
+
+class MQQueue(BaseModel):
+    """Definition einer MQ-Queue."""
+    id: str = ""
+    name: str = ""
+    description: str = ""          # Was macht diese Queue?
+    url: str = ""                  # HTTP-Endpunkt zum Abrufen/Einspielen
+    method: str = "GET"            # GET = lesen, POST/PUT = einspielen
+    service: str = ""              # Zugehöriger Service / was er triggert oder liest
+    role: str = "read"             # read | trigger | both
+    headers: Dict[str, str] = {}   # Feste HTTP-Header je Queue
+    body_template: str = ""        # JSON-Template für PUT/POST (Platzhalter: {{key}})
+    verify_ssl: bool = True
+    timeout_seconds: int = 30
+
+
+class MQConfig(BaseModel):
+    """MQ-Series Konfiguration."""
+    enabled: bool = False
+    queues: List[MQQueue] = []
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Test Tool
+# ══════════════════════════════════════════════════════════════════════════════
+
+class TestStageUrl(BaseModel):
+    """Eine URL innerhalb einer Stage."""
+    url: str = ""
+    description: str = ""
+
+
+class TestStage(BaseModel):
+    """Eine Deployment-Stage (Dev, Test, Prod …)."""
+    id: str = ""
+    name: str = ""
+    urls: List[TestStageUrl] = []
+
+
+class TestServiceParam(BaseModel):
+    """Ein Parameter eines Services."""
+    name: str = ""
+    type: str = "string"           # string | number | boolean | object | array
+    description: str = ""
+    required: bool = False
+    default: str = ""
+    location: str = "body"         # body | query | path | header
+
+
+class TestService(BaseModel):
+    """Definition eines testbaren Services."""
+    id: str = ""
+    name: str = ""
+    description: str = ""
+    endpoint: str = ""             # z.B. /api/orders
+    method: str = "POST"
+    content_type: str = "application/json"
+    parameters: List[TestServiceParam] = []
+    headers: Dict[str, str] = {}
+    # Lokale Ausführung (Python/Java im Repo)
+    local_script: str = ""         # Relativer Pfad zum Skript im aktiven Repo
+    local_interpreter: str = ""    # python | java | mvn | …
+
+
+class TestToolConfig(BaseModel):
+    """Test-Tool Konfiguration."""
+    enabled: bool = False
+    stages: List[TestStage] = []
+    services: List[TestService] = []
+    active_stage: str = ""         # ID der aktiven Stage
+    default_timeout_seconds: int = 60
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Log Servers
+# ══════════════════════════════════════════════════════════════════════════════
+
+class LogServer(BaseModel):
+    """Ein einzelner Log-Server innerhalb einer Stage."""
+    id: str = ""
+    name: str = ""
+    url: str = ""                  # URL zum Log-Download (HTTP GET)
+    description: str = ""
+    headers: Dict[str, str] = {}
+    verify_ssl: bool = True
+
+
+class LogStage(BaseModel):
+    """Eine Stage mit einem oder mehreren Log-Servern."""
+    id: str = ""
+    name: str = ""
+    servers: List[LogServer] = []
+
+
+class LogServersConfig(BaseModel):
+    """Log-Server Konfiguration pro Stage."""
+    enabled: bool = False
+    stages: List[LogStage] = []
+    # Anzahl der letzten Zeilen standardmäßig beim Download
+    default_tail_lines: int = 500
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# WLP Server
+# ══════════════════════════════════════════════════════════════════════════════
+
+class WLPServerEntry(BaseModel):
+    """Ein WLP-Server-Eintrag."""
+    id: str = ""
+    name: str = ""
+    description: str = ""
+    wlp_path: str = ""             # Pfad zum WLP-Installationsverzeichnis
+    server_name: str = "defaultServer"
+    start_timeout_seconds: int = 300
+    extra_jvm_args: str = ""
+
+
+class WLPConfig(BaseModel):
+    """WebSphere Liberty Profile Konfiguration."""
+    enabled: bool = False
+    servers: List[WLPServerEntry] = []
+    # Pfad zum aktiven Repo (für Artefakt-Prüfung, Fallback = java.get_active_path())
+    repo_path: str = ""
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Maven Build
+# ══════════════════════════════════════════════════════════════════════════════
+
+class MavenBuild(BaseModel):
+    """Definition eines Maven-Builds."""
+    id: str = ""
+    name: str = ""
+    description: str = ""
+    pom_path: str = ""             # Absoluter oder relativer Pfad zur pom.xml
+    goals: str = "clean install"
+    profiles: List[str] = []
+    skip_tests: bool = False
+    jvm_args: str = ""             # z.B. -Xmx512m
+    extra_args: str = ""           # Beliebige zusätzliche mvn-Argumente
+
+
+class MavenConfig(BaseModel):
+    """Maven-Build Konfiguration."""
+    enabled: bool = False
+    mvn_executable: str = "mvn"    # Pfad zum mvn-Binary
+    builds: List[MavenBuild] = []
+    default_timeout_minutes: int = 15
+
+
 class Settings(BaseModel):
     llm: LLMConfig = LLMConfig()
     models: List[ModelEntry] = []
@@ -248,6 +401,11 @@ class Settings(BaseModel):
     file_operations: FileOperationsConfig = FileOperationsConfig()
     data_sources: DataSourcesConfig = Field(default_factory=DataSourcesConfig)
     sub_agents: SubAgentsConfig = Field(default_factory=SubAgentsConfig)
+    mq: MQConfig = Field(default_factory=MQConfig)
+    test_tool: TestToolConfig = Field(default_factory=TestToolConfig)
+    log_servers: LogServersConfig = Field(default_factory=LogServersConfig)
+    wlp: WLPConfig = Field(default_factory=WLPConfig)
+    maven: MavenConfig = Field(default_factory=MavenConfig)
 
     def apply_env_overrides(self) -> "Settings":
         if os.getenv("LLM_BASE_URL"):

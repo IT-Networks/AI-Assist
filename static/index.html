@@ -85,6 +85,12 @@
           <button class="settings-nav-item" data-section="index">Index</button>
           <button class="settings-nav-item" data-section="server">Server</button>
           <button class="settings-nav-item" data-section="data_sources">Datenquellen</button>
+          <div class="settings-nav-separator"></div>
+          <button class="settings-nav-item" data-section="mq">MQ Series</button>
+          <button class="settings-nav-item" data-section="test_tool">Test-Tool</button>
+          <button class="settings-nav-item" data-section="log_servers">Log-Server</button>
+          <button class="settings-nav-item" data-section="wlp">WLP Server</button>
+          <button class="settings-nav-item" data-section="maven">Maven</button>
         </nav>
 
         <!-- Settings Content -->
@@ -257,6 +263,10 @@
       <button class="sidebar-tab" data-panel="confirm-panel">
         Bestätigung <span class="badge" id="pending-count" style="display:none">1</span>
       </button>
+      <button class="sidebar-tab" data-panel="mq-panel">MQ</button>
+      <button class="sidebar-tab" data-panel="testtool-panel">Test</button>
+      <button class="sidebar-tab" data-panel="wlp-panel">WLP</button>
+      <button class="sidebar-tab" data-panel="maven-panel">Build</button>
     </div>
 
     <!-- Tools Panel -->
@@ -312,6 +322,77 @@
         </div>
       </div>
     </div>
+    <!-- MQ Panel -->
+    <div class="sidebar-panel" id="mq-panel">
+      <div class="panel-header">
+        <span>&#128233; MQ Series</span>
+        <button class="icon-btn" onclick="loadMQPanel()" title="Aktualisieren">&#8635;</button>
+      </div>
+      <div class="panel-content" id="mq-panel-content">
+        <div class="empty-state"><span>&#128233;</span><p>Konfiguriere MQ-Queues in den Einstellungen</p></div>
+      </div>
+    </div>
+
+    <!-- Test-Tool Panel -->
+    <div class="sidebar-panel" id="testtool-panel">
+      <div class="panel-header">
+        <span>&#128296; Test-Tool</span>
+        <button class="icon-btn" onclick="loadTestToolPanel()" title="Aktualisieren">&#8635;</button>
+      </div>
+      <div class="tool-section">
+        <label class="tool-label">Stage:</label>
+        <select id="testtool-stage-select" onchange="onTestStageChange(this.value)" style="width:100%;margin-bottom:6px"></select>
+        <label class="tool-label">URL:</label>
+        <select id="testtool-url-select" style="width:100%;margin-bottom:6px"></select>
+      </div>
+      <div class="panel-content" id="testtool-services-content">
+        <div class="empty-state"><span>&#128296;</span><p>Konfiguriere Services in den Einstellungen</p></div>
+      </div>
+      <div id="testtool-result-area" style="display:none">
+        <div class="panel-header" style="margin-top:8px">
+          <span>Ergebnis</span>
+          <span id="testtool-status-badge" class="badge"></span>
+        </div>
+        <pre id="testtool-result-pre" class="tool-output"></pre>
+      </div>
+    </div>
+
+    <!-- WLP Panel -->
+    <div class="sidebar-panel" id="wlp-panel">
+      <div class="panel-header">
+        <span>&#9881; WLP Server</span>
+        <button class="icon-btn" onclick="loadWLPPanel()" title="Aktualisieren">&#8635;</button>
+      </div>
+      <div class="panel-content" id="wlp-servers-content">
+        <div class="empty-state"><span>&#9881;</span><p>Konfiguriere WLP-Server in den Einstellungen</p></div>
+      </div>
+      <div id="wlp-log-area" style="display:none">
+        <div class="panel-header" style="margin-top:8px">
+          <span>Server-Ausgabe</span>
+          <button class="icon-btn" onclick="document.getElementById('wlp-log-area').style.display='none'">&#10005;</button>
+        </div>
+        <div id="wlp-log-output" class="tool-output wlp-log"></div>
+      </div>
+    </div>
+
+    <!-- Maven Panel -->
+    <div class="sidebar-panel" id="maven-panel">
+      <div class="panel-header">
+        <span>&#128736; Maven Build</span>
+        <button class="icon-btn" onclick="loadMavenPanel()" title="Aktualisieren">&#8635;</button>
+      </div>
+      <div class="panel-content" id="maven-builds-content">
+        <div class="empty-state"><span>&#128736;</span><p>Konfiguriere Maven-Builds in den Einstellungen</p></div>
+      </div>
+      <div id="maven-log-area" style="display:none">
+        <div class="panel-header" style="margin-top:8px">
+          <span>Build-Ausgabe</span>
+          <button class="icon-btn" onclick="document.getElementById('maven-log-area').style.display='none'">&#10005;</button>
+        </div>
+        <div id="maven-log-output" class="tool-output maven-log"></div>
+      </div>
+    </div>
+
   </aside>
 
 </div>
