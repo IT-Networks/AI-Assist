@@ -110,6 +110,15 @@ async def lifespan(app: FastAPI):
                 print(f"[startup] Maven-Tools registriert: {mvn_count}")
         except Exception as e:
             print(f"[startup] Maven-Tools-Registrierung fehlgeschlagen: {e}")
+
+        # Log-Tools registrieren (log_find_server, log_read_window, log_read_ffdc)
+        try:
+            from app.agent.log_tools import register_log_tools
+            log_count = register_log_tools(registry)
+            if log_count:
+                print(f"[startup] Log-Tools registriert: {log_count}")
+        except Exception as e:
+            print(f"[startup] Log-Tools-Registrierung fehlgeschlagen: {e}")
     except Exception as e:
         print(f"[startup] Agent-Initialisierung fehlgeschlagen: {e}")
 

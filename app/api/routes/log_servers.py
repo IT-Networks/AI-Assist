@@ -12,13 +12,14 @@ Routes:
   DELETE /api/log-servers/stages/{stage_id}/servers/{id}   – Server löschen
 
   POST   /api/log-servers/download           – Logs von einem Server herunterladen
-  POST   /api/log-servers/find-server        – Passenden Server anhand Zeitstempel finden
+  POST   /api/log-servers/find-server        – Passenden Server sequentiell suchen (Early-Exit)
+  POST   /api/log-servers/read-window        – Logs im Zeitfenster lesen (Early-Exit je Server)
 """
 
 import uuid
 import re
 import httpx
-from datetime import datetime, timezone
+from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, HTTPException
@@ -46,15 +47,29 @@ class ServerRequest(BaseModel):
 class DownloadRequest(BaseModel):
     stage_id: str
     server_id: str
-    tail_lines: Optional[int] = None   # None = Default aus Config
+    tail_lines: Optional[int] = None
     extra_headers: Dict[str, str] = {}
 
 
 class FindServerRequest(BaseModel):
-    """Sucht den passenden Server anhand eines Zeitstempels und Inhalts."""
+    """Sucht den passenden Server sequentiell – bricht ab sobald ein guter Treffer gefunden."""
     stage_id: str
-    reference_time: str            # ISO-8601, z.B. aus Test-Tool-Aufruf
+    reference_time: str                # ISO-8601
     search_term: Optional[str] = None  # Optionaler Log-Inhalt zur Verifikation
+    # Score ≥ min_score → sofortiger Abbruch (Early-Exit)
+    min_score: float = 60.0
+    tail_lines: Optional[int] = None
+
+
+class ReadWindowRequest(BaseModel):
+    """Liest Logs in einem Zeitfenster – probiert Server sequentiell, bricht bei Treffer ab."""
+    stage_id: str
+    time_start: str                    # ISO-8601 – Beginn des Zeitfensters
+    time_end: str                      # ISO-8601 – Ende des Zeitfensters
+    search_term: Optional[str] = None  # Muss im gefilterten Abschnitt vorkommen
+    tail_lines: Optional[int] = None   # Anzahl Zeilen vom Server laden
+    # Mindest-Anzahl passender Zeilen damit Server als Treffer gilt
+    min_matching_lines: int = 1
 
 
 # ── Stage Management ──────────────────────────────────────────────────────────
@@ -158,7 +173,6 @@ async def download_logs(req: DownloadRequest) -> Dict[str, Any]:
     headers = dict(server.headers)
     headers.update(req.extra_headers)
 
-    # URL ggf. mit tail_lines als Query-Parameter erweitern
     url = server.url
     sep = "&" if "?" in url else "?"
     url_with_tail = f"{url}{sep}tail={tail}"
@@ -185,36 +199,95 @@ async def download_logs(req: DownloadRequest) -> Dict[str, Any]:
         raise HTTPException(status_code=502, detail=str(e))
 
 
-# ── Smart Server Finder ───────────────────────────────────────────────────────
+# ── Timestamp Helpers ─────────────────────────────────────────────────────────
 
-# Typische Log-Zeitstempel-Formate
 _TS_PATTERNS = [
-    r"\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}",  # ISO-8601 / Standard
-    r"\d{2}\.\d{2}\.\d{4} \d{2}:\d{2}:\d{2}",    # DD.MM.YYYY HH:MM:SS
-    r"\d{2}/\w{3}/\d{4}:\d{2}:\d{2}:\d{2}",       # Apache-Style
+    # (regex, strptime-Format)
+    (r"\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}", "%Y-%m-%dT%H:%M:%S"),
+    (r"\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}", "%Y-%m-%d %H:%M:%S"),
+    (r"\d{2}\.\d{2}\.\d{4} \d{2}:\d{2}:\d{2}",  "%d.%m.%Y %H:%M:%S"),
 ]
 
 
+def _parse_line_timestamp(line: str) -> Optional[datetime]:
+    """Extrahiert den ersten Zeitstempel aus einer Log-Zeile."""
+    for pattern, fmt in _TS_PATTERNS:
+        m = re.search(pattern, line)
+        if m:
+            try:
+                raw = m.group().replace("T", " ")
+                return datetime.strptime(raw[:19], "%Y-%m-%d %H:%M:%S")
+            except ValueError:
+                pass
+            try:
+                return datetime.strptime(m.group(), fmt)
+            except ValueError:
+                pass
+    return None
+
+
 def _extract_timestamps(text: str) -> List[datetime]:
-    """Extrahiert Zeitstempel aus Log-Text."""
+    """Extrahiert alle Zeitstempel aus einem Log-Text (für find-server)."""
     results = []
-    for pattern in _TS_PATTERNS:
-        for m in re.finditer(pattern, text):
-            raw = m.group()
-            for fmt in ("%Y-%m-%dT%H:%M:%S", "%Y-%m-%d %H:%M:%S", "%d.%m.%Y %H:%M:%S"):
-                try:
-                    results.append(datetime.strptime(raw, fmt))
-                    break
-                except ValueError:
-                    pass
+    for line in text.splitlines():
+        ts = _parse_line_timestamp(line)
+        if ts:
+            results.append(ts)
     return results
 
+
+def _filter_lines_to_window(
+    lines: List[str],
+    time_start: datetime,
+    time_end: datetime,
+) -> List[str]:
+    """
+    Filtert Log-Zeilen auf ein Zeitfenster.
+    Zeilen ohne Zeitstempel werden der zuletzt gesehenen Zeit zugeordnet.
+    """
+    result = []
+    last_ts: Optional[datetime] = None
+
+    for line in lines:
+        ts = _parse_line_timestamp(line)
+        if ts:
+            last_ts = ts
+
+        effective_ts = last_ts
+        if effective_ts is None:
+            # Noch kein Zeitstempel gesehen – Zeile überspringen
+            continue
+
+        if time_start <= effective_ts <= time_end:
+            result.append(line)
+
+    return result
+
+
+async def _fetch_server_logs(server: LogServer, tail: int) -> Optional[str]:
+    """Lädt Log-Inhalt von einem Server. Gibt None bei Fehler zurück."""
+    try:
+        headers = dict(server.headers)
+        url = server.url
+        sep = "&" if "?" in url else "?"
+        url_with_tail = f"{url}{sep}tail={tail}"
+        async with httpx.AsyncClient(verify=server.verify_ssl, timeout=30) as client:
+            resp = await client.get(url_with_tail, headers=headers)
+        if resp.is_success:
+            return resp.text
+    except Exception:
+        pass
+    return None
+
+
+# ── Sequential Find-Server (Early-Exit) ───────────────────────────────────────
 
 @router.post("/find-server")
 async def find_server(req: FindServerRequest) -> Dict[str, Any]:
     """
-    Versucht den passenden Log-Server für eine Stage zu finden,
-    indem Logs heruntergeladen und der Zeitstempel verglichen wird.
+    Sucht den passenden Log-Server SEQUENTIELL – bricht sofort ab wenn
+    ein Server mit Score ≥ min_score gefunden wird.
+    Server werden in konfigurierter Reihenfolge geprüft.
     """
     stage = _get_stage(req.stage_id)
     if not stage.servers:
@@ -222,53 +295,149 @@ async def find_server(req: FindServerRequest) -> Dict[str, Any]:
 
     try:
         ref_time = datetime.fromisoformat(req.reference_time.replace("Z", "+00:00"))
-        ref_time = ref_time.replace(tzinfo=None)  # naive für Vergleich
+        ref_time = ref_time.replace(tzinfo=None)
     except Exception:
         raise HTTPException(status_code=400, detail=f"Ungültiges Zeitformat: {req.reference_time}")
 
-    results = []
+    tail = req.tail_lines or settings.log_servers.default_tail_lines
+    tried = []
+
     for server in stage.servers:
-        try:
-            headers = dict(server.headers)
-            tail = settings.log_servers.default_tail_lines
-            url = f"{server.url}{'&' if '?' in server.url else '?'}tail={tail}"
-            async with httpx.AsyncClient(verify=server.verify_ssl, timeout=30) as client:
-                resp = await client.get(url, headers=headers)
-            if not resp.is_success:
-                results.append({"server": server.name, "score": -1, "error": f"HTTP {resp.status_code}"})
-                continue
+        content = await _fetch_server_logs(server, tail)
 
-            content = resp.text
-            timestamps = _extract_timestamps(content)
-            if not timestamps:
-                results.append({"server": server.name, "score": 0, "note": "Keine Zeitstempel gefunden"})
-                continue
+        if content is None:
+            tried.append({"server_id": server.id, "server": server.name, "score": -1, "error": "Download fehlgeschlagen"})
+            continue
 
-            # Nächsten Zeitstempel zur Referenzzeit suchen
-            closest = min(timestamps, key=lambda t: abs((t - ref_time).total_seconds()))
-            delta_s = abs((closest - ref_time).total_seconds())
+        timestamps = _extract_timestamps(content)
+        if not timestamps:
+            tried.append({"server_id": server.id, "server": server.name, "score": 0, "note": "Keine Zeitstempel"})
+            continue
 
-            # Optional: Suchbegriff prüfen
-            content_match = req.search_term.lower() in content.lower() if req.search_term else True
+        closest = min(timestamps, key=lambda t: abs((t - ref_time).total_seconds()))
+        delta_s = abs((closest - ref_time).total_seconds())
+        content_match = req.search_term.lower() in content.lower() if req.search_term else True
+        score = max(0, 100 - delta_s / 60) * (1.5 if content_match else 1.0)
+        score = round(score, 1)
 
-            score = max(0, 100 - delta_s / 60) * (1.5 if content_match else 1.0)
-            results.append({
-                "server_id": server.id,
-                "server": server.name,
-                "score": round(score, 1),
-                "closest_timestamp": closest.isoformat(),
-                "delta_seconds": round(delta_s, 1),
-                "content_match": content_match,
-            })
-        except Exception as e:
-            results.append({"server": server.name, "score": -1, "error": str(e)})
+        entry = {
+            "server_id": server.id,
+            "server": server.name,
+            "score": score,
+            "closest_timestamp": closest.isoformat(),
+            "delta_seconds": round(delta_s, 1),
+            "content_match": content_match,
+        }
+        tried.append(entry)
 
-    results.sort(key=lambda r: r.get("score", -1), reverse=True)
-    best = results[0] if results else None
+        # Early-Exit: Guter Treffer gefunden
+        if score >= req.min_score:
+            return {
+                "stage": stage.name,
+                "reference_time": req.reference_time,
+                "found": True,
+                "early_exit": True,
+                "best_match": entry,
+                "servers_tried": tried,
+                "servers_skipped": len(stage.servers) - len(tried),
+            }
+
+    # Kein Early-Exit – bestes Ergebnis aus allen Versuchen
+    tried_valid = [r for r in tried if r.get("score", -1) >= 0]
+    best = max(tried_valid, key=lambda r: r["score"]) if tried_valid else None
 
     return {
         "stage": stage.name,
         "reference_time": req.reference_time,
-        "results": results,
+        "found": bool(best),
+        "early_exit": False,
         "best_match": best,
+        "servers_tried": tried,
+        "servers_skipped": 0,
+    }
+
+
+# ── Read Window (Zeitfenster-Logs, Sequential + Early-Exit) ───────────────────
+
+@router.post("/read-window")
+async def read_window(req: ReadWindowRequest) -> Dict[str, Any]:
+    """
+    Lädt Logs von jedem Server der Stage SEQUENTIELL und filtert auf das
+    angegebene Zeitfenster. Bricht ab, sobald ein Server passende Zeilen liefert.
+
+    Rückgabe: Gefilterte Log-Zeilen des passenden Servers + Metadaten.
+    """
+    stage = _get_stage(req.stage_id)
+    if not stage.servers:
+        raise HTTPException(status_code=400, detail="Stage hat keine Server konfiguriert")
+
+    # Zeitfenster parsen
+    try:
+        t_start = datetime.fromisoformat(req.time_start.replace("Z", "+00:00")).replace(tzinfo=None)
+        t_end   = datetime.fromisoformat(req.time_end.replace("Z", "+00:00")).replace(tzinfo=None)
+    except Exception:
+        raise HTTPException(status_code=400, detail="Ungültiges Zeitformat (ISO-8601 erwartet)")
+
+    if t_end < t_start:
+        raise HTTPException(status_code=400, detail="time_end muss nach time_start liegen")
+
+    tail = req.tail_lines or settings.log_servers.default_tail_lines
+    tried = []
+
+    for server in stage.servers:
+        content = await _fetch_server_logs(server, tail)
+        if content is None:
+            tried.append({"server_id": server.id, "server": server.name, "result": "download_failed"})
+            continue
+
+        all_lines = content.splitlines()
+        window_lines = _filter_lines_to_window(all_lines, t_start, t_end)
+
+        # Suchbegriff innerhalb des Zeitfensters prüfen
+        if req.search_term:
+            term_lower = req.search_term.lower()
+            matching = [l for l in window_lines if term_lower in l.lower()]
+        else:
+            matching = window_lines
+
+        tried.append({
+            "server_id": server.id,
+            "server": server.name,
+            "total_lines": len(all_lines),
+            "window_lines": len(window_lines),
+            "matching_lines": len(matching),
+        })
+
+        # Early-Exit: Genug passende Zeilen gefunden
+        if len(matching) >= req.min_matching_lines:
+            return {
+                "stage": stage.name,
+                "server_id": server.id,
+                "server": server.name,
+                "time_start": req.time_start,
+                "time_end": req.time_end,
+                "found": True,
+                "early_exit": True,
+                "window_lines": window_lines,
+                "matching_lines": matching,
+                "total_downloaded": len(all_lines),
+                "servers_tried": tried,
+                "servers_skipped": len(stage.servers) - len(tried),
+                "content": "\n".join(window_lines),
+            }
+
+    # Kein Treffer – bestes Ergebnis zurückgeben (Server mit meisten Fenster-Zeilen)
+    best_try = max(tried, key=lambda t: t.get("window_lines", 0)) if tried else None
+
+    return {
+        "stage": stage.name,
+        "time_start": req.time_start,
+        "time_end": req.time_end,
+        "found": False,
+        "early_exit": False,
+        "window_lines": [],
+        "matching_lines": [],
+        "servers_tried": tried,
+        "servers_skipped": 0,
+        "best_partial": best_try,
     }
