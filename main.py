@@ -5,7 +5,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 from pathlib import Path
 
-from app.api.routes import chat, java, logs, pdf, confluence, models, python_routes, handbook, skills, agent, settings, database
+from app.api.routes import chat, java, logs, pdf, confluence, models, python_routes, handbook, skills, agent, settings, database, datasources
 
 
 @asynccontextmanager
@@ -62,6 +62,7 @@ async def lifespan(app: FastAPI):
     # Agent Orchestrator und Tools initialisieren
     try:
         from app.agent import get_tool_registry, get_agent_orchestrator
+        from app.agent.datasource_tools import register_datasource_tools
         registry = get_tool_registry()
         orchestrator = get_agent_orchestrator()
         tools_count = len(registry.tools)
@@ -69,6 +70,10 @@ async def lifespan(app: FastAPI):
         print(f"[startup] Agent initialisiert: {tools_count} Tools ({write_tools} Schreib-Ops)")
         if settings.file_operations.enabled:
             print(f"[startup] File-Ops aktiviert: Modus={settings.file_operations.default_mode}")
+        # Datenquellen-Tools registrieren
+        ds_count = register_datasource_tools(registry)
+        if ds_count:
+            print(f"[startup] Datenquellen-Tools registriert: {ds_count}")
     except Exception as e:
         print(f"[startup] Agent-Initialisierung fehlgeschlagen: {e}")
 
@@ -95,6 +100,7 @@ app.include_router(skills.router)
 app.include_router(agent.router)
 app.include_router(settings.router)
 app.include_router(database.router)
+app.include_router(datasources.router)
 
 
 # ══════════════════════════════════════════════════════════════════════════════

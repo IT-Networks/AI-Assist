@@ -3,13 +3,55 @@ from pathlib import Path
 from typing import Dict, List, Optional
 
 import yaml
-from pydantic import BaseModel, field_validator
+from pydantic import BaseModel, Field, field_validator
 from pydantic_settings import BaseSettings
 
 
 class ModelEntry(BaseModel):
     id: str
     display_name: str
+
+
+class DataSourceParam(BaseModel):
+    """Ein Parameter für ein Datenquellen-Tool."""
+    name: str = ""
+    type: str = "string"       # string, number, boolean, object
+    description: str = ""
+    required: bool = False
+    location: str = "query"    # query, body, path, header
+
+
+class DataSourceAuthConfig(BaseModel):
+    """Authentifizierungskonfiguration für eine Datenquelle."""
+    type: str = "none"         # none, basic, bearer, api_key
+    username: str = ""
+    password: str = ""
+    bearer_token: str = ""
+    api_key_header: str = "X-API-Key"
+    api_key_value: str = ""
+
+
+class DataSourceConfig(BaseModel):
+    """Konfiguration einer internen Datenquelle (HTTP-basiert)."""
+    id: str = ""
+    name: str = ""
+    description: str = ""      # Was ist diese Datenquelle?
+    base_url: str = ""         # z.B. http://jenkins.intern:8080
+    verify_ssl: bool = True    # False für interne Systeme mit selbstsignierten Certs
+    auth: DataSourceAuthConfig = Field(default_factory=DataSourceAuthConfig)
+    custom_headers: Dict[str, str] = {}
+    # KI-generierte Tool-Definition
+    tool_description: str = ""  # Was kann das Tool, wie funktioniert es?
+    tool_usage: str = ""        # Wann sollte der Agent dieses Tool verwenden?
+    endpoint_path: str = ""     # Standard-Endpunkt (z.B. /api/json)
+    method: str = "GET"
+    parameters: List[DataSourceParam] = []
+    explored: bool = False      # Wurde KI-Erkundung bereits durchgeführt?
+
+
+class DataSourcesConfig(BaseModel):
+    """Container für alle konfigurierten Datenquellen."""
+    sources: List[DataSourceConfig] = []
 
 
 class LLMConfig(BaseModel):
@@ -184,6 +226,7 @@ class Settings(BaseModel):
     jira: JiraConfig = JiraConfig()
     skills: SkillsConfig = SkillsConfig()
     file_operations: FileOperationsConfig = FileOperationsConfig()
+    data_sources: DataSourcesConfig = Field(default_factory=DataSourcesConfig)
 
     def apply_env_overrides(self) -> "Settings":
         if os.getenv("LLM_BASE_URL"):
