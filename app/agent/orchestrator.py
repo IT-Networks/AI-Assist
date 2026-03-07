@@ -47,6 +47,11 @@ class AgentEventType(str, Enum):
     USAGE = "usage"                    # Token-Nutzung
     COMPACTION = "compaction"          # Context wurde komprimiert
     DONE = "done"                      # Fertig
+    # Sub-Agent Events
+    SUBAGENT_START = "subagent_start"      # Sub-Agent-Phase beginnt (Routing läuft)
+    SUBAGENT_ROUTING = "subagent_routing"  # Routing fertig – ausgewählte Agenten bekannt
+    SUBAGENT_DONE = "subagent_done"        # Ein Sub-Agent hat Ergebnis geliefert
+    SUBAGENT_ERROR = "subagent_error"      # Sub-Agent fehlgeschlagen
 
 
 @dataclass
@@ -110,6 +115,8 @@ class AgentState:
     cancelled: bool = False
     # Entity Tracker: Verfolgt gefundene Entitäten und ihre Quellen (Java ↔ Handbuch ↔ PDF)
     entity_tracker: EntityTracker = field(default_factory=EntityTracker)
+    # Chat-Titel (wird aus erster User-Nachricht abgeleitet oder manuell gesetzt)
+    title: str = ""
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -301,9 +308,23 @@ class AgentOrchestrator:
         self.summarizer = get_summarizer()
 
     def _get_state(self, session_id: str) -> AgentState:
-        """Holt oder erstellt den State für eine Session."""
+        """Holt oder erstellt den State für eine Session. Stellt bei Bedarf vom Disk wieder her."""
         if session_id not in self._states:
-            self._states[session_id] = AgentState(session_id=session_id)
+            state = AgentState(session_id=session_id)
+            # Gespeicherten Chat vom Disk laden (Server-Neustart)
+            try:
+                from app.services.chat_store import load_chat
+                saved = load_chat(session_id)
+                if saved:
+                    state.messages_history = saved.get("messages_history", [])
+                    state.title = saved.get("title", "")
+                    try:
+                        state.mode = AgentMode(saved.get("mode", "read_only"))
+                    except ValueError:
+                        pass
+            except Exception:
+                pass
+            self._states[session_id] = state
         return self._states[session_id]
 
     def set_mode(self, session_id: str, mode: AgentMode) -> None:
@@ -316,11 +337,115 @@ class AgentOrchestrator:
         state = self._get_state(session_id)
         state.active_skill_ids = set(skill_ids)
 
+    async def _run_sub_agents_phase(
+        self,
+        user_message: str,
+        model: Optional[str],
+        messages: List[Dict],
+        budget,
+    ) -> AsyncGenerator[AgentEvent, None]:
+        """
+        Führt die parallele Sub-Agent-Erkundungsphase aus.
+
+        Sub-Agenten durchsuchen ihre spezialisierten Datenquellen parallel
+        und liefern komprimierte Zusammenfassungen zurück.
+        Diese werden als System-Message in den Main-Context injiziert,
+        bevor der Main-Agent-Loop startet.
+
+        Yieldet SUBAGENT_START / SUBAGENT_DONE / SUBAGENT_ERROR Events.
+        """
+        from app.agent.sub_agents import get_sub_agent_dispatcher
+        from app.agent.sub_agent import format_sub_agent_results
+        from app.services.llm_client import llm_client
+        from app.utils.token_counter import estimate_tokens
+
+        try:
+            dispatcher = get_sub_agent_dispatcher()
+        except Exception as e:
+            print(f"[sub_agents] Dispatcher nicht verfügbar: {e}")
+            return
+
+        routing_model = (
+            settings.sub_agents.routing_model
+            or settings.llm.tool_model
+            or settings.llm.default_model
+        )
+
+        # Phase 1: Routing läuft – noch keine Agenten bekannt
+        yield AgentEvent(AgentEventType.SUBAGENT_START, {
+            "message": "Intent-Routing läuft...",
+            "routing_model": routing_model,
+        })
+
+        # Routing: welche Agenten werden benötigt?
+        try:
+            selected_agents = await dispatcher.classify_intent(user_message, llm_client)
+        except Exception as e:
+            print(f"[sub_agents] Routing fehlgeschlagen: {e}")
+            yield AgentEvent(AgentEventType.SUBAGENT_ERROR, {"error": f"Routing: {e}"})
+            return
+
+        # Phase 2: Routing fertig – ausgewählte Agenten bekannt
+        yield AgentEvent(AgentEventType.SUBAGENT_ROUTING, {
+            "agents": selected_agents,
+            "routing_model": routing_model,
+        })
+
+        if not selected_agents:
+            print("[sub_agents] Keine relevanten Agenten ermittelt – überspringe Phase")
+            return
+
+        # Phase 3: Ausgewählte Agenten parallel ausführen
+        try:
+            results = await dispatcher.dispatch_selected(
+                query=user_message,
+                agents=selected_agents,
+                llm_client=llm_client,
+                tool_registry=self.tools,
+            )
+        except Exception as e:
+            print(f"[sub_agents] Dispatch fehlgeschlagen: {e}")
+            yield AgentEvent(AgentEventType.SUBAGENT_ERROR, {"error": str(e)})
+            return
+
+        # Events für jeden Sub-Agenten emittieren
+        for result in results:
+            if result.success:
+                yield AgentEvent(AgentEventType.SUBAGENT_DONE, {
+                    "agent": result.agent_name,
+                    "findings_count": len(result.key_findings),
+                    "sources_count": len(result.sources),
+                    "duration_ms": result.duration_ms,
+                })
+            else:
+                yield AgentEvent(AgentEventType.SUBAGENT_ERROR, {
+                    "agent": result.agent_name,
+                    "error": result.error,
+                })
+
+        # Ergebnisse als System-Message in den Haupt-Kontext injizieren
+        context_block = format_sub_agent_results(results)
+        if context_block:
+            context_tokens = estimate_tokens(context_block)
+            # Nur injizieren wenn Token-Budget ausreicht
+            if budget.can_add("context", context_tokens):
+                # Nach dem ersten System-Message (Haupt-Prompt) einfügen
+                insert_pos = 1
+                messages.insert(insert_pos, {
+                    "role": "system",
+                    "content": context_block,
+                })
+                budget.add("context", context_tokens)
+                print(f"[sub_agents] Context injiziert: {context_tokens} Tokens")
+            else:
+                print(f"[sub_agents] Context zu groß ({context_tokens} Tokens), übersprungen")
+
     async def process(
         self,
         session_id: str,
         user_message: str,
-        model: Optional[str] = None
+        model: Optional[str] = None,
+        context_selection: Optional[Any] = None,
     ) -> AsyncGenerator[AgentEvent, Optional[bool]]:
         """
         Verarbeitet eine User-Nachricht im Agent-Loop.
@@ -332,6 +457,7 @@ class AgentOrchestrator:
             session_id: Session-ID
             user_message: Nachricht des Users
             model: Optional: LLM-Modell
+            context_selection: Optional: Manuell ausgewählte Kontext-Elemente (ContextSelection)
 
         Yields:
             AgentEvent für jeden Schritt
@@ -395,6 +521,31 @@ class AgentOrchestrator:
             messages.append({"role": "system", "content": entity_hint})
             budget.set("memory", budget.used_memory + estimate_tokens(entity_hint))
 
+        # Manuell vom Nutzer ausgewählte Kontext-Elemente (Explorer-Chips)
+        if context_selection:
+            hint_parts = []
+            if getattr(context_selection, "java_files", None):
+                paths = ", ".join(context_selection.java_files[:20])
+                hint_parts.append(f"Java-Dateien: {paths}")
+            if getattr(context_selection, "python_files", None):
+                paths = ", ".join(context_selection.python_files[:20])
+                hint_parts.append(f"Python-Dateien: {paths}")
+            if getattr(context_selection, "pdf_ids", None):
+                ids = ", ".join(context_selection.pdf_ids[:10])
+                hint_parts.append(f"PDF-Dokumente (IDs): {ids}")
+            if getattr(context_selection, "handbook_services", None):
+                ids = ", ".join(context_selection.handbook_services[:10])
+                hint_parts.append(f"Handbuch-Services: {ids}")
+            if hint_parts:
+                ctx_msg = (
+                    "Der Nutzer hat folgende Elemente explizit als Kontext ausgewählt. "
+                    "Beziehe dich bevorzugt auf diese Quellen:\n"
+                    + "\n".join(f"- {p}" for p in hint_parts)
+                )
+                messages.append({"role": "system", "content": ctx_msg})
+                budget.set("memory", budget.used_memory + estimate_tokens(ctx_msg))
+                print(f"[agent] Nutzer-Kontext injiziert: {hint_parts}")
+
         # Konversations-Historie hinzufügen (für Multi-Turn)
         # context_items werden NICHT als separate System-Message eingefügt,
         # da Tool-Results bereits korrekt als role="tool" Messages im Verlauf erscheinen.
@@ -410,6 +561,10 @@ class AgentOrchestrator:
 
         # User-Nachricht in Historie speichern
         state.messages_history.append({"role": "user", "content": user_message})
+
+        # Auto-Titel aus erster User-Nachricht ableiten
+        if not state.title:
+            state.title = user_message[:60] + ("…" if len(user_message) > 60 else "")
 
         # === COMPACTION CHECK ===
         # Wenn Budget zu voll, Konversation zusammenfassen
@@ -441,6 +596,18 @@ class AgentOrchestrator:
                     ]))
             except Exception as e:
                 print(f"[agent] Compaction failed: {e}")
+
+        # === SUB-AGENT PHASE ===
+        # Spezialisierte Sub-Agenten erkunden Datenquellen parallel,
+        # bevor der Main-Agent seinen Loop startet.
+        if (
+            settings.sub_agents.enabled
+            and len(user_message) >= settings.sub_agents.min_query_length
+        ):
+            async for event in self._run_sub_agents_phase(
+                user_message, model, messages, budget
+            ):
+                yield event
 
         # Agent-Loop
         has_used_tools = False
@@ -554,6 +721,17 @@ class AgentOrchestrator:
                             "role": "assistant",
                             "content": assistant_response
                         })
+                        # Chat auf Disk persistieren
+                        try:
+                            from app.services.chat_store import save_chat
+                            save_chat(
+                                session_id=session_id,
+                                title=state.title or "Chat",
+                                messages_history=state.messages_history,
+                                mode=state.mode.value,
+                            )
+                        except Exception:
+                            pass
 
                     # Token-Nutzung als Event senden
                     usage_data = {
@@ -1261,8 +1439,13 @@ Sei vorsichtig und mache nur notwendige Änderungen.
         print(f"[agent] Anfrage für Session {session_id} abgebrochen")
 
     def clear_session(self, session_id: str) -> None:
-        """Löscht den State einer Session."""
+        """Löscht den State einer Session (Speicher + Disk)."""
         self._states.pop(session_id, None)
+        try:
+            from app.services.chat_store import delete_chat
+            delete_chat(session_id)
+        except Exception:
+            pass
 
 
 # ══════════════════════════════════════════════════════════════════════════════

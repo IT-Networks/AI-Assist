@@ -27,12 +27,21 @@ router = APIRouter(prefix="/api/agent", tags=["agent"])
 # Request/Response Models
 # ══════════════════════════════════════════════════════════════════════════════
 
+class ContextSelection(BaseModel):
+    """Vom Nutzer manuell ausgewählte Kontext-Elemente."""
+    java_files: List[str] = Field(default_factory=list, description="Ausgewählte Java-Dateipfade")
+    python_files: List[str] = Field(default_factory=list, description="Ausgewählte Python-Dateipfade")
+    pdf_ids: List[str] = Field(default_factory=list, description="Ausgewählte PDF-IDs")
+    handbook_services: List[str] = Field(default_factory=list, description="Ausgewählte Handbuch-Service-IDs")
+
+
 class AgentChatRequest(BaseModel):
     """Anfrage für Agent-Chat."""
     message: str = Field(..., min_length=1, max_length=100000, description="User-Nachricht (max 100k Zeichen)")
     session_id: Optional[str] = Field(None, max_length=100, description="Session-ID (neu wenn leer)")
     model: Optional[str] = Field(None, max_length=100, description="LLM-Modell")
     skill_ids: Optional[List[str]] = Field(None, max_length=20, description="Skill-IDs zum Aktivieren (max 20)")
+    context: Optional[ContextSelection] = Field(None, description="Manuell ausgewählte Kontext-Elemente")
 
 
 class AgentModeRequest(BaseModel):
@@ -108,7 +117,8 @@ async def agent_chat(request: AgentChatRequest, http_request: Request):
             gen = orchestrator.process(
                 session_id=session_id,
                 user_message=request.message,
-                model=request.model
+                model=request.model,
+                context_selection=request.context,
             )
 
             async for event in gen:
@@ -179,7 +189,8 @@ async def agent_chat_sync(request: AgentChatRequest) -> Dict[str, Any]:
         gen = orchestrator.process(
             session_id=session_id,
             user_message=request.message,
-            model=request.model
+            model=request.model,
+            context_selection=request.context,
         )
 
         async for event in gen:
@@ -419,6 +430,13 @@ async def create_session(
 
     state = orchestrator._get_state(session_id)
 
+    # Initiales Disk-Record anlegen (damit Neustart die Session kennt)
+    try:
+        from app.services.chat_store import save_chat
+        save_chat(session_id, "Neuer Chat", [], state.mode.value)
+    except Exception:
+        pass
+
     return AgentSessionResponse(
         session_id=session_id,
         mode=state.mode.value,
@@ -450,6 +468,45 @@ async def list_sessions() -> Dict[str, Any]:
             "first_message": first_msg,
         })
     return {"sessions": sessions, "count": len(sessions)}
+
+
+@router.get("/chats")
+async def list_persisted_chats() -> Dict[str, Any]:
+    """Listet alle persistierten Chats (aus Disk) auf."""
+    from app.services.chat_store import list_chats
+    return {"chats": list_chats()}
+
+
+@router.get("/session/{session_id}/history")
+async def get_session_history(session_id: str) -> Dict[str, Any]:
+    """Gibt die Nachrichten-Historie einer Session zurück (aus Speicher oder Disk)."""
+    from app.agent.orchestrator import get_agent_orchestrator
+    orchestrator = get_agent_orchestrator()
+    state = orchestrator._get_state(session_id)
+    return {
+        "session_id": session_id,
+        "messages": state.messages_history,
+        "title": state.title,
+    }
+
+
+class UpdateTitleRequest(BaseModel):
+    title: str = Field(..., min_length=1, max_length=200)
+
+
+@router.patch("/session/{session_id}/title")
+async def update_session_title(session_id: str, body: UpdateTitleRequest) -> Dict[str, str]:
+    """Aktualisiert den Titel einer Chat-Session."""
+    from app.agent.orchestrator import get_agent_orchestrator
+    from app.services.chat_store import update_title, load_chat, save_chat
+    orchestrator = get_agent_orchestrator()
+    state = orchestrator._get_state(session_id)
+    state.title = body.title
+    # Auf Disk aktualisieren
+    if not update_title(session_id, body.title):
+        # Datei existiert noch nicht → vollständig speichern
+        save_chat(session_id, body.title, state.messages_history, state.mode.value)
+    return {"title": body.title}
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -702,7 +759,8 @@ async def get_token_budget(session_id: str) -> Dict[str, Any]:
 
     Nützlich für UI-Anzeige und Debugging.
     """
-    orchestrator = get_orchestrator()
+    from app.agent.orchestrator import get_agent_orchestrator
+    orchestrator = get_agent_orchestrator()
     state = orchestrator._get_state(session_id)
 
     if state.token_budget:
