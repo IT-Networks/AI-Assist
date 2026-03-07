@@ -362,7 +362,15 @@ class SubAgentDispatcher:
             agents: Dict von agent_name → SubAgent-Instanz
         """
         self._agents = agents
-        self._model: str = settings.llm.tool_model or settings.llm.default_model
+
+    @property
+    def _model(self) -> str:
+        """Routing-Modell: routing_model > tool_model > default_model (live aus Settings)."""
+        return (
+            settings.sub_agents.routing_model
+            or settings.llm.tool_model
+            or settings.llm.default_model
+        )
 
     async def classify_intent(self, query: str, llm_client) -> List[str]:
         """
@@ -494,6 +502,58 @@ class SubAgentDispatcher:
             *[run_with_timeout(name) for name in relevant_agents]
         )
 
+        successful = sum(1 for r in results if r.success)
+        print(f"[sub_agents] Fertig: {successful}/{len(results)} erfolgreich")
+        return list(results)
+
+    async def dispatch_selected(
+        self,
+        query: str,
+        agents: List[str],
+        llm_client,
+        tool_registry,
+    ) -> List[SubAgentResult]:
+        """
+        Führt eine bereits geroutete Liste von Agenten parallel aus.
+        Routing (classify_intent) wurde bereits extern durchgeführt.
+        """
+        timeout = settings.sub_agents.timeout_seconds
+
+        # Unbekannte oder deaktivierte Agenten herausfiltern
+        valid = [a for a in agents if a in self._agents]
+        if not valid:
+            print("[sub_agents] Keine gültigen Agenten in der Auswahl")
+            return []
+
+        print(f"[sub_agents] Starte {len(valid)} Agenten parallel: {valid}")
+
+        async def run_with_timeout(agent_name: str) -> SubAgentResult:
+            agent = self._agents[agent_name]
+            try:
+                return await asyncio.wait_for(
+                    agent.run(query, llm_client, tool_registry),
+                    timeout=timeout,
+                )
+            except asyncio.TimeoutError:
+                return SubAgentResult(
+                    agent_name=agent.display_name,
+                    success=False,
+                    summary="",
+                    key_findings=[],
+                    sources=[],
+                    error=f"Timeout nach {timeout}s",
+                )
+            except Exception as e:
+                return SubAgentResult(
+                    agent_name=agent.display_name,
+                    success=False,
+                    summary="",
+                    key_findings=[],
+                    sources=[],
+                    error=str(e),
+                )
+
+        results = await asyncio.gather(*[run_with_timeout(name) for name in valid])
         successful = sum(1 for r in results if r.success)
         print(f"[sub_agents] Fertig: {successful}/{len(results)} erfolgreich")
         return list(results)

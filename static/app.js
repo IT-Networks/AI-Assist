@@ -800,9 +800,18 @@ async function processAgentEvent(event, bubble, msgDiv, chat) {
       break;
 
     case 'subagent_start': {
-      const card = createSubAgentCard(data.agents || []);
+      // Routing läuft – noch keine Agenten bekannt → Karte mit Routing-Indikator
+      const card = createSubAgentCard([], data.routing_model || '');
       bubble.appendChild(card);
       chat.subAgentCard = card;
+      if (document.contains(chat.pane)) scrollToBottom();
+      break;
+    }
+    case 'subagent_routing': {
+      // Routing fertig – ausgewählte Agenten jetzt bekannt
+      if (chat.subAgentCard) {
+        populateSubAgentCard(chat.subAgentCard, data.agents || [], data.routing_model || '');
+      }
       if (document.contains(chat.pane)) scrollToBottom();
       break;
     }
@@ -815,6 +824,9 @@ async function processAgentEvent(event, bubble, msgDiv, chat) {
     case 'subagent_error': {
       if (chat.subAgentCard) {
         updateSubAgentCard(chat.subAgentCard, 'error', data);
+      } else if (data.error && !data.agent) {
+        // Globaler Fehler (kein Agent-Name) → Systemmeldung
+        appendMessageToPane(chat.pane, 'error', `Sub-Agent Fehler: ${data.error}`);
       }
       break;
     }
@@ -938,24 +950,59 @@ function updateToolCard(toolId, status, result, pane) {
 }
 
 // ── Sub-Agent Cards ──
-function createSubAgentCard(agents) {
+
+const _SA_DISPLAY_NAMES = {
+  code_explorer:   'Code Explorer',
+  wiki_agent:      'Wiki Agent',
+  jira_agent:      'Jira Agent',
+  database_agent:  'Database Agent',
+  knowledge_agent: 'Knowledge Agent',
+};
+
+function _saLabel(agentId) {
+  return _SA_DISPLAY_NAMES[agentId] || agentId;
+}
+
+function createSubAgentCard(agents, routingModel) {
   const card = document.createElement('div');
   card.className = 'subagent-card';
-
-  const agentList = agents.length > 0
-    ? agents.map(a => `<span class="subagent-badge running" data-agent="${escapeHtml(a)}">${escapeHtml(a)}</span>`).join('')
-    : '<span class="subagent-badge running">Alle Quellen</span>';
+  const modelHint = routingModel ? `<span class="subagent-routing-badge">Routing via ${escapeHtml(routingModel)}</span>` : '';
 
   card.innerHTML = `
     <div class="subagent-header">
       <span class="subagent-icon">&#128269;</span>
       <span class="subagent-title">Parallele Recherche</span>
-      <span class="subagent-status running">Läuft...</span>
+      ${modelHint}
+      <span class="subagent-status running">Routing...</span>
     </div>
-    <div class="subagent-agents">${agentList}</div>
+    <div class="subagent-agents"></div>
     <div class="subagent-results"></div>
   `;
+  if (agents.length > 0) populateSubAgentCard(card, agents, routingModel);
   return card;
+}
+
+function populateSubAgentCard(card, agents, routingModel) {
+  const agentsEl = card.querySelector('.subagent-agents');
+  const statusEl = card.querySelector('.subagent-status');
+  const modelHint = routingModel ? `<span class="subagent-routing-badge">${escapeHtml(routingModel)}</span>` : '';
+
+  // Header aktualisieren
+  const header = card.querySelector('.subagent-header');
+  // Bestehende routing-badges entfernen
+  header.querySelectorAll('.subagent-routing-badge').forEach(b => b.remove());
+  if (routingModel) {
+    const badge = document.createElement('span');
+    badge.className = 'subagent-routing-badge';
+    badge.textContent = routingModel;
+    header.insertBefore(badge, statusEl);
+  }
+
+  agentsEl.innerHTML = agents
+    .map(a => `<span class="subagent-badge running" data-agent="${escapeHtml(a)}" title="${escapeHtml(a)}">${escapeHtml(_saLabel(a))}</span>`)
+    .join('');
+  statusEl.className = 'subagent-status running';
+  statusEl.textContent = `Läuft (${agents.length})...`;
 }
 
 function updateSubAgentCard(card, type, data) {
@@ -963,34 +1010,47 @@ function updateSubAgentCard(card, type, data) {
   const resultsEl = card.querySelector('.subagent-results');
   const statusEl = card.querySelector('.subagent-status');
 
+  // Backend sendet agent_name (display name), Badge hat data-agent (id) und zeigt _saLabel
+  // Wir matchen über das title-Attribut (=id) oder den Text (=display name)
+  const agentRaw = data.agent || 'Unbekannt';
+  const badge = card.querySelector(`.subagent-badge[data-agent="${CSS.escape(agentRaw)}"]`)
+    || [...card.querySelectorAll('.subagent-badge')].find(b =>
+        b.title === agentRaw || b.textContent.trim() === agentRaw
+       );
+
   if (type === 'done') {
-    const agentName = data.agent || 'Unbekannt';
     const duration = data.duration_ms ? `${(data.duration_ms / 1000).toFixed(1)}s` : '';
     const findings = data.findings_count != null ? `${data.findings_count} Findings` : '';
-    const badge = card.querySelector(`.subagent-badge[data-agent="${CSS.escape(agentName)}"]`)
-      || [...card.querySelectorAll('.subagent-badge')].find(b => b.textContent === agentName);
-    if (badge) { badge.className = 'subagent-badge done'; }
+    if (badge) badge.className = 'subagent-badge done';
 
     const row = document.createElement('div');
     row.className = 'subagent-result-row success';
-    row.textContent = `✓ ${agentName}${findings ? ' · ' + findings : ''}${duration ? ' · ' + duration : ''}`;
+    row.textContent = `✓ ${agentRaw}${findings ? ' · ' + findings : ''}${duration ? ' · ' + duration : ''}`;
     resultsEl.appendChild(row);
 
-    // Prüfen ob alle Badges fertig sind
+    // Alle Badges fertig?
     const allDone = [...card.querySelectorAll('.subagent-badge')].every(b => !b.classList.contains('running'));
     if (allDone) {
+      const total = card.querySelectorAll('.subagent-result-row.success').length;
       statusEl.className = 'subagent-status done';
-      statusEl.textContent = 'Fertig';
+      statusEl.textContent = `Fertig (${total} Quellen)`;
     }
   } else if (type === 'error') {
-    const agentName = data.agent || 'Unbekannt';
-    const badge = [...card.querySelectorAll('.subagent-badge')].find(b => b.textContent === agentName);
-    if (badge) { badge.className = 'subagent-badge error'; }
+    if (badge) badge.className = 'subagent-badge error';
 
     const row = document.createElement('div');
     row.className = 'subagent-result-row error';
-    row.textContent = `✗ ${agentName}: ${data.error || 'Fehler'}`;
+    row.textContent = `✗ ${agentRaw}: ${data.error || 'Fehler'}`;
     resultsEl.appendChild(row);
+
+    // Prüfen ob alle fertig (done oder error)
+    const allFinished = [...card.querySelectorAll('.subagent-badge')].every(
+      b => !b.classList.contains('running')
+    );
+    if (allFinished) {
+      statusEl.className = 'subagent-status error';
+      statusEl.textContent = 'Teilweise fehlgeschlagen';
+    }
   }
 }
 
@@ -1879,6 +1939,11 @@ function renderSettingsSection() {
     return;
   }
 
+  if (section === 'sub_agents') {
+    renderSubAgentsSection();
+    return;
+  }
+
   // Section-spezifische Beschreibungen
   const sectionDescriptions = {
     server: 'Konfiguration des FastAPI-Servers (Host, Port). Änderungen erfordern einen Neustart.',
@@ -2252,6 +2317,98 @@ function deleteModel(idx) {
   markSettingsModified();
 }
 
+// ── Sub-Agenten Section ──
+
+const ALL_SUB_AGENTS = [
+  { id: 'code_explorer',  label: 'Code Explorer',   desc: 'Java/Python Quellcode, Klassen, Methoden' },
+  { id: 'wiki_agent',     label: 'Wiki Agent',       desc: 'Confluence-Wiki, Architektur, Dokumentation' },
+  { id: 'jira_agent',     label: 'Jira Agent',       desc: 'Tickets, Bugs, User Stories' },
+  { id: 'database_agent', label: 'Database Agent',   desc: 'DB2-Tabellen, SQL-Schema' },
+  { id: 'knowledge_agent',label: 'Knowledge Agent',  desc: 'Handbuch, PDFs, Skills' },
+];
+
+function renderSubAgentsSection() {
+  const form = document.getElementById('settings-form');
+  const cfg = settingsState.settings.sub_agents || {};
+  const activeAgents = cfg.agents || [];
+  const availModels = settingsState.settings.models || [];
+  const defaultModel = settingsState.settings.llm?.tool_model || settingsState.settings.llm?.default_model || '';
+
+  const modelOptions = availModels.map(m =>
+    `<option value="${escapeHtml(m.id)}" ${(cfg.routing_model || '') === m.id ? 'selected' : ''}>${escapeHtml(m.display_name || m.id)}</option>`
+  ).join('');
+
+  const agentRows = ALL_SUB_AGENTS.map(a => {
+    const checked = activeAgents.includes(a.id);
+    return `
+      <label class="subagent-setting-row ${checked ? 'active' : ''}">
+        <input type="checkbox" class="sa-agent-cb" data-agent="${a.id}" ${checked ? 'checked' : ''}
+               onchange="markSettingsModified()">
+        <div class="sa-agent-info">
+          <span class="sa-agent-name">${escapeHtml(a.label)}</span>
+          <span class="sa-agent-desc">${escapeHtml(a.desc)}</span>
+        </div>
+      </label>`;
+  }).join('');
+
+  form.innerHTML = `
+    <div class="settings-section">
+      <h3 class="settings-section-title">SUB-AGENTEN</h3>
+      <p class="settings-section-desc">
+        Spezialisierte Agenten durchsuchen Datenquellen <strong>parallel</strong>, bevor der Haupt-Agent antwortet.
+        Das Routing-Modell entscheidet welche Agenten für eine Anfrage relevant sind.
+      </p>
+    </div>
+
+    <div class="settings-field">
+      <label>
+        <input type="checkbox" id="sa-enabled" ${cfg.enabled ? 'checked' : ''} onchange="markSettingsModified()">
+        Sub-Agenten aktiviert
+      </label>
+    </div>
+
+    <div class="settings-field">
+      <label for="sa-routing-model">Routing-Modell</label>
+      <select id="sa-routing-model" onchange="markSettingsModified()">
+        <option value="">Standard (${escapeHtml(defaultModel)})</option>
+        ${modelOptions}
+      </select>
+      <small style="color:var(--text-muted)">Wird verwendet um zu entscheiden welche Sub-Agenten aktiviert werden.</small>
+    </div>
+
+    <div class="settings-field">
+      <label for="sa-timeout">Timeout pro Agent (Sekunden)</label>
+      <input type="number" id="sa-timeout" value="${cfg.timeout_seconds ?? 30}" min="5" max="300" onchange="markSettingsModified()">
+    </div>
+
+    <div class="settings-field">
+      <label for="sa-max-iter">Max. Tool-Calls pro Agent</label>
+      <input type="number" id="sa-max-iter" value="${cfg.max_iterations ?? 5}" min="1" max="20" onchange="markSettingsModified()">
+    </div>
+
+    <div class="settings-field">
+      <label for="sa-min-len">Minimale Anfrage-Länge (Zeichen)</label>
+      <input type="number" id="sa-min-len" value="${cfg.min_query_length ?? 15}" min="1" max="200" onchange="markSettingsModified()">
+      <small style="color:var(--text-muted)">Kürzere Anfragen überspringen die Sub-Agent-Phase.</small>
+    </div>
+
+    <div class="settings-section" style="margin-top:16px">
+      <h4 style="margin-bottom:8px;color:var(--text-muted)">Aktive Agenten</h4>
+      <div class="sa-agents-list">${agentRows}</div>
+    </div>
+  `;
+}
+
+function collectSubAgentsValues() {
+  const enabled = document.getElementById('sa-enabled')?.checked ?? true;
+  const routing_model = document.getElementById('sa-routing-model')?.value || '';
+  const timeout_seconds = parseInt(document.getElementById('sa-timeout')?.value || '30');
+  const max_iterations = parseInt(document.getElementById('sa-max-iter')?.value || '5');
+  const min_query_length = parseInt(document.getElementById('sa-min-len')?.value || '15');
+  const agents = [...document.querySelectorAll('.sa-agent-cb:checked')].map(cb => cb.dataset.agent);
+  return { enabled, routing_model, timeout_seconds, max_iterations, min_query_length, agents };
+}
+
 // ── Repos Section (Java / Python) ──
 
 async function renderReposSection(lang) {
@@ -2493,6 +2650,25 @@ async function saveCurrentSection() {
   // Datenquellen haben eigene Speicher-Buttons (kein generischer Save)
   if (section === 'data_sources') {
     updateSettingsStatus('Datenquellen werden direkt über die Formular-Buttons gespeichert', 'success');
+    return;
+  }
+
+  // Sub-Agenten haben eigene Felder
+  if (section === 'sub_agents') {
+    const values = collectSubAgentsValues();
+    try {
+      const res = await fetch('/api/settings/section/sub_agents', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(values),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.detail || 'Fehler');
+      settingsState.settings.sub_agents = data.values;
+      updateSettingsStatus('Sub-Agenten-Einstellungen angewendet', 'success');
+    } catch (err) {
+      updateSettingsStatus('Fehler: ' + err.message, 'error');
+    }
     return;
   }
 

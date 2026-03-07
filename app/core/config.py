@@ -216,6 +216,7 @@ class SubAgentsConfig(BaseModel):
     timeout_seconds: int = 30           # Timeout pro Sub-Agent
     max_iterations: int = 5             # Max Tool-Calls pro Sub-Agent
     min_query_length: int = 15          # Kürzere Queries überspringen
+    routing_model: str = ""             # Modell für Intent-Routing (leer = tool_model)
     agents: List[str] = Field(
         default_factory=lambda: [
             "code_explorer",

@@ -78,6 +78,7 @@ def get_section_schema(section: str) -> Dict[str, Any]:
         "llm": "LLMConfig",
         "java": "JavaConfig",
         "python": "PythonConfig",
+        "sub_agents": "SubAgentsConfig",
         "tools": "ToolsConfig",
         "confluence": "ConfluenceConfig",
         "context": "ContextConfig",
@@ -190,6 +191,7 @@ def _get_section_description(section: str) -> str:
         "file_operations": "Datei-Operationen (Read/Write/Edit)",
         "database": "DB2-Datenbankverbindung für Abfragen",
         "jira": "Jira-Anbindung für Issue-Suche und -Abruf",
+        "sub_agents": "Parallele Sub-Agenten für Datenquellen-Recherche",
     }
     return descriptions.get(section, "")
 

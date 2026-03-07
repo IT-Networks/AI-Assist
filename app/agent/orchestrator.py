@@ -48,9 +48,10 @@ class AgentEventType(str, Enum):
     COMPACTION = "compaction"          # Context wurde komprimiert
     DONE = "done"                      # Fertig
     # Sub-Agent Events
-    SUBAGENT_START = "subagent_start"  # Sub-Agent-Phase beginnt
-    SUBAGENT_DONE = "subagent_done"    # Ein Sub-Agent hat Ergebnis geliefert
-    SUBAGENT_ERROR = "subagent_error"  # Sub-Agent fehlgeschlagen
+    SUBAGENT_START = "subagent_start"      # Sub-Agent-Phase beginnt (Routing läuft)
+    SUBAGENT_ROUTING = "subagent_routing"  # Routing fertig – ausgewählte Agenten bekannt
+    SUBAGENT_DONE = "subagent_done"        # Ein Sub-Agent hat Ergebnis geliefert
+    SUBAGENT_ERROR = "subagent_error"      # Sub-Agent fehlgeschlagen
 
 
 @dataclass
@@ -348,14 +349,41 @@ class AgentOrchestrator:
             print(f"[sub_agents] Dispatcher nicht verfügbar: {e}")
             return
 
+        routing_model = (
+            settings.sub_agents.routing_model
+            or settings.llm.tool_model
+            or settings.llm.default_model
+        )
+
+        # Phase 1: Routing läuft – noch keine Agenten bekannt
         yield AgentEvent(AgentEventType.SUBAGENT_START, {
-            "message": "Parallele Datenquellen-Recherche gestartet...",
-            "agents": settings.sub_agents.agents,
+            "message": "Intent-Routing läuft...",
+            "routing_model": routing_model,
         })
 
+        # Routing: welche Agenten werden benötigt?
         try:
-            results = await dispatcher.dispatch(
+            selected_agents = await dispatcher.classify_intent(user_message, llm_client)
+        except Exception as e:
+            print(f"[sub_agents] Routing fehlgeschlagen: {e}")
+            yield AgentEvent(AgentEventType.SUBAGENT_ERROR, {"error": f"Routing: {e}"})
+            return
+
+        # Phase 2: Routing fertig – ausgewählte Agenten bekannt
+        yield AgentEvent(AgentEventType.SUBAGENT_ROUTING, {
+            "agents": selected_agents,
+            "routing_model": routing_model,
+        })
+
+        if not selected_agents:
+            print("[sub_agents] Keine relevanten Agenten ermittelt – überspringe Phase")
+            return
+
+        # Phase 3: Ausgewählte Agenten parallel ausführen
+        try:
+            results = await dispatcher.dispatch_selected(
                 query=user_message,
+                agents=selected_agents,
                 llm_client=llm_client,
                 tool_registry=self.tools,
             )
