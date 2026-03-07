@@ -46,7 +46,7 @@ class AgentChatRequest(BaseModel):
 
 class AgentModeRequest(BaseModel):
     """Anfrage zum Ändern des Agent-Modus."""
-    mode: str = Field(..., description="Neuer Modus: read_only, write_with_confirm, autonomous")
+    mode: str = Field(..., description="Neuer Modus: read_only, write_with_confirm, autonomous, plan_then_execute")
 
 
 class AgentConfirmRequest(BaseModel):
@@ -140,6 +140,9 @@ async def agent_chat(request: AgentChatRequest, http_request: Request):
                 if event.type == AgentEventType.CONFIRM_REQUIRED:
                     yield f"data: {json.dumps({'type': 'waiting_for_confirmation', 'session_id': session_id}, ensure_ascii=False)}\n\n"
                     return
+
+                # PLAN_READY: Stream NICHT schließen – nachfolgende USAGE/DONE Events
+                # werden noch benötigt um die Status-Bar zu finalisieren.
 
         except asyncio.CancelledError:
             orchestrator.cancel_request(session_id)
@@ -280,6 +283,71 @@ async def confirm_operation(
             "status": "cancelled",
             "message": f"Operation '{tool_call.name}' abgebrochen"
         }
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Plan Approval Endpoints
+# ══════════════════════════════════════════════════════════════════════════════
+
+@router.post("/plan/{session_id}/approve")
+async def approve_plan(session_id: str) -> Dict[str, Any]:
+    """
+    Genehmigt den ausstehenden Plan einer Session.
+
+    Nach der Genehmigung kann der Agent mit der Ausführung beginnen.
+    Das Frontend startet dazu eine neue Chat-Anfrage.
+
+    Args:
+        session_id: Session-ID
+
+    Returns:
+        Status und Plan-Text
+    """
+    from app.agent.orchestrator import get_agent_orchestrator
+
+    orchestrator = get_agent_orchestrator()
+    state = orchestrator._get_state(session_id)
+
+    if not state.pending_plan:
+        raise HTTPException(
+            status_code=400,
+            detail="Kein ausstehender Plan für diese Session"
+        )
+
+    state.plan_approved = True
+
+    return {
+        "status": "approved",
+        "message": "Plan genehmigt. Starte eine neue Chat-Anfrage um die Ausführung zu beginnen.",
+        "plan": state.pending_plan,
+    }
+
+
+@router.post("/plan/{session_id}/reject")
+async def reject_plan(session_id: str) -> Dict[str, Any]:
+    """
+    Lehnt den ausstehenden Plan einer Session ab.
+
+    Der Plan wird verworfen und die Session bleibt im Planungsmodus.
+
+    Args:
+        session_id: Session-ID
+
+    Returns:
+        Status
+    """
+    from app.agent.orchestrator import get_agent_orchestrator
+
+    orchestrator = get_agent_orchestrator()
+    state = orchestrator._get_state(session_id)
+
+    state.pending_plan = None
+    state.plan_approved = False
+
+    return {
+        "status": "rejected",
+        "message": "Plan abgelehnt. Du kannst eine neue Anfrage stellen um einen neuen Plan zu erstellen.",
+    }
 
 
 # ══════════════════════════════════════════════════════════════════════════════

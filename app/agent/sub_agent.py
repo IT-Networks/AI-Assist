@@ -66,15 +66,16 @@ class SubAgent:
 
     Jeder Sub-Agent:
     - Hat eine fokussierte Tool-Whitelist (nur relevante Tools)
-    - Läuft in eigenem Mini-LLM-Loop (max 5 Iterationen)
+    - Läuft in eigenem Mini-LLM-Loop (max 5 Iterationen, überschreibbar via max_iterations)
     - Gibt eine komprimierte Zusammenfassung zurück
     - Nutzt das tool_model (schnelles Modell) für alle LLM-Calls
     """
 
     name: str = "base"
     display_name: str = "Sub-Agent"
-    description: str = ""          # System-Prompt für diesen Sub-Agent
-    allowed_tools: List[str] = []  # Tool-Whitelist aus bestehendem ToolRegistry
+    description: str = ""           # System-Prompt für diesen Sub-Agent
+    allowed_tools: List[str] = []   # Tool-Whitelist aus bestehendem ToolRegistry
+    max_iterations: Optional[int] = None  # None = settings.sub_agents.max_iterations verwenden
 
     def __init__(self):
         self._model: str = settings.llm.tool_model or settings.llm.default_model
@@ -97,7 +98,7 @@ class SubAgent:
             SubAgentResult mit Zusammenfassung und Key-Findings
         """
         start_ms = int(time.time() * 1000)
-        max_iterations = settings.sub_agents.max_iterations
+        max_iterations = self.max_iterations or settings.sub_agents.max_iterations
 
         # Fokussierter System-Prompt für diesen Sub-Agent
         system_prompt = (

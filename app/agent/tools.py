@@ -626,6 +626,87 @@ async def search_pdf(
     return ToolResult(success=True, data=output)
 
 
+async def get_pdf_info(filename: str) -> ToolResult:
+    """Gibt Metadaten und Seitenanzahl einer PDF-Datei zurück."""
+    from app.core.config import settings
+    from pathlib import Path
+    from app.services.pdf_reader import PDFReader
+    from app.core.exceptions import PDFReadError
+
+    uploads_dir = Path(settings.uploads.directory)
+    if not uploads_dir.exists():
+        return ToolResult(success=False, error="Upload-Verzeichnis nicht gefunden")
+
+    pdf_files = list(uploads_dir.glob("**/*.pdf"))
+    match = next((f for f in pdf_files if filename.lower() in f.name.lower()), None)
+    if not match:
+        available = ", ".join(f.name for f in pdf_files[:10]) or "keine"
+        return ToolResult(success=False, error=f"PDF '{filename}' nicht gefunden. Verfügbare PDFs: {available}")
+
+    try:
+        reader = PDFReader()
+        meta = reader.get_metadata(str(match))
+        output = f"=== PDF-Info: {match.name} ===\n"
+        output += f"Seiten: {meta['page_count']}\n"
+        if meta.get("title"):
+            output += f"Titel: {meta['title']}\n"
+        if meta.get("author"):
+            output += f"Autor: {meta['author']}\n"
+        if meta.get("subject"):
+            output += f"Betreff: {meta['subject']}\n"
+        output += f"\nDateipfad: {match.name}"
+        return ToolResult(success=True, data=output)
+    except PDFReadError as e:
+        return ToolResult(success=False, error=str(e))
+    except Exception as e:
+        return ToolResult(success=False, error=f"Fehler beim Lesen der PDF-Metadaten: {e}")
+
+
+async def read_pdf_pages(filename: str, start_page: int, end_page: int) -> ToolResult:
+    """Liest einen Seitenbereich einer PDF (1-basiert, inklusiv, max 30 Seiten pro Aufruf)."""
+    from app.core.config import settings
+    from pathlib import Path
+    from app.services.pdf_reader import PDFReader
+    from app.core.exceptions import PDFReadError
+
+    uploads_dir = Path(settings.uploads.directory)
+    if not uploads_dir.exists():
+        return ToolResult(success=False, error="Upload-Verzeichnis nicht gefunden")
+
+    pdf_files = list(uploads_dir.glob("**/*.pdf"))
+    match = next((f for f in pdf_files if filename.lower() in f.name.lower()), None)
+    if not match:
+        available = ", ".join(f.name for f in pdf_files[:10]) or "keine"
+        return ToolResult(success=False, error=f"PDF '{filename}' nicht gefunden. Verfügbare PDFs: {available}")
+
+    # Eingabe validieren
+    if start_page < 1:
+        start_page = 1
+    # Hard-Cap: maximal 30 Seiten pro Aufruf
+    end_page = min(end_page, start_page + 29)
+
+    try:
+        reader = PDFReader()
+        page_count = reader.get_page_count(str(match))
+        if start_page > page_count:
+            return ToolResult(
+                success=False,
+                error=f"Startseite {start_page} überschreitet Seitenanzahl ({page_count}) der PDF."
+            )
+        end_page = min(end_page, page_count)
+
+        text = reader.extract_pages(str(match), start_page, end_page)
+        header = (
+            f"=== {match.name} – Seiten {start_page}–{end_page} "
+            f"(von {page_count} gesamt) ===\n\n"
+        )
+        return ToolResult(success=True, data=header + text)
+    except PDFReadError as e:
+        return ToolResult(success=False, error=str(e))
+    except Exception as e:
+        return ToolResult(success=False, error=f"Fehler beim Lesen der PDF-Seiten: {e}")
+
+
 async def trace_java_references(
     class_name: str,
     include_interfaces: bool = True,
@@ -1299,6 +1380,35 @@ SEARCH_PDF_TOOL = Tool(
     handler=search_pdf
 )
 
+GET_PDF_INFO_TOOL = Tool(
+    name="get_pdf_info",
+    description=(
+        "Gibt Metadaten und Seitenanzahl einer PDF-Datei zurück. "
+        "Nutze dieses Tool bevor du read_pdf_pages aufrufst, um die Gesamtseitenzahl zu kennen."
+    ),
+    category=ToolCategory.KNOWLEDGE,
+    parameters=[
+        ToolParameter("filename", "string", "Dateiname oder Teil des Dateinamens der PDF"),
+    ],
+    handler=get_pdf_info
+)
+
+READ_PDF_PAGES_TOOL = Tool(
+    name="read_pdf_pages",
+    description=(
+        "Liest einen bestimmten Seitenbereich einer PDF-Datei (1-basiert, inklusiv). "
+        "Maximal 30 Seiten pro Aufruf. Für große PDFs: Nutze zuerst get_pdf_info für die "
+        "Seitenanzahl, dann lies relevante Abschnitte sequenziell mit mehreren Aufrufen."
+    ),
+    category=ToolCategory.KNOWLEDGE,
+    parameters=[
+        ToolParameter("filename", "string", "Dateiname oder Teil des Dateinamens der PDF"),
+        ToolParameter("start_page", "integer", "Erste Seite (1-basiert)"),
+        ToolParameter("end_page", "integer", "Letzte Seite (inklusiv, max. start_page + 29)"),
+    ],
+    handler=read_pdf_pages
+)
+
 READ_SQLJ_FILE_TOOL = Tool(
     name="read_sqlj_file",
     description="Liest eine SQLJ-Datei und extrahiert alle SQL-Statements (#sql { ... }) mit Methoden-Kontext und Host-Variablen (:varName). Ideal um SQL zu verstehen das ein Java-Service ausführt.",
@@ -1577,6 +1687,8 @@ def create_default_registry() -> ToolRegistry:
 
     # Knowledge Tools
     registry.register(GET_SERVICE_INFO_TOOL)
+    registry.register(GET_PDF_INFO_TOOL)
+    registry.register(READ_PDF_PAGES_TOOL)
 
     # Analysis Tools
     registry.register(TRACE_JAVA_REFERENCES_TOOL)

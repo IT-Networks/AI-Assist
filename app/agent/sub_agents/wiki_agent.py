@@ -17,6 +17,7 @@ class WikiAgent(SubAgent):
         "Lies die relevantesten Seiten vollständig aus. "
         "Extrahiere konkrete Fakten, Konfigurationen und Prozessschritte aus der Dokumentation."
     )
+    max_iterations = 10  # Bis zu 1 Suche + 9 Seiten pro Recherche-Auftrag
     allowed_tools = [
         "search_confluence",
         "read_confluence_page",
