@@ -10,6 +10,9 @@ llm:
   # Modell-Aufteilung für Agent (optional)
   tool_model: "gptoss120b"     # Schnelles Modell für Tool-Aufrufe/Suche
   analysis_model: ""           # Großes Modell für finale Analyse (leer = default_model)
+  # Phase-spezifische Temperature
+  tool_temperature: 0.0        # Tool-Call-Phase deterministisch (Mistral-optimiert)
+  analysis_temperature: 0.2    # Analyse-Phase (leer/-1 = temperature verwenden)
 
 models:
   - id: "gptoss120b"
