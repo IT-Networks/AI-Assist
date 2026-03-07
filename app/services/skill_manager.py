@@ -568,6 +568,28 @@ class SkillManager:
         """Löscht alle aktiven Skills einer Session."""
         self._active_skills.pop(session_id, None)
 
+    def requires_plan(self, session_id: str) -> bool:
+        """
+        Prüft ob ein aktiver Skill die Planungsphase (plan_then_execute) erfordert.
+
+        Wenn ja, sollte der Orchestrator den Modus auf PLAN_THEN_EXECUTE setzen.
+        """
+        active_skills = self.get_active_skills(session_id)
+        return any(
+            s.planning is not None and s.planning.require_plan
+            for s in active_skills
+        )
+
+    def get_plan_format_hint(self, session_id: str) -> Optional[str]:
+        """
+        Gibt den Plan-Format-Hinweis des ersten aktiven Skills zurück, der einen hat.
+        """
+        active_skills = self.get_active_skills(session_id)
+        for skill in active_skills:
+            if skill.planning and skill.planning.plan_format:
+                return skill.planning.plan_format
+        return None
+
     # ══════════════════════════════════════════════════════════════════════════
     # System Prompt Building
     # ══════════════════════════════════════════════════════════════════════════

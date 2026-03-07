@@ -451,6 +451,11 @@ function updateModeIndicator() {
       indicator.innerHTML = '<span class="mode-icon">&#9888;</span><span class="mode-text">Autonom</span>';
       if (welcomeMode) welcomeMode.textContent = 'Autonom';
       break;
+    case 'plan_then_execute':
+      indicator.classList.add('mode-plan');
+      indicator.innerHTML = '<span class="mode-icon">&#128203;</span><span class="mode-text">Plan &amp; Ausführen</span>';
+      if (welcomeMode) welcomeMode.textContent = 'Plan & Ausführen';
+      break;
   }
 }
 
@@ -894,6 +899,15 @@ async function processAgentEvent(event, bubble, msgDiv, chat) {
       break;
     }
 
+    case 'plan_ready': {
+      const planCard = createPlanCard(data.plan, chat);
+      bubble.appendChild(planCard);
+      chat.pendingPlan = data;
+      if (isActive) state.pendingPlan = data;
+      if (document.contains(chat.pane)) scrollToBottom();
+      break;
+    }
+
     case 'error':
       appendMessageToPane(chat.pane, 'error', data.error || 'Unbekannter Fehler');
       break;
@@ -1214,6 +1228,92 @@ async function confirmOperation(confirmed) {
     switchRightPanel('tools-panel');
   } catch (e) {
     appendMessage('error', 'Bestätigung fehlgeschlagen: ' + e.message);
+  }
+}
+
+// ── Plan Card (Planungsphase) ──
+function createPlanCard(planText, chat) {
+  const card = document.createElement('div');
+  card.className = 'plan-card';
+
+  const header = document.createElement('div');
+  header.className = 'plan-card-header';
+  header.innerHTML = '<span class="plan-icon">&#128203;</span><span class="plan-title">Implementierungsplan</span>';
+
+  const body = document.createElement('div');
+  body.className = 'plan-card-body';
+  // Markdown-ähnliche Formatierung: einfache Codeblöcke und Zeilenumbrüche
+  const escaped = escapeHtml(planText);
+  body.innerHTML = escaped.replace(/`([^`]+)`/g, '<code>$1</code>').replace(/\n/g, '<br>');
+
+  const footer = document.createElement('div');
+  footer.className = 'plan-card-footer';
+
+  const approveBtn = document.createElement('button');
+  approveBtn.className = 'plan-btn plan-btn-approve';
+  approveBtn.textContent = 'Plan ausführen';
+  approveBtn.onclick = () => approvePlan(card, chat);
+
+  const rejectBtn = document.createElement('button');
+  rejectBtn.className = 'plan-btn plan-btn-reject';
+  rejectBtn.textContent = 'Plan ablehnen';
+  rejectBtn.onclick = () => rejectPlan(card, chat);
+
+  footer.appendChild(approveBtn);
+  footer.appendChild(rejectBtn);
+
+  card.appendChild(header);
+  card.appendChild(body);
+  card.appendChild(footer);
+
+  return card;
+}
+
+async function approvePlan(card, chat) {
+  const sessionId = chat?.id || state.sessionId;
+  try {
+    const res = await fetch(`/api/agent/plan/${sessionId}/approve`, { method: 'POST' });
+    if (!res.ok) {
+      appendMessage('error', 'Plan-Genehmigung fehlgeschlagen: ' + res.statusText);
+      return;
+    }
+
+    // Buttons deaktivieren
+    card.querySelectorAll('.plan-btn').forEach(b => b.disabled = true);
+    card.querySelector('.plan-btn-approve').textContent = '✓ Plan genehmigt';
+    card.querySelector('.plan-btn-reject').style.display = 'none';
+
+    // Neue Chat-Anfrage starten um die Ausführung zu beginnen
+    const executionMessage = 'Bitte führe den genehmigten Plan jetzt aus.';
+    const activeChat = chatManager.getActive();
+    if (activeChat) {
+      await sendMessage(executionMessage, activeChat);
+    }
+  } catch (e) {
+    appendMessage('error', 'Plan-Genehmigung fehlgeschlagen: ' + e.message);
+  }
+}
+
+async function rejectPlan(card, chat) {
+  const sessionId = chat?.id || state.sessionId;
+  try {
+    await fetch(`/api/agent/plan/${sessionId}/reject`, { method: 'POST' });
+
+    // Karte als abgelehnt markieren
+    card.querySelectorAll('.plan-btn').forEach(b => b.disabled = true);
+    card.querySelector('.plan-btn-reject').textContent = '✗ Plan abgelehnt';
+    card.querySelector('.plan-btn-approve').style.display = 'none';
+    card.classList.add('plan-rejected');
+
+    if (chat) chat.pendingPlan = null;
+    state.pendingPlan = null;
+    appendMessageToPane(
+      chat?.pane || document.getElementById('messages-container'),
+      'system',
+      'Plan abgelehnt. Du kannst eine neue Anfrage stellen.'
+    );
+  } catch (e) {
+    appendMessage('error', 'Plan-Ablehnung fehlgeschlagen: ' + e.message);
   }
 }
 

@@ -33,6 +33,7 @@ class AgentMode(str, Enum):
     READ_ONLY = "read_only"           # Nur Lese-Operationen
     WRITE_WITH_CONFIRM = "write_with_confirm"  # Schreiben mit Bestätigung
     AUTONOMOUS = "autonomous"          # Schreiben ohne Bestätigung (gefährlich)
+    PLAN_THEN_EXECUTE = "plan_then_execute"    # Erst planen, dann mit Bestätigung ausführen
 
 
 class AgentEventType(str, Enum):
@@ -52,6 +53,10 @@ class AgentEventType(str, Enum):
     SUBAGENT_ROUTING = "subagent_routing"  # Routing fertig – ausgewählte Agenten bekannt
     SUBAGENT_DONE = "subagent_done"        # Ein Sub-Agent hat Ergebnis geliefert
     SUBAGENT_ERROR = "subagent_error"      # Sub-Agent fehlgeschlagen
+    # Planning Events
+    PLAN_READY = "plan_ready"              # Plan erstellt – wartet auf User-Genehmigung
+    PLAN_APPROVED = "plan_approved"        # Plan genehmigt, Ausführung startet
+    PLAN_REJECTED = "plan_rejected"        # Plan abgelehnt
 
 
 @dataclass
@@ -117,6 +122,9 @@ class AgentState:
     entity_tracker: EntityTracker = field(default_factory=EntityTracker)
     # Chat-Titel (wird aus erster User-Nachricht abgeleitet oder manuell gesetzt)
     title: str = ""
+    # Planungsphase (PLAN_THEN_EXECUTE-Modus)
+    pending_plan: Optional[str] = None    # Erstellter Plan, wartet auf Genehmigung
+    plan_approved: bool = False           # True wenn User den Plan genehmigt hat
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -470,7 +478,11 @@ class AgentOrchestrator:
         state.read_files_this_request = {}
         # Abbruch-Flag zurücksetzen
         state.cancelled = False
-        include_write_ops = state.mode != AgentMode.READ_ONLY
+        # Schreib-Ops: In Planungsphase nur erlaubt wenn Plan bereits genehmigt
+        if state.mode == AgentMode.PLAN_THEN_EXECUTE:
+            include_write_ops = state.plan_approved
+        else:
+            include_write_ops = state.mode != AgentMode.READ_ONLY
 
         # System-Prompt bauen
         system_prompt = SYSTEM_PROMPT
@@ -484,6 +496,15 @@ class AgentOrchestrator:
                 skill_prompt = skill_mgr.build_system_prompt(session_id)
                 if skill_prompt:
                     system_prompt += f"\n\n{skill_prompt}"
+                # Skill erfordert Planungsphase → Modus automatisch setzen
+                if (
+                    skill_mgr.requires_plan(session_id)
+                    and state.mode not in (AgentMode.PLAN_THEN_EXECUTE,)
+                    and not state.plan_approved
+                ):
+                    state.mode = AgentMode.PLAN_THEN_EXECUTE
+                    include_write_ops = False
+                    print(f"[agent] Skill erfordert Planungsphase → Modus auf PLAN_THEN_EXECUTE gesetzt")
             except Exception:
                 pass
 
@@ -491,8 +512,12 @@ class AgentOrchestrator:
         tool_schemas = self.tools.get_openai_schemas(include_write_ops=include_write_ops)
 
         # Agent-Instruktionen
-        agent_instructions = self._build_agent_instructions(state.mode)
+        agent_instructions = self._build_agent_instructions(state.mode, state.plan_approved)
         system_prompt += f"\n\n{agent_instructions}"
+
+        # Planungsphase: Plan als Kontext injizieren wenn genehmigt
+        if state.mode == AgentMode.PLAN_THEN_EXECUTE and state.plan_approved and state.pending_plan:
+            system_prompt += f"\n\n## Genehmigter Ausführungsplan\n\n{state.pending_plan}\n\nFühre diesen Plan jetzt Schritt für Schritt aus."
 
         # Token Budget initialisieren
         state.token_budget = create_budget_from_config()
@@ -670,6 +695,109 @@ class AgentOrchestrator:
                     # Entscheiden ob wir streamen oder die vorhandene Antwort nutzen
                     should_stream = settings.llm.streaming
                     existing_content = content
+
+                    # === PLANUNGSPHASE: Plan extrahieren ===
+                    # In der Planungsphase (vor Genehmigung) kein Streaming –
+                    # vollständige Antwort holen und [PLAN]...[/PLAN]-Block extrahieren.
+                    if state.mode == AgentMode.PLAN_THEN_EXECUTE and not state.plan_approved:
+                        plan_response = existing_content
+                        plan_usage = usage
+                        if not plan_response:
+                            plan_resp = await self._call_llm_with_tools(
+                                messages, [], None, is_tool_phase=False
+                            )
+                            plan_response = plan_resp.get("content", "")
+                            plan_usage = plan_resp.get("usage")
+
+                        plan_match = re.search(r'\[PLAN\](.*?)\[/PLAN\]', plan_response, re.DOTALL)
+                        if plan_match:
+                            plan_text = plan_match.group(1).strip()
+                            state.pending_plan = plan_text
+
+                            # In Konversations-Historie speichern
+                            state.messages_history.append({
+                                "role": "assistant",
+                                "content": plan_response
+                            })
+                            try:
+                                from app.services.chat_store import save_chat
+                                save_chat(
+                                    session_id=session_id,
+                                    title=state.title or "Chat",
+                                    messages_history=state.messages_history,
+                                    mode=state.mode.value,
+                                )
+                            except Exception:
+                                pass
+
+                            # Token-Nutzung
+                            if plan_usage and isinstance(plan_usage, TokenUsage):
+                                request_prompt_tokens += plan_usage.prompt_tokens
+                                request_completion_tokens += plan_usage.completion_tokens
+                                last_finish_reason = plan_usage.finish_reason
+                                last_model = plan_usage.model
+                            state.total_prompt_tokens += request_prompt_tokens
+                            state.total_completion_tokens += request_completion_tokens
+
+                            usage_data = {
+                                "prompt_tokens": request_prompt_tokens,
+                                "completion_tokens": request_completion_tokens,
+                                "total_tokens": request_prompt_tokens + request_completion_tokens,
+                                "finish_reason": last_finish_reason,
+                                "model": last_model,
+                                "truncated": last_finish_reason == "length",
+                                "max_tokens": settings.llm.max_tokens,
+                                "session_total_prompt": state.total_prompt_tokens,
+                                "session_total_completion": state.total_completion_tokens,
+                                "budget": budget.get_status() if budget else None,
+                                "compaction_count": state.compaction_count,
+                            }
+                            yield AgentEvent(AgentEventType.PLAN_READY, {
+                                "plan": plan_text,
+                                "full_response": plan_response,
+                            })
+                            yield AgentEvent(AgentEventType.USAGE, usage_data)
+                            yield AgentEvent(AgentEventType.DONE, {
+                                "response": plan_response,
+                                "is_plan": True,
+                                "tool_calls_count": len(state.tool_calls_history),
+                                "usage": usage_data,
+                            })
+                            return
+                        # Kein [PLAN]-Block → normale Antwort (Fallback)
+                        if plan_response:
+                            yield AgentEvent(AgentEventType.TOKEN, plan_response)
+                        if plan_usage and isinstance(plan_usage, TokenUsage):
+                            request_prompt_tokens += plan_usage.prompt_tokens
+                            request_completion_tokens += plan_usage.completion_tokens
+                            last_finish_reason = plan_usage.finish_reason
+                            last_model = plan_usage.model
+                        state.total_prompt_tokens += request_prompt_tokens
+                        state.total_completion_tokens += request_completion_tokens
+                        state.messages_history.append({
+                            "role": "assistant",
+                            "content": plan_response
+                        })
+                        usage_data = {
+                            "prompt_tokens": request_prompt_tokens,
+                            "completion_tokens": request_completion_tokens,
+                            "total_tokens": request_prompt_tokens + request_completion_tokens,
+                            "finish_reason": last_finish_reason,
+                            "model": last_model,
+                            "truncated": last_finish_reason == "length",
+                            "max_tokens": settings.llm.max_tokens,
+                            "session_total_prompt": state.total_prompt_tokens,
+                            "session_total_completion": state.total_completion_tokens,
+                            "budget": budget.get_status() if budget else None,
+                            "compaction_count": state.compaction_count,
+                        }
+                        yield AgentEvent(AgentEventType.USAGE, usage_data)
+                        yield AgentEvent(AgentEventType.DONE, {
+                            "response": plan_response,
+                            "tool_calls_count": len(state.tool_calls_history),
+                            "usage": usage_data,
+                        })
+                        return
 
                     # Wenn ein separates Analyse-Modell konfiguriert ist, muss neu angefragt werden
                     needs_new_request = (has_used_tools and settings.llm.analysis_model and not model)
@@ -1303,7 +1431,7 @@ class AgentOrchestrator:
         else:
             return ToolResult(success=False, error=f"Unbekannte Operation: {operation}")
 
-    def _build_agent_instructions(self, mode: AgentMode) -> str:
+    def _build_agent_instructions(self, mode: AgentMode, plan_approved: bool = False) -> str:
         """Baut die Agent-Instruktionen für den System-Prompt."""
         db_available = settings.database.enabled
         handbook_available = settings.handbook.enabled
@@ -1374,6 +1502,45 @@ Zusätzliche Tools:
 
 Der User muss Datei-Operationen bestätigen bevor sie ausgeführt werden.
 Datenbank-Abfragen (SELECT) sind ohne Bestätigung erlaubt.
+"""
+
+        elif mode == AgentMode.PLAN_THEN_EXECUTE and not plan_approved:
+            return base + """
+MODUS: Planungsphase
+Du befindest dich in der Planungsphase. Datei-Änderungen sind noch NICHT erlaubt.
+
+**Deine Aufgabe:**
+1. Nutze Read-Tools (search_code, read_file, etc.) um den relevanten Code zu analysieren.
+2. Erstelle einen strukturierten Implementierungsplan.
+3. Schreibe deinen fertigen Plan EXAKT in folgendem Format:
+
+[PLAN]
+**Aufgabe:** <Kurzbeschreibung der Aufgabe>
+
+**Analysierte Dateien:**
+- `<Dateipfad>`: <Was wurde darin gefunden>
+
+**Implementierungsschritte:**
+1. **`<Dateipfad>`** – <Was wird geändert und warum>
+2. ...
+
+**Erwartete Auswirkungen:**
+- <Auswirkung 1>
+[/PLAN]
+
+Schreibe NUR den [PLAN]-Block als deine finale Antwort. Führe keine Datei-Änderungen durch.
+"""
+
+        elif mode == AgentMode.PLAN_THEN_EXECUTE and plan_approved:
+            return base + """
+MODUS: Ausführungsphase (Plan genehmigt)
+Der User hat deinen Plan genehmigt.
+Zusätzliche Tools:
+- write_file: Erstelle oder überschreibe eine Datei (benötigt Bestätigung)
+- edit_file: Bearbeite eine Datei (benötigt Bestätigung)
+
+Führe den genehmigten Plan jetzt Schritt für Schritt aus.
+Der User muss jede Datei-Operation einzeln bestätigen.
 """
 
         else:  # AUTONOMOUS

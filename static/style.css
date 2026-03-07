@@ -112,6 +112,12 @@ body {
   border: 1px solid var(--danger);
 }
 
+.mode-plan {
+  background: rgba(147, 112, 219, 0.15);
+  color: #9370db;
+  border: 1px solid #9370db;
+}
+
 /* Header Buttons */
 .header-btn {
   background: var(--surface);
@@ -2545,4 +2551,103 @@ body {
 
 .btn-danger:hover {
   background: rgba(252, 129, 74, 0.35);
+}
+
+/* ── Plan Card (Planungsphase) ── */
+.plan-card {
+  background: var(--bg-secondary);
+  border: 1px solid #9370db;
+  border-radius: 8px;
+  margin: 8px 0;
+  overflow: hidden;
+  width: 100%;
+}
+
+.plan-card-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 14px;
+  background: rgba(147, 112, 219, 0.12);
+  border-bottom: 1px solid rgba(147, 112, 219, 0.3);
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: #9370db;
+}
+
+.plan-icon {
+  font-size: 1rem;
+}
+
+.plan-card-body {
+  padding: 12px 14px;
+  font-size: 0.82rem;
+  line-height: 1.6;
+  color: var(--text);
+  white-space: pre-wrap;
+  max-height: 400px;
+  overflow-y: auto;
+}
+
+.plan-card-body code {
+  background: var(--surface);
+  padding: 1px 5px;
+  border-radius: 3px;
+  font-family: var(--font-mono);
+  font-size: 0.78rem;
+  color: var(--accent);
+}
+
+.plan-card-footer {
+  display: flex;
+  gap: 8px;
+  padding: 10px 14px;
+  border-top: 1px solid var(--border);
+  background: var(--bg-secondary);
+}
+
+.plan-btn {
+  padding: 6px 14px;
+  border-radius: 5px;
+  border: none;
+  font-size: 0.8rem;
+  cursor: pointer;
+  font-weight: 500;
+  transition: opacity 0.15s;
+}
+
+.plan-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.plan-btn-approve {
+  background: #2ea043;
+  color: #fff;
+}
+
+.plan-btn-approve:hover:not(:disabled) {
+  background: #3fb950;
+}
+
+.plan-btn-reject {
+  background: var(--surface);
+  color: var(--text-muted);
+  border: 1px solid var(--border);
+}
+
+.plan-btn-reject:hover:not(:disabled) {
+  border-color: var(--danger);
+  color: var(--danger);
+}
+
+.plan-rejected .plan-card-header {
+  color: var(--text-muted);
+  background: var(--bg-secondary);
+  border-bottom-color: var(--border);
+}
+
+.plan-rejected {
+  border-color: var(--border);
+  opacity: 0.7;
 }

@@ -78,6 +78,12 @@ class SkillTool(BaseModel):
     handler: Optional[str] = None  # Python-Funktion (dotted path)
 
 
+class SkillPlanning(BaseModel):
+    """Planungs-Konfiguration eines Skills."""
+    require_plan: bool = False         # Aktiviert automatisch plan_then_execute-Modus
+    plan_format: Optional[str] = None  # Optionale Anweisung für den Plan-Stil
+
+
 class SkillMetadata(BaseModel):
     """Metadaten eines Skills."""
     author: Optional[str] = None
@@ -103,6 +109,7 @@ class Skill(BaseModel):
     type: SkillType = SkillType.KNOWLEDGE
 
     activation: SkillActivation = Field(default_factory=SkillActivation)
+    planning: Optional[SkillPlanning] = Field(default=None, description="Planungs-Konfiguration")
     system_prompt: Optional[str] = Field(default=None, description="LLM System-Prompt")
     knowledge_sources: List[KnowledgeSource] = Field(default_factory=list)
     tools: List[SkillTool] = Field(default_factory=list)
