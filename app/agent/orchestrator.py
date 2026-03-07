@@ -47,6 +47,10 @@ class AgentEventType(str, Enum):
     USAGE = "usage"                    # Token-Nutzung
     COMPACTION = "compaction"          # Context wurde komprimiert
     DONE = "done"                      # Fertig
+    # Sub-Agent Events
+    SUBAGENT_START = "subagent_start"  # Sub-Agent-Phase beginnt
+    SUBAGENT_DONE = "subagent_done"    # Ein Sub-Agent hat Ergebnis geliefert
+    SUBAGENT_ERROR = "subagent_error"  # Sub-Agent fehlgeschlagen
 
 
 @dataclass
@@ -316,6 +320,82 @@ class AgentOrchestrator:
         state = self._get_state(session_id)
         state.active_skill_ids = set(skill_ids)
 
+    async def _run_sub_agents_phase(
+        self,
+        user_message: str,
+        model: Optional[str],
+        messages: List[Dict],
+        budget,
+    ) -> AsyncGenerator[AgentEvent, None]:
+        """
+        Führt die parallele Sub-Agent-Erkundungsphase aus.
+
+        Sub-Agenten durchsuchen ihre spezialisierten Datenquellen parallel
+        und liefern komprimierte Zusammenfassungen zurück.
+        Diese werden als System-Message in den Main-Context injiziert,
+        bevor der Main-Agent-Loop startet.
+
+        Yieldet SUBAGENT_START / SUBAGENT_DONE / SUBAGENT_ERROR Events.
+        """
+        from app.agent.sub_agents import get_sub_agent_dispatcher
+        from app.agent.sub_agent import format_sub_agent_results
+        from app.services.llm_client import llm_client
+        from app.utils.token_counter import estimate_tokens
+
+        try:
+            dispatcher = get_sub_agent_dispatcher()
+        except Exception as e:
+            print(f"[sub_agents] Dispatcher nicht verfügbar: {e}")
+            return
+
+        yield AgentEvent(AgentEventType.SUBAGENT_START, {
+            "message": "Parallele Datenquellen-Recherche gestartet...",
+            "agents": settings.sub_agents.agents,
+        })
+
+        try:
+            results = await dispatcher.dispatch(
+                query=user_message,
+                llm_client=llm_client,
+                tool_registry=self.tools,
+            )
+        except Exception as e:
+            print(f"[sub_agents] Dispatch fehlgeschlagen: {e}")
+            yield AgentEvent(AgentEventType.SUBAGENT_ERROR, {"error": str(e)})
+            return
+
+        # Events für jeden Sub-Agenten emittieren
+        for result in results:
+            if result.success:
+                yield AgentEvent(AgentEventType.SUBAGENT_DONE, {
+                    "agent": result.agent_name,
+                    "findings_count": len(result.key_findings),
+                    "sources_count": len(result.sources),
+                    "duration_ms": result.duration_ms,
+                })
+            else:
+                yield AgentEvent(AgentEventType.SUBAGENT_ERROR, {
+                    "agent": result.agent_name,
+                    "error": result.error,
+                })
+
+        # Ergebnisse als System-Message in den Haupt-Kontext injizieren
+        context_block = format_sub_agent_results(results)
+        if context_block:
+            context_tokens = estimate_tokens(context_block)
+            # Nur injizieren wenn Token-Budget ausreicht
+            if budget.can_add("context", context_tokens):
+                # Nach dem ersten System-Message (Haupt-Prompt) einfügen
+                insert_pos = 1
+                messages.insert(insert_pos, {
+                    "role": "system",
+                    "content": context_block,
+                })
+                budget.add("context", context_tokens)
+                print(f"[sub_agents] Context injiziert: {context_tokens} Tokens")
+            else:
+                print(f"[sub_agents] Context zu groß ({context_tokens} Tokens), übersprungen")
+
     async def process(
         self,
         session_id: str,
@@ -441,6 +521,18 @@ class AgentOrchestrator:
                     ]))
             except Exception as e:
                 print(f"[agent] Compaction failed: {e}")
+
+        # === SUB-AGENT PHASE ===
+        # Spezialisierte Sub-Agenten erkunden Datenquellen parallel,
+        # bevor der Main-Agent seinen Loop startet.
+        if (
+            settings.sub_agents.enabled
+            and len(user_message) >= settings.sub_agents.min_query_length
+        ):
+            async for event in self._run_sub_agents_phase(
+                user_message, model, messages, budget
+            ):
+                yield event
 
         # Agent-Loop
         has_used_tools = False

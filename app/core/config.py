@@ -210,6 +210,23 @@ class ServerConfig(BaseModel):
     reload: bool = False
 
 
+class SubAgentsConfig(BaseModel):
+    """Konfiguration für das Sub-Agenten-System."""
+    enabled: bool = True
+    timeout_seconds: int = 30           # Timeout pro Sub-Agent
+    max_iterations: int = 5             # Max Tool-Calls pro Sub-Agent
+    min_query_length: int = 15          # Kürzere Queries überspringen
+    agents: List[str] = Field(
+        default_factory=lambda: [
+            "code_explorer",
+            "wiki_agent",
+            "jira_agent",
+            "database_agent",
+            "knowledge_agent",
+        ]
+    )
+
+
 class Settings(BaseModel):
     llm: LLMConfig = LLMConfig()
     models: List[ModelEntry] = []
@@ -227,6 +244,7 @@ class Settings(BaseModel):
     skills: SkillsConfig = SkillsConfig()
     file_operations: FileOperationsConfig = FileOperationsConfig()
     data_sources: DataSourcesConfig = Field(default_factory=DataSourcesConfig)
+    sub_agents: SubAgentsConfig = Field(default_factory=SubAgentsConfig)
 
     def apply_env_overrides(self) -> "Settings":
         if os.getenv("LLM_BASE_URL"):
