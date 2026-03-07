@@ -1766,6 +1766,12 @@ function updateSettingsStatus(msg, type = '') {
 
 function renderSettingsSection() {
   const section = settingsState.currentSection;
+
+  if (section === 'data_sources') {
+    renderDataSourcesSection();
+    return;
+  }
+
   const values = settingsState.settings[section];
   const desc = settingsState.descriptions[section] || '';
 
@@ -2413,6 +2419,489 @@ async function saveSettingsToFile() {
 
   } catch (err) {
     updateSettingsStatus('Speichern fehlgeschlagen: ' + err.message, 'error');
+  }
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// Datenquellen-Verwaltung
+// ══════════════════════════════════════════════════════════════════════════════
+
+let _dsState = {
+  sources: [],
+  editingId: null,   // null = neue Quelle, string = ID der bearbeiteten
+  suggestion: null,  // KI-Vorschlag (zwischengespeichert)
+};
+
+async function renderDataSourcesSection() {
+  const form = document.getElementById('settings-form');
+  form.innerHTML = `<div class="settings-section">
+    <h3 class="settings-section-title">DATENQUELLEN</h3>
+    <p class="settings-section-desc">
+      Interne HTTP-Systeme einbinden (Jenkins, GitHub, Log-APIs, Testsysteme, …).
+      Der Agent bekommt für jede Quelle ein eigenes Tool, das per KI automatisch
+      beschrieben werden kann.
+    </p>
+    <button class="btn btn-primary" onclick="dsShowForm(null)" style="margin-bottom:16px">
+      + Neue Datenquelle
+    </button>
+    <div id="ds-list"></div>
+    <div id="ds-form-container"></div>
+  </div>`;
+  await dsLoadList();
+}
+
+async function dsLoadList() {
+  try {
+    const res = await fetch('/api/datasources');
+    const data = await res.json();
+    _dsState.sources = data.sources || [];
+    dsRenderList();
+  } catch (e) {
+    document.getElementById('ds-list').innerHTML =
+      `<p style="color:var(--error)">Fehler beim Laden: ${e.message}</p>`;
+  }
+}
+
+function dsRenderList() {
+  const el = document.getElementById('ds-list');
+  if (!_dsState.sources.length) {
+    el.innerHTML = `<p style="color:var(--text-muted);font-style:italic">
+      Noch keine Datenquellen konfiguriert.</p>`;
+    return;
+  }
+  el.innerHTML = _dsState.sources.map(s => `
+    <div class="ds-item" id="ds-item-${s.id}">
+      <div class="ds-item-header">
+        <div class="ds-item-info">
+          <span class="ds-item-name">${escapeHtml(s.name)}</span>
+          <span class="ds-item-url">${escapeHtml(s.base_url)}</span>
+          ${s.explored ? '<span class="ds-badge explored">KI ✓</span>' : '<span class="ds-badge">Neu</span>'}
+          ${s.auth?.type !== 'none' ? `<span class="ds-badge auth">${escapeHtml(s.auth.type)}</span>` : ''}
+          ${!s.verify_ssl ? '<span class="ds-badge nossl">SSL off</span>' : ''}
+        </div>
+        <div class="ds-item-actions">
+          <button class="btn btn-xs" onclick="dsTest('${s.id}')" title="Verbindung testen">🔌 Test</button>
+          <button class="btn btn-xs btn-secondary" onclick="dsExplore('${s.id}')" title="KI erkundet die API">🤖 Erkunden</button>
+          <button class="btn btn-xs btn-secondary" onclick="dsShowForm('${s.id}')">✏ Bearbeiten</button>
+          <button class="btn btn-xs btn-danger" onclick="dsDelete('${s.id}', '${escapeHtml(s.name)}')">✕</button>
+        </div>
+      </div>
+      ${s.description ? `<div class="ds-item-desc">${escapeHtml(s.description)}</div>` : ''}
+      ${s.tool_description ? `<div class="ds-item-tool-desc">${escapeHtml(s.tool_description)}</div>` : ''}
+      <div id="ds-test-result-${s.id}" class="ds-test-result"></div>
+      <div id="ds-explore-result-${s.id}"></div>
+    </div>
+  `).join('');
+}
+
+function dsShowForm(id) {
+  _dsState.editingId = id;
+  _dsState.suggestion = null;
+  const source = id ? _dsState.sources.find(s => s.id === id) : null;
+  const s = source || {};
+  const auth = s.auth || {};
+
+  document.getElementById('ds-form-container').innerHTML = `
+    <div class="ds-form" id="ds-edit-form">
+      <h4 style="margin-bottom:12px">${id ? 'Datenquelle bearbeiten' : 'Neue Datenquelle'}</h4>
+
+      <div class="settings-field">
+        <label>Name *</label>
+        <input type="text" id="ds-name" placeholder="z.B. Jenkins-CI, GitHub-Internal, Log-Server"
+          value="${escapeHtml(s.name || '')}">
+      </div>
+      <div class="settings-field">
+        <label>Beschreibung</label>
+        <input type="text" id="ds-desc" placeholder="Was ist diese Datenquelle? Wofür wird sie verwendet?"
+          value="${escapeHtml(s.description || '')}">
+      </div>
+      <div class="settings-field">
+        <label>Basis-URL *</label>
+        <input type="text" id="ds-url" placeholder="http://jenkins.intern:8080"
+          value="${escapeHtml(s.base_url || '')}">
+      </div>
+
+      <div class="settings-field">
+        <label class="checkbox-label">
+          <input type="checkbox" id="ds-ssl" ${s.verify_ssl === false ? '' : 'checked'}>
+          SSL-Verifizierung aktiviert (deaktivieren für selbstsignierte Zertifikate)
+        </label>
+      </div>
+
+      <div class="settings-field">
+        <label>Authentifizierung</label>
+        <select id="ds-auth-type" onchange="dsUpdateAuthFields()">
+          <option value="none" ${auth.type === 'none' || !auth.type ? 'selected' : ''}>Keine</option>
+          <option value="basic" ${auth.type === 'basic' ? 'selected' : ''}>Basic Auth (Benutzer + Passwort)</option>
+          <option value="bearer" ${auth.type === 'bearer' ? 'selected' : ''}>Bearer Token</option>
+          <option value="api_key" ${auth.type === 'api_key' ? 'selected' : ''}>API-Key Header</option>
+        </select>
+      </div>
+      <div id="ds-auth-fields"></div>
+
+      <details style="margin-bottom:12px">
+        <summary style="cursor:pointer;color:var(--text-muted);font-size:13px">
+          Tool-Definition (manuell oder per KI-Erkundung befüllen)
+        </summary>
+        <div style="margin-top:10px">
+          <div class="settings-field">
+            <label>Tool-Beschreibung (für KI-Agenten)</label>
+            <textarea id="ds-tool-desc" rows="3" placeholder="Was liefert dieses Tool? Welche Daten kann der Agent damit abrufen?"
+              style="width:100%;resize:vertical">${escapeHtml(s.tool_description || '')}</textarea>
+          </div>
+          <div class="settings-field">
+            <label>Verwendungszweck</label>
+            <textarea id="ds-tool-usage" rows="2" placeholder="Wann soll der Agent dieses Tool verwenden? Beispiel-Anfragen?"
+              style="width:100%;resize:vertical">${escapeHtml(s.tool_usage || '')}</textarea>
+          </div>
+          <div class="settings-field">
+            <label>Standard-Endpunkt</label>
+            <input type="text" id="ds-endpoint" placeholder="/api/json oder /api/v1/builds"
+              value="${escapeHtml(s.endpoint_path || '')}">
+          </div>
+          <div class="settings-field">
+            <label>HTTP-Methode</label>
+            <select id="ds-method">
+              <option value="GET" ${(s.method || 'GET') === 'GET' ? 'selected' : ''}>GET</option>
+              <option value="POST" ${s.method === 'POST' ? 'selected' : ''}>POST</option>
+              <option value="PUT" ${s.method === 'PUT' ? 'selected' : ''}>PUT</option>
+            </select>
+          </div>
+
+          <div class="settings-field">
+            <label>Tool-Parameter</label>
+            <div id="ds-params-list">
+              ${(s.parameters || []).map((p, i) => dsRenderParamRow(i, p)).join('')}
+            </div>
+            <button class="btn btn-xs btn-secondary" onclick="dsAddParam()" style="margin-top:6px">
+              + Parameter hinzufügen
+            </button>
+          </div>
+        </div>
+      </details>
+
+      <div id="ds-suggestion-box"></div>
+
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px">
+        <button class="btn btn-primary" onclick="dsSave()">
+          ${id ? 'Speichern' : 'Anlegen'}
+        </button>
+        <button class="btn btn-secondary" onclick="dsCancelForm()">Abbrechen</button>
+        <button class="btn btn-secondary" onclick="dsTestForm()" title="Verbindung mit den aktuellen Eingaben testen">
+          🔌 Verbindung testen
+        </button>
+      </div>
+      <div id="ds-form-test-result" class="ds-test-result" style="margin-top:8px"></div>
+    </div>
+  `;
+
+  dsUpdateAuthFields();
+  // Befüllung der Auth-Felder mit gespeicherten Werten
+  const t = auth.type || 'none';
+  if (t === 'basic') {
+    document.getElementById('ds-auth-username').value = auth.username || '';
+    document.getElementById('ds-auth-password').value = auth.password ? '***' : '';
+  } else if (t === 'bearer') {
+    document.getElementById('ds-auth-bearer').value = auth.bearer_token ? '***' : '';
+  } else if (t === 'api_key') {
+    document.getElementById('ds-auth-key-header').value = auth.api_key_header || 'X-API-Key';
+    document.getElementById('ds-auth-key-value').value = auth.api_key_value ? '***' : '';
+  }
+
+  document.getElementById('ds-edit-form').scrollIntoView({ behavior: 'smooth' });
+}
+
+function dsRenderParamRow(index, p = {}) {
+  return `<div class="ds-param-row" id="ds-param-${index}">
+    <input type="text" placeholder="Name" value="${escapeHtml(p.name || '')}" data-param="${index}" data-field="name" style="width:120px">
+    <select data-param="${index}" data-field="type">
+      <option value="string" ${p.type === 'string' || !p.type ? 'selected' : ''}>string</option>
+      <option value="number" ${p.type === 'number' ? 'selected' : ''}>number</option>
+      <option value="boolean" ${p.type === 'boolean' ? 'selected' : ''}>boolean</option>
+    </select>
+    <input type="text" placeholder="Beschreibung" value="${escapeHtml(p.description || '')}" data-param="${index}" data-field="description" style="flex:1">
+    <select data-param="${index}" data-field="location" title="Wo wird der Parameter übergeben?">
+      <option value="query" ${p.location === 'query' || !p.location ? 'selected' : ''}>Query</option>
+      <option value="body" ${p.location === 'body' ? 'selected' : ''}>Body</option>
+      <option value="path" ${p.location === 'path' ? 'selected' : ''}>Path</option>
+      <option value="header" ${p.location === 'header' ? 'selected' : ''}>Header</option>
+    </select>
+    <label class="checkbox-label" style="white-space:nowrap;font-size:12px">
+      <input type="checkbox" data-param="${index}" data-field="required" ${p.required ? 'checked' : ''}> Pflicht
+    </label>
+    <button class="btn btn-xs btn-danger" onclick="dsRemoveParam(${index})">✕</button>
+  </div>`;
+}
+
+let _dsParamCount = 0;
+function dsAddParam() {
+  const list = document.getElementById('ds-params-list');
+  const idx = Date.now();
+  list.insertAdjacentHTML('beforeend', dsRenderParamRow(idx));
+  _dsParamCount++;
+}
+
+function dsRemoveParam(index) {
+  const row = document.getElementById(`ds-param-${index}`);
+  if (row) row.remove();
+}
+
+function dsCollectParams() {
+  const rows = document.querySelectorAll('.ds-param-row');
+  return Array.from(rows).map(row => {
+    const idx = row.id.replace('ds-param-', '');
+    const get = (field) => {
+      const el = row.querySelector(`[data-param="${idx}"][data-field="${field}"]`);
+      if (!el) return '';
+      if (el.type === 'checkbox') return el.checked;
+      return el.value;
+    };
+    return {
+      name: get('name'),
+      type: get('type') || 'string',
+      description: get('description'),
+      required: get('required'),
+      location: get('location') || 'query',
+    };
+  }).filter(p => p.name);
+}
+
+function dsUpdateAuthFields() {
+  const type = document.getElementById('ds-auth-type')?.value;
+  const container = document.getElementById('ds-auth-fields');
+  if (!container) return;
+  if (type === 'basic') {
+    container.innerHTML = `
+      <div class="settings-field" style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+        <div>
+          <label style="font-size:12px">Benutzername</label>
+          <input type="text" id="ds-auth-username" placeholder="user">
+        </div>
+        <div>
+          <label style="font-size:12px">Passwort</label>
+          <input type="password" id="ds-auth-password" placeholder="••••••">
+        </div>
+      </div>`;
+  } else if (type === 'bearer') {
+    container.innerHTML = `
+      <div class="settings-field">
+        <label style="font-size:12px">Bearer Token</label>
+        <input type="password" id="ds-auth-bearer" placeholder="eyJhbGci...">
+      </div>`;
+  } else if (type === 'api_key') {
+    container.innerHTML = `
+      <div class="settings-field" style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+        <div>
+          <label style="font-size:12px">Header-Name</label>
+          <input type="text" id="ds-auth-key-header" value="X-API-Key">
+        </div>
+        <div>
+          <label style="font-size:12px">API-Key</label>
+          <input type="password" id="ds-auth-key-value" placeholder="••••••">
+        </div>
+      </div>`;
+  } else {
+    container.innerHTML = '';
+  }
+}
+
+function dsCollectAuth() {
+  const type = document.getElementById('ds-auth-type')?.value || 'none';
+  const auth = { type };
+  if (type === 'basic') {
+    auth.username = document.getElementById('ds-auth-username')?.value || '';
+    auth.password = document.getElementById('ds-auth-password')?.value || '';
+  } else if (type === 'bearer') {
+    auth.bearer_token = document.getElementById('ds-auth-bearer')?.value || '';
+  } else if (type === 'api_key') {
+    auth.api_key_header = document.getElementById('ds-auth-key-header')?.value || 'X-API-Key';
+    auth.api_key_value = document.getElementById('ds-auth-key-value')?.value || '';
+  }
+  return auth;
+}
+
+function dsCollectFormData() {
+  return {
+    name: document.getElementById('ds-name')?.value?.trim() || '',
+    description: document.getElementById('ds-desc')?.value?.trim() || '',
+    base_url: document.getElementById('ds-url')?.value?.trim() || '',
+    verify_ssl: document.getElementById('ds-ssl')?.checked ?? true,
+    auth: dsCollectAuth(),
+    tool_description: document.getElementById('ds-tool-desc')?.value?.trim() || '',
+    tool_usage: document.getElementById('ds-tool-usage')?.value?.trim() || '',
+    endpoint_path: document.getElementById('ds-endpoint')?.value?.trim() || '',
+    method: document.getElementById('ds-method')?.value || 'GET',
+    parameters: dsCollectParams(),
+  };
+}
+
+async function dsSave() {
+  const data = dsCollectFormData();
+  if (!data.name) { updateSettingsStatus('Name ist erforderlich', 'error'); return; }
+  if (!data.base_url) { updateSettingsStatus('Basis-URL ist erforderlich', 'error'); return; }
+
+  try {
+    let res;
+    if (_dsState.editingId) {
+      res = await fetch(`/api/datasources/${_dsState.editingId}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(data),
+      });
+    } else {
+      res = await fetch('/api/datasources', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(data),
+      });
+    }
+    const result = await res.json();
+    if (!res.ok) throw new Error(result.detail || 'Fehler');
+
+    updateSettingsStatus(result.message || 'Gespeichert', 'success');
+    dsCancelForm();
+    await dsLoadList();
+  } catch (e) {
+    updateSettingsStatus('Fehler: ' + e.message, 'error');
+  }
+}
+
+function dsCancelForm() {
+  document.getElementById('ds-form-container').innerHTML = '';
+  _dsState.editingId = null;
+  _dsState.suggestion = null;
+}
+
+async function dsDelete(id, name) {
+  if (!confirm(`Datenquelle "${name}" wirklich löschen?`)) return;
+  try {
+    const res = await fetch(`/api/datasources/${id}`, { method: 'DELETE' });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.detail || 'Fehler');
+    updateSettingsStatus(data.message, 'success');
+    await dsLoadList();
+  } catch (e) {
+    updateSettingsStatus('Fehler: ' + e.message, 'error');
+  }
+}
+
+async function dsTest(id) {
+  const el = document.getElementById(`ds-test-result-${id}`);
+  el.textContent = '⏳ Teste Verbindung...';
+  el.className = 'ds-test-result testing';
+  try {
+    const res = await fetch(`/api/datasources/${id}/test`, { method: 'POST' });
+    const data = await res.json();
+    if (data.success) {
+      el.textContent = `✓ ${data.message} — ${data.preview?.substring(0, 120) || ''}`;
+      el.className = 'ds-test-result success';
+    } else {
+      el.textContent = `✗ ${data.error}`;
+      el.className = 'ds-test-result error';
+    }
+  } catch (e) {
+    el.textContent = `✗ ${e.message}`;
+    el.className = 'ds-test-result error';
+  }
+}
+
+async function dsTestForm() {
+  const el = document.getElementById('ds-form-test-result');
+  // Temp-Quelle aus Formular speichern (oder bestehende ID nutzen)
+  if (_dsState.editingId) {
+    el.textContent = '⏳ Speichere und teste...';
+    el.className = 'ds-test-result testing';
+    await dsSave();
+    if (_dsState.editingId) await dsTest(_dsState.editingId);
+  } else {
+    el.textContent = '⚠ Bitte erst "Anlegen" um die Verbindung zu testen.';
+    el.className = 'ds-test-result';
+  }
+}
+
+async function dsExplore(id) {
+  const resultEl = document.getElementById(`ds-explore-result-${id}`);
+  resultEl.innerHTML = `<div class="ds-explore-loading">🤖 KI erkundet die API… <span class="spinner-small"></span></div>`;
+
+  try {
+    const res = await fetch(`/api/datasources/${id}/explore`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({}),
+    });
+    const data = await res.json();
+
+    if (!data.success) {
+      resultEl.innerHTML = `<div class="ds-explore-error">✗ ${escapeHtml(data.error)}</div>`;
+      return;
+    }
+
+    const s = data.suggestion;
+    resultEl.innerHTML = `
+      <div class="ds-suggestion">
+        <div class="ds-suggestion-header">
+          <strong>🤖 KI-Vorschlag</strong>
+          <span style="color:var(--text-muted);font-size:12px">Bitte prüfen und übernehmen</span>
+        </div>
+        <div class="ds-suggestion-field"><label>Tool-Beschreibung:</label>
+          <span>${escapeHtml(s.tool_description || '')}</span></div>
+        <div class="ds-suggestion-field"><label>Verwendungszweck:</label>
+          <span>${escapeHtml(s.tool_usage || '')}</span></div>
+        <div class="ds-suggestion-field"><label>Endpunkt:</label>
+          <span>${escapeHtml(s.endpoint_path || '/')}</span>
+          <span class="ds-badge">${escapeHtml(s.method || 'GET')}</span></div>
+        ${s.suggested_endpoints?.length ? `
+          <div class="ds-suggestion-field"><label>Weitere Endpunkte:</label>
+            <ul style="margin:4px 0 0 16px;font-size:12px">
+              ${s.suggested_endpoints.map(e =>
+                `<li><code>${escapeHtml(e.path)}</code> – ${escapeHtml(e.description)}</li>`
+              ).join('')}
+            </ul>
+          </div>` : ''}
+        ${s.parameters?.length ? `
+          <div class="ds-suggestion-field"><label>Parameter (${s.parameters.length}):</label>
+            <div style="font-size:12px;margin-top:4px">
+              ${s.parameters.map(p =>
+                `<code>${escapeHtml(p.name)}</code> (${escapeHtml(p.type)}, ${escapeHtml(p.location || 'query')}${p.required ? ', Pflicht' : ''}) – ${escapeHtml(p.description)}`
+              ).join('<br>')}
+            </div>
+          </div>` : ''}
+        <div style="display:flex;gap:8px;margin-top:10px">
+          <button class="btn btn-primary btn-xs" onclick="dsApplySuggestion('${id}', this)">
+            ✓ Vorschlag übernehmen
+          </button>
+          <button class="btn btn-secondary btn-xs" onclick="this.closest('.ds-suggestion').remove()">
+            Verwerfen
+          </button>
+        </div>
+      </div>
+    `;
+    // Vorschlag für Apply speichern
+    resultEl.dataset.suggestion = JSON.stringify(s);
+  } catch (e) {
+    resultEl.innerHTML = `<div class="ds-explore-error">✗ ${e.message}</div>`;
+  }
+}
+
+async function dsApplySuggestion(id, btn) {
+  const resultEl = btn.closest('[id^="ds-explore-result-"]');
+  const suggestion = JSON.parse(resultEl?.dataset.suggestion || 'null');
+  if (!suggestion) return;
+
+  try {
+    const res = await fetch(`/api/datasources/${id}/apply-suggestion`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ suggestion }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.detail || 'Fehler');
+
+    updateSettingsStatus('KI-Vorschlag übernommen ✓', 'success');
+    resultEl.innerHTML = '';
+    await dsLoadList();
+  } catch (e) {
+    updateSettingsStatus('Fehler: ' + e.message, 'error');
   }
 }
 
