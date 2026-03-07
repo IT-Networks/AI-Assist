@@ -1194,7 +1194,7 @@ async def debug_java_with_testdata(
 
 SEARCH_CODE_TOOL = Tool(
     name="search_code",
-    description="Durchsucht Java-, Python- und SQL/SQLJ-Code nach relevanten Dateien und liest deren Inhalt. Gibt den vollständigen Code der gefundenen Dateien zurück.",
+    description="Findet Java/Python/SQL-Dateien per Volltextsuche. Nutze für: Klassennamen, Methodennamen, SQL-Patterns, Konzepte.",
     category=ToolCategory.SEARCH,
     parameters=[
         ToolParameter("query", "string", "Suchbegriff (Klassenname, Methode, Tabellenname, Konzept)"),
@@ -1231,7 +1231,7 @@ SEARCH_SKILLS_TOOL = Tool(
 
 READ_FILE_TOOL = Tool(
     name="read_file",
-    description="Liest den kompletten Inhalt einer Datei. Pfad muss relativ zum Repository oder absolut sein.",
+    description="Liest Datei vollständig. Pfad: relativ zum Repo-Root (z.B. 'src/Main.java') oder absolut.",
     category=ToolCategory.FILE,
     parameters=[
         ToolParameter("path", "string", "Pfad zur Datei"),
@@ -1311,17 +1311,10 @@ READ_SQLJ_FILE_TOOL = Tool(
 
 DEBUG_JAVA_TESTDATA_TOOL = Tool(
     name="debug_java_with_testdata",
-    description=(
-        "Debuggt einen Java-Service mit echten Testdaten. "
-        "WICHTIG: class_name ist ein PFLICHTFELD – rufe dieses Tool NIEMALS auf ohne einen konkreten Klassennamen. "
-        "Falls der Nutzer keinen Klassennamen angegeben hat, frage ZUERST danach bevor du dieses Tool aufrufst. "
-        "Was das Tool tut: Findet die Java-Klasse im Repository, liest den Code, sucht zugehörige SQLJ-Dateien, "
-        "extrahiert SQL-Statements der Zielmethode, substituiert Testparameter (:varName → Wert) "
-        "und führt die SQL-Abfragen gegen die DB aus. Gibt Java-Code + SQL + DB-Ergebnisse zurück."
-    ),
+    description="Führt Java-Service mit Testdaten aus: liest Code → SQLJ → substituiert Parameter → SQL-Ergebnis. PFLICHT: class_name angeben.",
     category=ToolCategory.ANALYSIS,
     parameters=[
-        ToolParameter("class_name", "string", "PFLICHT: Name der Java-Klasse (einfach z.B. 'CustomerService' oder vollqualifiziert 'com.example.CustomerService'). Darf nicht leer sein."),
+        ToolParameter("class_name", "string", "PFLICHT: Java-Klassenname (z.B. 'CustomerService'). Tool schlägt fehl wenn leer — zuerst search_code aufrufen um den Namen zu ermitteln."),
         ToolParameter("method_name", "string", "Name der Methode (optional, filtert SQL auf diese Methode)", required=False, default=""),
         ToolParameter("test_parameters", "object", "Testdaten als Key-Value-Objekt, z.B. {\"customerId\": \"12345\", \"date\": \"2024-01-01\"}. Keys entsprechen den SQLJ-Host-Variablen (:varName)", required=False, default={}),
     ],
@@ -1330,7 +1323,7 @@ DEBUG_JAVA_TESTDATA_TOOL = Tool(
 
 TRACE_JAVA_REFERENCES_TOOL = Tool(
     name="trace_java_references",
-    description="Verfolgt Java-Klassenhierarchien und findet Interfaces, Parent-Klassen und deren Implementierungen im Repository.",
+    description="Findet Interfaces, Parent-Klassen und Implementierungen. Nutze NACH search_code wenn Vererbung relevant ist.",
     category=ToolCategory.ANALYSIS,
     parameters=[
         ToolParameter("class_name", "string", "Name der Klasse (einfach oder vollqualifiziert)"),
@@ -1343,7 +1336,7 @@ TRACE_JAVA_REFERENCES_TOOL = Tool(
 
 QUERY_DATABASE_TOOL = Tool(
     name="query_database",
-    description="Führt eine SELECT-Abfrage auf der DB2-Datenbank aus. Nur SELECT-Statements erlaubt (readonly). Nutze dieses Tool um Daten aus der Datenbank abzufragen.",
+    description="Führt DB2 SELECT-Query aus (NUR SELECT erlaubt). Beispiel: SELECT * FROM ORDERS FETCH FIRST 10 ROWS ONLY",
     category=ToolCategory.SEARCH,
     is_write_operation=False,  # Nur SELECT erlaubt, daher keine Bestätigung nötig
     parameters=[

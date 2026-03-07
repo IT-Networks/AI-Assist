@@ -972,10 +972,18 @@ class AgentOrchestrator:
         if settings.llm.api_key and settings.llm.api_key != "none":
             headers["Authorization"] = f"Bearer {settings.llm.api_key}"
 
+        # Phase-spezifische Temperature: Tool-Phase deterministisch, Analyse-Phase konfigurierbar
+        is_tool_phase = bool(tools)
+        if is_tool_phase:
+            effective_temperature = settings.llm.tool_temperature
+        else:
+            cfg_analysis_temp = settings.llm.analysis_temperature
+            effective_temperature = cfg_analysis_temp if cfg_analysis_temp >= 0 else settings.llm.temperature
+
         payload = {
             "model": selected_model,
             "messages": messages,
-            "temperature": settings.llm.temperature,
+            "temperature": effective_temperature,
             "max_tokens": settings.llm.max_tokens,
         }
 
@@ -1169,7 +1177,12 @@ WICHTIG: Nutze query_database um Daten abzufragen. Beispiel: query_database(quer
 """
 
         base += """
-### Anweisungen:
+### Vorgehensweise bei jeder Anfrage:
+
+1. **Verstehen**: Was genau wird gefragt? Welche Information fehlt mir?
+2. **Planen**: Welche Tools brauche ich in welcher Reihenfolge?
+3. **Ausführen**: Tools einzeln aufrufen und Ergebnis abwarten, bevor das nächste Tool gerufen wird.
+4. **Antworten**: Erst wenn alle nötigen Infos vorliegen, die Antwort formulieren.
 
 Verwende die passenden Tools um Informationen zu sammeln, bevor du antwortest.
 - Bei Code-Fragen: Suche zuerst nach relevantem Code. Bei komplexen Klassen nutze trace_java_references.
@@ -1177,6 +1190,21 @@ Verwende die passenden Tools um Informationen zu sammeln, bevor du antwortest.
 - Bei PDF-Dokumenten: Durchsuche sie mit search_pdf.
 - Bei Datenbank-Fragen: Nutze list_database_tables und describe_database_table um die Struktur zu verstehen.
 - Lese jede Datei nur EINMAL - der Inhalt bleibt im Kontext verfügbar.
+
+### Beispiel-Abläufe:
+
+**Beispiel 1** — Benutzer: "Was macht die Klasse PaymentService?"
+→ Plane: Ich brauche den Java-Code → search_code, dann ggf. read_file.
+→ Tool: search_code(query="PaymentService", language="java", top_k=3)
+→ Ergebnis zeigt Pfad: src/payment/PaymentService.java
+→ Tool: read_file(path="src/payment/PaymentService.java")
+→ Antwort: "PaymentService ist zuständig für..."
+
+**Beispiel 2** — Benutzer: "Erstelle einen JUnit-Test für OrderValidator"
+→ Plane: Erst Quellcode lesen, dann Test generieren.
+→ Tool: search_code(query="OrderValidator", language="java")
+→ Tool: read_file(path="src/order/OrderValidator.java")
+→ Antwort mit vollständigem JUnit-5-Test in ```java Block.
 """
 
         if mode == AgentMode.READ_ONLY:

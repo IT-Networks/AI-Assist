@@ -68,6 +68,9 @@ class LLMConfig(BaseModel):
     analysis_model: str = ""  # Größeres Modell für Analyse/Antwort (leer = default_model)
     # Pro-Tool Modell-Zuweisung: {"tool_name": "model_id"} (leer = tool_model oder default_model)
     tool_models: Dict[str, str] = {}
+    # Phase-spezifische Temperature: Tool-Phase deterministisch (0.0), Analyse-Phase kreativ (0.2)
+    tool_temperature: float = 0.0       # Temperature für Tool-Call-Phase (deterministisch)
+    analysis_temperature: float = -1.0  # Temperature für Analyse-Phase (-1 = temperature verwenden)
 
 
 class RepoEntry(BaseModel):
