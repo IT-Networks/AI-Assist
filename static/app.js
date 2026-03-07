@@ -792,6 +792,26 @@ async function processAgentEvent(event, bubble, msgDiv, chat) {
       appendMessageToPane(chat.pane, 'system', `⏹ ${data.message || 'Anfrage abgebrochen'}`);
       break;
 
+    case 'subagent_start': {
+      const card = createSubAgentCard(data.agents || []);
+      bubble.appendChild(card);
+      chat.subAgentCard = card;
+      if (document.contains(chat.pane)) scrollToBottom();
+      break;
+    }
+    case 'subagent_done': {
+      if (chat.subAgentCard) {
+        updateSubAgentCard(chat.subAgentCard, 'done', data);
+      }
+      break;
+    }
+    case 'subagent_error': {
+      if (chat.subAgentCard) {
+        updateSubAgentCard(chat.subAgentCard, 'error', data);
+      }
+      break;
+    }
+
     case 'error':
       appendMessageToPane(chat.pane, 'error', data.error || 'Unbekannter Fehler');
       break;
@@ -901,6 +921,63 @@ function updateToolCard(toolId, status, result, pane) {
     if (result) {
       resultEl.textContent = typeof result === 'string' ? result.slice(0, 500) : JSON.stringify(result).slice(0, 500);
     }
+  }
+}
+
+// ── Sub-Agent Cards ──
+function createSubAgentCard(agents) {
+  const card = document.createElement('div');
+  card.className = 'subagent-card';
+
+  const agentList = agents.length > 0
+    ? agents.map(a => `<span class="subagent-badge running" data-agent="${escapeHtml(a)}">${escapeHtml(a)}</span>`).join('')
+    : '<span class="subagent-badge running">Alle Quellen</span>';
+
+  card.innerHTML = `
+    <div class="subagent-header">
+      <span class="subagent-icon">&#128269;</span>
+      <span class="subagent-title">Parallele Recherche</span>
+      <span class="subagent-status running">Läuft...</span>
+    </div>
+    <div class="subagent-agents">${agentList}</div>
+    <div class="subagent-results"></div>
+  `;
+  return card;
+}
+
+function updateSubAgentCard(card, type, data) {
+  if (!card) return;
+  const resultsEl = card.querySelector('.subagent-results');
+  const statusEl = card.querySelector('.subagent-status');
+
+  if (type === 'done') {
+    const agentName = data.agent || 'Unbekannt';
+    const duration = data.duration_ms ? `${(data.duration_ms / 1000).toFixed(1)}s` : '';
+    const findings = data.findings_count != null ? `${data.findings_count} Findings` : '';
+    const badge = card.querySelector(`.subagent-badge[data-agent="${CSS.escape(agentName)}"]`)
+      || [...card.querySelectorAll('.subagent-badge')].find(b => b.textContent === agentName);
+    if (badge) { badge.className = 'subagent-badge done'; }
+
+    const row = document.createElement('div');
+    row.className = 'subagent-result-row success';
+    row.textContent = `✓ ${agentName}${findings ? ' · ' + findings : ''}${duration ? ' · ' + duration : ''}`;
+    resultsEl.appendChild(row);
+
+    // Prüfen ob alle Badges fertig sind
+    const allDone = [...card.querySelectorAll('.subagent-badge')].every(b => !b.classList.contains('running'));
+    if (allDone) {
+      statusEl.className = 'subagent-status done';
+      statusEl.textContent = 'Fertig';
+    }
+  } else if (type === 'error') {
+    const agentName = data.agent || 'Unbekannt';
+    const badge = [...card.querySelectorAll('.subagent-badge')].find(b => b.textContent === agentName);
+    if (badge) { badge.className = 'subagent-badge error'; }
+
+    const row = document.createElement('div');
+    row.className = 'subagent-result-row error';
+    row.textContent = `✗ ${agentName}: ${data.error || 'Fehler'}`;
+    resultsEl.appendChild(row);
   }
 }
 

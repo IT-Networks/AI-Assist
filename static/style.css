@@ -874,6 +874,106 @@ body {
   color: var(--danger);
 }
 
+/* Sub-Agent Cards */
+.subagent-card {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  margin: 8px 0;
+  overflow: hidden;
+}
+
+.subagent-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+  font-size: 0.8rem;
+}
+
+.subagent-icon {
+  font-size: 1rem;
+}
+
+.subagent-title {
+  font-weight: 600;
+  color: var(--accent);
+}
+
+.subagent-status {
+  margin-left: auto;
+  font-size: 0.75rem;
+  padding: 2px 8px;
+  border-radius: 10px;
+}
+
+.subagent-status.running {
+  background: var(--warning-bg);
+  color: var(--warning);
+}
+
+.subagent-status.done {
+  background: var(--success-bg);
+  color: var(--success);
+}
+
+.subagent-status.error {
+  background: var(--danger-bg);
+  color: var(--danger);
+}
+
+.subagent-agents {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border);
+}
+
+.subagent-badge {
+  font-size: 0.7rem;
+  padding: 2px 8px;
+  border-radius: 10px;
+  font-weight: 500;
+}
+
+.subagent-badge.running {
+  background: var(--warning-bg);
+  color: var(--warning);
+}
+
+.subagent-badge.done {
+  background: var(--success-bg);
+  color: var(--success);
+}
+
+.subagent-badge.error {
+  background: var(--danger-bg);
+  color: var(--danger);
+}
+
+.subagent-results {
+  padding: 6px 12px 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.subagent-result-row {
+  font-size: 0.75rem;
+  padding: 2px 0;
+}
+
+.subagent-result-row.success {
+  color: var(--success);
+}
+
+.subagent-result-row.error {
+  color: var(--danger);
+}
+
 /* Tool Call Cards */
 .tool-call-card {
   background: var(--bg-secondary);
