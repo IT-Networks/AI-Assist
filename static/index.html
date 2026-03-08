@@ -248,6 +248,11 @@
         <span class="context-label">Kontext:</span>
         <div id="context-chips"></div>
       </div>
+      <!-- Suggestion-Bar: erscheint wenn Agent suggest_answers aufruft -->
+      <div id="suggestion-bar" style="display:none">
+        <span class="suggestion-bar-label" id="suggestion-question"></span>
+        <div id="suggestion-chips"></div>
+      </div>
       <div id="input-row">
         <textarea id="message-input" placeholder="Frage stellen... (Enter zum Senden, Shift+Enter für neue Zeile)" rows="2"></textarea>
         <button id="send-btn" onclick="sendMessage()">

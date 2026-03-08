@@ -469,8 +469,63 @@ function updateModeIndicator() {
       indicator.innerHTML = '<span class="mode-icon">&#128203;</span><span class="mode-text">Plan &amp; Ausführen</span>';
       if (welcomeMode) welcomeMode.textContent = 'Plan & Ausführen';
       break;
+    case 'debug':
+      indicator.classList.add('mode-debug');
+      indicator.innerHTML = '<span class="mode-icon">&#128269;</span><span class="mode-text">Debug</span>';
+      if (welcomeMode) welcomeMode.textContent = 'Debug';
+      break;
   }
 }
+
+// ── Suggestion Bar (Debug-Modus Rückfragen) ──────────────────────────────────
+
+/**
+ * Zeigt Antwort-Vorschläge als klickbare Chips über dem Input-Feld an.
+ * Wird vom QUESTION-SSE-Event getriggert wenn der Agent suggest_answers aufruft.
+ */
+function showSuggestions(question, options) {
+  const bar = document.getElementById('suggestion-bar');
+  const questionEl = document.getElementById('suggestion-question');
+  const chipsEl = document.getElementById('suggestion-chips');
+
+  if (!bar || !chipsEl) return;
+
+  questionEl.textContent = question || '';
+  chipsEl.innerHTML = '';
+
+  options.forEach(opt => {
+    const btn = document.createElement('button');
+    btn.className = 'suggestion-chip';
+    btn.textContent = opt;
+    btn.addEventListener('click', () => {
+      hideSuggestions();
+      const input = document.getElementById('message-input');
+      input.value = opt;
+      sendMessage();
+    });
+    chipsEl.appendChild(btn);
+  });
+
+  bar.style.display = 'flex';
+}
+
+function hideSuggestions() {
+  const bar = document.getElementById('suggestion-bar');
+  if (bar) bar.style.display = 'none';
+}
+
+// Suggestions ausblenden wenn User selbst zu tippen beginnt
+document.addEventListener('DOMContentLoaded', () => {
+  const input = document.getElementById('message-input');
+  if (input) {
+    input.addEventListener('keydown', (e) => {
+      // Nur ausblenden wenn User echten Text tippt (keine Navigation)
+      if (e.key.length === 1 && !e.ctrlKey && !e.metaKey) {
+        hideSuggestions();
+      }
+    });
+  }
+});
 
 // ── Models ──
 async function loadModels() {
@@ -624,6 +679,7 @@ const _CMD_LIST = [
   { cmd: '/schreiben',  desc: 'Modus: Schreiben mit Bestätigung ✏️', alias: '/s' },
   { cmd: '/plan',       desc: 'Modus: Plan & Ausführen 📋',       alias: '/p' },
   { cmd: '/auto',       desc: 'Modus: Autonom ⚠️',               alias: '/a' },
+  { cmd: '/debug',      desc: 'Modus: Debug & Fehleranalyse 🔍',  alias: '/d' },
   { cmd: '/suche an',   desc: 'Web-Suche aktivieren 🔍',          alias: null },
   { cmd: '/suche aus',  desc: 'Web-Suche deaktivieren',           alias: null },
   { cmd: '/neu',        desc: 'Neuen Chat öffnen',                alias: '/neuer chat' },
@@ -724,6 +780,7 @@ const _MODE_LABELS = {
   write_with_confirm: '&#128221; Schreiben (mit Bestätigung)',
   plan_then_execute:  '&#128203; Plan & Ausführen',
   autonomous:         '&#9888; Autonom',
+  debug:              '&#128269; Debug & Fehleranalyse',
 };
 
 async function _searchSetEnabled(enabled) {
@@ -755,6 +812,7 @@ function _buildHelpText() {
 \`/schreiben\` \`/s\`  → Schreiben mit Bestätigung &#128221;
 \`/plan\` \`/p\`  → Plan & Ausführen &#128203;
 \`/auto\` \`/a\`  → Autonom &#9888;
+\`/debug\` \`/d\`  → Debug & Fehleranalyse &#128269;
 
 **Web-Suche:**
 \`/suche an\`  → Web-Suche aktivieren
@@ -792,6 +850,7 @@ async function handleChatCommand(text) {
     'schreiben': 'write_with_confirm', 's': 'write_with_confirm', 'write': 'write_with_confirm',
     'plan': 'plan_then_execute', 'p': 'plan_then_execute', 'planning': 'plan_then_execute',
     'auto': 'autonomous',   'a': 'autonomous',     'autonomous': 'autonomous',
+    'debug': 'debug',       'd': 'debug',
   };
   if (modeMap[modePrefix]) {
     const modeKey = modeMap[modePrefix];
@@ -849,6 +908,7 @@ async function sendMessage() {
 
   input.value = '';
   input.style.height = 'auto';
+  hideSuggestions();
   appendMessage('user', text);
 
   updateActiveChatTitle(text);
@@ -1155,6 +1215,10 @@ async function processAgentEvent(event, bubble, msgDiv, chat) {
 
     case 'done':
       if (data.usage) displayTokenUsage(data.usage, chat);
+      break;
+
+    case 'question':
+      showSuggestions(data.question, data.options || []);
       break;
   }
 }
