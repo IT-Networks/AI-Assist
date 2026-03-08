@@ -1,8 +1,10 @@
+import asyncio
 import logging
 import uuid
 from pathlib import Path
 from typing import List, Optional
 
+from cachetools import TTLCache
 from fastapi import APIRouter, HTTPException, UploadFile, File, Query
 from pydantic import BaseModel
 
@@ -16,8 +18,8 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/pdf", tags=["pdf"])
 
-# In-memory store: pdf_id -> {filename, filepath, page_count, text}
-_pdf_store: dict = {}
+# LRU-Cache mit TTL: max 100 PDFs, 2 Stunden TTL (verhindert Memory-Leak)
+_pdf_store: TTLCache = TTLCache(maxsize=100, ttl=7200)
 _reader = PDFReader()
 
 
@@ -53,14 +55,20 @@ async def upload_pdf(file: UploadFile = File(...)):
     upload_dir.mkdir(parents=True, exist_ok=True)
     filepath = upload_dir / f"{pdf_id}_{file.filename}"
 
-    filepath.write_bytes(content_bytes)
+    # Async File I/O: Blockierendes Schreiben in ThreadPool auslagern
+    loop = asyncio.get_event_loop()
+    await loop.run_in_executor(None, filepath.write_bytes, content_bytes)
 
     try:
-        meta = _reader.get_metadata(str(filepath))
+        # PDF-Parsing ist CPU-intensiv → in ThreadPool auslagern
+        filepath_str = str(filepath)
+        meta = await loop.run_in_executor(None, _reader.get_metadata, filepath_str)
         # Pre-extract full text (up to 50 pages) for context
-        text = _reader.extract_text(str(filepath), max_pages=50)
+        text = await loop.run_in_executor(
+            None, lambda: _reader.extract_text(filepath_str, max_pages=50)
+        )
     except PDFReadError as e:
-        filepath.unlink(missing_ok=True)
+        await loop.run_in_executor(None, lambda: filepath.unlink(missing_ok=True))
         raise HTTPException(status_code=422, detail=str(e))
 
     _pdf_store[pdf_id] = {

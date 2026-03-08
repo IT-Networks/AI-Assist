@@ -1,6 +1,8 @@
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional
 
+from cachetools import TTLCache
+
 from app.core.config import settings
 from app.services.llm_client import SYSTEM_PROMPT
 from app.utils.token_counter import estimate_messages_tokens, estimate_tokens, truncate_text_to_tokens
@@ -13,8 +15,8 @@ class ContextAttachment:
     priority: int = 5  # lower = higher priority; kept when trimming
 
 
-# In-memory session store: session_id -> list of {role, content} messages
-_sessions: Dict[str, List[dict]] = {}
+# LRU-Cache mit TTL: max 500 Sessions, 4 Stunden TTL (verhindert Memory-Leak)
+_sessions: TTLCache = TTLCache(maxsize=500, ttl=14400)
 
 
 def get_history(session_id: str) -> List[dict]:

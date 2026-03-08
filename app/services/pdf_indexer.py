@@ -19,6 +19,9 @@ class PDFIndexer:
     def _connect(self) -> sqlite3.Connection:
         con = sqlite3.connect(str(self.db_path))
         con.row_factory = sqlite3.Row
+        # Performance: WAL mode + Timeout bei Lock-Konflikten
+        con.execute("PRAGMA journal_mode=WAL")
+        con.execute("PRAGMA busy_timeout=5000")
         return con
 
     def _init_db(self) -> None:

@@ -111,6 +111,7 @@ class HandbookIndexer:
         con.execute("PRAGMA journal_mode=WAL")
         con.execute("PRAGMA synchronous=NORMAL")
         con.execute("PRAGMA cache_size=10000")
+        con.execute("PRAGMA busy_timeout=5000")
         return con
 
     def _init_db(self) -> None:

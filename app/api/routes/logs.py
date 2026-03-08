@@ -1,6 +1,7 @@
 import uuid
 from pathlib import Path
 
+from cachetools import TTLCache
 from fastapi import APIRouter, HTTPException, UploadFile, File
 
 from app.core.config import settings
@@ -9,8 +10,8 @@ from app.services.log_parser import WLPLogParser
 
 router = APIRouter(prefix="/api/logs", tags=["logs"])
 
-# In-memory store: log_id -> {filename, content, summary, parsed}
-_log_store: dict = {}
+# LRU-Cache mit TTL: max 100 Logs, 1 Stunde TTL (verhindert Memory-Leak)
+_log_store: TTLCache = TTLCache(maxsize=100, ttl=3600)
 _parser = WLPLogParser()
 
 

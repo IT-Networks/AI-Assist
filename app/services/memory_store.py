@@ -53,6 +53,10 @@ class MemoryStore:
     def _connect(self) -> sqlite3.Connection:
         con = sqlite3.connect(str(self.db_path))
         con.row_factory = sqlite3.Row
+        # Performance: WAL mode für bessere Concurrent-Reads
+        con.execute("PRAGMA journal_mode=WAL")
+        # Timeout bei Lock-Konflikten (5 Sekunden statt 0)
+        con.execute("PRAGMA busy_timeout=5000")
         return con
 
     def _init_db(self) -> None:
@@ -266,6 +270,7 @@ class MemoryStore:
         # Zusammenbauen mit Token-Limit
         parts = []
         tokens_used = 0
+        accessed_ids = []
 
         for memory in relevant:
             entry_text = f"• [{memory.category}] {memory.key}: {memory.value}"
@@ -276,9 +281,11 @@ class MemoryStore:
 
             parts.append(entry_text)
             tokens_used += entry_tokens
+            accessed_ids.append(memory.id)
 
-            # Access-Count erhöhen
-            await self._increment_access(memory.id)
+        # Batch-Update: Access-Count für alle genutzten Memories in einem Query
+        if accessed_ids:
+            await self._increment_access_batch(accessed_ids)
 
         if not parts:
             return ""
@@ -295,6 +302,20 @@ class MemoryStore:
                     accessed_at = ?
                 WHERE id = ?
             """, (now, memory_id))
+
+    async def _increment_access_batch(self, memory_ids: List[str]) -> None:
+        """Batch-Update: Erhöht Access-Count für mehrere Einträge in einem Query."""
+        if not memory_ids:
+            return
+        now = datetime.utcnow().isoformat()
+        placeholders = ",".join("?" * len(memory_ids))
+        with self._connect() as con:
+            con.execute(f"""
+                UPDATE memories
+                SET access_count = access_count + 1,
+                    accessed_at = ?
+                WHERE id IN ({placeholders})
+            """, [now] + memory_ids)
 
     # ── Helpers ────────────────────────────────────────────────────────────
 
