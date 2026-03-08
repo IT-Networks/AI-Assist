@@ -90,6 +90,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     loadJavaIndexStatus(),
     loadPythonIndexStatus(),
     loadHandbookStatus(),
+    scanExistingPdfs(),
   ]);
 
   // Gespeicherte Chats laden oder neuen Chat erstellen
@@ -1813,7 +1814,27 @@ function addServiceToContext(serviceId, serviceName) {
   renderContextChips();
 }
 
-// ── PDF Upload ──
+// ── PDF Management ──
+async function scanExistingPdfs() {
+  try {
+    const res = await fetch('/api/pdf/scan', { method: 'POST' });
+    if (!res.ok) return;
+
+    const data = await res.json();
+    if (data.pdfs && data.pdfs.length > 0) {
+      // PDFs in Context laden
+      state.context.pdfIds = data.pdfs.map(pdf => ({
+        id: pdf.id,
+        label: pdf.filename
+      }));
+      renderPdfList();
+      console.log(`${data.loaded} PDFs aus Upload-Ordner geladen`);
+    }
+  } catch (e) {
+    console.debug('PDF-Scan fehlgeschlagen:', e);
+  }
+}
+
 async function uploadPDF() {
   const fileInput = document.getElementById('pdf-file-input');
   const file = fileInput.files[0];

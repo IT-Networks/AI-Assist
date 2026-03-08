@@ -1,0 +1,734 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Skills Verwaltung - AI Code Assistant</title>
+  <link rel="stylesheet" href="/static/style.css">
+  <style>
+    /* Skills Page Specific Styles */
+    .skills-page {
+      max-width: 1400px;
+      margin: 0 auto;
+      padding: 20px;
+    }
+
+    .skills-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 24px;
+      padding-bottom: 16px;
+      border-bottom: 1px solid var(--border);
+    }
+
+    .skills-header h1 {
+      margin: 0;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .skills-header .back-link {
+      color: var(--text-muted);
+      text-decoration: none;
+      font-size: 14px;
+    }
+
+    .skills-header .back-link:hover {
+      color: var(--accent);
+    }
+
+    .skills-grid {
+      display: grid;
+      grid-template-columns: 350px 1fr;
+      gap: 24px;
+      height: calc(100vh - 140px);
+    }
+
+    .skills-list-panel {
+      background: var(--bg-secondary);
+      border-radius: 8px;
+      border: 1px solid var(--border);
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+
+    .skills-list-header {
+      padding: 16px;
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    .skills-list-header h2 {
+      margin: 0;
+      font-size: 16px;
+    }
+
+    .skills-search {
+      padding: 12px 16px;
+      border-bottom: 1px solid var(--border);
+    }
+
+    .skills-search input {
+      width: 100%;
+      padding: 8px 12px;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      background: var(--bg-primary);
+      color: var(--text);
+    }
+
+    .skills-list {
+      flex: 1;
+      overflow-y: auto;
+      padding: 8px;
+    }
+
+    .skill-item {
+      padding: 12px 16px;
+      border-radius: 6px;
+      cursor: pointer;
+      margin-bottom: 4px;
+      transition: background 0.15s;
+    }
+
+    .skill-item:hover {
+      background: var(--bg-hover);
+    }
+
+    .skill-item.active {
+      background: var(--accent);
+      color: white;
+    }
+
+    .skill-item-name {
+      font-weight: 500;
+      margin-bottom: 4px;
+    }
+
+    .skill-item-desc {
+      font-size: 12px;
+      color: var(--text-muted);
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .skill-item.active .skill-item-desc {
+      color: rgba(255,255,255,0.8);
+    }
+
+    .skill-item-tags {
+      display: flex;
+      gap: 4px;
+      margin-top: 6px;
+      flex-wrap: wrap;
+    }
+
+    .skill-tag {
+      font-size: 10px;
+      padding: 2px 6px;
+      background: var(--bg-tertiary);
+      border-radius: 4px;
+      color: var(--text-muted);
+    }
+
+    .skill-item.active .skill-tag {
+      background: rgba(255,255,255,0.2);
+      color: white;
+    }
+
+    .skill-editor-panel {
+      background: var(--bg-secondary);
+      border-radius: 8px;
+      border: 1px solid var(--border);
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+
+    .skill-editor-header {
+      padding: 16px 20px;
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    .skill-editor-header h2 {
+      margin: 0;
+      font-size: 16px;
+    }
+
+    .skill-editor-actions {
+      display: flex;
+      gap: 8px;
+    }
+
+    .skill-editor-content {
+      flex: 1;
+      overflow-y: auto;
+      padding: 20px;
+    }
+
+    .form-group {
+      margin-bottom: 20px;
+    }
+
+    .form-group label {
+      display: block;
+      font-weight: 500;
+      margin-bottom: 6px;
+      font-size: 14px;
+    }
+
+    .form-group .hint {
+      font-size: 12px;
+      color: var(--text-muted);
+      margin-top: 4px;
+    }
+
+    .form-group input,
+    .form-group select,
+    .form-group textarea {
+      width: 100%;
+      padding: 10px 12px;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      background: var(--bg-primary);
+      color: var(--text);
+      font-size: 14px;
+    }
+
+    .form-group textarea {
+      min-height: 120px;
+      resize: vertical;
+      font-family: monospace;
+    }
+
+    .form-group textarea.large {
+      min-height: 200px;
+    }
+
+    .form-row {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 16px;
+    }
+
+    .form-section {
+      margin-bottom: 24px;
+      padding-bottom: 20px;
+      border-bottom: 1px solid var(--border);
+    }
+
+    .form-section:last-child {
+      border-bottom: none;
+      margin-bottom: 0;
+    }
+
+    .form-section h3 {
+      margin: 0 0 16px 0;
+      font-size: 14px;
+      color: var(--text-muted);
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+
+    .empty-state {
+      text-align: center;
+      padding: 60px 20px;
+      color: var(--text-muted);
+    }
+
+    .empty-state .icon {
+      font-size: 48px;
+      margin-bottom: 16px;
+    }
+
+    .btn {
+      padding: 8px 16px;
+      border-radius: 6px;
+      border: none;
+      cursor: pointer;
+      font-size: 14px;
+      font-weight: 500;
+      transition: background 0.15s, transform 0.1s;
+    }
+
+    .btn:hover {
+      transform: translateY(-1px);
+    }
+
+    .btn-primary {
+      background: var(--accent);
+      color: white;
+    }
+
+    .btn-primary:hover {
+      background: var(--accent-hover);
+    }
+
+    .btn-secondary {
+      background: var(--bg-tertiary);
+      color: var(--text);
+    }
+
+    .btn-danger {
+      background: var(--error);
+      color: white;
+    }
+
+    .btn-success {
+      background: var(--success);
+      color: white;
+    }
+
+    .btn-sm {
+      padding: 6px 12px;
+      font-size: 12px;
+    }
+
+    .toast {
+      position: fixed;
+      bottom: 20px;
+      right: 20px;
+      padding: 12px 20px;
+      border-radius: 8px;
+      color: white;
+      font-weight: 500;
+      z-index: 1000;
+      animation: slideIn 0.3s ease;
+    }
+
+    .toast.success { background: var(--success); }
+    .toast.error { background: var(--error); }
+    .toast.info { background: var(--accent); }
+
+    @keyframes slideIn {
+      from { transform: translateX(100%); opacity: 0; }
+      to { transform: translateX(0); opacity: 1; }
+    }
+
+    /* Knowledge Section */
+    .knowledge-list {
+      margin-top: 12px;
+    }
+
+    .knowledge-item {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 8px 12px;
+      background: var(--bg-primary);
+      border-radius: 6px;
+      margin-bottom: 6px;
+    }
+
+    .knowledge-item-info {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .knowledge-type {
+      font-size: 10px;
+      padding: 2px 6px;
+      background: var(--accent);
+      color: white;
+      border-radius: 4px;
+    }
+  </style>
+</head>
+<body>
+
+<div class="skills-page">
+  <div class="skills-header">
+    <div>
+      <a href="/" class="back-link">&larr; Zurück zum Chat</a>
+      <h1><span>&#9889;</span> Skills Verwaltung</h1>
+    </div>
+    <button class="btn btn-primary" onclick="createNewSkill()">
+      + Neuen Skill erstellen
+    </button>
+  </div>
+
+  <div class="skills-grid">
+    <!-- Skills Liste -->
+    <div class="skills-list-panel">
+      <div class="skills-list-header">
+        <h2>Skills</h2>
+        <span id="skills-count">0 Skills</span>
+      </div>
+      <div class="skills-search">
+        <input type="text" id="skills-filter" placeholder="Skills filtern..." oninput="filterSkills()">
+      </div>
+      <div class="skills-list" id="skills-list">
+        <div class="empty-state">
+          <div class="icon">&#9889;</div>
+          <p>Lade Skills...</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- Skill Editor -->
+    <div class="skill-editor-panel">
+      <div class="skill-editor-header">
+        <h2 id="editor-title">Skill bearbeiten</h2>
+        <div class="skill-editor-actions" id="editor-actions" style="display:none">
+          <button class="btn btn-secondary btn-sm" onclick="reindexSkill()">&#128260; Reindexieren</button>
+          <button class="btn btn-danger btn-sm" onclick="deleteSkill()">&#128465; Löschen</button>
+        </div>
+      </div>
+      <div class="skill-editor-content" id="editor-content">
+        <div class="empty-state" id="editor-empty">
+          <div class="icon">&#128221;</div>
+          <p>Wähle einen Skill aus oder erstelle einen neuen</p>
+        </div>
+
+        <form id="skill-form" style="display:none" onsubmit="saveSkill(event)">
+          <input type="hidden" id="skill-id">
+
+          <div class="form-section">
+            <h3>Grundinformationen</h3>
+            <div class="form-group">
+              <label for="skill-name">Name *</label>
+              <input type="text" id="skill-name" required placeholder="z.B. Java Spring Boot Experte">
+            </div>
+            <div class="form-group">
+              <label for="skill-description">Beschreibung</label>
+              <textarea id="skill-description" placeholder="Beschreibe was dieser Skill kann..."></textarea>
+            </div>
+          </div>
+
+          <div class="form-section">
+            <h3>Aktivierung</h3>
+            <div class="form-row">
+              <div class="form-group">
+                <label for="skill-type">Skill-Typ</label>
+                <select id="skill-type">
+                  <option value="general">Allgemein</option>
+                  <option value="code">Code</option>
+                  <option value="documentation">Dokumentation</option>
+                  <option value="analysis">Analyse</option>
+                </select>
+              </div>
+              <div class="form-group">
+                <label for="skill-activation">Aktivierungsmodus</label>
+                <select id="skill-activation">
+                  <option value="manual">Manuell</option>
+                  <option value="auto">Automatisch</option>
+                  <option value="always">Immer aktiv</option>
+                </select>
+              </div>
+            </div>
+            <div class="form-group">
+              <label for="skill-triggers">Trigger-Wörter</label>
+              <input type="text" id="skill-triggers" placeholder="spring, boot, java (Komma-getrennt)">
+              <div class="hint">Bei Auto-Aktivierung: Skill wird aktiviert wenn diese Wörter in der Anfrage vorkommen</div>
+            </div>
+            <div class="form-group">
+              <label for="skill-tags">Tags</label>
+              <input type="text" id="skill-tags" placeholder="backend, java, framework (Komma-getrennt)">
+            </div>
+          </div>
+
+          <div class="form-section">
+            <h3>System-Prompt</h3>
+            <div class="form-group">
+              <label for="skill-prompt">System-Prompt</label>
+              <textarea id="skill-prompt" class="large" placeholder="Du bist ein Experte für..."></textarea>
+              <div class="hint">Dieser Prompt wird zum System-Prompt hinzugefügt wenn der Skill aktiv ist</div>
+            </div>
+          </div>
+
+          <div class="form-section" id="knowledge-section">
+            <h3>Wissensquellen</h3>
+            <div class="form-group">
+              <label>Vorhandene Wissensquellen</label>
+              <div class="knowledge-list" id="knowledge-list">
+                <div class="empty-state" style="padding: 20px;">
+                  <p>Keine Wissensquellen</p>
+                </div>
+              </div>
+            </div>
+            <div class="form-group">
+              <label>PDF als Wissensquelle hinzufügen</label>
+              <input type="file" id="knowledge-pdf" accept=".pdf">
+              <div class="hint">PDF wird automatisch in Chunks aufgeteilt und indiziert</div>
+            </div>
+          </div>
+
+          <div style="display: flex; gap: 12px; justify-content: flex-end; padding-top: 20px; border-top: 1px solid var(--border);">
+            <button type="button" class="btn btn-secondary" onclick="cancelEdit()">Abbrechen</button>
+            <button type="submit" class="btn btn-success">Speichern</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+// State
+let skills = [];
+let currentSkillId = null;
+let isNewSkill = false;
+
+// Initialize
+document.addEventListener('DOMContentLoaded', () => {
+  loadSkills();
+});
+
+// Load Skills
+async function loadSkills() {
+  try {
+    const res = await fetch('/api/skills');
+    if (!res.ok) throw new Error('Skills nicht verfügbar');
+
+    skills = await res.json();
+    renderSkillsList();
+  } catch (e) {
+    showToast('Fehler beim Laden der Skills: ' + e.message, 'error');
+    document.getElementById('skills-list').innerHTML = `
+      <div class="empty-state">
+        <div class="icon">&#9888;</div>
+        <p>Skills konnten nicht geladen werden</p>
+      </div>
+    `;
+  }
+}
+
+// Render Skills List
+function renderSkillsList() {
+  const container = document.getElementById('skills-list');
+  const countEl = document.getElementById('skills-count');
+  const filter = document.getElementById('skills-filter').value.toLowerCase();
+
+  const filtered = skills.filter(s =>
+    s.name.toLowerCase().includes(filter) ||
+    (s.description || '').toLowerCase().includes(filter)
+  );
+
+  countEl.textContent = `${filtered.length} Skills`;
+
+  if (filtered.length === 0) {
+    container.innerHTML = `
+      <div class="empty-state">
+        <div class="icon">&#9889;</div>
+        <p>${filter ? 'Keine passenden Skills' : 'Noch keine Skills vorhanden'}</p>
+      </div>
+    `;
+    return;
+  }
+
+  container.innerHTML = filtered.map(skill => `
+    <div class="skill-item ${skill.id === currentSkillId ? 'active' : ''}" onclick="selectSkill('${skill.id}')">
+      <div class="skill-item-name">${escapeHtml(skill.name)}</div>
+      <div class="skill-item-desc">${escapeHtml(skill.description || 'Keine Beschreibung')}</div>
+      ${skill.tags && skill.tags.length ? `
+        <div class="skill-item-tags">
+          ${skill.tags.slice(0, 3).map(t => `<span class="skill-tag">${escapeHtml(t)}</span>`).join('')}
+        </div>
+      ` : ''}
+    </div>
+  `).join('');
+}
+
+// Filter Skills
+function filterSkills() {
+  renderSkillsList();
+}
+
+// Select Skill
+async function selectSkill(skillId) {
+  currentSkillId = skillId;
+  isNewSkill = false;
+  renderSkillsList();
+
+  try {
+    const res = await fetch(`/api/skills/${skillId}`);
+    if (!res.ok) throw new Error('Skill nicht gefunden');
+
+    const skill = await res.json();
+    showEditor(skill);
+  } catch (e) {
+    showToast('Fehler: ' + e.message, 'error');
+  }
+}
+
+// Show Editor
+function showEditor(skill = null) {
+  document.getElementById('editor-empty').style.display = 'none';
+  document.getElementById('skill-form').style.display = 'block';
+  document.getElementById('editor-actions').style.display = skill ? 'flex' : 'none';
+  document.getElementById('editor-title').textContent = skill ? skill.name : 'Neuer Skill';
+
+  if (skill) {
+    document.getElementById('skill-id').value = skill.id;
+    document.getElementById('skill-name').value = skill.name;
+    document.getElementById('skill-description').value = skill.description || '';
+    document.getElementById('skill-type').value = skill.type || 'general';
+    document.getElementById('skill-activation').value = skill.activation?.mode || 'manual';
+    document.getElementById('skill-triggers').value = (skill.activation?.trigger_words || []).join(', ');
+    document.getElementById('skill-tags').value = (skill.tags || []).join(', ');
+    document.getElementById('skill-prompt').value = skill.system_prompt || '';
+
+    // Knowledge sources
+    const knowledgeList = document.getElementById('knowledge-list');
+    if (skill.knowledge_sources && skill.knowledge_sources.length > 0) {
+      knowledgeList.innerHTML = skill.knowledge_sources.map(src => `
+        <div class="knowledge-item">
+          <div class="knowledge-item-info">
+            <span class="knowledge-type">${src.type}</span>
+            <span>${escapeHtml(src.name || src.path || 'Unbekannt')}</span>
+          </div>
+          <span>${src.chunks || 0} Chunks</span>
+        </div>
+      `).join('');
+    } else {
+      knowledgeList.innerHTML = '<div class="empty-state" style="padding: 20px;"><p>Keine Wissensquellen</p></div>';
+    }
+  } else {
+    document.getElementById('skill-id').value = '';
+    document.getElementById('skill-name').value = '';
+    document.getElementById('skill-description').value = '';
+    document.getElementById('skill-type').value = 'general';
+    document.getElementById('skill-activation').value = 'manual';
+    document.getElementById('skill-triggers').value = '';
+    document.getElementById('skill-tags').value = '';
+    document.getElementById('skill-prompt').value = '';
+    document.getElementById('knowledge-list').innerHTML = '<div class="empty-state" style="padding: 20px;"><p>Keine Wissensquellen</p></div>';
+  }
+}
+
+// Create New Skill
+function createNewSkill() {
+  currentSkillId = null;
+  isNewSkill = true;
+  renderSkillsList();
+  showEditor(null);
+  document.getElementById('skill-name').focus();
+}
+
+// Cancel Edit
+function cancelEdit() {
+  currentSkillId = null;
+  isNewSkill = false;
+  renderSkillsList();
+  document.getElementById('editor-empty').style.display = 'block';
+  document.getElementById('skill-form').style.display = 'none';
+  document.getElementById('editor-actions').style.display = 'none';
+  document.getElementById('editor-title').textContent = 'Skill bearbeiten';
+}
+
+// Save Skill
+async function saveSkill(e) {
+  e.preventDefault();
+
+  const skillId = document.getElementById('skill-id').value;
+  const data = {
+    name: document.getElementById('skill-name').value,
+    description: document.getElementById('skill-description').value,
+    type: document.getElementById('skill-type').value,
+    activation_mode: document.getElementById('skill-activation').value,
+    trigger_words: document.getElementById('skill-triggers').value.split(',').map(s => s.trim()).filter(Boolean),
+    tags: document.getElementById('skill-tags').value.split(',').map(s => s.trim()).filter(Boolean),
+    system_prompt: document.getElementById('skill-prompt').value,
+  };
+
+  try {
+    let res;
+    if (isNewSkill || !skillId) {
+      res = await fetch('/api/skills', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(data)
+      });
+    } else {
+      res = await fetch(`/api/skills/${skillId}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(data)
+      });
+    }
+
+    if (!res.ok) {
+      const err = await res.json();
+      throw new Error(err.detail || 'Speichern fehlgeschlagen');
+    }
+
+    const result = await res.json();
+    showToast(`Skill "${data.name}" gespeichert`, 'success');
+
+    await loadSkills();
+
+    if (result.id) {
+      selectSkill(result.id);
+    }
+  } catch (e) {
+    showToast('Fehler: ' + e.message, 'error');
+  }
+}
+
+// Delete Skill
+async function deleteSkill() {
+  if (!currentSkillId) return;
+
+  const skill = skills.find(s => s.id === currentSkillId);
+  if (!confirm(`Skill "${skill?.name}" wirklich löschen?`)) return;
+
+  try {
+    const res = await fetch(`/api/skills/${currentSkillId}`, { method: 'DELETE' });
+    if (!res.ok) throw new Error('Löschen fehlgeschlagen');
+
+    showToast('Skill gelöscht', 'success');
+    cancelEdit();
+    await loadSkills();
+  } catch (e) {
+    showToast('Fehler: ' + e.message, 'error');
+  }
+}
+
+// Reindex Skill
+async function reindexSkill() {
+  if (!currentSkillId) return;
+
+  try {
+    const res = await fetch(`/api/skills/${currentSkillId}/reindex`, { method: 'POST' });
+    if (!res.ok) throw new Error('Reindexierung fehlgeschlagen');
+
+    const result = await res.json();
+    showToast(`${result.chunks_indexed} Chunks reindexiert`, 'success');
+  } catch (e) {
+    showToast('Fehler: ' + e.message, 'error');
+  }
+}
+
+// Toast Notification
+function showToast(message, type = 'info') {
+  const toast = document.createElement('div');
+  toast.className = `toast ${type}`;
+  toast.textContent = message;
+  document.body.appendChild(toast);
+
+  setTimeout(() => {
+    toast.style.animation = 'slideIn 0.3s ease reverse';
+    setTimeout(() => toast.remove(), 300);
+  }, 3000);
+}
+
+// Escape HTML
+function escapeHtml(text) {
+  const div = document.createElement('div');
+  div.textContent = text || '';
+  return div.innerHTML;
+}
+</script>
+
+</body>
+</html>
