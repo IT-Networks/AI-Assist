@@ -5,7 +5,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 from pathlib import Path
 
-from app.api.routes import chat, java, logs, pdf, confluence, models, python_routes, handbook, skills, agent, settings, database, datasources
+from app.api.routes import chat, java, logs, pdf, confluence, models, python_routes, handbook, skills, agent, settings, database, datasources, mq, testtool, log_servers, wlp, maven
 
 
 @asynccontextmanager
@@ -74,6 +74,51 @@ async def lifespan(app: FastAPI):
         ds_count = register_datasource_tools(registry)
         if ds_count:
             print(f"[startup] Datenquellen-Tools registriert: {ds_count}")
+
+        # MQ-Tools registrieren
+        try:
+            from app.agent.mq_tools import register_mq_tools
+            mq_count = register_mq_tools(registry)
+            if mq_count:
+                print(f"[startup] MQ-Tools registriert: {mq_count}")
+        except Exception as e:
+            print(f"[startup] MQ-Tools-Registrierung fehlgeschlagen: {e}")
+
+        # TestTool-Tools registrieren
+        try:
+            from app.agent.testtool_tools import register_testtool_tools
+            tt_count = register_testtool_tools(registry)
+            if tt_count:
+                print(f"[startup] TestTool-Tools registriert: {tt_count}")
+        except Exception as e:
+            print(f"[startup] TestTool-Tools-Registrierung fehlgeschlagen: {e}")
+
+        # WLP-Tools registrieren
+        try:
+            from app.agent.wlp_tools import register_wlp_tools
+            wlp_count = register_wlp_tools(registry)
+            if wlp_count:
+                print(f"[startup] WLP-Tools registriert: {wlp_count}")
+        except Exception as e:
+            print(f"[startup] WLP-Tools-Registrierung fehlgeschlagen: {e}")
+
+        # Maven-Tools registrieren
+        try:
+            from app.agent.maven_tools import register_maven_tools
+            mvn_count = register_maven_tools(registry)
+            if mvn_count:
+                print(f"[startup] Maven-Tools registriert: {mvn_count}")
+        except Exception as e:
+            print(f"[startup] Maven-Tools-Registrierung fehlgeschlagen: {e}")
+
+        # Log-Tools registrieren (log_find_server, log_read_window, log_read_ffdc)
+        try:
+            from app.agent.log_tools import register_log_tools
+            log_count = register_log_tools(registry)
+            if log_count:
+                print(f"[startup] Log-Tools registriert: {log_count}")
+        except Exception as e:
+            print(f"[startup] Log-Tools-Registrierung fehlgeschlagen: {e}")
     except Exception as e:
         print(f"[startup] Agent-Initialisierung fehlgeschlagen: {e}")
 
@@ -101,6 +146,11 @@ app.include_router(agent.router)
 app.include_router(settings.router)
 app.include_router(database.router)
 app.include_router(datasources.router)
+app.include_router(mq.router)
+app.include_router(testtool.router)
+app.include_router(log_servers.router)
+app.include_router(wlp.router)
+app.include_router(maven.router)
 
 
 # ══════════════════════════════════════════════════════════════════════════════

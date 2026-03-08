@@ -2099,6 +2099,31 @@ function renderSettingsSection() {
     return;
   }
 
+  if (section === 'mq') {
+    renderMQSection();
+    return;
+  }
+
+  if (section === 'test_tool') {
+    renderTestToolSection();
+    return;
+  }
+
+  if (section === 'log_servers') {
+    renderLogServersSection();
+    return;
+  }
+
+  if (section === 'wlp') {
+    renderWLPSection();
+    return;
+  }
+
+  if (section === 'maven') {
+    renderMavenSection();
+    return;
+  }
+
   const values = settingsState.settings[section];
   const desc = settingsState.descriptions[section] || '';
 
@@ -3386,6 +3411,1099 @@ async function dsApplySuggestion(id, btn) {
     updateSettingsStatus('Fehler: ' + e.message, 'error');
   }
 }
+
+// ══════════════════════════════════════════════════════════════════════════════
+// MQ Settings Section
+// ══════════════════════════════════════════════════════════════════════════════
+
+async function renderMQSection() {
+  const form = document.getElementById('settings-form');
+  form.innerHTML = `
+    <div class="settings-section">
+      <h3 class="settings-section-title">MQ SERIES</h3>
+      <p class="settings-section-desc">MQ-Queues per HTTP abrufen und Nachrichten einspielen. Jede Queue kann Service-Zuordnung, feste Header und ein Body-Template haben.</p>
+    </div>
+    <div id="mq-queues-list"><div class="spinner-inline"></div></div>
+    <div class="settings-add-form" id="mq-add-form">
+      <h4>Queue hinzufügen</h4>
+      <div class="settings-field"><label>Name</label><input id="mq-new-name" type="text" class="settings-input" placeholder="z.B. Order-Queue"></div>
+      <div class="settings-field"><label>URL</label><input id="mq-new-url" type="text" class="settings-input" placeholder="http://mq-server/api/queues/ORDER_QUEUE"></div>
+      <div class="settings-field"><label>Methode</label>
+        <select id="mq-new-method" class="settings-input">
+          <option value="GET">GET (Lesen)</option>
+          <option value="POST">POST (Einspielen)</option>
+          <option value="PUT">PUT (Einspielen)</option>
+        </select>
+      </div>
+      <div class="settings-field"><label>Rolle</label>
+        <select id="mq-new-role" class="settings-input">
+          <option value="read">read – Lesen</option>
+          <option value="trigger">trigger – Auslösen</option>
+          <option value="both">both – Lesen + Auslösen</option>
+        </select>
+      </div>
+      <div class="settings-field"><label>Service (zugehöriger Service)</label><input id="mq-new-service" type="text" class="settings-input" placeholder="z.B. OrderService"></div>
+      <div class="settings-field"><label>Beschreibung</label><input id="mq-new-desc" type="text" class="settings-input" placeholder="Was diese Queue triggert oder liest"></div>
+      <div class="settings-field"><label>Body-Template ({{key}} als Platzhalter)</label><textarea id="mq-new-body" class="settings-input" rows="3" placeholder='{"orderId": "{{orderId}}"}'></textarea></div>
+      <div class="settings-field"><label>Header (JSON)</label><textarea id="mq-new-headers" class="settings-input" rows="2" placeholder='{"Authorization": "Bearer token"}'></textarea></div>
+      <button class="btn btn-primary" onclick="mqAddQueue()">+ Hinzufügen</button>
+    </div>
+  `;
+  await mqLoadQueues();
+}
+
+async function mqLoadQueues() {
+  const res = await fetch('/api/mq/queues');
+  const data = await res.json();
+  const list = document.getElementById('mq-queues-list');
+  if (!list) return;
+  if (!data.queues || !data.queues.length) {
+    list.innerHTML = '<p class="empty-hint">Noch keine Queues konfiguriert.</p>';
+    return;
+  }
+  list.innerHTML = data.queues.map(q => `
+    <div class="ds-item">
+      <div class="ds-item-header">
+        <div>
+          <span class="ds-item-name">${escapeHtml(q.name)}</span>
+          <span class="ds-item-badge">${q.role}</span>
+          <span class="ds-item-badge badge-info">${q.method}</span>
+        </div>
+        <div class="ds-item-actions">
+          <button class="btn btn-xs btn-secondary" onclick="mqTestQueue('${q.id}')">Test</button>
+          <button class="btn btn-xs btn-danger" onclick="mqDeleteQueue('${q.id}')">&#128465;</button>
+        </div>
+      </div>
+      <div class="ds-item-detail">
+        <span class="ds-detail-label">Service:</span> ${escapeHtml(q.service || '-')}
+        &nbsp;|&nbsp; <span class="ds-detail-label">URL:</span> <code>${escapeHtml(q.url)}</code>
+      </div>
+      ${q.description ? `<div class="ds-item-desc">${escapeHtml(q.description)}</div>` : ''}
+      ${q.body_template ? `<div class="ds-item-desc"><small>Template: <code>${escapeHtml(q.body_template.substring(0,80))}</code></small></div>` : ''}
+    </div>
+  `).join('');
+}
+
+async function mqAddQueue() {
+  let headers = {};
+  try { headers = JSON.parse(document.getElementById('mq-new-headers').value || '{}'); } catch (e) {}
+  const body = {
+    name: document.getElementById('mq-new-name').value,
+    url: document.getElementById('mq-new-url').value,
+    method: document.getElementById('mq-new-method').value,
+    role: document.getElementById('mq-new-role').value,
+    service: document.getElementById('mq-new-service').value,
+    description: document.getElementById('mq-new-desc').value,
+    body_template: document.getElementById('mq-new-body').value,
+    headers,
+  };
+  const res = await fetch('/api/mq/queues', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(body) });
+  if (!res.ok) { updateSettingsStatus('Fehler: ' + (await res.json()).detail, 'error'); return; }
+  updateSettingsStatus('Queue hinzugefügt ✓', 'success');
+  ['mq-new-name','mq-new-url','mq-new-service','mq-new-desc','mq-new-body','mq-new-headers'].forEach(id => document.getElementById(id).value = '');
+  await mqLoadQueues();
+}
+
+async function mqDeleteQueue(id) {
+  if (!confirm('Queue löschen?')) return;
+  await fetch(`/api/mq/queues/${id}`, { method: 'DELETE' });
+  await mqLoadQueues();
+}
+
+async function mqTestQueue(id) {
+  updateSettingsStatus('⏳ Teste Queue...', '');
+  const res = await fetch(`/api/mq/queues/${id}/test`, { method: 'POST' });
+  const data = await res.json();
+  if (data.success) updateSettingsStatus(`✓ HTTP ${data.status_code} – ${data.body_preview?.substring(0,80)}`, 'success');
+  else updateSettingsStatus(`✗ ${data.error || 'Fehler'}`, 'error');
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// Test-Tool Settings Section
+// ══════════════════════════════════════════════════════════════════════════════
+
+async function renderTestToolSection() {
+  const form = document.getElementById('settings-form');
+  form.innerHTML = `
+    <div class="settings-section">
+      <h3 class="settings-section-title">TEST-TOOL</h3>
+      <p class="settings-section-desc">Services per HTTP aufrufen, Parameter übergeben und Ergebnisse lesen. Lokale Services aus dem Repo können ebenfalls ausgeführt werden.</p>
+    </div>
+    <div class="settings-subsection">
+      <h4>Stages (Deployment-Umgebungen)</h4>
+      <div id="tt-stages-list"><div class="spinner-inline"></div></div>
+      <div class="settings-add-form">
+        <div class="settings-field-row">
+          <input id="tt-new-stage-name" type="text" class="settings-input" placeholder="Stage-Name (z.B. Dev)">
+          <button class="btn btn-primary btn-sm" onclick="ttAddStage()">+ Stage</button>
+        </div>
+        <div class="settings-field-row" style="margin-top:4px">
+          <input id="tt-new-url" type="text" class="settings-input" placeholder="URL (z.B. http://dev:8080)">
+          <input id="tt-new-url-desc" type="text" class="settings-input" placeholder="Beschreibung" style="max-width:180px">
+          <button class="btn btn-secondary btn-sm" onclick="ttAddUrlToStage()">+ URL</button>
+        </div>
+        <div class="settings-field" style="margin-top:4px">
+          <label>Aktive Stage:</label>
+          <select id="tt-active-stage-select" onchange="ttSetActiveStage(this.value)" class="settings-input" style="max-width:200px"></select>
+        </div>
+      </div>
+    </div>
+    <div class="settings-subsection" style="margin-top:16px">
+      <h4>Services</h4>
+      <div id="tt-services-list"><div class="spinner-inline"></div></div>
+      <div class="settings-add-form">
+        <h5 style="margin:0 0 8px">Service hinzufügen</h5>
+        <div class="settings-field-row">
+          <input id="tt-svc-name" type="text" class="settings-input" placeholder="Name">
+          <input id="tt-svc-endpoint" type="text" class="settings-input" placeholder="Endpoint (z.B. /api/orders)">
+          <select id="tt-svc-method" class="settings-input" style="max-width:90px">
+            <option>POST</option><option>GET</option><option>PUT</option><option>DELETE</option><option>PATCH</option>
+          </select>
+        </div>
+        <div class="settings-field-row" style="margin-top:4px">
+          <input id="tt-svc-desc" type="text" class="settings-input" placeholder="Beschreibung">
+          <input id="tt-svc-script" type="text" class="settings-input" placeholder="Lokales Skript (optional, relativ zum Repo)">
+        </div>
+        <div class="settings-field" style="margin-top:4px">
+          <label>Parameter (Name,Typ,Required je Zeile: <code>customerId,string,true</code>):</label>
+          <textarea id="tt-svc-params" class="settings-input" rows="3" placeholder="customerId,string,true&#10;amount,number,false"></textarea>
+        </div>
+        <button class="btn btn-primary" onclick="ttAddService()">+ Service</button>
+      </div>
+    </div>
+    <div class="settings-subsection" style="margin-top:16px">
+      <h4>Lokaler WLP-Server</h4>
+      <p class="settings-section-desc">Testaufrufe direkt an einen lokalen WLP-Server weiterleiten. Wenn gesetzt, wird <code>use_local_wlp=true</code> genutzt statt der Stage-URL.</p>
+      <div id="tt-local-wlp-section"><div class="spinner-inline"></div></div>
+    </div>
+  `;
+  await ttLoadAll();
+}
+
+async function ttLoadAll() {
+  const [stRes, svRes, wlpRes] = await Promise.all([
+    fetch('/api/testtool/stages'),
+    fetch('/api/testtool/services'),
+    fetch('/api/testtool/local-wlp'),
+  ]);
+  const stData = await stRes.json();
+  const svData = await svRes.json();
+  const wlpData = wlpRes.ok ? await wlpRes.json() : { local_wlp_url: '' };
+
+  // Lokaler WLP-URL
+  const wlpSection = document.getElementById('tt-local-wlp-section');
+  if (wlpSection) {
+    wlpSection.innerHTML = `
+      <div class="settings-field-row">
+        <input id="tt-local-wlp-url" type="text" class="settings-input" placeholder="http://localhost:9080" value="${escapeHtml(wlpData.local_wlp_url || '')}">
+        <button class="btn btn-primary btn-sm" onclick="ttSaveLocalWLP()">Speichern</button>
+        ${wlpData.local_wlp_url ? '<button class="btn btn-secondary btn-sm" onclick="ttClearLocalWLP()">&#10006; Löschen</button>' : ''}
+      </div>
+      ${wlpData.local_wlp_url ? `<p style="margin:4px 0 0;font-size:12px;color:var(--success)">&#10003; Aktiv: <code>${escapeHtml(wlpData.local_wlp_url)}</code></p>` : '<p style="margin:4px 0 0;font-size:12px;color:var(--text-muted)">Nicht konfiguriert</p>'}
+    `;
+  }
+
+  // Stages
+  const stList = document.getElementById('tt-stages-list');
+  if (stList) {
+    stList.innerHTML = !stData.stages?.length ? '<p class="empty-hint">Keine Stages konfiguriert.</p>' :
+      stData.stages.map(s => `
+        <div class="ds-item">
+          <div class="ds-item-header">
+            <span class="ds-item-name">${escapeHtml(s.name)}</span>
+            ${s.id === stData.active_stage ? '<span class="badge badge-success">aktiv</span>' : ''}
+            <div class="ds-item-actions">
+              <button class="btn btn-xs btn-secondary" onclick="ttSetActiveStage('${s.id}')">Aktivieren</button>
+              <button class="btn btn-xs btn-danger" onclick="ttDeleteStage('${s.id}')">&#128465;</button>
+            </div>
+          </div>
+          <div class="ds-item-detail">${s.urls.map(u => `<code>${escapeHtml(u.url)}</code> ${escapeHtml(u.description||'')}`).join(' | ')}</div>
+        </div>
+      `).join('');
+  }
+
+  // Active Stage Select
+  const sel = document.getElementById('tt-active-stage-select');
+  if (sel) {
+    sel.innerHTML = stData.stages.map(s => `<option value="${s.id}" ${s.id===stData.active_stage?'selected':''}>${escapeHtml(s.name)}</option>`).join('');
+  }
+
+  // Services
+  const svList = document.getElementById('tt-services-list');
+  if (svList) {
+    svList.innerHTML = !svData.services?.length ? '<p class="empty-hint">Keine Services konfiguriert.</p>' :
+      svData.services.map(s => `
+        <div class="ds-item">
+          <div class="ds-item-header">
+            <span class="ds-item-name">${escapeHtml(s.name)}</span>
+            <span class="ds-item-badge">${s.method}</span>
+            ${s.local_script ? '<span class="ds-item-badge badge-info">lokal</span>' : ''}
+            <button class="btn btn-xs btn-danger" onclick="ttDeleteService('${s.id}')">&#128465;</button>
+          </div>
+          <div class="ds-item-detail"><code>${escapeHtml(s.endpoint)}</code> ${s.description ? '– ' + escapeHtml(s.description) : ''}</div>
+          ${s.parameters?.length ? `<div class="ds-item-desc"><small>Params: ${s.parameters.map(p=>`${p.name}(${p.type}${p.required?'*':''})`).join(', ')}</small></div>` : ''}
+        </div>
+      `).join('');
+  }
+}
+
+// Aktuell ausgewählte Stage-ID für URL-Zuweisung
+let _ttSelectedStageId = null;
+
+async function ttAddStage() {
+  const name = document.getElementById('tt-new-stage-name').value.trim();
+  if (!name) return;
+  const res = await fetch('/api/testtool/stages', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ name, urls: [] }) });
+  if (!res.ok) { updateSettingsStatus('Fehler', 'error'); return; }
+  const data = await res.json();
+  _ttSelectedStageId = data.added.id;
+  document.getElementById('tt-new-stage-name').value = '';
+  updateSettingsStatus('Stage hinzugefügt ✓', 'success');
+  await ttLoadAll();
+}
+
+async function ttAddUrlToStage() {
+  const stageId = _ttSelectedStageId || document.getElementById('tt-active-stage-select')?.value;
+  if (!stageId) { updateSettingsStatus('Bitte zuerst eine Stage auswählen oder erstellen', 'error'); return; }
+  const url = document.getElementById('tt-new-url').value.trim();
+  const desc = document.getElementById('tt-new-url-desc').value.trim();
+  if (!url) return;
+  const stage = (await (await fetch('/api/testtool/stages')).json()).stages.find(s => s.id === stageId);
+  if (!stage) return;
+  const newUrls = [...stage.urls, { url, description: desc }];
+  await fetch(`/api/testtool/stages/${stageId}`, { method: 'PUT', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ name: stage.name, urls: newUrls }) });
+  document.getElementById('tt-new-url').value = '';
+  document.getElementById('tt-new-url-desc').value = '';
+  await ttLoadAll();
+}
+
+async function ttSetActiveStage(id) {
+  await fetch(`/api/testtool/stages/active?stage_id=${encodeURIComponent(id)}`, { method: 'PUT' });
+  updateSettingsStatus('Aktive Stage gesetzt ✓', 'success');
+  await ttLoadAll();
+}
+
+async function ttDeleteStage(id) {
+  if (!confirm('Stage löschen?')) return;
+  await fetch(`/api/testtool/stages/${id}`, { method: 'DELETE' });
+  await ttLoadAll();
+}
+
+async function ttSaveLocalWLP() {
+  const url = document.getElementById('tt-local-wlp-url')?.value.trim();
+  if (!url) { ttClearLocalWLP(); return; }
+  await fetch('/api/testtool/local-wlp', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ url }),
+  });
+  updateSettingsStatus('Lokaler WLP gespeichert ✓', 'success');
+  await ttLoadAll();
+}
+
+async function ttClearLocalWLP() {
+  await fetch('/api/testtool/local-wlp', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ url: '' }),
+  });
+  updateSettingsStatus('Lokaler WLP entfernt', 'info');
+  await ttLoadAll();
+}
+
+async function ttAddService() {
+  const paramLines = document.getElementById('tt-svc-params').value.trim().split('\n').filter(Boolean);
+  const parameters = paramLines.map(line => {
+    const [name, type, req] = line.split(',').map(s => s.trim());
+    return { name: name||'', type: type||'string', required: req === 'true', description: '', location: 'body', default: '' };
+  });
+  const body = {
+    name: document.getElementById('tt-svc-name').value,
+    endpoint: document.getElementById('tt-svc-endpoint').value,
+    method: document.getElementById('tt-svc-method').value,
+    description: document.getElementById('tt-svc-desc').value,
+    local_script: document.getElementById('tt-svc-script').value,
+    parameters,
+  };
+  const res = await fetch('/api/testtool/services', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(body) });
+  if (!res.ok) { updateSettingsStatus('Fehler', 'error'); return; }
+  updateSettingsStatus('Service hinzugefügt ✓', 'success');
+  ['tt-svc-name','tt-svc-endpoint','tt-svc-desc','tt-svc-script','tt-svc-params'].forEach(id => document.getElementById(id).value = '');
+  await ttLoadAll();
+}
+
+async function ttDeleteService(id) {
+  if (!confirm('Service löschen?')) return;
+  await fetch(`/api/testtool/services/${id}`, { method: 'DELETE' });
+  await ttLoadAll();
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// Log-Server Settings Section
+// ══════════════════════════════════════════════════════════════════════════════
+
+async function renderLogServersSection() {
+  const form = document.getElementById('settings-form');
+  form.innerHTML = `
+    <div class="settings-section">
+      <h3 class="settings-section-title">LOG-SERVER</h3>
+      <p class="settings-section-desc">URLs zum Log-Download je Stage und Server. Der Agent nutzt Zeitstempel-Abgleich um den richtigen Server für einen Testzeitpunkt zu finden.</p>
+    </div>
+    <div id="ls-stages-list"><div class="spinner-inline"></div></div>
+    <div class="settings-add-form">
+      <h4>Stage hinzufügen</h4>
+      <div class="settings-field-row">
+        <input id="ls-new-stage" type="text" class="settings-input" placeholder="Stage-Name (z.B. Production)">
+        <button class="btn btn-primary btn-sm" onclick="lsAddStage()">+ Stage</button>
+      </div>
+    </div>
+    <div class="settings-add-form" style="margin-top:12px">
+      <h4>Server zu Stage hinzufügen</h4>
+      <div class="settings-field">
+        <label>Stage:</label>
+        <select id="ls-target-stage" class="settings-input" style="max-width:200px"></select>
+      </div>
+      <div class="settings-field-row">
+        <input id="ls-new-srv-name" type="text" class="settings-input" placeholder="Server-Name">
+        <input id="ls-new-srv-url" type="text" class="settings-input" placeholder="Log-Download-URL">
+        <button class="btn btn-primary btn-sm" onclick="lsAddServer()">+ Server</button>
+      </div>
+      <div class="settings-field"><label>Beschreibung:</label><input id="ls-new-srv-desc" type="text" class="settings-input" placeholder="Optionale Beschreibung"></div>
+    </div>
+  `;
+  await lsLoadAll();
+}
+
+async function lsLoadAll() {
+  const res = await fetch('/api/log-servers/stages');
+  const data = await res.json();
+  const list = document.getElementById('ls-stages-list');
+  if (!list) return;
+  list.innerHTML = !data.stages?.length ? '<p class="empty-hint">Keine Stages konfiguriert.</p>' :
+    data.stages.map(stage => `
+      <div class="ds-item">
+        <div class="ds-item-header">
+          <span class="ds-item-name">&#128218; ${escapeHtml(stage.name)}</span>
+          <button class="btn btn-xs btn-danger" onclick="lsDeleteStage('${stage.id}')">&#128465;</button>
+        </div>
+        ${stage.servers.map(srv => `
+          <div class="ls-server-row">
+            <span class="ds-detail-label">${escapeHtml(srv.name)}</span>
+            <code>${escapeHtml(srv.url)}</code>
+            ${srv.description ? `<small>${escapeHtml(srv.description)}</small>` : ''}
+            <button class="btn btn-xs btn-danger" onclick="lsDeleteServer('${stage.id}','${srv.id}')">&#128465;</button>
+          </div>
+        `).join('')}
+        ${!stage.servers.length ? '<div class="ls-server-row empty-hint">Keine Server</div>' : ''}
+      </div>
+    `).join('');
+
+  // Stage-Select für Server-Zuweisung befüllen
+  const sel = document.getElementById('ls-target-stage');
+  if (sel) sel.innerHTML = data.stages.map(s => `<option value="${s.id}">${escapeHtml(s.name)}</option>`).join('');
+}
+
+async function lsAddStage() {
+  const name = document.getElementById('ls-new-stage').value.trim();
+  if (!name) return;
+  await fetch('/api/log-servers/stages', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ name }) });
+  document.getElementById('ls-new-stage').value = '';
+  await lsLoadAll();
+}
+
+async function lsDeleteStage(id) {
+  if (!confirm('Stage löschen?')) return;
+  await fetch(`/api/log-servers/stages/${id}`, { method: 'DELETE' });
+  await lsLoadAll();
+}
+
+async function lsAddServer() {
+  const stageId = document.getElementById('ls-target-stage')?.value;
+  if (!stageId) return;
+  const body = {
+    name: document.getElementById('ls-new-srv-name').value,
+    url: document.getElementById('ls-new-srv-url').value,
+    description: document.getElementById('ls-new-srv-desc').value,
+  };
+  const res = await fetch(`/api/log-servers/stages/${stageId}/servers`, { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(body) });
+  if (!res.ok) { updateSettingsStatus('Fehler', 'error'); return; }
+  ['ls-new-srv-name','ls-new-srv-url','ls-new-srv-desc'].forEach(id => document.getElementById(id).value = '');
+  await lsLoadAll();
+}
+
+async function lsDeleteServer(stageId, serverId) {
+  if (!confirm('Server löschen?')) return;
+  await fetch(`/api/log-servers/stages/${stageId}/servers/${serverId}`, { method: 'DELETE' });
+  await lsLoadAll();
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// WLP Settings Section
+// ══════════════════════════════════════════════════════════════════════════════
+
+async function renderWLPSection() {
+  const form = document.getElementById('settings-form');
+  form.innerHTML = `
+    <div class="settings-section">
+      <h3 class="settings-section-title">WLP SERVER</h3>
+      <p class="settings-section-desc">WebSphere Liberty Profile Server starten, server.xml prüfen und Artefakt validieren. Start wird per SSE-Stream überwacht.</p>
+    </div>
+    <div id="wlp-list"><div class="spinner-inline"></div></div>
+    <div class="settings-add-form">
+      <h4>Server hinzufügen</h4>
+      <div class="settings-field"><label>Name</label><input id="wlp-new-name" type="text" class="settings-input" placeholder="z.B. Lokaler Dev-Server"></div>
+      <div class="settings-field"><label>WLP-Pfad (Verzeichnis, z.B. /opt/ibm/wlp)</label><input id="wlp-new-path" type="text" class="settings-input" placeholder="/opt/ibm/wlp"></div>
+      <div class="settings-field"><label>Server-Name (in usr/servers/)</label><input id="wlp-new-srvname" type="text" class="settings-input" placeholder="defaultServer" value="defaultServer"></div>
+      <div class="settings-field"><label>Beschreibung</label><input id="wlp-new-desc" type="text" class="settings-input"></div>
+      <div class="settings-field"><label>Extra JVM-Args</label><input id="wlp-new-jvm" type="text" class="settings-input" placeholder="-Xmx512m"></div>
+      <div class="settings-field"><label>Repo-Pfad (für Artefakt-Suche, optional)</label><input id="wlp-repo-path" type="text" class="settings-input" placeholder="Standardmäßig aktives Java-Repo"></div>
+      <button class="btn btn-primary" onclick="wlpAddServer()">+ Hinzufügen</button>
+    </div>
+  `;
+  await wlpLoadList();
+}
+
+async function wlpLoadList() {
+  const res = await fetch('/api/wlp/servers');
+  const data = await res.json();
+  const list = document.getElementById('wlp-list');
+  if (!list) return;
+  list.innerHTML = !data.servers?.length ? '<p class="empty-hint">Keine WLP-Server konfiguriert.</p>' :
+    data.servers.map(s => `
+      <div class="ds-item">
+        <div class="ds-item-header">
+          <div>
+            <span class="ds-item-name">${escapeHtml(s.name)}</span>
+            ${data.running?.includes(s.id) ? '<span class="badge badge-success">läuft</span>' : '<span class="badge">gestoppt</span>'}
+          </div>
+          <div class="ds-item-actions">
+            <button class="btn btn-xs btn-secondary" onclick="wlpValidate('${s.id}')">&#10003; Prüfen</button>
+            <button class="btn btn-xs btn-primary" onclick="wlpStart('${s.id}')">&#9654; Start</button>
+            <button class="btn btn-xs btn-warning" onclick="wlpStop('${s.id}')">&#9646;&#9646; Stop</button>
+            <button class="btn btn-xs btn-danger" onclick="wlpDeleteServer('${s.id}')">&#128465;</button>
+          </div>
+        </div>
+        <div class="ds-item-detail">
+          <span class="ds-detail-label">WLP:</span> <code>${escapeHtml(s.wlp_path)}</code>
+          &nbsp;|&nbsp; <span class="ds-detail-label">Server:</span> <code>${escapeHtml(s.server_name)}</code>
+        </div>
+        ${s.description ? `<div class="ds-item-desc">${escapeHtml(s.description)}</div>` : ''}
+      </div>
+    `).join('');
+}
+
+async function wlpAddServer() {
+  const body = {
+    name: document.getElementById('wlp-new-name').value,
+    wlp_path: document.getElementById('wlp-new-path').value,
+    server_name: document.getElementById('wlp-new-srvname').value || 'defaultServer',
+    description: document.getElementById('wlp-new-desc').value,
+    extra_jvm_args: document.getElementById('wlp-new-jvm').value,
+  };
+  const repoPath = document.getElementById('wlp-repo-path').value;
+  if (repoPath) {
+    await fetch('/api/settings/section/wlp', { method: 'PUT', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ repo_path: repoPath }) });
+  }
+  const res = await fetch('/api/wlp/servers', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(body) });
+  if (!res.ok) { updateSettingsStatus('Fehler', 'error'); return; }
+  updateSettingsStatus('Server hinzugefügt ✓', 'success');
+  await wlpLoadList();
+}
+
+async function wlpDeleteServer(id) {
+  if (!confirm('Server entfernen?')) return;
+  await fetch(`/api/wlp/servers/${id}`, { method: 'DELETE' });
+  await wlpLoadList();
+}
+
+async function wlpValidate(id) {
+  updateSettingsStatus('⏳ Prüfe server.xml...', '');
+  const res = await fetch(`/api/wlp/servers/${id}/validate`, { method: 'POST' });
+  const data = await res.json();
+  if (!data.valid) { updateSettingsStatus(`✗ ${data.error}`, 'error'); return; }
+  const ok = data.all_artifacts_present;
+  const appInfo = data.applications.map(a => `${a.name||a.tag} (${a.location||'?'})`).join(', ');
+  const artOk = data.built_artifact ? `Artefakt: ${data.built_artifact.path} (${data.built_artifact.size_kb}KB)` : 'Kein gebautes Artefakt gefunden';
+  updateSettingsStatus(
+    `${ok ? '✓' : '⚠'} Apps: ${appInfo} | ${artOk}`,
+    ok ? 'success' : 'warning'
+  );
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// Maven Settings Section
+// ══════════════════════════════════════════════════════════════════════════════
+
+async function renderMavenSection() {
+  const form = document.getElementById('settings-form');
+  form.innerHTML = `
+    <div class="settings-section">
+      <h3 class="settings-section-title">MAVEN BUILD</h3>
+      <p class="settings-section-desc">Maven-Builds definieren und per Klick ausführen. Build-Ausgabe wird per SSE live gestreamt.</p>
+    </div>
+    <div class="settings-field">
+      <label>mvn-Executable</label>
+      <input id="mvn-exec" type="text" class="settings-input" placeholder="mvn" value="">
+    </div>
+    <div id="mvn-builds-list"><div class="spinner-inline"></div></div>
+    <div class="settings-add-form">
+      <h4>Build hinzufügen</h4>
+      <div class="settings-field-row">
+        <input id="mvn-new-name" type="text" class="settings-input" placeholder="Name (z.B. OrderService Build)">
+        <input id="mvn-new-desc" type="text" class="settings-input" placeholder="Beschreibung">
+      </div>
+      <div class="settings-field"><label>pom.xml Pfad</label><input id="mvn-new-pom" type="text" class="settings-input" placeholder="/pfad/zum/pom.xml"></div>
+      <div class="settings-field-row">
+        <input id="mvn-new-goals" type="text" class="settings-input" placeholder="Goals (z.B. clean install)" value="clean install">
+        <input id="mvn-new-profiles" type="text" class="settings-input" placeholder="Profile (kommasepariert)">
+      </div>
+      <div class="settings-field-row">
+        <input id="mvn-new-jvm" type="text" class="settings-input" placeholder="JVM-Args (z.B. -Xmx512m)">
+        <label class="checkbox-label" style="align-self:center">
+          <input type="checkbox" id="mvn-new-skip-tests"> Tests überspringen
+        </label>
+      </div>
+      <div class="settings-actions-section" style="margin-top:8px">
+        <button class="btn btn-secondary" onclick="mvnDetectPoms()">&#128269; pom.xml erkennen</button>
+        <button class="btn btn-primary" onclick="mvnAddBuild()">+ Build hinzufügen</button>
+      </div>
+      <div id="mvn-pom-detect-result" style="margin-top:8px"></div>
+    </div>
+  `;
+  await mvnLoadBuilds();
+}
+
+async function mvnLoadBuilds() {
+  const res = await fetch('/api/maven/builds');
+  const data = await res.json();
+
+  const execInput = document.getElementById('mvn-exec');
+  if (execInput) execInput.value = data.mvn_executable || 'mvn';
+
+  const list = document.getElementById('mvn-builds-list');
+  if (!list) return;
+  list.innerHTML = !data.builds?.length ? '<p class="empty-hint">Keine Builds konfiguriert.</p>' :
+    data.builds.map(b => `
+      <div class="ds-item">
+        <div class="ds-item-header">
+          <div>
+            <span class="ds-item-name">${escapeHtml(b.name)}</span>
+            ${data.running?.includes(b.id) ? '<span class="badge badge-success">läuft</span>' : ''}
+          </div>
+          <div class="ds-item-actions">
+            <button class="btn btn-xs btn-primary" onclick="mvnRunBuild('${b.id}')">&#9654; Build</button>
+            <button class="btn btn-xs btn-warning" onclick="mvnStopBuild('${b.id}')">&#9646;&#9646;</button>
+            <button class="btn btn-xs btn-danger" onclick="mvnDeleteBuild('${b.id}')">&#128465;</button>
+          </div>
+        </div>
+        <div class="ds-item-detail">
+          <code>${escapeHtml(b.pom_path)}</code> | <span class="ds-detail-label">Goals:</span> <code>${escapeHtml(b.goals)}</code>
+          ${b.profiles?.length ? `| Profile: ${b.profiles.join(',')}` : ''}
+          ${b.skip_tests ? '| <span class="badge">skip-tests</span>' : ''}
+        </div>
+        ${b.description ? `<div class="ds-item-desc">${escapeHtml(b.description)}</div>` : ''}
+      </div>
+    `).join('');
+}
+
+async function mvnDetectPoms() {
+  const res = await fetch('/api/maven/detect');
+  const data = await res.json();
+  const el = document.getElementById('mvn-pom-detect-result');
+  if (!el) return;
+  if (!data.found?.length) { el.innerHTML = '<p class="empty-hint">Keine pom.xml im aktiven Repo gefunden.</p>'; return; }
+  el.innerHTML = data.found.map(p => `
+    <div class="ls-server-row">
+      <code>${escapeHtml(p.relative)}</code>
+      <button class="btn btn-xs btn-secondary" onclick="document.getElementById('mvn-new-pom').value='${escapeHtml(p.path)}'">Übernehmen</button>
+    </div>
+  `).join('');
+}
+
+async function mvnAddBuild() {
+  const profiles = (document.getElementById('mvn-new-profiles').value || '').split(',').map(s=>s.trim()).filter(Boolean);
+  const body = {
+    name: document.getElementById('mvn-new-name').value,
+    description: document.getElementById('mvn-new-desc').value,
+    pom_path: document.getElementById('mvn-new-pom').value,
+    goals: document.getElementById('mvn-new-goals').value || 'clean install',
+    profiles,
+    skip_tests: document.getElementById('mvn-new-skip-tests').checked,
+    jvm_args: document.getElementById('mvn-new-jvm').value,
+  };
+  const res = await fetch('/api/maven/builds', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(body) });
+  if (!res.ok) { updateSettingsStatus('Fehler', 'error'); return; }
+  // Executable speichern
+  const exec = document.getElementById('mvn-exec').value;
+  if (exec) await fetch('/api/settings/section/maven', { method: 'PUT', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ mvn_executable: exec }) });
+  updateSettingsStatus('Build hinzugefügt ✓', 'success');
+  await mvnLoadBuilds();
+}
+
+async function mvnDeleteBuild(id) {
+  if (!confirm('Build löschen?')) return;
+  await fetch(`/api/maven/builds/${id}`, { method: 'DELETE' });
+  await mvnLoadBuilds();
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// Operative Panels (rechte Sidebar)
+// ══════════════════════════════════════════════════════════════════════════════
+
+// ── MQ Panel ──────────────────────────────────────────────────────────────────
+
+async function loadMQPanel() {
+  const content = document.getElementById('mq-panel-content');
+  if (!content) return;
+  try {
+    const res = await fetch('/api/mq/queues');
+    const data = await res.json();
+    if (!data.queues?.length) {
+      content.innerHTML = '<div class="empty-state"><span>&#128233;</span><p>Keine Queues konfiguriert</p></div>';
+      return;
+    }
+    content.innerHTML = data.queues.map(q => `
+      <div class="tool-card">
+        <div class="tool-card-header">
+          <span class="tool-card-name">${escapeHtml(q.name)}</span>
+          <span class="tool-card-badge">${q.role}</span>
+        </div>
+        <div class="tool-card-desc">${escapeHtml(q.service || q.description || '')}</div>
+        <div class="tool-card-actions">
+          ${q.method === 'GET' || q.role !== 'trigger' ? `<button class="btn btn-xs btn-secondary" onclick="mqPanelGet('${q.id}','${escapeHtml(q.name)}')">&#128229; Lesen</button>` : ''}
+          ${q.method !== 'GET' || q.role !== 'read' ? `<button class="btn btn-xs btn-primary" onclick="mqPanelPutDialog('${q.id}','${escapeHtml(q.name)}','${escapeHtml(q.body_template||'')}')">&#128228; Einspielen</button>` : ''}
+        </div>
+        <div id="mq-result-${q.id}" class="tool-result" style="display:none"></div>
+      </div>
+    `).join('');
+  } catch (e) {
+    content.innerHTML = `<p class="error-hint">Fehler: ${e.message}</p>`;
+  }
+}
+
+async function mqPanelGet(queueId, queueName) {
+  const resultEl = document.getElementById(`mq-result-${queueId}`);
+  resultEl.style.display = 'block';
+  resultEl.innerHTML = '<span class="spinner-inline"></span> Lese...';
+  try {
+    const res = await fetch(`/api/mq/queues/${queueId}/get`, { method: 'POST', headers: {'Content-Type':'application/json'}, body: '{}' });
+    const data = await res.json();
+    resultEl.innerHTML = `<span class="${data.ok ? 'ok' : 'err'}">HTTP ${data.status_code}</span><pre>${escapeHtml(JSON.stringify(data.body, null, 2).substring(0,500))}</pre>`;
+  } catch (e) {
+    resultEl.innerHTML = `<span class="err">Fehler: ${e.message}</span>`;
+  }
+}
+
+function mqPanelPutDialog(queueId, queueName, bodyTemplate) {
+  const userBody = prompt(`Nachricht für Queue "${queueName}" einspielen:\n${bodyTemplate ? 'Template: ' + bodyTemplate.substring(0,100) : ''}`, bodyTemplate || '{}');
+  if (userBody === null) return;
+  mqPanelPut(queueId, userBody);
+}
+
+async function mqPanelPut(queueId, body) {
+  const resultEl = document.getElementById(`mq-result-${queueId}`);
+  if (!resultEl) return;
+  resultEl.style.display = 'block';
+  resultEl.innerHTML = '<span class="spinner-inline"></span> Sende...';
+  try {
+    const res = await fetch(`/api/mq/queues/${queueId}/put`, {
+      method: 'POST',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({ body }),
+    });
+    const data = await res.json();
+    resultEl.innerHTML = `<span class="${data.ok ? 'ok' : 'err'}">HTTP ${data.status_code}</span><pre>${escapeHtml(JSON.stringify(data.body, null, 2).substring(0,300))}</pre>`;
+  } catch (e) {
+    resultEl.innerHTML = `<span class="err">Fehler: ${e.message}</span>`;
+  }
+}
+
+// ── Test-Tool Panel ───────────────────────────────────────────────────────────
+
+async function loadTestToolPanel() {
+  try {
+    const [stRes, svRes, wlpRes] = await Promise.all([
+      fetch('/api/testtool/stages'),
+      fetch('/api/testtool/services'),
+      fetch('/api/testtool/local-wlp'),
+    ]);
+    const stData = await stRes.json();
+    const svData = await svRes.json();
+    const wlpData = wlpRes.ok ? await wlpRes.json() : { local_wlp_url: '' };
+
+    // Lokaler WLP Status
+    const wlpStatus = document.getElementById('testtool-local-wlp-status');
+    if (wlpStatus) {
+      if (wlpData.local_wlp_url) {
+        wlpStatus.innerHTML = `<span class="badge badge-success">Lokal WLP: ${escapeHtml(wlpData.local_wlp_url)}</span>`;
+        wlpStatus.style.display = 'block';
+      } else {
+        wlpStatus.style.display = 'none';
+      }
+    }
+
+    const stageSelect = document.getElementById('testtool-stage-select');
+    const urlSelect = document.getElementById('testtool-url-select');
+    if (stageSelect) {
+      stageSelect.innerHTML = stData.stages?.map(s =>
+        `<option value="${s.id}" ${s.id===stData.active_stage?'selected':''}>${escapeHtml(s.name)}</option>`
+      ).join('') || '<option>Keine Stages</option>';
+      // URLs für aktive Stage laden
+      const active = stData.stages?.find(s => s.id === stData.active_stage);
+      if (active && urlSelect) {
+        urlSelect.innerHTML = active.urls.map(u => `<option value="${u.url}">${escapeHtml(u.url)} ${u.description?'('+escapeHtml(u.description)+')':''}</option>`).join('');
+      }
+    }
+
+    const content = document.getElementById('testtool-services-content');
+    if (!content) return;
+    if (!svData.services?.length) {
+      content.innerHTML = '<div class="empty-state"><span>&#128296;</span><p>Keine Services konfiguriert</p></div>';
+      return;
+    }
+    content.innerHTML = svData.services.map(s => `
+      <div class="tool-card">
+        <div class="tool-card-header">
+          <span class="tool-card-name">${escapeHtml(s.name)}</span>
+          <span class="tool-card-badge">${s.method}</span>
+          ${s.has_local ? '<span class="tool-card-badge badge-info">lokal</span>' : ''}
+        </div>
+        ${s.description ? `<div class="tool-card-desc">${escapeHtml(s.description)}</div>` : ''}
+        ${s.parameters?.length ? `
+          <div class="tool-params" id="params-${s.id}">
+            ${s.parameters.map(p => `
+              <div class="param-row">
+                <label class="param-label">${escapeHtml(p.name)}${p.required?'*':''}</label>
+                <input type="text" class="param-input" id="p-${s.id}-${p.name}" placeholder="${escapeHtml(p.type)}" data-svc="${s.id}" data-param="${p.name}">
+              </div>
+            `).join('')}
+          </div>
+        ` : ''}
+        <div class="tool-card-actions">
+          <button class="btn btn-xs btn-primary" onclick="ttPanelExecute('${s.id}')">&#9654; Ausführen</button>
+          ${s.has_local ? `<button class="btn btn-xs btn-secondary" onclick="ttPanelLocal('${s.id}')">&#128196; Lokal</button>` : ''}
+        </div>
+      </div>
+    `).join('');
+  } catch (e) {
+    const content = document.getElementById('testtool-services-content');
+    if (content) content.innerHTML = `<p class="error-hint">Fehler: ${e.message}</p>`;
+  }
+}
+
+function ttToggleLocalWlp(checked) {
+  const stageSection = document.getElementById('testtool-stage-section');
+  if (stageSection) stageSection.style.display = checked ? 'none' : 'block';
+}
+
+function onTestStageChange(stageId) {
+  fetch('/api/testtool/stages').then(r => r.json()).then(data => {
+    const stage = data.stages?.find(s => s.id === stageId);
+    const sel = document.getElementById('testtool-url-select');
+    if (sel && stage) {
+      sel.innerHTML = stage.urls.map(u => `<option value="${u.url}">${escapeHtml(u.url)}</option>`).join('');
+    }
+  });
+}
+
+function _collectParams(svcId) {
+  const params = {};
+  document.querySelectorAll(`[data-svc="${svcId}"]`).forEach(el => {
+    if (el.value) params[el.dataset.param] = el.value;
+  });
+  return params;
+}
+
+async function ttPanelExecute(svcId) {
+  const useLocalWlp = document.getElementById('testtool-use-local-wlp')?.checked || false;
+  const stageUrl = useLocalWlp ? '' : (document.getElementById('testtool-url-select')?.value || '');
+  const params = _collectParams(svcId);
+  const resultArea = document.getElementById('testtool-result-area');
+  const resultPre = document.getElementById('testtool-result-pre');
+  const badge = document.getElementById('testtool-status-badge');
+
+  resultArea.style.display = 'block';
+  resultPre.textContent = useLocalWlp ? '⏳ Ausführung (lokaler WLP)...' : '⏳ Ausführung...';
+  badge.textContent = '';
+
+  try {
+    const res = await fetch(`/api/testtool/execute/${svcId}`, {
+      method: 'POST',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({ params, stage_url: stageUrl || undefined, use_local_wlp: useLocalWlp }),
+    });
+    const data = await res.json();
+    badge.textContent = `HTTP ${data.status_code}${data.via_local_wlp ? ' [lokal]' : ''}`;
+    badge.className = `badge ${data.success ? 'badge-success' : 'badge-error'}`;
+    resultPre.textContent = JSON.stringify(data.response, null, 2).substring(0, 3000);
+    if (data.elapsed_ms) resultPre.textContent += `\n\n[${data.elapsed_ms}ms | ${data.url}]`;
+  } catch (e) {
+    resultPre.textContent = `Fehler: ${e.message}`;
+  }
+}
+
+async function ttPanelLocal(svcId) {
+  const params = _collectParams(svcId);
+  const resultArea = document.getElementById('testtool-result-area');
+  const resultPre = document.getElementById('testtool-result-pre');
+  resultArea.style.display = 'block';
+  resultPre.textContent = '⏳ Lokale Ausführung...';
+
+  try {
+    const res = await fetch(`/api/testtool/local/${svcId}`, {
+      method: 'POST',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({ params }),
+    });
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split('\n');
+      buffer = lines.pop();
+      for (const line of lines) {
+        if (!line.startsWith('data:')) continue;
+        try {
+          const ev = JSON.parse(line.slice(5).trim());
+          if (ev.type === 'output') resultPre.textContent += ev.line + '\n';
+          else if (ev.type === 'done') resultPre.textContent += `\n[Exit: ${ev.exit_code}]`;
+          else if (ev.type === 'error') resultPre.textContent += `\nFehler: ${ev.message}`;
+        } catch (_) {}
+      }
+    }
+  } catch (e) {
+    resultPre.textContent += `\nFehler: ${e.message}`;
+  }
+}
+
+// ── WLP Panel ─────────────────────────────────────────────────────────────────
+
+async function loadWLPPanel() {
+  const content = document.getElementById('wlp-servers-content');
+  if (!content) return;
+  try {
+    const res = await fetch('/api/wlp/servers');
+    const data = await res.json();
+    if (!data.servers?.length) {
+      content.innerHTML = '<div class="empty-state"><span>&#9881;</span><p>Keine WLP-Server konfiguriert</p></div>';
+      return;
+    }
+    content.innerHTML = data.servers.map(s => `
+      <div class="tool-card">
+        <div class="tool-card-header">
+          <span class="tool-card-name">${escapeHtml(s.name)}</span>
+          ${data.running?.includes(s.id) ? '<span class="badge badge-success">läuft</span>' : '<span class="badge">gestoppt</span>'}
+        </div>
+        <div class="tool-card-desc"><code>${escapeHtml(s.server_name)}</code> in <code>${escapeHtml(s.wlp_path)}</code></div>
+        <div class="tool-card-actions">
+          <button class="btn btn-xs btn-secondary" onclick="wlpPanelValidate('${s.id}')">&#10003; Prüfen</button>
+          <button class="btn btn-xs btn-primary" onclick="wlpPanelStart('${s.id}')">&#9654; Start</button>
+          <button class="btn btn-xs btn-warning" onclick="wlpPanelStop('${s.id}')">&#9646;&#9646; Stop</button>
+          <button class="btn btn-xs btn-secondary" onclick="wlpPanelLogs('${s.id}')">&#128196; Logs</button>
+        </div>
+        <div id="wlp-card-result-${s.id}" class="tool-result" style="display:none"></div>
+      </div>
+    `).join('');
+  } catch (e) {
+    content.innerHTML = `<p class="error-hint">Fehler: ${e.message}</p>`;
+  }
+}
+
+async function wlpPanelValidate(id) {
+  const el = document.getElementById(`wlp-card-result-${id}`);
+  el.style.display = 'block';
+  el.innerHTML = '<span class="spinner-inline"></span> Prüfe server.xml...';
+  const res = await fetch(`/api/wlp/servers/${id}/validate`, { method: 'POST' });
+  const data = await res.json();
+  if (!data.valid) { el.innerHTML = `<span class="err">✗ ${escapeHtml(data.error)}</span>`; return; }
+  const ok = data.all_artifacts_present;
+  el.innerHTML = `
+    <span class="${ok ? 'ok' : 'warn'}">${ok ? '✓' : '⚠'} server.xml valide</span>
+    ${data.applications.map(a => `<div><code>${escapeHtml(a.name||a.tag)}</code> → <code>${escapeHtml(a.artifact_path||'?')}</code> ${a.artifact_exists ? '✓' : '<span class="err">fehlt!</span>'}</div>`).join('')}
+    ${data.built_artifact ? `<div class="ok">Gebaut: <code>${escapeHtml(data.built_artifact.path)}</code> (${data.built_artifact.size_kb}KB)</div>` : '<div class="warn">Kein gebautes Artefakt im Repo</div>'}
+  `;
+}
+
+function wlpPanelStart(id) {
+  const logArea = document.getElementById('wlp-log-area');
+  const logOutput = document.getElementById('wlp-log-output');
+  logArea.style.display = 'block';
+  logOutput.textContent = '';
+  _streamWLPServer(id, 'start', logOutput);
+}
+
+async function wlpPanelStop(id) {
+  const res = await fetch(`/api/wlp/servers/${id}/stop`, { method: 'POST' });
+  const data = await res.json();
+  const logOutput = document.getElementById('wlp-log-output');
+  if (logOutput) logOutput.textContent += `\n[Stop: ${data.success ? 'OK' : data.error}]\n${data.output||''}`;
+  loadWLPPanel();
+}
+
+async function wlpPanelLogs(id) {
+  const logArea = document.getElementById('wlp-log-area');
+  const logOutput = document.getElementById('wlp-log-output');
+  logArea.style.display = 'block';
+  logOutput.textContent = '⏳ Lade Logs...';
+  const res = await fetch(`/api/wlp/servers/${id}/logs?lines=200`);
+  const data = await res.json();
+  logOutput.textContent = data.found ? data.lines.join('\n') : `Keine messages.log gefunden: ${data.log_path}`;
+  logOutput.scrollTop = logOutput.scrollHeight;
+}
+
+async function _streamWLPServer(id, action, outputEl) {
+  try {
+    const res = await fetch(`/api/wlp/servers/${id}/${action}`, { method: 'POST' });
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split('\n');
+      buffer = lines.pop();
+      for (const line of lines) {
+        if (!line.startsWith('data:')) continue;
+        try {
+          const ev = JSON.parse(line.slice(5).trim());
+          if (ev.type === 'output') {
+            const span = document.createElement('div');
+            span.className = ev.is_error ? 'log-error' : (ev.is_ready ? 'log-ready' : '');
+            span.textContent = ev.line;
+            outputEl.appendChild(span);
+            outputEl.scrollTop = outputEl.scrollHeight;
+          } else if (ev.type === 'ready') {
+            const span = document.createElement('div');
+            span.className = 'log-ready';
+            span.textContent = '✓ Server bereit!';
+            outputEl.appendChild(span);
+          } else if (ev.type === 'warning') {
+            const span = document.createElement('div');
+            span.className = 'log-warn';
+            span.textContent = '⚠ ' + ev.message;
+            outputEl.appendChild(span);
+          } else if (ev.type === 'done') {
+            outputEl.textContent += `\n[Exit: ${ev.exit_code}]`;
+            loadWLPPanel();
+          }
+        } catch (_) {}
+      }
+    }
+  } catch (e) {
+    outputEl.textContent += `\nFehler: ${e.message}`;
+  }
+}
+
+// ── Maven Panel ───────────────────────────────────────────────────────────────
+
+async function loadMavenPanel() {
+  const content = document.getElementById('maven-builds-content');
+  if (!content) return;
+  try {
+    const res = await fetch('/api/maven/builds');
+    const data = await res.json();
+    if (!data.builds?.length) {
+      content.innerHTML = '<div class="empty-state"><span>&#128736;</span><p>Keine Builds konfiguriert</p></div>';
+      return;
+    }
+    content.innerHTML = data.builds.map(b => `
+      <div class="tool-card">
+        <div class="tool-card-header">
+          <span class="tool-card-name">${escapeHtml(b.name)}</span>
+          ${data.running?.includes(b.id) ? '<span class="badge badge-success">läuft</span>' : ''}
+        </div>
+        <div class="tool-card-desc"><code>${escapeHtml(b.goals)}</code>${b.description ? ' – ' + escapeHtml(b.description) : ''}</div>
+        <div class="tool-card-actions">
+          <button class="btn btn-xs btn-primary" onclick="mvnPanelRun('${b.id}')">&#9654; Build</button>
+          <button class="btn btn-xs btn-warning" onclick="mvnStopBuild('${b.id}')">&#9646;&#9646; Stop</button>
+        </div>
+        <div id="mvn-card-result-${b.id}" class="tool-result" style="display:none"></div>
+      </div>
+    `).join('');
+  } catch (e) {
+    content.innerHTML = `<p class="error-hint">Fehler: ${e.message}</p>`;
+  }
+}
+
+function mvnPanelRun(buildId) {
+  const logArea = document.getElementById('maven-log-area');
+  const logOutput = document.getElementById('maven-log-output');
+  logArea.style.display = 'block';
+  logOutput.textContent = '';
+  _streamMavenBuild(buildId, logOutput);
+}
+
+async function mvnStopBuild(buildId) {
+  const res = await fetch(`/api/maven/builds/${buildId}/stop`, { method: 'POST' });
+  const data = await res.json();
+  const logOutput = document.getElementById('maven-log-output');
+  if (logOutput) logOutput.textContent += `\n[${data.message}]`;
+  loadMavenPanel();
+}
+
+async function mvnRunBuild(buildId) {
+  switchRightPanel('maven-panel');
+  mvnPanelRun(buildId);
+}
+
+async function _streamMavenBuild(buildId, outputEl) {
+  try {
+    const res = await fetch(`/api/maven/builds/${buildId}/run`, { method: 'POST', headers: {'Content-Type':'application/json'}, body: '{}' });
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split('\n');
+      buffer = lines.pop();
+      for (const line of lines) {
+        if (!line.startsWith('data:')) continue;
+        try {
+          const ev = JSON.parse(line.slice(5).trim());
+          if (ev.type === 'output') {
+            const div = document.createElement('div');
+            div.className = ev.is_error ? 'log-error' : (ev.is_success ? 'log-ready' : (ev.is_warning ? 'log-warn' : ''));
+            div.textContent = ev.line;
+            outputEl.appendChild(div);
+            outputEl.scrollTop = outputEl.scrollHeight;
+          } else if (ev.type === 'done') {
+            const div = document.createElement('div');
+            div.className = ev.success ? 'log-ready' : 'log-error';
+            div.textContent = ev.success ? '✓ BUILD SUCCESS' : `✗ BUILD FAILURE (Exit: ${ev.exit_code})`;
+            outputEl.appendChild(div);
+            loadMavenPanel();
+          } else if (ev.type === 'start') {
+            outputEl.textContent += `$ ${ev.cmd}\n`;
+          }
+        } catch (_) {}
+      }
+    }
+  } catch (e) {
+    outputEl.textContent += `\nFehler: ${e.message}`;
+  }
+}
+
+// ── Auto-load operative panels when tab switches ──────────────────────────────
+document.addEventListener('DOMContentLoaded', () => {
+  // Panel-Tab-Klick-Handler für operative Panels
+  document.querySelectorAll('[data-panel]').forEach(tab => {
+    const panel = tab.getAttribute('data-panel');
+    if (['mq-panel','testtool-panel','wlp-panel','maven-panel'].includes(panel)) {
+      tab.addEventListener('click', () => {
+        if (panel === 'mq-panel') loadMQPanel();
+        else if (panel === 'testtool-panel') loadTestToolPanel();
+        else if (panel === 'wlp-panel') loadWLPPanel();
+        else if (panel === 'maven-panel') loadMavenPanel();
+      });
+    }
+  });
+});
 
 // Keyboard shortcut to close modal
 document.addEventListener('keydown', (e) => {
