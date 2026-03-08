@@ -3550,17 +3550,37 @@ async function renderTestToolSection() {
         <button class="btn btn-primary" onclick="ttAddService()">+ Service</button>
       </div>
     </div>
+    <div class="settings-subsection" style="margin-top:16px">
+      <h4>Lokaler WLP-Server</h4>
+      <p class="settings-section-desc">Testaufrufe direkt an einen lokalen WLP-Server weiterleiten. Wenn gesetzt, wird <code>use_local_wlp=true</code> genutzt statt der Stage-URL.</p>
+      <div id="tt-local-wlp-section"><div class="spinner-inline"></div></div>
+    </div>
   `;
   await ttLoadAll();
 }
 
 async function ttLoadAll() {
-  const [stRes, svRes] = await Promise.all([
+  const [stRes, svRes, wlpRes] = await Promise.all([
     fetch('/api/testtool/stages'),
     fetch('/api/testtool/services'),
+    fetch('/api/testtool/local-wlp'),
   ]);
   const stData = await stRes.json();
   const svData = await svRes.json();
+  const wlpData = wlpRes.ok ? await wlpRes.json() : { local_wlp_url: '' };
+
+  // Lokaler WLP-URL
+  const wlpSection = document.getElementById('tt-local-wlp-section');
+  if (wlpSection) {
+    wlpSection.innerHTML = `
+      <div class="settings-field-row">
+        <input id="tt-local-wlp-url" type="text" class="settings-input" placeholder="http://localhost:9080" value="${escapeHtml(wlpData.local_wlp_url || '')}">
+        <button class="btn btn-primary btn-sm" onclick="ttSaveLocalWLP()">Speichern</button>
+        ${wlpData.local_wlp_url ? '<button class="btn btn-secondary btn-sm" onclick="ttClearLocalWLP()">&#10006; Löschen</button>' : ''}
+      </div>
+      ${wlpData.local_wlp_url ? `<p style="margin:4px 0 0;font-size:12px;color:var(--success)">&#10003; Aktiv: <code>${escapeHtml(wlpData.local_wlp_url)}</code></p>` : '<p style="margin:4px 0 0;font-size:12px;color:var(--text-muted)">Nicht konfiguriert</p>'}
+    `;
+  }
 
   // Stages
   const stList = document.getElementById('tt-stages-list');
@@ -3645,6 +3665,28 @@ async function ttSetActiveStage(id) {
 async function ttDeleteStage(id) {
   if (!confirm('Stage löschen?')) return;
   await fetch(`/api/testtool/stages/${id}`, { method: 'DELETE' });
+  await ttLoadAll();
+}
+
+async function ttSaveLocalWLP() {
+  const url = document.getElementById('tt-local-wlp-url')?.value.trim();
+  if (!url) { ttClearLocalWLP(); return; }
+  await fetch('/api/testtool/local-wlp', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ url }),
+  });
+  updateSettingsStatus('Lokaler WLP gespeichert ✓', 'success');
+  await ttLoadAll();
+}
+
+async function ttClearLocalWLP() {
+  await fetch('/api/testtool/local-wlp', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ url: '' }),
+  });
+  updateSettingsStatus('Lokaler WLP entfernt', 'info');
   await ttLoadAll();
 }
 
@@ -4059,9 +4101,25 @@ async function mqPanelPut(queueId, body) {
 
 async function loadTestToolPanel() {
   try {
-    const [stRes, svRes] = await Promise.all([fetch('/api/testtool/stages'), fetch('/api/testtool/services')]);
+    const [stRes, svRes, wlpRes] = await Promise.all([
+      fetch('/api/testtool/stages'),
+      fetch('/api/testtool/services'),
+      fetch('/api/testtool/local-wlp'),
+    ]);
     const stData = await stRes.json();
     const svData = await svRes.json();
+    const wlpData = wlpRes.ok ? await wlpRes.json() : { local_wlp_url: '' };
+
+    // Lokaler WLP Status
+    const wlpStatus = document.getElementById('testtool-local-wlp-status');
+    if (wlpStatus) {
+      if (wlpData.local_wlp_url) {
+        wlpStatus.innerHTML = `<span class="badge badge-success">Lokal WLP: ${escapeHtml(wlpData.local_wlp_url)}</span>`;
+        wlpStatus.style.display = 'block';
+      } else {
+        wlpStatus.style.display = 'none';
+      }
+    }
 
     const stageSelect = document.getElementById('testtool-stage-select');
     const urlSelect = document.getElementById('testtool-url-select');
@@ -4112,6 +4170,11 @@ async function loadTestToolPanel() {
   }
 }
 
+function ttToggleLocalWlp(checked) {
+  const stageSection = document.getElementById('testtool-stage-section');
+  if (stageSection) stageSection.style.display = checked ? 'none' : 'block';
+}
+
 function onTestStageChange(stageId) {
   fetch('/api/testtool/stages').then(r => r.json()).then(data => {
     const stage = data.stages?.find(s => s.id === stageId);
@@ -4131,24 +4194,25 @@ function _collectParams(svcId) {
 }
 
 async function ttPanelExecute(svcId) {
-  const stageUrl = document.getElementById('testtool-url-select')?.value || '';
+  const useLocalWlp = document.getElementById('testtool-use-local-wlp')?.checked || false;
+  const stageUrl = useLocalWlp ? '' : (document.getElementById('testtool-url-select')?.value || '');
   const params = _collectParams(svcId);
   const resultArea = document.getElementById('testtool-result-area');
   const resultPre = document.getElementById('testtool-result-pre');
   const badge = document.getElementById('testtool-status-badge');
 
   resultArea.style.display = 'block';
-  resultPre.textContent = '⏳ Ausführung...';
+  resultPre.textContent = useLocalWlp ? '⏳ Ausführung (lokaler WLP)...' : '⏳ Ausführung...';
   badge.textContent = '';
 
   try {
     const res = await fetch(`/api/testtool/execute/${svcId}`, {
       method: 'POST',
       headers: {'Content-Type':'application/json'},
-      body: JSON.stringify({ params, stage_url: stageUrl }),
+      body: JSON.stringify({ params, stage_url: stageUrl || undefined, use_local_wlp: useLocalWlp }),
     });
     const data = await res.json();
-    badge.textContent = `HTTP ${data.status_code}`;
+    badge.textContent = `HTTP ${data.status_code}${data.via_local_wlp ? ' [lokal]' : ''}`;
     badge.className = `badge ${data.success ? 'badge-success' : 'badge-error'}`;
     resultPre.textContent = JSON.stringify(data.response, null, 2).substring(0, 3000);
     if (data.elapsed_ms) resultPre.textContent += `\n\n[${data.elapsed_ms}ms | ${data.url}]`;

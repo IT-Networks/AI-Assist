@@ -57,6 +57,11 @@ class ExecuteRequest(BaseModel):
     stage_url: Optional[str] = None    # Überschreibt aktive Stage-URL
     extra_headers: Dict[str, str] = {}
     timeout_seconds: int = 60
+    use_local_wlp: bool = False        # Weiterleitung an lokalen WLP-Server
+
+
+class LocalWLPRequest(BaseModel):
+    url: str                           # Lokale WLP-Basis-URL (z.B. http://localhost:9080)
 
 
 # ── Stage Management ──────────────────────────────────────────────────────────
@@ -167,14 +172,32 @@ async def delete_service(svc_id: str) -> Dict[str, Any]:
 
 # ── Execution ─────────────────────────────────────────────────────────────────
 
-def _resolve_base_url(stage_url: Optional[str]) -> str:
-    """Liefert die Basis-URL der aktiven Stage (erste URL)."""
+def _resolve_base_url(stage_url: Optional[str], use_local_wlp: bool = False) -> str:
+    """Liefert die Basis-URL: lokaler WLP (wenn aktiviert), explizite URL oder aktive Stage."""
+    if use_local_wlp:
+        url = settings.test_tool.local_wlp_url
+        if not url:
+            raise HTTPException(status_code=400, detail="Kein lokaler WLP-Server konfiguriert (local_wlp_url fehlt)")
+        return url.rstrip("/")
     if stage_url:
         return stage_url.rstrip("/")
     stage = next((s for s in settings.test_tool.stages if s.id == settings.test_tool.active_stage), None)
     if not stage or not stage.urls:
         raise HTTPException(status_code=400, detail="Keine aktive Stage oder URL konfiguriert")
     return stage.urls[0].url.rstrip("/")
+
+
+@router.get("/local-wlp")
+async def get_local_wlp() -> Dict[str, Any]:
+    """Gibt den konfigurierten lokalen WLP-Server zurück."""
+    return {"local_wlp_url": settings.test_tool.local_wlp_url}
+
+
+@router.put("/local-wlp")
+async def set_local_wlp(req: LocalWLPRequest) -> Dict[str, Any]:
+    """Setzt die URL des lokalen WLP-Servers für direkte Testweiterleitung."""
+    settings.test_tool.local_wlp_url = req.url
+    return {"local_wlp_url": settings.test_tool.local_wlp_url}
 
 
 @router.post("/execute/{svc_id}")
@@ -184,7 +207,7 @@ async def execute_service(svc_id: str, req: ExecuteRequest) -> Dict[str, Any]:
     if not svc:
         raise HTTPException(status_code=404, detail=f"Service '{svc_id}' nicht gefunden")
 
-    base_url = _resolve_base_url(req.stage_url)
+    base_url = _resolve_base_url(req.stage_url, req.use_local_wlp)
     endpoint = svc.endpoint
     # Path-Parameter ersetzen
     for k, v in req.params.items():
@@ -241,6 +264,7 @@ async def execute_service(svc_id: str, req: ExecuteRequest) -> Dict[str, Any]:
             "raw": text[:5000] if len(text) > 5000 else text,
             "response_headers": dict(resp.headers),
             "elapsed_ms": int(resp.elapsed.total_seconds() * 1000) if resp.elapsed else None,
+            "via_local_wlp": req.use_local_wlp,
         }
     except httpx.TimeoutException:
         raise HTTPException(status_code=504, detail=f"Timeout nach {req.timeout_seconds}s")

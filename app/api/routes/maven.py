@@ -10,12 +10,14 @@ Routes:
   POST   /api/maven/builds/{id}/run    – Build ausführen (SSE-Stream)
   POST   /api/maven/builds/{id}/stop   – Laufenden Build abbrechen
   GET    /api/maven/detect             – pom.xml im aktiven Repo erkennen
+  POST   /api/maven/pom/analyze        – Dependencies aus pom.xml lesen inkl. Exclusions
 """
 
 import asyncio
 import json
 import os
 import uuid
+import xml.etree.ElementTree as ET
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -112,6 +114,94 @@ async def detect_pom() -> Dict[str, Any]:
 
     poms.sort(key=lambda p: p["depth"])
     return {"found": poms, "repo_path": str(root)}
+
+
+# ── POM Dependency Analysis ───────────────────────────────────────────────────
+
+_POM_NS = "http://maven.apache.org/POM/4.0.0"
+
+
+def _tag(name: str) -> str:
+    return f"{{{_POM_NS}}}{name}"
+
+
+def _text(el: Any, tag: str) -> str:
+    child = el.find(_tag(tag))
+    return child.text.strip() if child is not None and child.text else ""
+
+
+def _parse_dependencies(pom_path: str) -> List[Dict[str, Any]]:
+    """Parst alle <dependency>-Blöcke aus einer pom.xml inkl. bestehender Exclusions."""
+    try:
+        tree = ET.parse(pom_path)
+    except ET.ParseError as e:
+        raise HTTPException(status_code=400, detail=f"pom.xml konnte nicht geparst werden: {e}")
+
+    root = tree.getroot()
+    # Unterstütze pom.xml mit und ohne Namespace
+    deps_containers = root.findall(f".//{_tag('dependencies')}")
+    if not deps_containers:
+        deps_containers = root.findall(".//dependencies")
+
+    dependencies = []
+    for container in deps_containers:
+        dep_tag = _tag("dependency") if deps_containers == root.findall(f".//{_tag('dependencies')}") else "dependency"
+        for dep in container.findall(dep_tag):
+            group_id = _text(dep, "groupId") or (dep.findtext("groupId") or "")
+            artifact_id = _text(dep, "artifactId") or (dep.findtext("artifactId") or "")
+            version = _text(dep, "version") or (dep.findtext("version") or "")
+            scope = _text(dep, "scope") or (dep.findtext("scope") or "compile")
+
+            # Bestehende Exclusions auslesen
+            existing_exclusions = []
+            excl_container = dep.find(_tag("exclusions")) or dep.find("exclusions")
+            if excl_container is not None:
+                for excl in list(excl_container):
+                    eg = excl.findtext(_tag("groupId")) or excl.findtext("groupId") or ""
+                    ea = excl.findtext(_tag("artifactId")) or excl.findtext("artifactId") or ""
+                    if eg or ea:
+                        existing_exclusions.append({"groupId": eg.strip(), "artifactId": ea.strip()})
+
+            if group_id or artifact_id:
+                dependencies.append({
+                    "groupId": group_id,
+                    "artifactId": artifact_id,
+                    "version": version,
+                    "scope": scope,
+                    "existing_exclusions": existing_exclusions,
+                    "can_exclude_transitive": True,  # Immer möglich via <exclusions>
+                    "safe_to_comment_out": scope in ("test", "provided", "optional"),
+                })
+
+    return dependencies
+
+
+class PomAnalyzeRequest(BaseModel):
+    pom_path: str
+
+
+@router.post("/pom/analyze")
+async def analyze_pom(req: PomAnalyzeRequest) -> Dict[str, Any]:
+    """
+    Liest alle Dependencies aus einer pom.xml.
+    Gibt je Dependency an: groupId, artifactId, version, scope,
+    bereits vorhandene Exclusions und ob Auskommentieren sicher ist.
+    """
+    pom = Path(req.pom_path)
+    if not pom.exists():
+        raise HTTPException(status_code=404, detail=f"pom.xml nicht gefunden: {pom}")
+
+    deps = _parse_dependencies(str(pom))
+    return {
+        "pom_path": str(pom),
+        "dependency_count": len(deps),
+        "dependencies": deps,
+        "hint": (
+            "safe_to_comment_out=true: Dependency kann kommentiert werden (test/provided/optional). "
+            "can_exclude_transitive=true: Subdependency via <exclusions> ausschließen möglich. "
+            "Bevorzuge <exclusions> wenn nur eine transitiv eingezogene Library das Problem verursacht."
+        ),
+    }
 
 
 # ── Run Build ─────────────────────────────────────────────────────────────────

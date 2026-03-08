@@ -304,6 +304,7 @@ class TestToolConfig(BaseModel):
     services: List[TestService] = []
     active_stage: str = ""         # ID der aktiven Stage
     default_timeout_seconds: int = 60
+    local_wlp_url: str = ""        # Lokaler WLP-Server für direkte Testweiterleitung
 
 
 # ══════════════════════════════════════════════════════════════════════════════

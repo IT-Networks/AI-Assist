@@ -126,4 +126,56 @@ def register_maven_tools(registry: ToolRegistry) -> int:
     ))
     count += 1
 
+    # ── maven_analyze_pom ─────────────────────────────────────────────────────
+    async def maven_analyze_pom(**kwargs: Any) -> ToolResult:
+        from app.api.routes.maven import _parse_dependencies
+        pom_path: str = kwargs.get("pom_path", "")
+
+        if not pom_path:
+            # Versuche pom.xml aus aktiven Repo zu ermitteln
+            from pathlib import Path
+            repo = settings.java.get_active_path() if hasattr(settings, "java") else ""
+            if repo:
+                candidates = list(Path(repo).glob("pom.xml"))
+                if candidates:
+                    pom_path = str(candidates[0])
+        if not pom_path:
+            return ToolResult(success=False, error="pom_path nicht angegeben und kein aktives Java-Repo konfiguriert")
+
+        from pathlib import Path
+        if not Path(pom_path).exists():
+            return ToolResult(success=False, error=f"pom.xml nicht gefunden: {pom_path}")
+
+        try:
+            deps = _parse_dependencies(pom_path)
+        except Exception as e:
+            return ToolResult(success=False, error=str(e))
+
+        return ToolResult(success=True, data={
+            "pom_path": pom_path,
+            "dependency_count": len(deps),
+            "dependencies": deps,
+            "hint": (
+                "safe_to_comment_out=true: scope ist test/provided/optional – sicher auskommentierbar. "
+                "existing_exclusions: bereits vorhandene Exclusions. "
+                "can_exclude_transitive=true: <exclusion> für Sub-Dependencies möglich."
+            ),
+        })
+
+    registry.register(Tool(
+        name="maven_analyze_pom",
+        description=(
+            "Liest alle Dependencies aus einer pom.xml und analysiert ob sie sicher "
+            "auskommentiert oder per <exclusion> von Sub-Dependencies bereinigt werden können. "
+            "Zeigt Scope, Version und bestehende Exclusions je Dependency. "
+            "Nutze dies VOR jeder pom.xml-Änderung."
+        ),
+        category=ToolCategory.SEARCH,
+        parameters=[
+            ToolParameter(name="pom_path", type="string", description="Pfad zur pom.xml (optional wenn aktives Java-Repo konfiguriert)", required=False),
+        ],
+        handler=maven_analyze_pom,
+    ))
+    count += 1
+
     return count
