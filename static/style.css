@@ -3007,3 +3007,51 @@ body {
   display: flex;
   gap: 6px;
 }
+
+/* Slash-Command Autocomplete Dropdown */
+.cmd-suggestions-dropdown {
+  position: absolute;
+  bottom: calc(100% + 4px);
+  left: 0;
+  right: 0;
+  background: var(--bg-secondary);
+  border: 1px solid var(--accent);
+  border-radius: 8px;
+  box-shadow: 0 -4px 16px rgba(0,0,0,0.3);
+  z-index: 200;
+  overflow: hidden;
+  max-height: 240px;
+  overflow-y: auto;
+}
+.cmd-suggestion {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 12px;
+  cursor: pointer;
+  font-size: 13px;
+  transition: background 0.1s;
+}
+.cmd-suggestion:hover,
+.cmd-suggestion.active {
+  background: var(--bg-tertiary, rgba(255,255,255,0.06));
+}
+.cmd-suggestion .cmd-name {
+  font-family: var(--font-mono);
+  font-weight: 600;
+  color: var(--accent);
+  min-width: 110px;
+}
+.cmd-suggestion .cmd-desc {
+  color: var(--text-secondary);
+  flex: 1;
+  font-size: 12px;
+}
+.cmd-suggestion .cmd-alias {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-muted);
+  background: var(--bg);
+  padding: 1px 5px;
+  border-radius: 4px;
+}

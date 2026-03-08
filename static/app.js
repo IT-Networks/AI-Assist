@@ -133,6 +133,19 @@ function setupInputHandlers() {
   input.addEventListener('input', function() {
     this.style.height = 'auto';
     this.style.height = Math.min(this.scrollHeight, 150) + 'px';
+    _updateCommandSuggestions(this.value);
+  });
+
+  input.addEventListener('keydown', (e) => {
+    if (_commandDropdownVisible()) {
+      if (e.key === 'ArrowDown') { e.preventDefault(); _commandSelectNext(1); return; }
+      if (e.key === 'ArrowUp')   { e.preventDefault(); _commandSelectNext(-1); return; }
+      if (e.key === 'Tab' || e.key === 'Enter') {
+        const active = document.querySelector('.cmd-suggestion.active');
+        if (active) { e.preventDefault(); _applyCommandSuggestion(active.dataset.cmd); return; }
+      }
+      if (e.key === 'Escape') { _hideCommandSuggestions(); return; }
+    }
   });
 }
 
@@ -601,10 +614,234 @@ async function cancelRequest() {
   _setStreamingMode(false);
 }
 
+// ══════════════════════════════════════════════════════════════════════════════
+// Chat Slash-Command-Router + Autocomplete
+// ══════════════════════════════════════════════════════════════════════════════
+
+// Alle Befehle mit Beschreibung (für Autocomplete)
+const _CMD_LIST = [
+  { cmd: '/lesen',      desc: 'Modus: Nur Lesen 🔒',             alias: '/r' },
+  { cmd: '/schreiben',  desc: 'Modus: Schreiben mit Bestätigung ✏️', alias: '/s' },
+  { cmd: '/plan',       desc: 'Modus: Plan & Ausführen 📋',       alias: '/p' },
+  { cmd: '/auto',       desc: 'Modus: Autonom ⚠️',               alias: '/a' },
+  { cmd: '/suche an',   desc: 'Web-Suche aktivieren 🔍',          alias: null },
+  { cmd: '/suche aus',  desc: 'Web-Suche deaktivieren',           alias: null },
+  { cmd: '/neu',        desc: 'Neuen Chat öffnen',                alias: '/neuer chat' },
+  { cmd: '/hilfe',      desc: 'Alle Befehle anzeigen',            alias: '/?' },
+];
+
+function _commandDropdownVisible() {
+  const el = document.getElementById('cmd-suggestions');
+  return el && el.style.display !== 'none';
+}
+
+function _updateCommandSuggestions(text) {
+  let el = document.getElementById('cmd-suggestions');
+  if (!el) {
+    el = document.createElement('div');
+    el.id = 'cmd-suggestions';
+    el.className = 'cmd-suggestions-dropdown';
+    const input = document.getElementById('message-input');
+    input.parentElement.style.position = 'relative';
+    input.parentElement.appendChild(el);
+  }
+
+  if (!text.startsWith('/') || text.includes('\n')) {
+    el.style.display = 'none';
+    return;
+  }
+
+  const filter = text.toLowerCase();
+  const matches = _CMD_LIST.filter(c =>
+    c.cmd.startsWith(filter) || (c.alias && c.alias.startsWith(filter))
+  );
+
+  if (!matches.length) { el.style.display = 'none'; return; }
+
+  el.innerHTML = matches.map((c, i) => `
+    <div class="cmd-suggestion ${i === 0 ? 'active' : ''}" data-cmd="${escapeHtml(c.cmd)}"
+         onclick="_applyCommandSuggestion('${escapeHtml(c.cmd)}')">
+      <span class="cmd-name">${escapeHtml(c.cmd)}</span>
+      <span class="cmd-desc">${c.desc}</span>
+      ${c.alias ? `<span class="cmd-alias">${escapeHtml(c.alias)}</span>` : ''}
+    </div>
+  `).join('');
+  el.style.display = 'block';
+}
+
+function _hideCommandSuggestions() {
+  const el = document.getElementById('cmd-suggestions');
+  if (el) el.style.display = 'none';
+}
+
+function _commandSelectNext(dir) {
+  const items = document.querySelectorAll('.cmd-suggestion');
+  if (!items.length) return;
+  const current = [...items].findIndex(i => i.classList.contains('active'));
+  const next = (current + dir + items.length) % items.length;
+  items.forEach((el, i) => el.classList.toggle('active', i === next));
+}
+
+function _applyCommandSuggestion(cmd) {
+  const input = document.getElementById('message-input');
+  input.value = cmd + ' ';
+  input.focus();
+  _hideCommandSuggestions();
+  // Dropdown erneut triggern für Unterparameter (z.B. "/mode ")
+  _updateCommandSuggestions(input.value);
+}
+
+const _COMMANDS = {
+  // Modus-Befehle
+  'lesen':     () => setAgentMode('read_only'),
+  'r':         () => setAgentMode('read_only'),
+  'schreiben': () => setAgentMode('write_with_confirm'),
+  's':         () => setAgentMode('write_with_confirm'),
+  'plan':      () => setAgentMode('plan_then_execute'),
+  'p':         () => setAgentMode('plan_then_execute'),
+  'auto':      () => setAgentMode('autonomous'),
+  'a':         () => setAgentMode('autonomous'),
+
+  // Web-Suche
+  'suche an':    () => _searchSetEnabled(true),
+  'suche aus':   () => _searchSetEnabled(false),
+  'search on':   () => _searchSetEnabled(true),
+  'search off':  () => _searchSetEnabled(false),
+
+  // Chat-Management
+  'neu':         () => chatManager.createChat(),
+  'neuer chat':  () => chatManager.createChat(),
+  'new':         () => chatManager.createChat(),
+
+  // Hilfe
+  'hilfe':  null,
+  'help':   null,
+  '?':      null,
+};
+
+const _MODE_LABELS = {
+  read_only:          '&#128274; Nur Lesen',
+  write_with_confirm: '&#128221; Schreiben (mit Bestätigung)',
+  plan_then_execute:  '&#128203; Plan & Ausführen',
+  autonomous:         '&#9888; Autonom',
+};
+
+async function _searchSetEnabled(enabled) {
+  await fetch('/api/search/toggle', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ enabled }),
+  });
+  // Sync toggle-Elemente
+  ['search-enabled-toggle', 'search-settings-toggle'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.checked = enabled;
+  });
+  const txt = document.getElementById('search-status-text');
+  if (txt) {
+    txt.textContent = enabled
+      ? 'Aktiviert – Agent kann Internet-Suchen anfragen (Bestätigung erforderlich)'
+      : 'Deaktiviert – Agent kann keine Internet-Suchen durchführen';
+    txt.style.color = enabled ? 'var(--success)' : 'var(--text-muted)';
+  }
+  return `Web-Suche ${enabled ? 'aktiviert ✓' : 'deaktiviert'}.`;
+}
+
+function _buildHelpText() {
+  return `**Chat-Befehle** (beginnen mit \`/\`)
+
+**Modus wechseln:**
+\`/lesen\` \`/r\`  → Nur Lesen &#128274;
+\`/schreiben\` \`/s\`  → Schreiben mit Bestätigung &#128221;
+\`/plan\` \`/p\`  → Plan & Ausführen &#128203;
+\`/auto\` \`/a\`  → Autonom &#9888;
+
+**Web-Suche:**
+\`/suche an\`  → Web-Suche aktivieren
+\`/suche aus\`  → Web-Suche deaktivieren
+
+**Chat:**
+\`/neu\`  → Neuen Chat öffnen
+
+\`/hilfe\` \`/?\`  → Diese Hilfe anzeigen
+
+Alternativ kannst du dem Agenten auch auf Deutsch sagen:
+_"Wechsel in den Lese-Modus"_, _"Suche einschalten"_ usw.`;
+}
+
+/**
+ * Verarbeitet Slash-Befehle aus dem Chat-Eingabefeld.
+ * @returns {boolean} true wenn der Befehl erkannt und verarbeitet wurde
+ */
+async function handleChatCommand(text) {
+  // Normalisieren: "/Mode Lesen" → "mode lesen"
+  const raw = text.slice(1).trim().toLowerCase();
+
+  // Hilfe
+  if (raw === 'hilfe' || raw === 'help' || raw === '?') {
+    appendMessage('system', _buildHelpText());
+    return true;
+  }
+
+  // Modus-Shortcuts: /mode lesen | /lesen | /r | usw.
+  // Unterstütze auch "/mode schreiben" als Alias
+  const modePrefix = raw.startsWith('mode ') ? raw.slice(5) : raw;
+
+  const modeMap = {
+    'lesen': 'read_only',   'r': 'read_only',      'read': 'read_only',     'read_only': 'read_only',
+    'schreiben': 'write_with_confirm', 's': 'write_with_confirm', 'write': 'write_with_confirm',
+    'plan': 'plan_then_execute', 'p': 'plan_then_execute', 'planning': 'plan_then_execute',
+    'auto': 'autonomous',   'a': 'autonomous',     'autonomous': 'autonomous',
+  };
+  if (modeMap[modePrefix]) {
+    const modeKey = modeMap[modePrefix];
+    await setAgentMode(modeKey);
+    appendMessage('system', `Modus gewechselt: ${_MODE_LABELS[modeKey] || modeKey}`);
+    return true;
+  }
+
+  // Suche
+  if (raw === 'suche an' || raw === 'search on') {
+    const msg = await _searchSetEnabled(true);
+    appendMessage('system', msg);
+    return true;
+  }
+  if (raw === 'suche aus' || raw === 'search off') {
+    const msg = await _searchSetEnabled(false);
+    appendMessage('system', msg);
+    return true;
+  }
+
+  // Neuer Chat
+  if (raw === 'neu' || raw === 'new' || raw === 'neuer chat' || raw === 'new chat') {
+    chatManager.createChat();
+    appendMessage('system', 'Neuer Chat geöffnet.');
+    return true;
+  }
+
+  // Unbekannter Befehl → System-Hinweis, aber trotzdem als normaler Text weiterleiten
+  appendMessage('system',
+    `Unbekannter Befehl \`/${raw}\`. Tippe \`/hilfe\` für alle Befehle.\n` +
+    `Die Nachricht wird dennoch an den Agenten gesendet.`
+  );
+  return false;  // false = weiter normal senden
+}
+
 async function sendMessage() {
   const input = document.getElementById('message-input');
   const text = input.value.trim();
   if (!text) return;
+
+  // ── Slash-Command-Router ─────────────────────────────────────────────────
+  if (text.startsWith('/')) {
+    const handled = await handleChatCommand(text);
+    if (handled) {
+      input.value = '';
+      input.style.height = 'auto';
+      return;
+    }
+  }
+  // ─────────────────────────────────────────────────────────────────────────
 
   const activeChat = chatManager.getActive();
   // Verhindere Doppel-Senden wenn dieser Chat bereits streamt
