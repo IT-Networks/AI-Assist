@@ -123,6 +123,24 @@ async def list_services() -> Dict[str, Any]:
 
 @router.post("/services")
 async def add_service(req: ServiceRequest) -> Dict[str, Any]:
+    from app.utils.path_validator import validate_path_within_base
+
+    # local_script validieren wenn angegeben (Path-Traversal verhindern)
+    if req.local_script:
+        base_path = settings.java.get_active_path() or settings.wlp.repo_path
+        if base_path:
+            is_valid, _, error = validate_path_within_base(req.local_script, base_path)
+            if not is_valid:
+                raise HTTPException(status_code=400, detail=f"Ungültiger local_script: {error}")
+
+    # local_interpreter auf Whitelist prüfen
+    ALLOWED_INTERPRETERS = ("python", "python3", "bash", "sh", "java", "node")
+    if req.local_interpreter and req.local_interpreter not in ALLOWED_INTERPRETERS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Ungültiger local_interpreter. Erlaubt: {', '.join(ALLOWED_INTERPRETERS)}"
+        )
+
     params = [TestServiceParam(**p) for p in req.parameters]
     svc = TestService(
         id=str(uuid.uuid4())[:8],
@@ -142,6 +160,24 @@ async def add_service(req: ServiceRequest) -> Dict[str, Any]:
 
 @router.put("/services/{svc_id}")
 async def update_service(svc_id: str, req: ServiceRequest) -> Dict[str, Any]:
+    from app.utils.path_validator import validate_path_within_base
+
+    # local_script validieren wenn angegeben (Path-Traversal verhindern)
+    if req.local_script:
+        base_path = settings.java.get_active_path() or settings.wlp.repo_path
+        if base_path:
+            is_valid, _, error = validate_path_within_base(req.local_script, base_path)
+            if not is_valid:
+                raise HTTPException(status_code=400, detail=f"Ungültiger local_script: {error}")
+
+    # local_interpreter auf Whitelist prüfen
+    ALLOWED_INTERPRETERS = ("python", "python3", "bash", "sh", "java", "node")
+    if req.local_interpreter and req.local_interpreter not in ALLOWED_INTERPRETERS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Ungültiger local_interpreter. Erlaubt: {', '.join(ALLOWED_INTERPRETERS)}"
+        )
+
     for i, s in enumerate(settings.test_tool.services):
         if s.id == svc_id:
             params = [TestServiceParam(**p) for p in req.parameters]

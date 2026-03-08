@@ -124,6 +124,73 @@ async def lifespan(app: FastAPI):
 
     yield
 
+    # ═══════════════════════════════════════════════════════════════════════════
+    # Shutdown: Cleanup von laufenden Prozessen und Verbindungen
+    # ═══════════════════════════════════════════════════════════════════════════
+    print("[shutdown] Starte Cleanup...")
+
+    # WLP: Laufende Prozesse beenden
+    try:
+        from app.api.routes.wlp import _running_processes
+        if _running_processes:
+            print(f"[shutdown] Beende {len(_running_processes)} WLP-Prozesse...")
+            for server_id, proc in list(_running_processes.items()):
+                try:
+                    proc.terminate()
+                    await asyncio.wait_for(proc.wait(), timeout=5.0)
+                    print(f"[shutdown] WLP-Server '{server_id}' beendet")
+                except asyncio.TimeoutError:
+                    proc.kill()
+                    print(f"[shutdown] WLP-Server '{server_id}' gekillt (Timeout)")
+                except Exception as e:
+                    print(f"[shutdown] WLP-Server '{server_id}' Cleanup-Fehler: {e}")
+            _running_processes.clear()
+    except Exception as e:
+        print(f"[shutdown] WLP-Cleanup fehlgeschlagen: {e}")
+
+    # Maven: Laufende Builds beenden
+    try:
+        from app.api.routes.maven import _running_builds
+        if _running_builds:
+            print(f"[shutdown] Beende {len(_running_builds)} Maven-Builds...")
+            for build_id, proc in list(_running_builds.items()):
+                try:
+                    proc.terminate()
+                    await asyncio.wait_for(proc.wait(), timeout=5.0)
+                    print(f"[shutdown] Maven-Build '{build_id}' beendet")
+                except asyncio.TimeoutError:
+                    proc.kill()
+                    print(f"[shutdown] Maven-Build '{build_id}' gekillt (Timeout)")
+                except Exception as e:
+                    print(f"[shutdown] Maven-Build '{build_id}' Cleanup-Fehler: {e}")
+            _running_builds.clear()
+    except Exception as e:
+        print(f"[shutdown] Maven-Cleanup fehlgeschlagen: {e}")
+
+    # HTTP-Clients schließen
+    try:
+        from app.services.llm_client import close_http_client
+        await close_http_client()
+        print("[shutdown] LLM-Client geschlossen")
+    except Exception as e:
+        print(f"[shutdown] LLM-Client-Cleanup fehlgeschlagen: {e}")
+
+    try:
+        from app.services.confluence_client import close_confluence_client
+        await close_confluence_client()
+        print("[shutdown] Confluence-Client geschlossen")
+    except Exception as e:
+        print(f"[shutdown] Confluence-Client-Cleanup fehlgeschlagen: {e}")
+
+    try:
+        from app.services.jira_client import close_jira_client
+        await close_jira_client()
+        print("[shutdown] Jira-Client geschlossen")
+    except Exception as e:
+        print(f"[shutdown] Jira-Client-Cleanup fehlgeschlagen: {e}")
+
+    print("[shutdown] Cleanup abgeschlossen")
+
 
 app = FastAPI(
     title="AI Code Assistant",

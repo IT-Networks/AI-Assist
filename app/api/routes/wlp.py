@@ -58,6 +58,18 @@ async def list_servers() -> Dict[str, Any]:
 
 @router.post("/servers")
 async def add_server(req: WLPServerRequest) -> Dict[str, Any]:
+    from app.utils.path_validator import validate_identifier
+
+    # wlp_path muss existieren
+    wlp_path = Path(req.wlp_path)
+    if not wlp_path.exists():
+        raise HTTPException(status_code=400, detail=f"WLP-Pfad existiert nicht: {req.wlp_path}")
+
+    # server_name validieren (keine Path-Traversal-Zeichen)
+    is_valid, error = validate_identifier(req.server_name, max_length=64, allow_dots=False)
+    if not is_valid:
+        raise HTTPException(status_code=400, detail=f"Ungültiger server_name: {error}")
+
     srv = WLPServerEntry(id=str(uuid.uuid4())[:8], **req.model_dump())
     settings.wlp.servers.append(srv)
     return {"added": srv.model_dump()}
@@ -65,6 +77,18 @@ async def add_server(req: WLPServerRequest) -> Dict[str, Any]:
 
 @router.put("/servers/{server_id}")
 async def update_server(server_id: str, req: WLPServerRequest) -> Dict[str, Any]:
+    from app.utils.path_validator import validate_identifier
+
+    # wlp_path muss existieren
+    wlp_path = Path(req.wlp_path)
+    if not wlp_path.exists():
+        raise HTTPException(status_code=400, detail=f"WLP-Pfad existiert nicht: {req.wlp_path}")
+
+    # server_name validieren
+    is_valid, error = validate_identifier(req.server_name, max_length=64, allow_dots=False)
+    if not is_valid:
+        raise HTTPException(status_code=400, detail=f"Ungültiger server_name: {error}")
+
     for i, s in enumerate(settings.wlp.servers):
         if s.id == server_id:
             settings.wlp.servers[i] = WLPServerEntry(id=server_id, **req.model_dump())

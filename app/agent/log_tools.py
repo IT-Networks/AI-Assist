@@ -43,13 +43,20 @@ def register_log_tools(registry: ToolRegistry) -> int:
 
     # ── log_find_server ───────────────────────────────────────────────────────
     async def log_find_server(**kwargs: Any) -> ToolResult:
-        import httpx, re
+        import httpx, re, logging
         from datetime import datetime
+        logger = logging.getLogger(__name__)
 
         stage_id: str = kwargs.get("stage_id", "")
         reference_time: str = kwargs.get("reference_time", "")
         search_term: str = kwargs.get("search_term", "")
-        min_score: float = float(kwargs.get("min_score", 60.0))
+
+        # min_score mit Range-Validierung (0-150)
+        try:
+            min_score_raw = float(kwargs.get("min_score", 60.0))
+            min_score: float = max(0.0, min(min_score_raw, 150.0))
+        except (ValueError, TypeError):
+            min_score = 60.0
 
         stage = next((s for s in settings.log_servers.stages if s.id == stage_id), None)
         if not stage:
@@ -237,8 +244,17 @@ def register_log_tools(registry: ToolRegistry) -> int:
     async def log_read_ffdc(**kwargs: Any) -> ToolResult:
         """Liest FFDC-Logs eines WLP-Servers (First Failure Data Capture)."""
         from pathlib import Path
+        import logging
+        logger = logging.getLogger(__name__)
+
         server_id: str = kwargs.get("server_id", "")
-        max_files: int = int(kwargs.get("max_files", 3))
+
+        # max_files mit Range-Validierung (1-20)
+        try:
+            max_files_raw = int(kwargs.get("max_files", 3))
+            max_files: int = max(1, min(max_files_raw, 20))
+        except (ValueError, TypeError):
+            max_files = 3
 
         srv = next((s for s in settings.wlp.servers if s.id == server_id), None)
         if not srv:
@@ -268,6 +284,7 @@ def register_log_tools(registry: ToolRegistry) -> int:
                     "truncated": len(content) > 8000,
                 })
             except Exception as e:
+                logger.warning(f"FFDC-Datei lesen fehlgeschlagen ({fpath.name}): {e}")
                 results.append({"file": fpath.name, "error": str(e)})
 
         return ToolResult(success=True, data={

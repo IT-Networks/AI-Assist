@@ -66,6 +66,21 @@ async def list_builds() -> Dict[str, Any]:
 
 @router.post("/builds")
 async def add_build(req: BuildRequest) -> Dict[str, Any]:
+    from app.utils.path_validator import validate_path_within_base
+
+    # Path-Validierung: pom_path muss innerhalb des Repos liegen
+    base_path = settings.java.get_active_path() or settings.wlp.repo_path
+    if base_path:
+        is_valid, resolved_path, error = validate_path_within_base(
+            req.pom_path, base_path, allow_absolute=True
+        )
+        if not is_valid:
+            raise HTTPException(status_code=400, detail=f"Ungültiger pom_path: {error}")
+    else:
+        # Prüfe ob Pfad existiert
+        if not Path(req.pom_path).exists():
+            raise HTTPException(status_code=400, detail=f"pom_path nicht gefunden: {req.pom_path}")
+
     build = MavenBuild(id=str(uuid.uuid4())[:8], **req.model_dump())
     settings.maven.builds.append(build)
     return {"added": build.model_dump()}
@@ -187,7 +202,21 @@ async def analyze_pom(req: PomAnalyzeRequest) -> Dict[str, Any]:
     Gibt je Dependency an: groupId, artifactId, version, scope,
     bereits vorhandene Exclusions und ob Auskommentieren sicher ist.
     """
-    pom = Path(req.pom_path)
+    from app.utils.path_validator import validate_path_within_base
+
+    # Path-Validierung: pom_path muss innerhalb des Repos liegen
+    base_path = settings.java.get_active_path() or settings.wlp.repo_path
+    if base_path:
+        is_valid, resolved_path, error = validate_path_within_base(
+            req.pom_path, base_path, allow_absolute=True
+        )
+        if not is_valid:
+            raise HTTPException(status_code=400, detail=f"Ungültiger pom_path: {error}")
+        pom = Path(resolved_path)
+    else:
+        # Fallback: nur prüfen ob Pfad existiert (für absolute Pfade ohne Repo)
+        pom = Path(req.pom_path)
+
     if not pom.exists():
         raise HTTPException(status_code=404, detail=f"pom.xml nicht gefunden: {pom}")
 

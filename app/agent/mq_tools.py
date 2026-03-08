@@ -46,14 +46,17 @@ def register_mq_tools(registry: ToolRegistry) -> int:
 
     # ── mq_get_message ────────────────────────────────────────────────────────
     async def mq_get_message(**kwargs: Any) -> ToolResult:
-        import httpx, json
+        import httpx, json, logging
+        logger = logging.getLogger(__name__)
+
         queue_id: str = kwargs.get("queue_id", "")
         extra_headers: dict = kwargs.get("extra_headers", {})
         if isinstance(extra_headers, str):
             try:
                 extra_headers = json.loads(extra_headers)
-            except Exception:
-                extra_headers = {}
+            except json.JSONDecodeError as e:
+                logger.warning(f"MQ: Ungültige extra_headers JSON: {e}")
+                return ToolResult(success=False, error=f"Ungültige extra_headers JSON: {e}")
 
         queue = next((q for q in settings.mq.queues if q.id == queue_id), None)
         if not queue:
@@ -67,14 +70,18 @@ def register_mq_tools(registry: ToolRegistry) -> int:
             text = resp.text
             try:
                 data = resp.json()
-            except Exception:
+            except json.JSONDecodeError:
+                logger.debug("MQ: Response ist kein JSON")
                 data = text
             return ToolResult(
                 success=resp.is_success,
                 data={"status_code": resp.status_code, "body": data, "raw": text[:2000]},
                 error=None if resp.is_success else f"HTTP {resp.status_code}",
             )
+        except httpx.TimeoutException:
+            return ToolResult(success=False, error=f"Timeout nach {queue.timeout_seconds}s")
         except Exception as e:
+            logger.warning(f"MQ get_message Fehler: {e}")
             return ToolResult(success=False, error=str(e))
 
     registry.register(Tool(
@@ -95,7 +102,9 @@ def register_mq_tools(registry: ToolRegistry) -> int:
 
     # ── mq_put_message ────────────────────────────────────────────────────────
     async def mq_put_message(**kwargs: Any) -> ToolResult:
-        import httpx, json
+        import httpx, json, logging
+        logger = logging.getLogger(__name__)
+
         queue_id: str = kwargs.get("queue_id", "")
         body: str = kwargs.get("body", "")
         params_str: str = kwargs.get("template_params", "{}")
@@ -103,12 +112,14 @@ def register_mq_tools(registry: ToolRegistry) -> int:
 
         try:
             template_params = json.loads(params_str) if params_str else {}
-        except Exception:
-            template_params = {}
+        except json.JSONDecodeError as e:
+            logger.warning(f"MQ: Ungültige template_params JSON: {e}")
+            return ToolResult(success=False, error=f"Ungültige template_params JSON: {e}")
         try:
             extra_headers = json.loads(extra_headers_str) if extra_headers_str else {}
-        except Exception:
-            extra_headers = {}
+        except json.JSONDecodeError as e:
+            logger.warning(f"MQ: Ungültige extra_headers JSON: {e}")
+            return ToolResult(success=False, error=f"Ungültige extra_headers JSON: {e}")
 
         queue = next((q for q in settings.mq.queues if q.id == queue_id), None)
         if not queue:
@@ -135,14 +146,18 @@ def register_mq_tools(registry: ToolRegistry) -> int:
             text = resp.text
             try:
                 data = resp.json()
-            except Exception:
+            except json.JSONDecodeError:
+                logger.debug("MQ: Response ist kein JSON")
                 data = text
             return ToolResult(
                 success=resp.is_success,
                 data={"status_code": resp.status_code, "body": data},
                 error=None if resp.is_success else f"HTTP {resp.status_code}: {text[:200]}",
             )
+        except httpx.TimeoutException:
+            return ToolResult(success=False, error=f"Timeout nach {queue.timeout_seconds}s")
         except Exception as e:
+            logger.warning(f"MQ put_message Fehler: {e}")
             return ToolResult(success=False, error=str(e))
 
     registry.register(Tool(

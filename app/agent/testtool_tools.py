@@ -53,16 +53,26 @@ def register_testtool_tools(registry: ToolRegistry) -> int:
     # ── testtool_execute_service ──────────────────────────────────────────────
     async def testtool_execute_service(**kwargs: Any) -> ToolResult:
         import httpx
+        import logging
+        logger = logging.getLogger(__name__)
 
         svc_id: str = kwargs.get("service_id", "")
         params_str: str = kwargs.get("params", "{}")
         stage_url: str = kwargs.get("stage_url", "")
-        timeout: int = int(kwargs.get("timeout_seconds", settings.test_tool.default_timeout_seconds))
 
+        # Timeout mit Range-Validierung (1-300 Sekunden)
+        try:
+            timeout_raw = int(kwargs.get("timeout_seconds", settings.test_tool.default_timeout_seconds))
+            timeout: int = max(1, min(timeout_raw, 300))
+        except (ValueError, TypeError):
+            timeout = settings.test_tool.default_timeout_seconds
+
+        # JSON-Parsing mit Logging statt silent fail
         try:
             params = json.loads(params_str) if params_str else {}
-        except Exception:
-            params = {}
+        except json.JSONDecodeError as e:
+            logger.warning(f"TestTool: Ungültige JSON-Parameter: {e}")
+            return ToolResult(success=False, error=f"Ungültige JSON-Parameter: {e}")
 
         svc = next((s for s in settings.test_tool.services if s.id == svc_id), None)
         if not svc:
@@ -101,7 +111,9 @@ def register_testtool_tools(registry: ToolRegistry) -> int:
         url = base_url + endpoint
 
         try:
-            async with httpx.AsyncClient(timeout=timeout, verify=False) as client:
+            # SSL-Verifizierung aus Config (nicht hardcoded False)
+            verify_ssl = getattr(settings.test_tool, 'verify_ssl', True)
+            async with httpx.AsyncClient(timeout=timeout, verify=verify_ssl) as client:
                 resp = await client.request(
                     method=svc.method,
                     url=url,
@@ -112,7 +124,8 @@ def register_testtool_tools(registry: ToolRegistry) -> int:
             text = resp.text
             try:
                 data = resp.json()
-            except Exception:
+            except json.JSONDecodeError:
+                logger.debug(f"TestTool: Response ist kein JSON, verwende raw text")
                 data = text
 
             return ToolResult(

@@ -82,8 +82,17 @@ def register_wlp_tools(registry: ToolRegistry) -> int:
     # ── wlp_get_logs ──────────────────────────────────────────────────────────
     async def wlp_get_logs(**kwargs: Any) -> ToolResult:
         from pathlib import Path
+        import logging
+        logger = logging.getLogger(__name__)
+
         server_id: str = kwargs.get("server_id", "")
-        lines: int = int(kwargs.get("lines", 100))
+
+        # lines mit Range-Validierung (1-10000)
+        try:
+            lines_raw = int(kwargs.get("lines", 100))
+            lines: int = max(1, min(lines_raw, 10000))
+        except (ValueError, TypeError):
+            lines = 100
 
         srv = next((s for s in settings.wlp.servers if s.id == server_id), None)
         if not srv:
@@ -93,8 +102,12 @@ def register_wlp_tools(registry: ToolRegistry) -> int:
         if not log_path.exists():
             return ToolResult(success=False, error=f"messages.log nicht gefunden: {log_path}")
 
-        with open(log_path, "r", errors="replace") as f:
-            all_lines = f.readlines()
+        try:
+            with open(log_path, "r", errors="replace") as f:
+                all_lines = f.readlines()
+        except Exception as e:
+            logger.warning(f"WLP Log-Datei lesen fehlgeschlagen: {e}")
+            return ToolResult(success=False, error=f"Log-Datei lesen fehlgeschlagen: {e}")
 
         tail = all_lines[-lines:]
         return ToolResult(success=True, data={
