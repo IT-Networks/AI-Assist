@@ -37,6 +37,10 @@ def validate_path_within_base(
 
     user_path = user_path.strip()
 
+    # Null-Byte-Injektion verhindern
+    if "\x00" in user_path or "\n" in user_path or "\r" in user_path:
+        return False, None, "Ungültiger Pfad: enthält Steuerzeichen"
+
     # Verdächtige Muster prüfen
     suspicious_patterns = [
         r"\.\.",           # Parent directory traversal
