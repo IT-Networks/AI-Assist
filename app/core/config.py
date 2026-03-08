@@ -384,6 +384,15 @@ class MavenConfig(BaseModel):
     default_timeout_minutes: int = 15
 
 
+# ══════════════════════════════════════════════════════════════════════════════
+# Web Search
+# ══════════════════════════════════════════════════════════════════════════════
+
+class WebSearchConfig(BaseModel):
+    """Internet-Recherche mit Nutzer-Bestätigungspflicht."""
+    enabled: bool = False
+
+
 class Settings(BaseModel):
     llm: LLMConfig = LLMConfig()
     models: List[ModelEntry] = []
@@ -407,6 +416,7 @@ class Settings(BaseModel):
     log_servers: LogServersConfig = Field(default_factory=LogServersConfig)
     wlp: WLPConfig = Field(default_factory=WLPConfig)
     maven: MavenConfig = Field(default_factory=MavenConfig)
+    search: WebSearchConfig = Field(default_factory=WebSearchConfig)
 
     def apply_env_overrides(self) -> "Settings":
         if os.getenv("LLM_BASE_URL"):

@@ -5,7 +5,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 from pathlib import Path
 
-from app.api.routes import chat, java, logs, pdf, confluence, models, python_routes, handbook, skills, agent, settings, database, datasources, mq, testtool, log_servers, wlp, maven
+from app.api.routes import chat, java, logs, pdf, confluence, models, python_routes, handbook, skills, agent, settings, database, datasources, mq, testtool, log_servers, wlp, maven, search
 
 
 @asynccontextmanager
@@ -119,6 +119,15 @@ async def lifespan(app: FastAPI):
                 print(f"[startup] Log-Tools registriert: {log_count}")
         except Exception as e:
             print(f"[startup] Log-Tools-Registrierung fehlgeschlagen: {e}")
+
+        # Web-Such-Tools registrieren (web_search, web_search_toggle)
+        try:
+            from app.agent.search_tools import register_search_tools
+            search_count = register_search_tools(registry)
+            if search_count:
+                print(f"[startup] Such-Tools registriert: {search_count}")
+        except Exception as e:
+            print(f"[startup] Such-Tools-Registrierung fehlgeschlagen: {e}")
     except Exception as e:
         print(f"[startup] Agent-Initialisierung fehlgeschlagen: {e}")
 
@@ -151,6 +160,7 @@ app.include_router(testtool.router)
 app.include_router(log_servers.router)
 app.include_router(wlp.router)
 app.include_router(maven.router)
+app.include_router(search.router)
 
 
 # ══════════════════════════════════════════════════════════════════════════════

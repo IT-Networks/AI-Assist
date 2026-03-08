@@ -91,6 +91,7 @@
           <button class="settings-nav-item" data-section="log_servers">Log-Server</button>
           <button class="settings-nav-item" data-section="wlp">WLP Server</button>
           <button class="settings-nav-item" data-section="maven">Maven</button>
+          <button class="settings-nav-item" data-section="search">&#128269; Suche</button>
         </nav>
 
         <!-- Settings Content -->
@@ -263,6 +264,9 @@
       <button class="sidebar-tab" data-panel="confirm-panel">
         Bestätigung <span class="badge" id="pending-count" style="display:none">1</span>
       </button>
+      <button class="sidebar-tab" data-panel="search-panel">
+        &#128269; Suche <span class="badge badge-info" id="search-pending-badge" style="display:none">0</span>
+      </button>
       <button class="sidebar-tab" data-panel="mq-panel">MQ</button>
       <button class="sidebar-tab" data-panel="testtool-panel">Test</button>
       <button class="sidebar-tab" data-panel="wlp-panel">WLP</button>
@@ -293,6 +297,15 @@
           <span>&#10003;</span>
           <p>Keine ausstehenden Bestätigungen</p>
         </div>
+        <!-- Ausstehende Suchanfragen -->
+        <div id="pending-searches" style="display:none">
+          <div class="confirm-header">
+            <span class="confirm-icon">&#128269;</span>
+            <span class="confirm-title">Web-Suche Bestätigung</span>
+          </div>
+          <div id="pending-searches-list"></div>
+        </div>
+
         <div id="pending-confirmation" style="display:none">
           <div class="confirm-header">
             <span class="confirm-icon">&#9888;</span>
@@ -322,6 +335,35 @@
         </div>
       </div>
     </div>
+    <!-- Search Panel -->
+    <div class="sidebar-panel" id="search-panel">
+      <div class="panel-header">
+        <span>&#128269; Web-Suche</span>
+        <button class="icon-btn" onclick="loadSearchPanel()" title="Aktualisieren">&#8635;</button>
+      </div>
+      <div class="tool-section">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
+          <span style="font-size:13px;font-weight:500">Status</span>
+          <label class="toggle-switch" title="Web-Suche ein-/ausschalten">
+            <input type="checkbox" id="search-enabled-toggle" onchange="searchToggle(this.checked)">
+            <span class="toggle-slider"></span>
+          </label>
+        </div>
+        <p id="search-status-text" style="font-size:12px;color:var(--text-muted);margin:0 0 8px">
+          Deaktiviert – Agent kann keine Internet-Suchen durchführen
+        </p>
+        <p style="font-size:11px;color:var(--text-muted);border-top:1px solid var(--border);padding-top:8px;margin:0">
+          Jede Suchanfrage muss einzeln bestätigt werden.<br>
+          Interne IPs und Hostnamen werden automatisch geblockt.
+        </p>
+      </div>
+      <div class="panel-content">
+        <div id="search-history-content">
+          <div class="empty-state"><span>&#128269;</span><p>Noch keine Suchanfragen</p></div>
+        </div>
+      </div>
+    </div>
+
     <!-- MQ Panel -->
     <div class="sidebar-panel" id="mq-panel">
       <div class="panel-header">

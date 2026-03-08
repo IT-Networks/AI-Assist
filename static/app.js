@@ -2103,6 +2103,11 @@ function renderSettingsSection() {
     return;
   }
 
+  if (section === 'search') {
+    renderSearchSettingsSection();
+    return;
+  }
+
   const values = settingsState.settings[section];
   const desc = settingsState.descriptions[section] || '';
 
@@ -4473,16 +4478,268 @@ document.addEventListener('DOMContentLoaded', () => {
   // Panel-Tab-Klick-Handler für operative Panels
   document.querySelectorAll('[data-panel]').forEach(tab => {
     const panel = tab.getAttribute('data-panel');
-    if (['mq-panel','testtool-panel','wlp-panel','maven-panel'].includes(panel)) {
+    if (['mq-panel','testtool-panel','wlp-panel','maven-panel','search-panel'].includes(panel)) {
       tab.addEventListener('click', () => {
         if (panel === 'mq-panel') loadMQPanel();
         else if (panel === 'testtool-panel') loadTestToolPanel();
         else if (panel === 'wlp-panel') loadWLPPanel();
         else if (panel === 'maven-panel') loadMavenPanel();
+        else if (panel === 'search-panel') loadSearchPanel();
       });
     }
   });
+
+  // Web-Such-Polling starten (alle 4 Sekunden auf ausstehende Anfragen prüfen)
+  startSearchPolling();
 });
+
+// ══════════════════════════════════════════════════════════════════════════════
+// Web-Suche
+// ══════════════════════════════════════════════════════════════════════════════
+
+let _searchPollInterval = null;
+
+function startSearchPolling() {
+  if (_searchPollInterval) return;
+  _searchPollInterval = setInterval(_pollPendingSearches, 4000);
+  _pollPendingSearches(); // Sofort einmal prüfen
+}
+
+async function _pollPendingSearches() {
+  try {
+    const res = await fetch('/api/search/pending');
+    if (!res.ok) return;
+    const data = await res.json();
+    const pending = data.pending || [];
+
+    // Badge in Sidebar-Tab aktualisieren
+    const badge = document.getElementById('search-pending-badge');
+    if (badge) {
+      badge.textContent = pending.length;
+      badge.style.display = pending.length ? 'inline' : 'none';
+    }
+
+    // Badge in "Bestätigung"-Tab
+    const confirmBadge = document.getElementById('pending-count');
+    if (confirmBadge) {
+      const hasPlan = document.getElementById('pending-confirmation')?.style.display !== 'none';
+      const total = (hasPlan ? 1 : 0) + pending.length;
+      confirmBadge.textContent = total;
+      confirmBadge.style.display = total ? 'inline' : 'none';
+    }
+
+    // Ausstehende Suchen in confirm-panel rendern
+    const searchesDiv = document.getElementById('pending-searches');
+    const searchesList = document.getElementById('pending-searches-list');
+    const noConfirm = document.getElementById('no-confirmation');
+
+    if (!searchesDiv || !searchesList) return;
+
+    if (pending.length === 0) {
+      searchesDiv.style.display = 'none';
+      if (noConfirm && document.getElementById('pending-confirmation')?.style.display === 'none') {
+        noConfirm.style.display = 'flex';
+      }
+      return;
+    }
+
+    if (noConfirm) noConfirm.style.display = 'none';
+    searchesDiv.style.display = 'block';
+    searchesList.innerHTML = pending.map(item => `
+      <div class="search-confirm-card" id="sc-${item.id}">
+        <div style="font-size:12px;font-weight:600;margin-bottom:4px">&#128269; Agent möchte suchen:</div>
+        <div class="sc-query">${escapeHtml(item.query)}</div>
+        ${item.reason ? `<div class="sc-reason">Grund: ${escapeHtml(item.reason)}</div>` : ''}
+        <div class="sc-actions">
+          <button class="btn btn-xs btn-success" onclick="searchConfirm('${item.id}')">&#10003; Bestätigen</button>
+          <button class="btn btn-xs btn-danger" onclick="searchReject('${item.id}')">&#10005; Ablehnen</button>
+        </div>
+      </div>
+    `).join('');
+  } catch (e) {
+    // Kein Netz oder Server nicht erreichbar – still ignorieren
+  }
+}
+
+async function searchConfirm(searchId) {
+  const card = document.getElementById(`sc-${searchId}`);
+  if (card) card.innerHTML = '<div class="spinner-inline"></div> Suche wird ausgeführt...';
+  try {
+    await fetch(`/api/search/confirm/${searchId}`, { method: 'POST' });
+    await _pollPendingSearches();
+    loadSearchPanel(); // History aktualisieren
+  } catch (e) {
+    if (card) card.innerHTML = `<span class="badge badge-error">Fehler: ${e.message}</span>`;
+  }
+}
+
+async function searchReject(searchId) {
+  await fetch(`/api/search/cancel/${searchId}`, { method: 'DELETE' });
+  await _pollPendingSearches();
+}
+
+async function searchToggle(enabled) {
+  await fetch('/api/search/toggle', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ enabled }),
+  });
+  const txt = document.getElementById('search-status-text');
+  if (txt) {
+    txt.textContent = enabled
+      ? 'Aktiviert – Agent kann Internet-Suchen anfragen (Bestätigung erforderlich)'
+      : 'Deaktiviert – Agent kann keine Internet-Suchen durchführen';
+    txt.style.color = enabled ? 'var(--success)' : 'var(--text-muted)';
+  }
+}
+
+async function loadSearchPanel() {
+  try {
+    const [statusRes, histRes] = await Promise.all([
+      fetch('/api/search/status'),
+      fetch('/api/search/history'),
+    ]);
+    const status = await statusRes.json();
+    const hist = await histRes.json();
+
+    // Toggle-Zustand setzen
+    const toggle = document.getElementById('search-enabled-toggle');
+    if (toggle) toggle.checked = status.enabled;
+    const txt = document.getElementById('search-status-text');
+    if (txt) {
+      txt.textContent = status.enabled
+        ? 'Aktiviert – Agent kann Internet-Suchen anfragen (Bestätigung erforderlich)'
+        : 'Deaktiviert – Agent kann keine Internet-Suchen durchführen';
+      txt.style.color = status.enabled ? 'var(--success)' : 'var(--text-muted)';
+    }
+
+    // History rendern
+    const content = document.getElementById('search-history-content');
+    if (!content) return;
+    const history = hist.history || [];
+    if (!history.length) {
+      content.innerHTML = '<div class="empty-state"><span>&#128269;</span><p>Noch keine Suchanfragen</p></div>';
+      return;
+    }
+    content.innerHTML = history.map(item => `
+      <div style="margin-bottom:12px">
+        <div style="font-size:11px;color:var(--text-muted);margin-bottom:4px">
+          ${item.executed_at ? new Date(item.executed_at).toLocaleTimeString('de-DE') : ''} –
+          <span style="font-family:var(--font-mono)">${escapeHtml(item.query)}</span>
+        </div>
+        ${(item.results || []).map(r => `
+          <div class="search-result-card">
+            <div class="sr-title">${escapeHtml(r.title)}</div>
+            ${r.snippet ? `<div class="sr-snippet">${escapeHtml(r.snippet.substring(0, 180))}</div>` : ''}
+            ${r.url ? `<div class="sr-url"><a href="${escapeHtml(r.url)}" target="_blank" rel="noopener">${escapeHtml(r.url.substring(0, 60))}...</a></div>` : ''}
+          </div>
+        `).join('')}
+      </div>
+    `).join('<hr style="border-color:var(--border);margin:8px 0">');
+  } catch (e) {
+    const content = document.getElementById('search-history-content');
+    if (content) content.innerHTML = `<p class="error-hint">Fehler: ${e.message}</p>`;
+  }
+}
+
+// ── Search Settings Section ────────────────────────────────────────────────────
+
+async function renderSearchSettingsSection() {
+  const form = document.getElementById('settings-form');
+  try {
+    const res = await fetch('/api/search/status');
+    const data = await res.json();
+    form.innerHTML = `
+      <div class="settings-section">
+        <h3 class="settings-section-title">WEB-SUCHE</h3>
+        <p class="settings-section-desc">
+          Der Agent kann Internet-Recherchen durchführen (z.B. Fehlercodes nachschlagen).
+          Jede Anfrage muss vom Nutzer einzeln bestätigt werden.
+          Interne IPs, Hostnamen und Dateipfade werden automatisch geblockt.
+        </p>
+      </div>
+      <div class="settings-subsection">
+        <h4>Status</h4>
+        <div style="display:flex;align-items:center;gap:12px;margin-bottom:8px">
+          <label class="toggle-switch">
+            <input type="checkbox" id="search-settings-toggle" ${data.enabled ? 'checked' : ''} onchange="searchSettingsToggle(this.checked)">
+            <span class="toggle-slider"></span>
+          </label>
+          <span id="search-settings-status" style="font-size:13px;color:${data.enabled ? 'var(--success)' : 'var(--text-muted)'}">
+            ${data.enabled ? '&#10003; Aktiviert' : 'Deaktiviert'}
+          </span>
+        </div>
+        <p style="font-size:12px;color:var(--text-muted)">
+          Der Agent kann die Suche auch selbst ein-/ausschalten wenn du schreibst:<br>
+          <code>"Websuche einschalten"</code> oder <code>"Suche ausschalten"</code>
+        </p>
+      </div>
+      <div class="settings-subsection" style="margin-top:16px">
+        <h4>Sicherheitsregeln</h4>
+        <ul style="font-size:12px;color:var(--text-secondary);padding-left:16px;margin:0">
+          <li>Interne IP-Adressen (10.x, 192.168.x, 172.16-31.x) werden geblockt</li>
+          <li>Interne Hostnamen (.local, .intern, .corp, .lan) werden geblockt</li>
+          <li>Lokale Dateipfade werden geblockt</li>
+          <li>Jede Suche erscheint im "Bestätigung"-Panel zur Freigabe</li>
+          <li>Abgelehnte Suchen werden nicht ausgeführt</li>
+        </ul>
+      </div>
+      <div class="settings-subsection" style="margin-top:16px">
+        <h4>Verlauf (letzte Suchen)</h4>
+        <div id="search-settings-history"><div class="spinner-inline"></div></div>
+      </div>
+    `;
+    // History laden
+    const histRes = await fetch('/api/search/history');
+    const histData = await histRes.json();
+    const histEl = document.getElementById('search-settings-history');
+    if (!histEl) return;
+    const history = histData.history || [];
+    if (!history.length) {
+      histEl.innerHTML = '<p class="empty-hint">Noch keine Suchanfragen.</p>';
+      return;
+    }
+    histEl.innerHTML = history.slice(0, 10).map(item => `
+      <div class="ds-item">
+        <div class="ds-item-header">
+          <span class="ds-item-name">${escapeHtml(item.query)}</span>
+          <span class="badge ${item.status === 'done' ? 'badge-success' : 'badge-error'}">${item.status}</span>
+        </div>
+        <div class="ds-item-detail">
+          ${item.reason ? escapeHtml(item.reason) + ' – ' : ''}
+          ${item.results?.length || 0} Ergebnis(se)
+          ${item.executed_at ? '– ' + new Date(item.executed_at).toLocaleString('de-DE') : ''}
+        </div>
+      </div>
+    `).join('');
+  } catch (e) {
+    form.innerHTML = `<p class="error-hint">Fehler: ${e.message}</p>`;
+  }
+}
+
+async function searchSettingsToggle(enabled) {
+  await fetch('/api/search/toggle', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ enabled }),
+  });
+  const el = document.getElementById('search-settings-status');
+  if (el) {
+    el.textContent = enabled ? '✓ Aktiviert' : 'Deaktiviert';
+    el.style.color = enabled ? 'var(--success)' : 'var(--text-muted)';
+  }
+  updateSettingsStatus(enabled ? 'Web-Suche aktiviert ✓' : 'Web-Suche deaktiviert', 'success');
+  // Auch Search-Panel-Toggle synchronisieren
+  const panelToggle = document.getElementById('search-enabled-toggle');
+  if (panelToggle) panelToggle.checked = enabled;
+  const panelTxt = document.getElementById('search-status-text');
+  if (panelTxt) {
+    panelTxt.textContent = enabled
+      ? 'Aktiviert – Agent kann Internet-Suchen anfragen (Bestätigung erforderlich)'
+      : 'Deaktiviert – Agent kann keine Internet-Suchen durchführen';
+    panelTxt.style.color = enabled ? 'var(--success)' : 'var(--text-muted)';
+  }
+}
 
 // Keyboard shortcut to close modal
 document.addEventListener('keydown', (e) => {
