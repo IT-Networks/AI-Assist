@@ -400,6 +400,12 @@ class WebSearchConfig(BaseModel):
 # Jenkins (intern gehostet)
 # ══════════════════════════════════════════════════════════════════════════════
 
+class JenkinsJobPath(BaseModel):
+    """Ein Jenkins Job-Pfad (Ordner-Struktur)."""
+    name: str = ""                  # Anzeigename (z.B. "OSPE", "PKP")
+    path: str = ""                  # Pfad relativ zur base_url (z.B. "job/Verbund/job/OSPE")
+
+
 class JenkinsConfig(BaseModel):
     """Jenkins CI/CD Server Konfiguration (intern gehostet)."""
     enabled: bool = False
@@ -407,7 +413,9 @@ class JenkinsConfig(BaseModel):
     username: str = ""              # Jenkins-Benutzername
     api_token: str = ""             # Jenkins API-Token (statt Passwort)
     verify_ssl: bool = False        # False für interne Server mit Self-Signed Certs
-    default_job: str = ""           # Standard-Job für schnellen Zugriff
+    # Job-Pfade (Ordner-Struktur in Jenkins)
+    job_paths: List[JenkinsJobPath] = []  # z.B. [{"name": "OSPE", "path": "job/Verbund/job/OSPE"}]
+    default_job_path: str = ""      # Name des Standard-Pfads
     job_filter: str = ""            # Optionaler Prefix-Filter (z.B. "MyProject-")
     timeout_seconds: int = 30       # Timeout für API-Calls
     # Sicherheit: Build-Trigger benötigt Bestätigung

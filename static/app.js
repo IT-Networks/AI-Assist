@@ -2456,6 +2456,11 @@ function renderSettingsSection() {
     return;
   }
 
+  if (section === 'jenkins') {
+    renderJenkinsSection();
+    return;
+  }
+
   const values = settingsState.settings[section];
   const desc = settingsState.descriptions[section] || '';
 
@@ -3202,6 +3207,25 @@ async function saveCurrentSection() {
       if (!res.ok) throw new Error(data.detail || 'Fehler');
       settingsState.settings.sub_agents = data.values;
       updateSettingsStatus('Sub-Agenten-Einstellungen angewendet', 'success');
+    } catch (err) {
+      updateSettingsStatus('Fehler: ' + err.message, 'error');
+    }
+    return;
+  }
+
+  // Jenkins hat eigene Felder (job_paths Array)
+  if (section === 'jenkins') {
+    const values = collectJenkinsSettings();
+    try {
+      const res = await fetch('/api/settings/section/jenkins', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(values),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.detail || 'Fehler');
+      settingsState.settings.jenkins = data.values;
+      updateSettingsStatus('Jenkins-Einstellungen angewendet', 'success');
     } catch (err) {
       updateSettingsStatus('Fehler: ' + err.message, 'error');
     }
@@ -5221,6 +5245,234 @@ async function loadSearchPanel() {
     const content = document.getElementById('search-history-content');
     if (content) content.innerHTML = `<p class="error-hint">Fehler: ${e.message}</p>`;
   }
+}
+
+// ── Jenkins Settings Section ────────────────────────────────────────────────────
+
+async function renderJenkinsSection() {
+  const cfg = settingsState.settings.jenkins || {};
+  const jobPaths = cfg.job_paths || [];
+
+  const form = document.getElementById('settings-form');
+  form.innerHTML = `
+    <div class="settings-section">
+      <h3 class="settings-section-title">JENKINS CI/CD</h3>
+      <p class="settings-section-desc">
+        Jenkins CI/CD Server Konfiguration für Build-Status und Job-Ausführung.
+      </p>
+    </div>
+
+    <div class="settings-field">
+      <label for="jenkins-enabled">Aktiviert</label>
+      <label class="checkbox-label">
+        <input type="checkbox" id="jenkins-enabled" ${cfg.enabled ? 'checked' : ''} onchange="markSettingsModified()">
+        ${cfg.enabled ? 'Aktiviert' : 'Deaktiviert'}
+      </label>
+    </div>
+
+    <div class="settings-field">
+      <label for="jenkins-base-url">Base URL</label>
+      <input type="text" id="jenkins-base-url" value="${escapeHtml(cfg.base_url || '')}"
+        placeholder="http://jenkins.intern:8080" onchange="markSettingsModified()" style="font-family:var(--font-mono)">
+    </div>
+
+    <div class="settings-field">
+      <label for="jenkins-username">Benutzername</label>
+      <input type="text" id="jenkins-username" value="${escapeHtml(cfg.username || '')}"
+        placeholder="jenkins-user" onchange="markSettingsModified()">
+    </div>
+
+    <div class="settings-field">
+      <label for="jenkins-token">API Token</label>
+      <input type="password" id="jenkins-token" value="${escapeHtml(cfg.api_token || '')}"
+        placeholder="Jenkins API Token" onchange="markSettingsModified()" autocomplete="off">
+    </div>
+
+    <div class="settings-field">
+      <label for="jenkins-verify-ssl">SSL-Zertifikat prüfen</label>
+      <label class="checkbox-label">
+        <input type="checkbox" id="jenkins-verify-ssl" ${cfg.verify_ssl ? 'checked' : ''} onchange="markSettingsModified()">
+        ${cfg.verify_ssl ? 'Ja' : 'Nein (für Self-Signed Certs)'}
+      </label>
+    </div>
+
+    <div class="settings-section" style="margin-top:20px">
+      <h3 class="settings-section-title">JOB-PFADE</h3>
+      <p class="settings-section-desc">
+        Jenkins Job-Ordner-Pfade (z.B. job/Verbund/job/OSPE). Der Agent sucht Jobs in diesen Pfaden.
+      </p>
+    </div>
+
+    <div id="jenkins-paths-list">
+      ${jobPaths.length ? jobPaths.map((p, i) => `
+        <div class="ds-item" style="margin-bottom:8px">
+          <div class="ds-item-header">
+            <div>
+              <span class="ds-item-name">${escapeHtml(p.name)}</span>
+              ${cfg.default_job_path === p.name ? '<span class="badge badge-success">Standard</span>' : ''}
+            </div>
+            <div class="ds-item-actions">
+              <button class="btn btn-xs btn-secondary" onclick="jenkinsSetDefaultPath('${escapeHtml(p.name)}')">&#9733; Standard</button>
+              <button class="btn btn-xs btn-danger" onclick="jenkinsRemovePath(${i})">&#128465;</button>
+            </div>
+          </div>
+          <div class="ds-item-detail">
+            <code>${escapeHtml(p.path)}</code>
+          </div>
+        </div>
+      `).join('') : '<p class="empty-hint">Keine Job-Pfade konfiguriert.</p>'}
+    </div>
+
+    <div class="ds-add-form" style="margin-top:12px">
+      <h4>Neuen Pfad hinzufügen</h4>
+      <div class="settings-field">
+        <label for="jenkins-new-name">Name</label>
+        <input type="text" id="jenkins-new-name" placeholder="z.B. OSPE, PKP">
+      </div>
+      <div class="settings-field">
+        <label for="jenkins-new-path">Pfad</label>
+        <input type="text" id="jenkins-new-path" placeholder="job/Verbund/job/OSPE" style="font-family:var(--font-mono)">
+      </div>
+      <button class="btn btn-primary" onclick="jenkinsAddPath()">+ Pfad hinzufügen</button>
+    </div>
+
+    <div class="settings-field" style="margin-top:20px">
+      <label for="jenkins-job-filter">Job-Filter (Optional)</label>
+      <input type="text" id="jenkins-job-filter" value="${escapeHtml(cfg.job_filter || '')}"
+        placeholder="Prefix-Filter, z.B. MyProject-" onchange="markSettingsModified()">
+    </div>
+
+    <div class="settings-field">
+      <label for="jenkins-timeout">Timeout (Sekunden)</label>
+      <input type="number" id="jenkins-timeout" value="${cfg.timeout_seconds || 30}"
+        min="5" max="300" onchange="markSettingsModified()">
+    </div>
+
+    <div class="settings-field">
+      <label for="jenkins-confirm-build">Build-Bestätigung erforderlich</label>
+      <label class="checkbox-label">
+        <input type="checkbox" id="jenkins-confirm-build" ${cfg.require_build_confirmation !== false ? 'checked' : ''} onchange="markSettingsModified()">
+        Builds müssen bestätigt werden
+      </label>
+    </div>
+
+    <div class="settings-actions-section" style="margin-top:20px">
+      <button class="btn btn-secondary" onclick="jenkinsTestConnection()">
+        🔌 Verbindung testen
+      </button>
+      <span id="jenkins-test-result" class="test-result"></span>
+    </div>
+  `;
+}
+
+function jenkinsAddPath() {
+  const name = document.getElementById('jenkins-new-name').value.trim();
+  const path = document.getElementById('jenkins-new-path').value.trim();
+
+  if (!name || !path) {
+    updateSettingsStatus('Name und Pfad erforderlich', 'error');
+    return;
+  }
+
+  if (!settingsState.settings.jenkins) {
+    settingsState.settings.jenkins = { job_paths: [] };
+  }
+  if (!settingsState.settings.jenkins.job_paths) {
+    settingsState.settings.jenkins.job_paths = [];
+  }
+
+  // Prüfen ob Name schon existiert
+  if (settingsState.settings.jenkins.job_paths.some(p => p.name === name)) {
+    updateSettingsStatus('Name bereits vorhanden', 'error');
+    return;
+  }
+
+  settingsState.settings.jenkins.job_paths.push({ name, path });
+  markSettingsModified();
+  renderJenkinsSection();
+  updateSettingsStatus('Pfad hinzugefügt', 'success');
+}
+
+function jenkinsRemovePath(idx) {
+  if (!settingsState.settings.jenkins?.job_paths) return;
+  settingsState.settings.jenkins.job_paths.splice(idx, 1);
+  markSettingsModified();
+  renderJenkinsSection();
+}
+
+function jenkinsSetDefaultPath(name) {
+  if (!settingsState.settings.jenkins) {
+    settingsState.settings.jenkins = {};
+  }
+  settingsState.settings.jenkins.default_job_path = name;
+  markSettingsModified();
+  renderJenkinsSection();
+  updateSettingsStatus(`Standard-Pfad: ${name}`, 'success');
+}
+
+async function jenkinsTestConnection() {
+  const resultEl = document.getElementById('jenkins-test-result');
+  resultEl.textContent = '⏳ Teste Verbindung...';
+  resultEl.className = 'test-result testing';
+
+  // Erst die aktuellen Werte speichern
+  const cfg = {
+    enabled: document.getElementById('jenkins-enabled').checked,
+    base_url: document.getElementById('jenkins-base-url').value.trim(),
+    username: document.getElementById('jenkins-username').value.trim(),
+    api_token: document.getElementById('jenkins-token').value,
+    verify_ssl: document.getElementById('jenkins-verify-ssl').checked,
+    job_paths: settingsState.settings.jenkins?.job_paths || [],
+    default_job_path: settingsState.settings.jenkins?.default_job_path || '',
+    job_filter: document.getElementById('jenkins-job-filter').value.trim(),
+    timeout_seconds: parseInt(document.getElementById('jenkins-timeout').value) || 30,
+    require_build_confirmation: document.getElementById('jenkins-confirm-build').checked,
+  };
+
+  if (!cfg.base_url) {
+    resultEl.textContent = '✗ Base URL fehlt';
+    resultEl.className = 'test-result error';
+    return;
+  }
+
+  try {
+    // Temporär speichern für den Test
+    await fetch('/api/settings/section/jenkins', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(cfg)
+    });
+
+    const res = await fetch('/api/jenkins/test', { method: 'POST' });
+    const data = await res.json();
+
+    if (data.success) {
+      resultEl.textContent = `✓ ${data.message || 'Verbindung erfolgreich'}`;
+      resultEl.className = 'test-result success';
+    } else {
+      resultEl.textContent = `✗ ${data.error || 'Verbindung fehlgeschlagen'}`;
+      resultEl.className = 'test-result error';
+    }
+  } catch (e) {
+    resultEl.textContent = `✗ Fehler: ${e.message}`;
+    resultEl.className = 'test-result error';
+  }
+}
+
+// Beim Speichern die Jenkins-Felder sammeln
+function collectJenkinsSettings() {
+  return {
+    enabled: document.getElementById('jenkins-enabled')?.checked || false,
+    base_url: document.getElementById('jenkins-base-url')?.value?.trim() || '',
+    username: document.getElementById('jenkins-username')?.value?.trim() || '',
+    api_token: document.getElementById('jenkins-token')?.value || '',
+    verify_ssl: document.getElementById('jenkins-verify-ssl')?.checked || false,
+    job_paths: settingsState.settings.jenkins?.job_paths || [],
+    default_job_path: settingsState.settings.jenkins?.default_job_path || '',
+    job_filter: document.getElementById('jenkins-job-filter')?.value?.trim() || '',
+    timeout_seconds: parseInt(document.getElementById('jenkins-timeout')?.value) || 30,
+    require_build_confirmation: document.getElementById('jenkins-confirm-build')?.checked !== false,
+  };
 }
 
 // ── Search Settings Section ────────────────────────────────────────────────────
