@@ -46,7 +46,7 @@ class ModelEntryRequest(BaseModel):
 # Helpers
 # ══════════════════════════════════════════════════════════════════════════════
 
-SENSITIVE_FIELDS = {"api_key", "password", "api_token", "secret"}
+SENSITIVE_FIELDS = {"api_key", "password", "api_token", "secret", "token"}
 
 
 def mask_sensitive(data: Dict[str, Any], unmask: bool = False) -> Dict[str, Any]:
@@ -90,6 +90,8 @@ def get_section_schema(section: str) -> Dict[str, Any]:
         "file_operations": "FileOperationsConfig",
         "database": "DatabaseConfig",
         "jira": "JiraConfig",
+        "jenkins": "JenkinsConfig",
+        "github": "GitHubConfig",
     }
 
     if section not in section_classes:
@@ -192,6 +194,8 @@ def _get_section_description(section: str) -> str:
         "database": "DB2-Datenbankverbindung für Abfragen",
         "jira": "Jira-Anbindung für Issue-Suche und -Abruf",
         "sub_agents": "Parallele Sub-Agenten für Datenquellen-Recherche",
+        "jenkins": "Jenkins CI/CD Server (intern gehostet)",
+        "github": "GitHub Enterprise Server (intern gehostet)",
     }
     return descriptions.get(section, "")
 
@@ -337,6 +341,8 @@ def _generate_yaml_with_comments(data: Dict[str, Any]) -> str:
         "skills": "# Skill-System",
         "file_operations": "# Datei-Operationen (Read/Write/Edit wie Claude Code)",
         "database": "# DB2-Datenbankverbindung",
+        "jenkins": "\n# ═══════════════════════════════════════════════════════════════════\n# Jenkins CI/CD (intern gehostet)",
+        "github": "# GitHub Enterprise Server (intern gehostet)",
     }
 
     lines = []

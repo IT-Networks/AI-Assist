@@ -360,14 +360,8 @@ Wichtig:
 
     try:
         messages = [{"role": "user", "content": prompt}]
-        response_text = ""
-        async for chunk in llm.stream_chat(
-            messages=messages,
-            model=model,
-            max_tokens=1500,
-            temperature=0.1,
-        ):
-            response_text += chunk
+        # Nutze chat() statt stream - Response wird eh gesammelt
+        response_text = await llm.chat(messages=messages, model=model)
 
         # JSON aus Response extrahieren
         import re

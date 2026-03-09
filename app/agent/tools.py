@@ -20,6 +20,7 @@ class ToolCategory(str, Enum):
     FILE = "file"
     KNOWLEDGE = "knowledge"
     ANALYSIS = "analysis"
+    DEVOPS = "devops"  # Jenkins, GitHub, CI/CD
 
 
 @dataclass

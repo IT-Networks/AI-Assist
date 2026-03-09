@@ -128,6 +128,24 @@ async def lifespan(app: FastAPI):
                 print(f"[startup] Such-Tools registriert: {search_count}")
         except Exception as e:
             print(f"[startup] Such-Tools-Registrierung fehlgeschlagen: {e}")
+
+        # Jenkins-Tools registrieren
+        try:
+            from app.agent.jenkins_tools import register_jenkins_tools
+            jenkins_count = register_jenkins_tools(registry)
+            if jenkins_count:
+                print(f"[startup] Jenkins-Tools registriert: {jenkins_count}")
+        except Exception as e:
+            print(f"[startup] Jenkins-Tools-Registrierung fehlgeschlagen: {e}")
+
+        # GitHub-Tools registrieren
+        try:
+            from app.agent.github_tools import register_github_tools
+            github_count = register_github_tools(registry)
+            if github_count:
+                print(f"[startup] GitHub-Tools registriert: {github_count}")
+        except Exception as e:
+            print(f"[startup] GitHub-Tools-Registrierung fehlgeschlagen: {e}")
     except Exception as e:
         print(f"[startup] Agent-Initialisierung fehlgeschlagen: {e}")
 

@@ -396,6 +396,52 @@ class WebSearchConfig(BaseModel):
     enabled: bool = False
 
 
+# ══════════════════════════════════════════════════════════════════════════════
+# Jenkins (intern gehostet)
+# ══════════════════════════════════════════════════════════════════════════════
+
+class JenkinsConfig(BaseModel):
+    """Jenkins CI/CD Server Konfiguration (intern gehostet)."""
+    enabled: bool = False
+    base_url: str = ""              # z.B. http://jenkins.intern:8080
+    username: str = ""              # Jenkins-Benutzername
+    api_token: str = ""             # Jenkins API-Token (statt Passwort)
+    verify_ssl: bool = False        # False für interne Server mit Self-Signed Certs
+    default_job: str = ""           # Standard-Job für schnellen Zugriff
+    job_filter: str = ""            # Optionaler Prefix-Filter (z.B. "MyProject-")
+    timeout_seconds: int = 30       # Timeout für API-Calls
+    # Sicherheit: Build-Trigger benötigt Bestätigung
+    require_build_confirmation: bool = True
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# GitHub Enterprise (intern gehostet)
+# ══════════════════════════════════════════════════════════════════════════════
+
+class GitHubConfig(BaseModel):
+    """GitHub Enterprise Server Konfiguration (intern gehostet)."""
+    enabled: bool = False
+    base_url: str = ""              # z.B. https://github.intern.example.com
+    api_url: str = ""               # z.B. https://github.intern.example.com/api/v3 (wird auto-generiert wenn leer)
+    token: str = ""                 # Personal Access Token
+    verify_ssl: bool = False        # False für interne Server mit Self-Signed Certs
+    default_org: str = ""           # Standard-Organisation
+    default_repo: str = ""          # Standard-Repository (Format: owner/repo)
+    timeout_seconds: int = 30       # Timeout für API-Calls
+    max_items: int = 50             # Max. Items bei Listen (PRs, Issues, etc.)
+    # Filter für relevante Daten
+    pr_state_filter: str = "open"   # open | closed | all
+    issue_state_filter: str = "open"  # open | closed | all
+
+    def get_api_url(self) -> str:
+        """Gibt die API-URL zurück (auto-generiert wenn leer)."""
+        if self.api_url:
+            return self.api_url.rstrip("/")
+        if self.base_url:
+            return f"{self.base_url.rstrip('/')}/api/v3"
+        return ""
+
+
 class Settings(BaseModel):
     llm: LLMConfig = LLMConfig()
     models: List[ModelEntry] = []
@@ -420,6 +466,8 @@ class Settings(BaseModel):
     wlp: WLPConfig = Field(default_factory=WLPConfig)
     maven: MavenConfig = Field(default_factory=MavenConfig)
     search: WebSearchConfig = Field(default_factory=WebSearchConfig)
+    jenkins: JenkinsConfig = Field(default_factory=JenkinsConfig)
+    github: GitHubConfig = Field(default_factory=GitHubConfig)
 
     def apply_env_overrides(self) -> "Settings":
         if os.getenv("LLM_BASE_URL"):
