@@ -155,6 +155,15 @@ async def lifespan(app: FastAPI):
                 print(f"[startup] Internal-Fetch-Tools registriert: {if_count}")
         except Exception as e:
             print(f"[startup] Internal-Fetch-Tools-Registrierung fehlgeschlagen: {e}")
+
+        # Git-Tools registrieren (lokale Git-Operationen)
+        try:
+            from app.agent.git_tools import register_git_tools
+            git_count = register_git_tools(registry)
+            if git_count:
+                print(f"[startup] Git-Tools registriert: {git_count}")
+        except Exception as e:
+            print(f"[startup] Git-Tools-Registrierung fehlgeschlagen: {e}")
     except Exception as e:
         print(f"[startup] Agent-Initialisierung fehlgeschlagen: {e}")
 

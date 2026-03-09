@@ -1539,6 +1539,21 @@ Nutze github_search_code wenn der User nach:
 - Nach ähnlichen Implementierungen sucht
 """
 
+        # Git-Tools sind immer verfügbar (Git ist vorausgesetzt)
+        base += """
+**Git (Lokales Repository):**
+- git_status: Zeigt geänderte/ungetrackte Dateien, aktueller Branch
+- git_diff: Zeigt Code-Änderungen (Working Dir, Staged, zwischen Commits)
+- git_log: Commit-Historie anzeigen (mit Filter nach Autor, Datei, Zeit)
+- git_branch_list: Alle Branches auflisten
+- git_blame: Wer hat welche Zeile geändert?
+- git_show_commit: Vollständige Commit-Details mit Diff
+
+WICHTIG: git_* Tools sind für LOKALE Repos. Für REMOTE GitHub: github_* Tools verwenden.
+Nutze git_status/git_diff wenn der User wissen will was sich geändert hat.
+Nutze git_blame um herauszufinden wer Code geschrieben hat.
+"""
+
         if db_available:
             base += f"""
 **Datenbank (DB2):**
