@@ -5,7 +5,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 from pathlib import Path
 
-from app.api.routes import chat, java, logs, pdf, confluence, models, python_routes, handbook, skills, agent, settings, database, datasources, mq, testtool, log_servers, wlp, maven, search, jenkins
+from app.api.routes import chat, java, logs, pdf, confluence, models, python_routes, handbook, skills, agent, settings, database, datasources, mq, testtool, log_servers, wlp, maven, search, jenkins, github
 
 
 @asynccontextmanager
@@ -247,6 +247,7 @@ app.include_router(wlp.router)
 app.include_router(maven.router)
 app.include_router(search.router)
 app.include_router(jenkins.router)
+app.include_router(github.router)
 
 
 # ══════════════════════════════════════════════════════════════════════════════

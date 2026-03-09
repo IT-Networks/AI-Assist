@@ -433,11 +433,10 @@ class GitHubConfig(BaseModel):
     """GitHub Enterprise Server Konfiguration (intern gehostet)."""
     enabled: bool = False
     base_url: str = ""              # z.B. https://github.intern.example.com
-    api_url: str = ""               # z.B. https://github.intern.example.com/api/v3 (wird auto-generiert wenn leer)
     token: str = ""                 # Personal Access Token
     verify_ssl: bool = False        # False für interne Server mit Self-Signed Certs
-    default_org: str = ""           # Standard-Organisation
-    default_repo: str = ""          # Standard-Repository (Format: owner/repo)
+    default_org: str = ""           # Standard-Organisation für Repo-Listen
+    default_repo: str = ""          # Standard-Repository (Format: org/repo)
     timeout_seconds: int = 30       # Timeout für API-Calls
     max_items: int = 50             # Max. Items bei Listen (PRs, Issues, etc.)
     # Filter für relevante Daten
@@ -445,9 +444,7 @@ class GitHubConfig(BaseModel):
     issue_state_filter: str = "open"  # open | closed | all
 
     def get_api_url(self) -> str:
-        """Gibt die API-URL zurück (auto-generiert wenn leer)."""
-        if self.api_url:
-            return self.api_url.rstrip("/")
+        """Gibt die API-URL zurück (base_url + /api/v3)."""
         if self.base_url:
             return f"{self.base_url.rstrip('/')}/api/v3"
         return ""

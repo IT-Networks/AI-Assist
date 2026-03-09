@@ -2462,6 +2462,11 @@ function renderSettingsSection() {
     return;
   }
 
+  if (section === 'github') {
+    renderGitHubSection();
+    return;
+  }
+
   const values = settingsState.settings[section];
   const desc = settingsState.descriptions[section] || '';
 
@@ -3227,6 +3232,25 @@ async function saveCurrentSection() {
       if (!res.ok) throw new Error(data.detail || 'Fehler');
       settingsState.settings.jenkins = data.values;
       updateSettingsStatus('Jenkins-Einstellungen angewendet', 'success');
+    } catch (err) {
+      updateSettingsStatus('Fehler: ' + err.message, 'error');
+    }
+    return;
+  }
+
+  // GitHub hat eigene Felder
+  if (section === 'github') {
+    const values = collectGitHubSettings();
+    try {
+      const res = await fetch('/api/settings/section/github', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(values),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.detail || 'Fehler');
+      settingsState.settings.github = data.values;
+      updateSettingsStatus('GitHub-Einstellungen angewendet', 'success');
     } catch (err) {
       updateSettingsStatus('Fehler: ' + err.message, 'error');
     }
@@ -5246,6 +5270,157 @@ async function loadSearchPanel() {
     const content = document.getElementById('search-history-content');
     if (content) content.innerHTML = `<p class="error-hint">Fehler: ${e.message}</p>`;
   }
+}
+
+// ── GitHub Settings Section ──────────────────────────────────────────────────────
+
+async function renderGitHubSection() {
+  const cfg = settingsState.settings.github || {};
+
+  const form = document.getElementById('settings-form');
+  form.innerHTML = `
+    <div class="settings-section">
+      <h3 class="settings-section-title">GITHUB ENTERPRISE</h3>
+      <p class="settings-section-desc">
+        GitHub Enterprise Server für Repository-, PR- und Issue-Abfragen.
+      </p>
+    </div>
+
+    <div class="settings-field">
+      <label for="github-enabled">Aktiviert</label>
+      <label class="checkbox-label">
+        <input type="checkbox" id="github-enabled" ${cfg.enabled ? 'checked' : ''} onchange="markSettingsModified()">
+        ${cfg.enabled ? 'Aktiviert' : 'Deaktiviert'}
+      </label>
+    </div>
+
+    <div class="settings-field">
+      <label for="github-base-url">Server URL</label>
+      <input type="text" id="github-base-url" value="${escapeHtml(cfg.base_url || '')}"
+        placeholder="https://github.intern.example.com" onchange="markSettingsModified()" style="font-family:var(--font-mono)">
+      <small style="color:var(--text-muted)">API-URL wird automatisch als /api/v3 angehängt</small>
+    </div>
+
+    <div class="settings-field">
+      <label for="github-token">Personal Access Token</label>
+      <input type="password" id="github-token" value="${escapeHtml(cfg.token || '')}"
+        placeholder="ghp_xxxxxxxxxxxx" onchange="markSettingsModified()" autocomplete="off">
+    </div>
+
+    <div class="settings-field">
+      <label for="github-verify-ssl">SSL-Zertifikat prüfen</label>
+      <label class="checkbox-label">
+        <input type="checkbox" id="github-verify-ssl" ${cfg.verify_ssl ? 'checked' : ''} onchange="markSettingsModified()">
+        ${cfg.verify_ssl ? 'Ja' : 'Nein (für Self-Signed Certs)'}
+      </label>
+    </div>
+
+    <div class="settings-section" style="margin-top:20px">
+      <h3 class="settings-section-title">STANDARD-WERTE</h3>
+      <p class="settings-section-desc">
+        Diese Werte werden verwendet, wenn der Agent keine expliziten Angaben macht.
+      </p>
+    </div>
+
+    <div class="settings-field">
+      <label for="github-default-org">Standard-Organisation</label>
+      <input type="text" id="github-default-org" value="${escapeHtml(cfg.default_org || '')}"
+        placeholder="z.B. IT-Networks" onchange="markSettingsModified()">
+      <small style="color:var(--text-muted)">Wird für github_list_repos verwendet</small>
+    </div>
+
+    <div class="settings-field">
+      <label for="github-default-repo">Standard-Repository</label>
+      <input type="text" id="github-default-repo" value="${escapeHtml(cfg.default_repo || '')}"
+        placeholder="z.B. IT-Networks/AI-Assist" onchange="markSettingsModified()" style="font-family:var(--font-mono)">
+      <small style="color:var(--text-muted)">Format: org/repo - für PRs, Issues, Branches</small>
+    </div>
+
+    <div class="settings-field">
+      <label for="github-timeout">Timeout (Sekunden)</label>
+      <input type="number" id="github-timeout" value="${cfg.timeout_seconds || 30}"
+        min="5" max="120" onchange="markSettingsModified()">
+    </div>
+
+    <div class="settings-field">
+      <label for="github-max-items">Max. Einträge pro Liste</label>
+      <input type="number" id="github-max-items" value="${cfg.max_items || 50}"
+        min="10" max="100" onchange="markSettingsModified()">
+    </div>
+
+    <div class="settings-actions-section" style="margin-top:20px">
+      <button class="btn btn-secondary" onclick="githubTestConnection()">
+        🔌 Verbindung testen
+      </button>
+      <span id="github-test-result" class="test-result"></span>
+    </div>
+  `;
+}
+
+async function githubTestConnection() {
+  const resultEl = document.getElementById('github-test-result');
+  resultEl.textContent = '⏳ Teste Verbindung...';
+  resultEl.className = 'test-result testing';
+
+  // Erst die aktuellen Werte speichern
+  const cfg = {
+    enabled: document.getElementById('github-enabled').checked,
+    base_url: document.getElementById('github-base-url').value.trim(),
+    token: document.getElementById('github-token').value,
+    verify_ssl: document.getElementById('github-verify-ssl').checked,
+    default_org: document.getElementById('github-default-org').value.trim(),
+    default_repo: document.getElementById('github-default-repo').value.trim(),
+    timeout_seconds: parseInt(document.getElementById('github-timeout').value) || 30,
+    max_items: parseInt(document.getElementById('github-max-items').value) || 50,
+  };
+
+  if (!cfg.base_url) {
+    resultEl.textContent = '✗ Server URL fehlt';
+    resultEl.className = 'test-result error';
+    return;
+  }
+
+  try {
+    // Temporär speichern für den Test
+    await fetch('/api/settings/section/github', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(cfg)
+    });
+
+    const res = await fetch('/api/github/test', { method: 'POST' });
+    const data = await res.json();
+
+    if (data.success) {
+      let msg = `✓ ${data.message}`;
+      if (data.org?.status === 'ok') {
+        msg += ` | Org: ${data.org.name} (${data.org.public_repos} Repos)`;
+      } else if (data.org?.status === 'error') {
+        msg += ` | ⚠ Org-Fehler: ${data.org.error}`;
+      }
+      resultEl.textContent = msg;
+      resultEl.className = 'test-result success';
+    } else {
+      resultEl.textContent = `✗ ${data.error || 'Verbindung fehlgeschlagen'}`;
+      resultEl.className = 'test-result error';
+    }
+  } catch (e) {
+    resultEl.textContent = `✗ Fehler: ${e.message}`;
+    resultEl.className = 'test-result error';
+  }
+}
+
+function collectGitHubSettings() {
+  return {
+    enabled: document.getElementById('github-enabled')?.checked || false,
+    base_url: document.getElementById('github-base-url')?.value?.trim() || '',
+    token: document.getElementById('github-token')?.value || '',
+    verify_ssl: document.getElementById('github-verify-ssl')?.checked || false,
+    default_org: document.getElementById('github-default-org')?.value?.trim() || '',
+    default_repo: document.getElementById('github-default-repo')?.value?.trim() || '',
+    timeout_seconds: parseInt(document.getElementById('github-timeout')?.value) || 30,
+    max_items: parseInt(document.getElementById('github-max-items')?.value) || 50,
+  };
 }
 
 // ── Jenkins Settings Section ────────────────────────────────────────────────────
