@@ -73,30 +73,99 @@
       <div class="settings-layout">
         <!-- Settings Navigation -->
         <nav class="settings-nav">
-          <button class="settings-nav-item active" data-section="llm">LLM</button>
-          <button class="settings-nav-item" data-section="models">Modelle</button>
-          <button class="settings-nav-item" data-section="agent_tools">Agent Tools</button>
-          <button class="settings-nav-item" data-section="java">Java</button>
-          <button class="settings-nav-item" data-section="python">Python</button>
-          <button class="settings-nav-item" data-section="confluence">Confluence</button>
-          <button class="settings-nav-item" data-section="handbook">Handbuch</button>
-          <button class="settings-nav-item" data-section="database">Datenbank</button>
-          <button class="settings-nav-item" data-section="jira">Jira</button>
-          <button class="settings-nav-item" data-section="skills">Skills</button>
-          <button class="settings-nav-item" data-section="sub_agents">Sub-Agenten</button>
-          <button class="settings-nav-item" data-section="file_operations">Datei-Ops</button>
-          <button class="settings-nav-item" data-section="index">Index</button>
-          <button class="settings-nav-item" data-section="server">Server</button>
-          <button class="settings-nav-item" data-section="data_sources">Datenquellen</button>
-          <div class="settings-nav-separator"></div>
-          <button class="settings-nav-item" data-section="mq">MQ Series</button>
-          <button class="settings-nav-item" data-section="test_tool">Test-Tool</button>
-          <button class="settings-nav-item" data-section="log_servers">Log-Server</button>
-          <button class="settings-nav-item" data-section="wlp">WLP Server</button>
-          <button class="settings-nav-item" data-section="maven">Maven</button>
-          <button class="settings-nav-item" data-section="jenkins">Jenkins</button>
-          <button class="settings-nav-item" data-section="github">GitHub</button>
-          <button class="settings-nav-item" data-section="search">&#128269; Suche</button>
+          <!-- Search -->
+          <div class="settings-nav-search">
+            <input type="text" id="settings-search" placeholder="&#128269; Suchen..." onkeyup="filterSettingsNav(this.value)">
+          </div>
+
+          <!-- KI & Modelle -->
+          <div class="settings-nav-category expanded" data-category="ai">
+            <button class="settings-nav-category-header" onclick="toggleSettingsCategory('ai')">
+              <span class="category-icon">&#129302;</span>
+              <span class="category-label">KI & Modelle</span>
+              <span class="category-arrow">&#9662;</span>
+            </button>
+            <div class="settings-nav-category-items">
+              <button class="settings-nav-item active" data-section="llm">LLM</button>
+              <button class="settings-nav-item" data-section="models">Modelle</button>
+              <button class="settings-nav-item" data-section="sub_agents">Sub-Agenten</button>
+            </div>
+          </div>
+
+          <!-- Agent -->
+          <div class="settings-nav-category" data-category="agent">
+            <button class="settings-nav-category-header" onclick="toggleSettingsCategory('agent')">
+              <span class="category-icon">&#9881;</span>
+              <span class="category-label">Agent</span>
+              <span class="category-arrow">&#9656;</span>
+            </button>
+            <div class="settings-nav-category-items">
+              <button class="settings-nav-item" data-section="agent_tools">Agent Tools</button>
+              <button class="settings-nav-item" data-section="skills">Skills</button>
+              <button class="settings-nav-item" data-section="file_operations">Datei-Ops</button>
+            </div>
+          </div>
+
+          <!-- Entwicklung -->
+          <div class="settings-nav-category" data-category="dev">
+            <button class="settings-nav-category-header" onclick="toggleSettingsCategory('dev')">
+              <span class="category-icon">&#128187;</span>
+              <span class="category-label">Entwicklung</span>
+              <span class="category-arrow">&#9656;</span>
+            </button>
+            <div class="settings-nav-category-items">
+              <button class="settings-nav-item" data-section="java">Java</button>
+              <button class="settings-nav-item" data-section="python">Python</button>
+              <button class="settings-nav-item" data-section="maven">Maven</button>
+              <button class="settings-nav-item" data-section="github">GitHub</button>
+            </div>
+          </div>
+
+          <!-- Datenquellen -->
+          <div class="settings-nav-category" data-category="data">
+            <button class="settings-nav-category-header" onclick="toggleSettingsCategory('data')">
+              <span class="category-icon">&#128218;</span>
+              <span class="category-label">Datenquellen</span>
+              <span class="category-arrow">&#9656;</span>
+            </button>
+            <div class="settings-nav-category-items">
+              <button class="settings-nav-item" data-section="database">Datenbank</button>
+              <button class="settings-nav-item" data-section="confluence">Confluence</button>
+              <button class="settings-nav-item" data-section="handbook">Handbuch</button>
+              <button class="settings-nav-item" data-section="jira">Jira</button>
+              <button class="settings-nav-item" data-section="index">Index</button>
+              <button class="settings-nav-item" data-section="data_sources">Datenquellen</button>
+            </div>
+          </div>
+
+          <!-- Server & Infra -->
+          <div class="settings-nav-category" data-category="server">
+            <button class="settings-nav-category-header" onclick="toggleSettingsCategory('server')">
+              <span class="category-icon">&#128421;</span>
+              <span class="category-label">Server & Infra</span>
+              <span class="category-arrow">&#9656;</span>
+            </button>
+            <div class="settings-nav-category-items">
+              <button class="settings-nav-item" data-section="server">Server</button>
+              <button class="settings-nav-item" data-section="wlp">WLP Server</button>
+              <button class="settings-nav-item" data-section="log_servers">Log-Server</button>
+              <button class="settings-nav-item" data-section="test_tool">Test-Tool</button>
+            </div>
+          </div>
+
+          <!-- Integrationen -->
+          <div class="settings-nav-category" data-category="integrations">
+            <button class="settings-nav-category-header" onclick="toggleSettingsCategory('integrations')">
+              <span class="category-icon">&#128279;</span>
+              <span class="category-label">Integrationen</span>
+              <span class="category-arrow">&#9656;</span>
+            </button>
+            <div class="settings-nav-category-items">
+              <button class="settings-nav-item" data-section="mq">MQ Series</button>
+              <button class="settings-nav-item" data-section="jenkins">Jenkins</button>
+              <button class="settings-nav-item" data-section="search">Web-Suche</button>
+            </div>
+          </div>
         </nav>
 
         <!-- Settings Content -->

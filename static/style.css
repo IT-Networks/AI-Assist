@@ -1743,6 +1743,109 @@ body {
   border-left-color: var(--accent);
 }
 
+/* Settings Nav Search */
+.settings-nav-search {
+  padding: 8px 12px 12px;
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 8px;
+}
+
+.settings-nav-search input {
+  width: 100%;
+  padding: 6px 10px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg);
+  color: var(--text);
+  font-size: 0.85rem;
+}
+
+.settings-nav-search input:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+/* Settings Nav Categories */
+.settings-nav-category {
+  margin-bottom: 2px;
+}
+
+.settings-nav-category-header {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  padding: 10px 12px;
+  background: none;
+  border: none;
+  text-align: left;
+  color: var(--text);
+  font-size: 0.9rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.15s;
+  gap: 8px;
+}
+
+.settings-nav-category-header:hover {
+  background: var(--surface-hover);
+}
+
+.category-icon {
+  font-size: 1rem;
+  width: 20px;
+  text-align: center;
+}
+
+.category-label {
+  flex: 1;
+}
+
+.category-arrow {
+  font-size: 0.7rem;
+  color: var(--text-secondary);
+  transition: transform 0.2s;
+}
+
+.settings-nav-category.expanded .category-arrow {
+  transform: rotate(0deg);
+}
+
+.settings-nav-category:not(.expanded) .category-arrow {
+  transform: rotate(-90deg);
+}
+
+.settings-nav-category-items {
+  display: none;
+  padding-left: 12px;
+}
+
+.settings-nav-category.expanded .settings-nav-category-items {
+  display: block;
+}
+
+.settings-nav-category-items .settings-nav-item {
+  padding: 8px 12px 8px 20px;
+  font-size: 0.85rem;
+  border-left: 2px solid transparent;
+}
+
+.settings-nav-category-items .settings-nav-item:hover {
+  border-left-color: var(--border);
+}
+
+.settings-nav-category-items .settings-nav-item.active {
+  border-left-color: var(--accent);
+}
+
+/* Hide items when searching */
+.settings-nav-category.search-hidden {
+  display: none;
+}
+
+.settings-nav-item.search-hidden {
+  display: none;
+}
+
 .settings-content {
   flex: 1;
   padding: 20px;

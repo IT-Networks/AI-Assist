@@ -2371,10 +2371,112 @@ const settingsState = {
   }
 };
 
+// ── Settings Navigation Categories ─────────────────────────────────────────────
+
+function toggleSettingsCategory(categoryId) {
+  const category = document.querySelector(`.settings-nav-category[data-category="${categoryId}"]`);
+  if (!category) return;
+
+  category.classList.toggle('expanded');
+
+  // Update arrow
+  const arrow = category.querySelector('.category-arrow');
+  if (arrow) {
+    arrow.innerHTML = category.classList.contains('expanded') ? '&#9662;' : '&#9656;';
+  }
+
+  // Save state to localStorage
+  saveSettingsCategoryState();
+}
+
+function saveSettingsCategoryState() {
+  const expandedCategories = [];
+  document.querySelectorAll('.settings-nav-category.expanded').forEach(cat => {
+    expandedCategories.push(cat.dataset.category);
+  });
+  localStorage.setItem('settings-expanded-categories', JSON.stringify(expandedCategories));
+}
+
+function restoreSettingsCategoryState() {
+  const saved = localStorage.getItem('settings-expanded-categories');
+  if (saved) {
+    try {
+      const expandedCategories = JSON.parse(saved);
+      document.querySelectorAll('.settings-nav-category').forEach(cat => {
+        const isExpanded = expandedCategories.includes(cat.dataset.category);
+        cat.classList.toggle('expanded', isExpanded);
+        const arrow = cat.querySelector('.category-arrow');
+        if (arrow) {
+          arrow.innerHTML = isExpanded ? '&#9662;' : '&#9656;';
+        }
+      });
+    } catch (e) {
+      console.warn('Could not restore settings category state:', e);
+    }
+  }
+}
+
+function expandCategoryForSection(section) {
+  // Find the category containing this section and expand it
+  const item = document.querySelector(`.settings-nav-item[data-section="${section}"]`);
+  if (item) {
+    const category = item.closest('.settings-nav-category');
+    if (category && !category.classList.contains('expanded')) {
+      category.classList.add('expanded');
+      const arrow = category.querySelector('.category-arrow');
+      if (arrow) {
+        arrow.innerHTML = '&#9662;';
+      }
+    }
+  }
+}
+
+function filterSettingsNav(query) {
+  const q = query.toLowerCase().trim();
+
+  document.querySelectorAll('.settings-nav-category').forEach(category => {
+    let hasVisibleItems = false;
+
+    category.querySelectorAll('.settings-nav-item').forEach(item => {
+      const text = item.textContent.toLowerCase();
+      const section = item.dataset.section.toLowerCase();
+      const matches = !q || text.includes(q) || section.includes(q);
+
+      item.classList.toggle('search-hidden', !matches);
+      if (matches) hasVisibleItems = true;
+    });
+
+    // Also check category label
+    const label = category.querySelector('.category-label');
+    if (label && label.textContent.toLowerCase().includes(q)) {
+      hasVisibleItems = true;
+      // Show all items in matching category
+      category.querySelectorAll('.settings-nav-item').forEach(item => {
+        item.classList.remove('search-hidden');
+      });
+    }
+
+    category.classList.toggle('search-hidden', !hasVisibleItems);
+
+    // Auto-expand categories with matches during search
+    if (q && hasVisibleItems) {
+      category.classList.add('expanded');
+      const arrow = category.querySelector('.category-arrow');
+      if (arrow) arrow.innerHTML = '&#9662;';
+    }
+  });
+}
+
 async function openSettings() {
   const modal = document.getElementById('settings-modal');
   modal.style.display = 'flex';
   document.body.style.overflow = 'hidden';
+
+  // Restore category expansion state
+  restoreSettingsCategoryState();
+
+  // Expand category for current section
+  expandCategoryForSection(settingsState.currentSection);
 
   // Setup navigation
   document.querySelectorAll('.settings-nav-item').forEach(btn => {
@@ -2395,6 +2497,13 @@ function closeSettings() {
   document.body.style.overflow = '';
   settingsState.modified = false;
   updateSettingsStatus('');
+
+  // Reset search field
+  const searchInput = document.getElementById('settings-search');
+  if (searchInput) {
+    searchInput.value = '';
+    filterSettingsNav('');
+  }
 }
 
 async function loadSettings() {

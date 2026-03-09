@@ -15,12 +15,133 @@ Routing:
 
 import asyncio
 import json
+import re
 import time
 import uuid
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
+import httpx
+
 from app.core.config import settings
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Text-basierter Tool-Call-Parser (Fallback für Modelle ohne natives Tool-Calling)
+# ══════════════════════════════════════════════════════════════════════════════
+
+def _parse_text_tool_calls(content: str, allowed_tools: List[str]) -> List[Dict]:
+    """
+    Parst Tool-Calls aus dem Text-Content von Modellen ohne natives Tool-Calling.
+
+    Unterstützte Formate:
+    1. Mistral Compact: [TOOL_CALLS]funcname{"arg": "val"}
+    2. Mistral Standard: [TOOL_CALLS] [{"name": "func", "arguments": {...}}]
+    3. XML: <tool_call>{"name": "func", "arguments": {...}}</tool_call>
+    4. JSON-Block: ```json\n{"name": "func", ...}\n```
+    """
+    if not content:
+        return []
+
+    tool_names = set(allowed_tools) if allowed_tools else set()
+    parsed_calls = []
+
+    # Format 1a: Mistral Compact Format
+    mistral_compact_matches = re.findall(
+        r'\[TOOL_CALLS\](\w+)(\{.*?\}|\[.*?\])',
+        content,
+        re.DOTALL
+    )
+    if mistral_compact_matches:
+        for name, args_str in mistral_compact_matches:
+            if not tool_names or name in tool_names:
+                try:
+                    args = json.loads(args_str)
+                    parsed_calls.append({
+                        "id": f"call_{uuid.uuid4().hex[:8]}",
+                        "type": "function",
+                        "function": {
+                            "name": name,
+                            "arguments": json.dumps(args) if isinstance(args, dict) else args_str
+                        }
+                    })
+                except json.JSONDecodeError:
+                    parsed_calls.append({
+                        "id": f"call_{uuid.uuid4().hex[:8]}",
+                        "type": "function",
+                        "function": {"name": name, "arguments": args_str}
+                    })
+        if parsed_calls:
+            return parsed_calls
+
+    # Format 1b: Mistral Standard Format
+    mistral_match = re.search(r'\[TOOL_CALLS\]\s*(\[.*?\])', content, re.DOTALL)
+    if mistral_match:
+        try:
+            calls = json.loads(mistral_match.group(1))
+            if isinstance(calls, list):
+                for call in calls:
+                    name = call.get("name") or call.get("function")
+                    args = call.get("arguments") or call.get("parameters") or {}
+                    if name and (not tool_names or name in tool_names):
+                        parsed_calls.append({
+                            "id": f"call_{uuid.uuid4().hex[:8]}",
+                            "type": "function",
+                            "function": {
+                                "name": name,
+                                "arguments": json.dumps(args) if isinstance(args, dict) else args
+                            }
+                        })
+            if parsed_calls:
+                return parsed_calls
+        except (json.JSONDecodeError, KeyError):
+            pass
+
+    # Format 2: XML <tool_call> oder <functioncall>
+    xml_matches = re.findall(
+        r'<(?:tool_call|functioncall)>(.*?)</(?:tool_call|functioncall)>',
+        content,
+        re.DOTALL | re.IGNORECASE
+    )
+    for match in xml_matches:
+        try:
+            data = json.loads(match.strip())
+            name = data.get("name") or data.get("function")
+            args = data.get("arguments") or data.get("parameters") or {}
+            if name and (not tool_names or name in tool_names):
+                parsed_calls.append({
+                    "id": f"call_{uuid.uuid4().hex[:8]}",
+                    "type": "function",
+                    "function": {
+                        "name": name,
+                        "arguments": json.dumps(args) if isinstance(args, dict) else str(args)
+                    }
+                })
+        except (json.JSONDecodeError, KeyError):
+            pass
+    if parsed_calls:
+        return parsed_calls
+
+    # Format 3: JSON-Block mit Tool-Call-Struktur
+    json_blocks = re.findall(r'```(?:json)?\s*(\{.*?\})\s*```', content, re.DOTALL)
+    for block in json_blocks:
+        try:
+            data = json.loads(block)
+            name = data.get("name") or data.get("tool") or data.get("function")
+            args = data.get("arguments") or data.get("parameters") or data.get("args") or {}
+            if name and (not tool_names or name in tool_names):
+                parsed_calls.append({
+                    "id": f"call_{uuid.uuid4().hex[:8]}",
+                    "type": "function",
+                    "function": {
+                        "name": name,
+                        "arguments": json.dumps(args) if isinstance(args, dict) else str(args)
+                    }
+                })
+        except (json.JSONDecodeError, KeyError):
+            pass
+
+    return parsed_calls
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -156,6 +277,15 @@ class SubAgent:
                     duration_ms=int(time.time() * 1000) - start_ms,
                 )
 
+            # Fallback: Text-basiertes Tool-Call-Parsing für Modelle ohne natives Tool-Calling
+            native_tools = bool(tool_calls_raw)
+            if not tool_calls_raw and response_text:
+                text_tool_calls = _parse_text_tool_calls(response_text, self.allowed_tools)
+                if text_tool_calls:
+                    print(f"[sub_agent:{self.name}] Text-Parser erkannte {len(text_tool_calls)} Tool-Calls")
+                    tool_calls_raw = text_tool_calls
+                    native_tools = False
+
             # Keine Tool-Calls mehr → Agent ist fertig
             if not tool_calls_raw:
                 # Versuche JSON aus der Antwort zu parsen
@@ -163,8 +293,21 @@ class SubAgent:
                 break
 
             # Tool-Calls ausführen
-            messages.append({"role": "assistant", "content": response_text or "", "tool_calls": tool_calls_raw})
+            if native_tools:
+                # OpenAI-kompatibles Format: content muss None sein wenn tool_calls vorhanden
+                messages.append({
+                    "role": "assistant",
+                    "content": response_text if response_text else None,
+                    "tool_calls": tool_calls_raw
+                })
+            else:
+                # Text-basiertes Format: Kein tool_calls-Feld im assistant-Message
+                messages.append({
+                    "role": "assistant",
+                    "content": response_text or ""
+                })
 
+            tool_results = []
             for tc in tool_calls_raw:
                 tc_name = tc.get("function", {}).get("name", "")
                 tc_args_raw = tc.get("function", {}).get("arguments", "{}")
@@ -186,10 +329,26 @@ class SubAgent:
                     except Exception as e:
                         tool_content = f"[Fehler] {tc_name}: {e}"
 
+                tool_results.append((tc_id, tc_name, tool_content))
+
+            # Tool-Ergebnisse je nach Format hinzufügen
+            if native_tools:
+                # OpenAI-Format: role="tool" mit tool_call_id
+                for tc_id, tc_name, tool_content in tool_results:
+                    messages.append({
+                        "role": "tool",
+                        "tool_call_id": tc_id,
+                        "content": tool_content,
+                    })
+            else:
+                # Text-basiertes Format: Tool-Ergebnisse als user-Message
+                results_text = "\n\n".join([
+                    f"=== Ergebnis von {tc_name} ===\n{tool_content}"
+                    for tc_id, tc_name, tool_content in tool_results
+                ])
                 messages.append({
-                    "role": "tool",
-                    "tool_call_id": tc_id,
-                    "content": tool_content,
+                    "role": "user",
+                    "content": f"Tool-Ergebnisse:\n\n{results_text}"
                 })
 
         if final_result is None:
@@ -224,7 +383,6 @@ class SubAgent:
         Gibt (response_text, tool_calls_raw) zurück.
         """
         from app.services.llm_client import _get_http_client, _RETRY_DELAYS, _is_retryable
-        import httpx
 
         payload = {
             "model": self._model,
@@ -253,17 +411,45 @@ class SubAgent:
                 )
                 response.raise_for_status()
                 data = response.json()
-                choice = data["choices"][0]["message"]
-                text = choice.get("content") or ""
-                tool_calls = choice.get("tool_calls") or []
+
+                # Robuste Response-Parsing
+                if "choices" not in data or not data["choices"]:
+                    print(f"[sub_agent:{self.name}] Keine 'choices' in LLM-Response: {list(data.keys())}")
+                    return "", []
+
+                choice = data["choices"][0]
+                message = choice.get("message", {})
+                text = message.get("content") or ""
+                tool_calls = message.get("tool_calls") or []
+                finish_reason = choice.get("finish_reason", "")
+
+                # Debug-Log bei unerwarteten Situationen
+                if finish_reason == "tool_calls" and not tool_calls:
+                    print(f"[sub_agent:{self.name}] finish_reason='tool_calls' aber keine tool_calls!")
+                    print(f"  Content (erste 300 Zeichen): {text[:300]}")
+
                 return text, tool_calls
-            except Exception as e:
+
+            except httpx.HTTPStatusError as e:
                 last_exc = e
+                error_body = ""
+                try:
+                    error_body = e.response.text[:500]
+                except Exception:
+                    pass
+                print(f"[sub_agent:{self.name}] HTTP {e.response.status_code}: {error_body}")
                 if _is_retryable(e) and attempt < len(_RETRY_DELAYS):
                     continue
                 break
 
-        raise RuntimeError(f"LLM-Aufruf fehlgeschlagen: {last_exc}")
+            except Exception as e:
+                last_exc = e
+                print(f"[sub_agent:{self.name}] Fehler bei LLM-Call: {type(e).__name__}: {e}")
+                if _is_retryable(e) and attempt < len(_RETRY_DELAYS):
+                    continue
+                break
+
+        raise RuntimeError(f"LLM-Aufruf fehlgeschlagen nach {len(_RETRY_DELAYS)+1} Versuchen: {last_exc}")
 
     def _parse_final_response(self, text: str) -> SubAgentResult:
         """Parst die finale JSON-Antwort des Sub-Agenten."""
