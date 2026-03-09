@@ -1216,6 +1216,7 @@ async function processAgentEvent(event, bubble, msgDiv, chat) {
 
     case 'done':
       if (data.usage) displayTokenUsage(data.usage, chat);
+      hideSuggestions();  // Rückfrage-Buttons ausblenden wenn Antwort fertig
       break;
 
     case 'question':

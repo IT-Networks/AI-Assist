@@ -1542,12 +1542,18 @@ async def read_confluence_page(page_id: str) -> ToolResult:
 
 SEARCH_CONFLUENCE_TOOL = Tool(
     name="search_confluence",
-    description="Durchsucht Confluence nach Seiten per Volltextsuche. Gibt Titel, IDs und Auszüge zurück. Nutze read_confluence_page mit der ID um den vollen Inhalt zu lesen.",
+    description=(
+        "Durchsucht das Confluence-Wiki nach Seiten. "
+        "Sucht in Titel UND Seiteninhalt (Volltextsuche). "
+        "Verwende Stichworte oder Phrasen, z.B. 'Installation Anleitung' oder 'API Dokumentation'. "
+        "Gibt Titel, IDs und Textauszüge zurück. "
+        "Nutze read_confluence_page mit der ID um den vollständigen Seiteninhalt zu lesen."
+    ),
     category=ToolCategory.KNOWLEDGE,
     parameters=[
-        ToolParameter("query", "string", "Suchbegriff"),
-        ToolParameter("space", "string", "Optional: Confluence Space Key", required=False, default=""),
-        ToolParameter("limit", "integer", "Maximale Anzahl Ergebnisse", required=False, default=10),
+        ToolParameter("query", "string", "Suchbegriffe (z.B. 'API Dokumentation' oder 'Installation Guide')"),
+        ToolParameter("space", "string", "Optional: Confluence Space Key zum Einschränken", required=False, default=""),
+        ToolParameter("limit", "integer", "Maximale Anzahl Ergebnisse (1-20)", required=False, default=10),
     ],
     handler=search_confluence
 )

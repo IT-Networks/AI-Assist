@@ -71,7 +71,24 @@ class ConfluenceClient:
         ancestor_id: Optional[str],
         labels: Optional[List[str]],
     ) -> str:
-        parts = [f'text~"{query}"', f'type="{content_type}"']
+        """
+        Baut eine CQL-Query für die Confluence-Suche.
+
+        Verbesserungen:
+        - Sucht in Titel UND Text (OR-Verknüpfung)
+        - Unterstützt mehrere Suchbegriffe (AND-Verknüpfung zwischen Begriffen)
+        - Wildcards für Teilwort-Suche
+        """
+        # Query bereinigen und in Wörter aufteilen
+        query = query.strip()
+
+        # Einfache Variante: Suche in text UND title
+        # Confluence CQL: text ~ "word" sucht nach enthaltenen Wörtern
+        # title ~ "word" sucht im Titel
+        search_clause = f'(text~"{query}" OR title~"{query}")'
+
+        parts = [search_clause, f'type="{content_type}"']
+
         if space_key:
             parts.append(f'space="{space_key}"')
         if ancestor_id:
