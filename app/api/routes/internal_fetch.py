@@ -22,6 +22,10 @@ router = APIRouter(prefix="/api/internal-fetch", tags=["internal-fetch"])
 
 class FetchRequest(BaseModel):
     url: str
+    method: str = "GET"
+    body: Optional[str] = None
+    headers: Optional[Dict[str, str]] = None
+    content_type: Optional[str] = None
 
 
 class TestRequest(BaseModel):
@@ -48,7 +52,13 @@ def _validate_url(url: str) -> tuple[bool, str]:
     return False, f"URL nicht erlaubt. Erlaubte Prefixe: {settings.internal_fetch.base_urls}"
 
 
-async def _do_fetch(url: str) -> Dict[str, Any]:
+async def _do_fetch(
+    url: str,
+    method: str = "GET",
+    body: Optional[str] = None,
+    custom_headers: Optional[Dict[str, str]] = None,
+    content_type: Optional[str] = None,
+) -> Dict[str, Any]:
     """Führt den HTTP-Request aus."""
     import httpx
     import base64
@@ -63,6 +73,20 @@ async def _do_fetch(url: str) -> Dict[str, Any]:
         headers["Authorization"] = f"Basic {encoded}"
     elif cfg.auth_type == "bearer" and cfg.auth_token:
         headers["Authorization"] = f"Bearer {cfg.auth_token}"
+
+    # Custom Headers
+    if custom_headers:
+        headers.update(custom_headers)
+
+    # Content-Type für Body
+    if body and content_type:
+        headers["Content-Type"] = content_type
+    elif body and "Content-Type" not in headers:
+        body_stripped = body.strip()
+        if body_stripped.startswith(("{", "[")):
+            headers["Content-Type"] = "application/json"
+        else:
+            headers["Content-Type"] = "text/plain"
 
     # Proxy
     proxy_config = {}
@@ -79,9 +103,14 @@ async def _do_fetch(url: str) -> Dict[str, Any]:
             follow_redirects=True,
             **proxy_config,
         ) as client:
-            response = await client.get(url, headers=headers)
+            response = await client.request(
+                method=method.upper(),
+                url=url,
+                headers=headers,
+                content=body if body else None,
+            )
 
-            content_type = response.headers.get("content-type", "")
+            resp_content_type = response.headers.get("content-type", "")
 
             # Content begrenzen für API-Antwort
             content = response.text
@@ -91,9 +120,10 @@ async def _do_fetch(url: str) -> Dict[str, Any]:
             return {
                 "success": True,
                 "status_code": response.status_code,
-                "content_type": content_type,
+                "content_type": resp_content_type,
                 "content": content,
                 "url": str(response.url),
+                "method": method.upper(),
             }
 
     except httpx.TimeoutException:

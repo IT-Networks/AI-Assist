@@ -74,15 +74,45 @@ def _get_proxy_config(config) -> Dict[str, Any]:
     return {"proxy": proxy_url}
 
 
-async def _fetch_url(url: str, config) -> Dict[str, Any]:
+async def _fetch_url(
+    url: str,
+    config,
+    method: str = "GET",
+    body: Optional[str] = None,
+    custom_headers: Optional[Dict[str, str]] = None,
+    content_type: Optional[str] = None,
+) -> Dict[str, Any]:
     """
     Führt den eigentlichen HTTP-Request aus.
+
+    Args:
+        url: Ziel-URL
+        config: InternalFetchConfig
+        method: HTTP-Methode (GET, POST, PUT, DELETE, PATCH)
+        body: Request-Body (für POST/PUT/PATCH)
+        custom_headers: Zusätzliche Header
+        content_type: Content-Type für Body
 
     Returns:
         Dict mit status_code, content_type, content, error
     """
     headers = _get_auth_headers(config)
     headers["User-Agent"] = "AI-Assist-InternalFetch/1.0"
+
+    # Custom Headers hinzufügen
+    if custom_headers:
+        headers.update(custom_headers)
+
+    # Content-Type für Body
+    if body and content_type:
+        headers["Content-Type"] = content_type
+    elif body and "Content-Type" not in headers:
+        # Auto-detect: JSON wenn Body mit { oder [ beginnt
+        body_stripped = body.strip()
+        if body_stripped.startswith(("{", "[")):
+            headers["Content-Type"] = "application/json"
+        else:
+            headers["Content-Type"] = "text/plain"
 
     proxy_config = _get_proxy_config(config)
 
@@ -93,12 +123,18 @@ async def _fetch_url(url: str, config) -> Dict[str, Any]:
             follow_redirects=True,
             **proxy_config,
         ) as client:
-            response = await client.get(url, headers=headers)
+            # Request ausführen
+            response = await client.request(
+                method=method.upper(),
+                url=url,
+                headers=headers,
+                content=body if body else None,
+            )
 
-            content_type = response.headers.get("content-type", "")
+            resp_content_type = response.headers.get("content-type", "")
 
             # Content lesen (Text oder JSON)
-            if "application/json" in content_type:
+            if "application/json" in resp_content_type:
                 try:
                     content = response.json()
                 except Exception:
@@ -108,9 +144,10 @@ async def _fetch_url(url: str, config) -> Dict[str, Any]:
 
             return {
                 "status_code": response.status_code,
-                "content_type": content_type,
+                "content_type": resp_content_type,
                 "content": content,
                 "url": str(response.url),
+                "headers": dict(response.headers),
                 "error": None,
             }
 
@@ -216,17 +253,17 @@ def register_internal_fetch_tools(registry: ToolRegistry) -> int:
     registry.register(Tool(
         name="internal_fetch",
         description=(
-            "Ruft eine interne/Intranet-URL ab und gibt den Inhalt zurück. "
-            "Unterstützt HTML, JSON und Text. "
-            "URLs müssen mit den konfigurierten Base URLs beginnen (Sicherheit). "
-            "Nutze dies für: Interne APIs, Intranet-Seiten, interne Wikis."
+            "Ruft eine beliebige URL ab und gibt den Inhalt zurück. "
+            "Unterstützt HTTP/HTTPS, HTML, JSON und Text. "
+            "Ideal für: Interne APIs, Intranet-Seiten, Wikis, externe Webseiten. "
+            "Verwendet konfigurierten Proxy und Auth falls eingerichtet."
         ),
         category=ToolCategory.SEARCH,
         parameters=[
             ToolParameter(
                 name="url",
                 type="string",
-                description="Die abzurufende URL (muss mit einer konfigurierten Base URL beginnen)",
+                description="Die abzurufende URL (HTTP oder HTTPS)",
                 required=True,
             ),
         ],
@@ -313,9 +350,9 @@ def register_internal_fetch_tools(registry: ToolRegistry) -> int:
     registry.register(Tool(
         name="internal_search",
         description=(
-            "Ruft eine interne URL ab und durchsucht den Inhalt nach einem Regex-Pattern. "
+            "Ruft eine URL ab und durchsucht den Inhalt nach einem Regex-Pattern. "
             "Gibt passende Zeilen mit Kontext zurück. "
-            "Nutze dies wenn du spezifische Informationen in einer internen Seite suchst."
+            "Ideal zum Suchen von Informationen in Webseiten, APIs, Dokumentationen."
         ),
         category=ToolCategory.SEARCH,
         parameters=[
@@ -340,6 +377,145 @@ def register_internal_fetch_tools(registry: ToolRegistry) -> int:
             ),
         ],
         handler=internal_search,
+    ))
+    count += 1
+
+    # ── http_request (curl-Ersatz) ────────────────────────────────────────────
+
+    async def http_request(**kwargs: Any) -> ToolResult:
+        """Führt einen HTTP-Request aus (curl-Ersatz)."""
+        import json as json_module
+
+        url: str = kwargs.get("url", "").strip()
+        method: str = kwargs.get("method", "GET").upper().strip()
+        body: str = kwargs.get("body", "")
+        headers_str: str = kwargs.get("headers", "")
+        content_type_param: str = kwargs.get("content_type", "")
+
+        if not settings.internal_fetch.enabled:
+            return ToolResult(
+                success=False,
+                error=(
+                    "Internal Fetch ist deaktiviert. "
+                    "Aktiviere es in Settings → Internal Fetch."
+                ),
+            )
+
+        if method not in ("GET", "POST", "PUT", "DELETE", "PATCH", "HEAD", "OPTIONS"):
+            return ToolResult(
+                success=False,
+                error=f"Ungültige HTTP-Methode: {method}. Erlaubt: GET, POST, PUT, DELETE, PATCH, HEAD, OPTIONS"
+            )
+
+        # URL validieren
+        is_valid, error = _validate_url(url, settings.internal_fetch.base_urls)
+        if not is_valid:
+            return ToolResult(success=False, error=error)
+
+        # Headers parsen (Format: "Header1: Value1\nHeader2: Value2" oder JSON)
+        custom_headers = {}
+        if headers_str:
+            headers_str = headers_str.strip()
+            if headers_str.startswith("{"):
+                # JSON-Format
+                try:
+                    custom_headers = json_module.loads(headers_str)
+                except json_module.JSONDecodeError as e:
+                    return ToolResult(success=False, error=f"Ungültiges Header-JSON: {e}")
+            else:
+                # Zeilenformat: "Header: Value"
+                for line in headers_str.split("\n"):
+                    line = line.strip()
+                    if ":" in line:
+                        key, val = line.split(":", 1)
+                        custom_headers[key.strip()] = val.strip()
+
+        # Request ausführen
+        result = await _fetch_url(
+            url=url,
+            config=settings.internal_fetch,
+            method=method,
+            body=body if body else None,
+            custom_headers=custom_headers if custom_headers else None,
+            content_type=content_type_param if content_type_param else None,
+        )
+
+        if result["error"]:
+            return ToolResult(success=False, error=result["error"])
+
+        # Erfolgreiche Antwort formatieren
+        output = f"=== HTTP {method} {url} ===\n"
+        output += f"Status: {result['status_code']}\n"
+        output += f"Content-Type: {result['content_type']}\n"
+
+        # Response Headers (optional, gekürzt)
+        if result.get("headers"):
+            important_headers = ["content-length", "server", "date", "location", "set-cookie"]
+            resp_headers = {k: v for k, v in result["headers"].items() if k.lower() in important_headers}
+            if resp_headers:
+                output += f"Headers: {resp_headers}\n"
+
+        output += f"\n"
+
+        content = result["content"]
+        if isinstance(content, dict) or isinstance(content, list):
+            output += "```json\n"
+            output += json_module.dumps(content, ensure_ascii=False, indent=2)
+            output += "\n```"
+        else:
+            content_str = str(content)
+            if len(content_str) > 50000:
+                output += content_str[:50000]
+                output += f"\n\n... [+{len(content_str) - 50000} Zeichen abgeschnitten]"
+            else:
+                output += content_str
+
+        return ToolResult(success=True, data=output)
+
+    registry.register(Tool(
+        name="http_request",
+        description=(
+            "Führt HTTP-Requests aus (curl-Ersatz). "
+            "Unterstützt alle Methoden: GET, POST, PUT, DELETE, PATCH, HEAD, OPTIONS. "
+            "Mit Body (JSON/Text) und Custom Headers. "
+            "Für: REST-APIs, Webhooks, Service-Tests, Daten senden/empfangen."
+        ),
+        category=ToolCategory.SEARCH,
+        parameters=[
+            ToolParameter(
+                name="url",
+                type="string",
+                description="Ziel-URL",
+                required=True,
+            ),
+            ToolParameter(
+                name="method",
+                type="string",
+                description="HTTP-Methode: GET, POST, PUT, DELETE, PATCH (default: GET)",
+                required=False,
+                default="GET",
+                enum=["GET", "POST", "PUT", "DELETE", "PATCH", "HEAD", "OPTIONS"],
+            ),
+            ToolParameter(
+                name="body",
+                type="string",
+                description="Request-Body (für POST/PUT/PATCH). JSON wird automatisch erkannt.",
+                required=False,
+            ),
+            ToolParameter(
+                name="headers",
+                type="string",
+                description="Custom Headers als JSON ({\"Header\": \"Value\"}) oder zeilenweise (Header: Value)",
+                required=False,
+            ),
+            ToolParameter(
+                name="content_type",
+                type="string",
+                description="Content-Type für Body (default: auto-detect, application/json für JSON)",
+                required=False,
+            ),
+        ],
+        handler=http_request,
     ))
     count += 1
 
