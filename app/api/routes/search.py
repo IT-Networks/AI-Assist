@@ -129,6 +129,9 @@ async def _ddg_search(query: str, max_results: int = 5) -> List[Dict[str, str]]:
     # Proxy-Konfiguration (mit no_proxy-Prüfung)
     proxy_config = _get_proxy_config(_DDG_URL)
 
+    # Debug-Logging für SSL-Einstellungen
+    print(f"[search] Query: {query[:50]}... | verify_ssl={settings.search.verify_ssl} | proxy={bool(proxy_config)}")
+
     try:
         async with httpx.AsyncClient(
             timeout=timeout,
@@ -144,7 +147,29 @@ async def _ddg_search(query: str, max_results: int = 5) -> List[Dict[str, str]]:
         return [{"title": "Timeout", "snippet": f"Verbindung zu DuckDuckGo timed out nach {timeout}s.{proxy_hint}", "url": ""}]
     except httpx.ProxyError as e:
         return [{"title": "Proxy-Fehler", "snippet": f"Proxy-Verbindung fehlgeschlagen: {e}", "url": ""}]
+    except httpx.ConnectError as e:
+        error_str = str(e).lower()
+        if "ssl" in error_str or "certificate" in error_str:
+            ssl_status = "aktiviert" if settings.search.verify_ssl else "deaktiviert"
+            return [{
+                "title": "SSL-Zertifikatsfehler",
+                "snippet": f"SSL-Verifizierung fehlgeschlagen. SSL-Prüfung ist aktuell {ssl_status}. "
+                          f"Für selbstsignierte Proxy-Zertifikate: Settings → Web-Suche → "
+                          f"'SSL-Zertifikate verifizieren' deaktivieren und speichern.",
+                "url": ""
+            }]
+        return [{"title": "Verbindungsfehler", "snippet": str(e), "url": ""}]
     except Exception as e:
+        error_str = str(e).lower()
+        if "ssl" in error_str or "certificate" in error_str:
+            ssl_status = "aktiviert" if settings.search.verify_ssl else "deaktiviert"
+            return [{
+                "title": "SSL-Zertifikatsfehler",
+                "snippet": f"SSL-Verifizierung fehlgeschlagen ({e}). SSL-Prüfung ist aktuell {ssl_status}. "
+                          f"Für selbstsignierte Proxy-Zertifikate: Settings → Web-Suche → "
+                          f"'SSL-Zertifikate verifizieren' deaktivieren und speichern.",
+                "url": ""
+            }]
         return [{"title": "Fehler", "snippet": str(e), "url": ""}]
 
     results = []
