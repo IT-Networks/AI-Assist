@@ -5096,6 +5096,16 @@ async function wlpPanelLogs(id) {
   logOutput.scrollTop = logOutput.scrollHeight;
 }
 
+// Alias-Funktionen für WLP (Button-Callbacks in wlpLoadList)
+function wlpStart(id) {
+  switchRightPanel('wlp-panel');
+  wlpPanelStart(id);
+}
+
+async function wlpStop(id) {
+  await wlpPanelStop(id);
+}
+
 async function _streamWLPServer(id, action, outputEl) {
   try {
     const res = await fetch(`/api/wlp/servers/${id}/${action}`, { method: 'POST' });
