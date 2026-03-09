@@ -12,6 +12,7 @@ Tools:
 """
 
 import logging
+import re
 from typing import Any, Dict, List, Optional
 
 import httpx
@@ -19,6 +20,19 @@ import httpx
 from app.agent.tools import Tool, ToolCategory, ToolParameter, ToolResult, ToolRegistry
 
 logger = logging.getLogger(__name__)
+
+
+def _parse_link_header(link_header: str) -> Dict[str, str]:
+    """Parst den GitHub Link-Header für Pagination."""
+    links = {}
+    if not link_header:
+        return links
+
+    for part in link_header.split(","):
+        match = re.match(r'<([^>]+)>;\s*rel="([^"]+)"', part.strip())
+        if match:
+            links[match.group(2)] = match.group(1)
+    return links
 
 
 async def _github_request(
@@ -58,6 +72,77 @@ async def _github_request(
             return {"success": False, "error": str(e)}
 
 
+async def _github_paginated_request(
+    url: str,
+    token: str,
+    verify_ssl: bool = False,
+    timeout: int = 30,
+    params: Optional[dict] = None,
+    max_items: int = 0,
+) -> Dict[str, Any]:
+    """
+    Führt paginierte GitHub API Requests aus.
+
+    Args:
+        max_items: Maximale Anzahl Items (0 = alle)
+    """
+    headers = {
+        "Accept": "application/vnd.github.v3+json",
+        "Authorization": f"token {token}",
+    }
+
+    all_data: List[Any] = []
+    current_url = url
+    page_count = 0
+    max_pages = 100  # Sicherheitslimit
+
+    async with httpx.AsyncClient(verify=verify_ssl, timeout=timeout) as client:
+        while current_url and page_count < max_pages:
+            try:
+                response = await client.get(
+                    current_url,
+                    headers=headers,
+                    params=params if page_count == 0 else None,
+                )
+                response.raise_for_status()
+
+                data = response.json()
+                if isinstance(data, list):
+                    all_data.extend(data)
+                else:
+                    all_data.append(data)
+
+                page_count += 1
+
+                # Prüfen ob max_items erreicht
+                if max_items > 0 and len(all_data) >= max_items:
+                    all_data = all_data[:max_items]
+                    break
+
+                # Nächste Seite aus Link-Header
+                link_header = response.headers.get("Link", "")
+                links = _parse_link_header(link_header)
+                current_url = links.get("next")
+
+            except httpx.HTTPStatusError as e:
+                error_body = ""
+                try:
+                    error_body = e.response.json().get("message", "")
+                except Exception:
+                    error_body = e.response.text[:200]
+                return {"success": False, "error": f"HTTP {e.response.status_code}: {error_body}"}
+            except httpx.RequestError as e:
+                return {"success": False, "error": f"Verbindungsfehler: {e}"}
+            except Exception as e:
+                return {"success": False, "error": str(e)}
+
+    return {
+        "success": True,
+        "data": all_data,
+        "pages_fetched": page_count,
+    }
+
+
 def register_github_tools(registry: ToolRegistry) -> int:
     from app.core.config import settings
 
@@ -65,11 +150,13 @@ def register_github_tools(registry: ToolRegistry) -> int:
 
     # ── github_list_repos ──────────────────────────────────────────────────────
     async def github_list_repos(**kwargs: Any) -> ToolResult:
-        """Listet Repositories einer Organisation auf."""
+        """Listet Repositories einer Organisation auf (mit Pagination)."""
         if not settings.github.enabled:
             return ToolResult(success=False, error="GitHub ist nicht aktiviert")
 
         org: str = kwargs.get("org", "").strip() or settings.github.default_org
+        max_repos: int = int(kwargs.get("max_repos", 0))  # 0 = alle
+
         if not org:
             return ToolResult(success=False, error="org ist erforderlich (oder default_org in Konfiguration setzen)")
 
@@ -77,13 +164,14 @@ def register_github_tools(registry: ToolRegistry) -> int:
         if not api_url:
             return ToolResult(success=False, error="GitHub API-URL ist nicht konfiguriert")
 
-        result = await _github_request(
-            method="GET",
+        # Paginierte Abfrage - holt alle Seiten
+        result = await _github_paginated_request(
             url=f"{api_url}/orgs/{org}/repos",
             token=settings.github.token,
             verify_ssl=settings.github.verify_ssl,
             timeout=settings.github.timeout_seconds,
-            params={"per_page": settings.github.max_items, "sort": "updated"},
+            params={"per_page": 100, "sort": "updated"},  # Max pro Seite
+            max_items=max_repos,
         )
 
         if not result["success"]:
@@ -106,6 +194,7 @@ def register_github_tools(registry: ToolRegistry) -> int:
             data={
                 "org": org,
                 "repo_count": len(repos),
+                "pages_fetched": result.get("pages_fetched", 1),
                 "repos": repos,
             },
         )
@@ -113,9 +202,10 @@ def register_github_tools(registry: ToolRegistry) -> int:
     registry.register(Tool(
         name="github_list_repos",
         description=(
-            "Listet alle Repositories einer GitHub-Organisation auf. "
+            "Listet alle Repositories einer GitHub-Organisation auf (mit automatischer Pagination). "
             "Zeigt Name, Beschreibung, Sichtbarkeit und Anzahl offener Issues. "
-            "Verwende dies um einen Überblick über Projekte zu bekommen."
+            "Holt automatisch alle Seiten - nicht auf 50/100 begrenzt. "
+            "Verwende max_repos um die Anzahl zu limitieren."
         ),
         category=ToolCategory.DEVOPS,
         parameters=[
@@ -123,6 +213,12 @@ def register_github_tools(registry: ToolRegistry) -> int:
                 name="org",
                 type="string",
                 description="GitHub-Organisation (leer = Standard-Organisation aus Konfiguration)",
+                required=False,
+            ),
+            ToolParameter(
+                name="max_repos",
+                type="integer",
+                description="Maximale Anzahl Repos (0 = alle, Standard: 0)",
                 required=False,
             ),
         ],
