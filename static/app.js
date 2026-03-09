@@ -2359,6 +2359,7 @@ const settingsState = {
     uploads: 'Upload-Verzeichnis und Limits',
     jenkins: 'Jenkins CI/CD Server (intern gehostet)',
     github: 'GitHub Enterprise Server (intern gehostet)',
+    internal_fetch: 'Intranet-URLs abrufen (HTTP Fetch)',
     data_sources: 'Interne HTTP-Systeme (Jenkins, GitHub, APIs)',
     mq: 'IBM MQ Series Messaging',
     test_tool: 'Test-Automatisierung',
@@ -2592,6 +2593,11 @@ function renderSettingsSection() {
 
   if (section === 'github') {
     renderGitHubSection();
+    return;
+  }
+
+  if (section === 'internal_fetch') {
+    renderInternalFetchSection();
     return;
   }
 
@@ -3447,6 +3453,25 @@ async function saveCurrentSection() {
       if (!res.ok) throw new Error(data.detail || 'Fehler');
       settingsState.settings.github = data.values;
       updateSettingsStatus('GitHub-Einstellungen angewendet', 'success');
+    } catch (err) {
+      updateSettingsStatus('Fehler: ' + err.message, 'error');
+    }
+    return;
+  }
+
+  // Internal Fetch hat eigene Felder
+  if (section === 'internal_fetch') {
+    const values = collectInternalFetchSettings();
+    try {
+      const res = await fetch('/api/settings/section/internal_fetch', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(values),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.detail || 'Fehler');
+      settingsState.settings.internal_fetch = data.values;
+      updateSettingsStatus('Internal-Fetch-Einstellungen angewendet', 'success');
     } catch (err) {
       updateSettingsStatus('Fehler: ' + err.message, 'error');
     }
@@ -5801,6 +5826,171 @@ function collectGitHubSettings() {
     default_repo: document.getElementById('github-default-repo')?.value?.trim() || '',
     timeout_seconds: parseInt(document.getElementById('github-timeout')?.value) || 30,
     max_items: parseInt(document.getElementById('github-max-items')?.value) || 50,
+  };
+}
+
+// ── Internal Fetch Settings Section ─────────────────────────────────────────────
+
+async function renderInternalFetchSection() {
+  const cfg = settingsState.settings.internal_fetch || {};
+  const baseUrls = (cfg.base_urls || []).join('\n');
+
+  const form = document.getElementById('settings-form');
+  form.innerHTML = `
+    <div class="settings-section">
+      <h3 class="settings-section-title">INTERNAL FETCH</h3>
+      <p class="settings-section-desc">
+        Tool zum Abrufen interner/Intranet-URLs. URLs werden gegen die Base URLs validiert (Sicherheit).
+      </p>
+    </div>
+
+    <div class="settings-field">
+      <label for="if-enabled">Aktiviert</label>
+      <label class="checkbox-label">
+        <input type="checkbox" id="if-enabled" ${cfg.enabled ? 'checked' : ''} onchange="markSettingsModified()">
+        ${cfg.enabled ? 'Aktiviert' : 'Deaktiviert'}
+      </label>
+    </div>
+
+    <div class="settings-field">
+      <label for="if-base-urls">Erlaubte Base URLs</label>
+      <textarea id="if-base-urls" rows="4" onchange="markSettingsModified()"
+        placeholder="https://intranet.company.com&#10;http://wiki.intern:8080"
+        style="font-family:var(--font-mono);font-size:13px">${escapeHtml(baseUrls)}</textarea>
+      <small style="color:var(--text-muted)">Eine URL pro Zeile. Nur URLs die mit diesen Prefixen beginnen sind erlaubt.</small>
+    </div>
+
+    <div class="settings-field">
+      <label for="if-verify-ssl">SSL-Zertifikat pruefen</label>
+      <label class="checkbox-label">
+        <input type="checkbox" id="if-verify-ssl" ${cfg.verify_ssl !== false ? 'checked' : ''} onchange="markSettingsModified()">
+        ${cfg.verify_ssl !== false ? 'Ja' : 'Nein (fuer Self-Signed Certs)'}
+      </label>
+    </div>
+
+    <div class="settings-field">
+      <label for="if-timeout">Timeout (Sekunden)</label>
+      <input type="number" id="if-timeout" value="${cfg.timeout_seconds || 30}"
+        min="5" max="120" onchange="markSettingsModified()">
+    </div>
+
+    <div class="settings-section" style="margin-top:20px">
+      <h3 class="settings-section-title">AUTHENTIFIZIERUNG</h3>
+      <p class="settings-section-desc">
+        Optional: Authentifizierung fuer alle Requests.
+      </p>
+    </div>
+
+    <div class="settings-field">
+      <label for="if-auth-type">Auth-Typ</label>
+      <select id="if-auth-type" onchange="internalFetchAuthTypeChanged(); markSettingsModified()">
+        <option value="none" ${cfg.auth_type === 'none' || !cfg.auth_type ? 'selected' : ''}>Keine</option>
+        <option value="basic" ${cfg.auth_type === 'basic' ? 'selected' : ''}>Basic Auth</option>
+        <option value="bearer" ${cfg.auth_type === 'bearer' ? 'selected' : ''}>Bearer Token</option>
+      </select>
+    </div>
+
+    <div id="if-auth-basic" style="display:${cfg.auth_type === 'basic' ? 'block' : 'none'}">
+      <div class="settings-field">
+        <label for="if-auth-username">Benutzername</label>
+        <input type="text" id="if-auth-username" value="${escapeHtml(cfg.auth_username || '')}"
+          placeholder="username" onchange="markSettingsModified()">
+      </div>
+      <div class="settings-field">
+        <label for="if-auth-password">Passwort</label>
+        <input type="password" id="if-auth-password" value="${escapeHtml(cfg.auth_password || '')}"
+          placeholder="password" onchange="markSettingsModified()" autocomplete="off">
+      </div>
+    </div>
+
+    <div id="if-auth-bearer" style="display:${cfg.auth_type === 'bearer' ? 'block' : 'none'}">
+      <div class="settings-field">
+        <label for="if-auth-token">Bearer Token</label>
+        <input type="password" id="if-auth-token" value="${escapeHtml(cfg.auth_token || '')}"
+          placeholder="eyJhbGc..." onchange="markSettingsModified()" autocomplete="off">
+      </div>
+    </div>
+
+    <div class="settings-section" style="margin-top:20px">
+      <h3 class="settings-section-title">PROXY</h3>
+      <p class="settings-section-desc">
+        Optional: Proxy fuer interne Requests.
+      </p>
+    </div>
+
+    <div class="settings-field">
+      <label for="if-proxy-url">Proxy URL</label>
+      <input type="text" id="if-proxy-url" value="${escapeHtml(cfg.proxy_url || '')}"
+        placeholder="http://proxy.intern:8080" onchange="markSettingsModified()" style="font-family:var(--font-mono)">
+    </div>
+
+    <div class="settings-actions-section" style="margin-top:20px">
+      <button class="btn btn-secondary" onclick="internalFetchTestConnection()">
+        🔌 Verbindung testen
+      </button>
+      <span id="if-test-result" class="test-result"></span>
+    </div>
+  `;
+}
+
+function internalFetchAuthTypeChanged() {
+  const authType = document.getElementById('if-auth-type').value;
+  document.getElementById('if-auth-basic').style.display = authType === 'basic' ? 'block' : 'none';
+  document.getElementById('if-auth-bearer').style.display = authType === 'bearer' ? 'block' : 'none';
+}
+
+async function internalFetchTestConnection() {
+  const resultEl = document.getElementById('if-test-result');
+  resultEl.textContent = '⏳ Teste Verbindung...';
+  resultEl.className = 'test-result testing';
+
+  // Erst die aktuellen Werte speichern
+  const cfg = collectInternalFetchSettings();
+
+  if (!cfg.base_urls || cfg.base_urls.length === 0) {
+    resultEl.textContent = '✗ Keine Base URLs konfiguriert';
+    resultEl.className = 'test-result error';
+    return;
+  }
+
+  try {
+    // Temporaer speichern fuer den Test
+    await fetch('/api/settings/section/internal_fetch', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(cfg)
+    });
+
+    const res = await fetch('/api/internal-fetch/test', { method: 'POST' });
+    const data = await res.json();
+
+    if (data.success) {
+      resultEl.textContent = `✓ ${data.message}`;
+      resultEl.className = 'test-result success';
+    } else {
+      resultEl.textContent = `✗ ${data.error || 'Verbindung fehlgeschlagen'}`;
+      resultEl.className = 'test-result error';
+    }
+  } catch (e) {
+    resultEl.textContent = `✗ Fehler: ${e.message}`;
+    resultEl.className = 'test-result error';
+  }
+}
+
+function collectInternalFetchSettings() {
+  const baseUrlsText = document.getElementById('if-base-urls')?.value || '';
+  const baseUrls = baseUrlsText.split('\n').map(u => u.trim()).filter(u => u.length > 0);
+
+  return {
+    enabled: document.getElementById('if-enabled')?.checked || false,
+    base_urls: baseUrls,
+    verify_ssl: document.getElementById('if-verify-ssl')?.checked || false,
+    timeout_seconds: parseInt(document.getElementById('if-timeout')?.value) || 30,
+    auth_type: document.getElementById('if-auth-type')?.value || 'none',
+    auth_username: document.getElementById('if-auth-username')?.value?.trim() || '',
+    auth_password: document.getElementById('if-auth-password')?.value || '',
+    auth_token: document.getElementById('if-auth-token')?.value || '',
+    proxy_url: document.getElementById('if-proxy-url')?.value?.trim() || '',
   };
 }
 

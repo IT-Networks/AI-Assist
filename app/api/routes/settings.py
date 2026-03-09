@@ -92,6 +92,7 @@ def get_section_schema(section: str) -> Dict[str, Any]:
         "jira": "JiraConfig",
         "jenkins": "JenkinsConfig",
         "github": "GitHubConfig",
+        "internal_fetch": "InternalFetchConfig",
     }
 
     if section not in section_classes:
@@ -196,6 +197,7 @@ def _get_section_description(section: str) -> str:
         "sub_agents": "Parallele Sub-Agenten für Datenquellen-Recherche",
         "jenkins": "Jenkins CI/CD Server (intern gehostet)",
         "github": "GitHub Enterprise Server (intern gehostet)",
+        "internal_fetch": "Intranet-URLs abrufen (internes HTTP-Fetch-Tool)",
     }
     return descriptions.get(section, "")
 
@@ -343,6 +345,7 @@ def _generate_yaml_with_comments(data: Dict[str, Any]) -> str:
         "database": "# DB2-Datenbankverbindung",
         "jenkins": "\n# ═══════════════════════════════════════════════════════════════════\n# Jenkins CI/CD (intern gehostet)",
         "github": "# GitHub Enterprise Server (intern gehostet)",
+        "internal_fetch": "# Internal Fetch (Intranet-URLs abrufen)",
     }
 
     lines = []

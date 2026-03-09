@@ -5,7 +5,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 from pathlib import Path
 
-from app.api.routes import chat, java, logs, pdf, confluence, models, python_routes, handbook, skills, agent, settings, database, datasources, mq, testtool, log_servers, wlp, maven, search, jenkins, github
+from app.api.routes import chat, java, logs, pdf, confluence, models, python_routes, handbook, skills, agent, settings, database, datasources, mq, testtool, log_servers, wlp, maven, search, jenkins, github, internal_fetch
 
 
 @asynccontextmanager
@@ -146,6 +146,15 @@ async def lifespan(app: FastAPI):
                 print(f"[startup] GitHub-Tools registriert: {github_count}")
         except Exception as e:
             print(f"[startup] GitHub-Tools-Registrierung fehlgeschlagen: {e}")
+
+        # Internal Fetch Tools registrieren
+        try:
+            from app.agent.internal_fetch_tools import register_internal_fetch_tools
+            if_count = register_internal_fetch_tools(registry)
+            if if_count:
+                print(f"[startup] Internal-Fetch-Tools registriert: {if_count}")
+        except Exception as e:
+            print(f"[startup] Internal-Fetch-Tools-Registrierung fehlgeschlagen: {e}")
     except Exception as e:
         print(f"[startup] Agent-Initialisierung fehlgeschlagen: {e}")
 
@@ -248,6 +257,7 @@ app.include_router(maven.router)
 app.include_router(search.router)
 app.include_router(jenkins.router)
 app.include_router(github.router)
+app.include_router(internal_fetch.router)
 
 
 # ══════════════════════════════════════════════════════════════════════════════

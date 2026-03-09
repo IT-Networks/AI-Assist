@@ -410,6 +410,25 @@ class WebSearchConfig(BaseModel):
     verify_ssl: bool = True          # SSL-Zertifikate prüfen (False für selbstsignierte Proxy-Zertifikate)
     timeout_seconds: int = 30        # Timeout für HTTP-Requests
 
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Internal Fetch (Intranet-URLs abrufen)
+# ══════════════════════════════════════════════════════════════════════════════
+
+class InternalFetchConfig(BaseModel):
+    """Konfiguration für das Abrufen interner/Intranet-URLs."""
+    enabled: bool = False
+    base_urls: List[str] = []        # Erlaubte URL-Prefixe (Sicherheit)
+    verify_ssl: bool = True          # SSL-Zertifikate prüfen
+    timeout_seconds: int = 30        # Timeout für HTTP-Requests
+    # Authentifizierung
+    auth_type: str = "none"          # "none", "basic", "bearer"
+    auth_username: str = ""          # Benutzername für Basic Auth
+    auth_password: str = ""          # Passwort für Basic Auth
+    auth_token: str = ""             # Bearer Token
+    # Proxy-Konfiguration
+    proxy_url: str = ""              # Proxy für interne Requests (optional)
+
     def get_proxy_url(self) -> Optional[str]:
         """
         Gibt die vollständige Proxy-URL inkl. Auth zurück.
@@ -537,6 +556,7 @@ class Settings(BaseModel):
     search: WebSearchConfig = Field(default_factory=WebSearchConfig)
     jenkins: JenkinsConfig = Field(default_factory=JenkinsConfig)
     github: GitHubConfig = Field(default_factory=GitHubConfig)
+    internal_fetch: InternalFetchConfig = Field(default_factory=InternalFetchConfig)
 
     def apply_env_overrides(self) -> "Settings":
         if os.getenv("LLM_BASE_URL"):
