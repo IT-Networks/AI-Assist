@@ -237,17 +237,23 @@ def register_github_tools(registry: ToolRegistry) -> int:
     count += 1
 
     # ── Hilfsfunktion: Repo-Name zu vollständigem Pfad ──────────────────────────
-    def _resolve_repo(repo_input: str) -> str:
+    def _resolve_repo(repo_input: str) -> Optional[str]:
         """
         Löst Repo-Namen auf: Wenn kein '/' enthalten, wird default_org vorangestellt.
         Beispiel: 'AI-Assist' → 'IT-Networks/AI-Assist'
+
+        Returns:
+            Vollständiger Repo-Pfad oder None wenn nicht auflösbar.
         """
-        repo = repo_input.strip()
+        repo = repo_input.strip() if repo_input else ""
         if not repo:
-            return settings.github.default_repo
+            # Fallback auf default_repo
+            repo = settings.github.default_repo
+        if not repo:
+            return None  # Kein Repo angegeben und kein default konfiguriert
         if "/" not in repo and settings.github.default_org:
             return f"{settings.github.default_org}/{repo}"
-        return repo
+        return repo if "/" in repo else None  # Ohne org/repo Format ungültig
 
     # ── github_list_prs ────────────────────────────────────────────────────────
     async def github_list_prs(**kwargs: Any) -> ToolResult:

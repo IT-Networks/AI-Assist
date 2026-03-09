@@ -1109,16 +1109,6 @@ async def debug_java_with_testdata(
     if test_parameters is None:
         test_parameters = {}
 
-    if not class_name or not class_name.strip():
-        return ToolResult(
-            success=False,
-            error=(
-                "class_name fehlt. Bitte den genauen Java-Klassennamen angeben, "
-                "z.B. 'CustomerService' oder 'com.example.CustomerService'. "
-                "Frage den Nutzer nach dem Klassennamen bevor du dieses Tool erneut aufrufst."
-            )
-        )
-
     class_name = class_name.strip()
     output = f"=== Java Debug: {class_name}"
     if method_name:

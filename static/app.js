@@ -5686,8 +5686,14 @@ function collectJenkinsSettings() {
 async function renderSearchSettingsSection() {
   const form = document.getElementById('settings-form');
   try {
-    const res = await fetch('/api/search/status');
-    const data = await res.json();
+    // Status und Proxy-Config parallel laden
+    const [statusRes, configRes] = await Promise.all([
+      fetch('/api/search/status'),
+      fetch('/api/search/config')
+    ]);
+    const data = await statusRes.json();
+    const config = await configRes.json();
+
     form.innerHTML = `
       <div class="settings-section">
         <h3 class="settings-section-title">WEB-SUCHE</h3>
@@ -5713,6 +5719,51 @@ async function renderSearchSettingsSection() {
           <code>"Websuche einschalten"</code> oder <code>"Suche ausschalten"</code>
         </p>
       </div>
+
+      <div class="settings-subsection" style="margin-top:16px">
+        <h4>Proxy-Konfiguration</h4>
+        <p style="font-size:12px;color:var(--text-muted);margin-bottom:12px">
+          Für Netzwerke mit Proxy-Server. Leer lassen für direkten Internetzugang.
+        </p>
+        <div class="settings-field">
+          <label>Proxy-URL</label>
+          <input type="text" id="search-proxy-url" class="settings-input"
+                 placeholder="http://proxy.example.com:8080"
+                 value="${escapeHtml(config.proxy_url || '')}">
+        </div>
+        <div class="settings-field-row" style="display:flex;gap:12px">
+          <div class="settings-field" style="flex:1">
+            <label>Benutzername</label>
+            <input type="text" id="search-proxy-user" class="settings-input"
+                   placeholder="(optional)"
+                   value="${escapeHtml(config.proxy_username || '')}">
+          </div>
+          <div class="settings-field" style="flex:1">
+            <label>Passwort</label>
+            <input type="password" id="search-proxy-pass" class="settings-input"
+                   placeholder="(optional)"
+                   value="${config.proxy_password || ''}">
+          </div>
+        </div>
+        <div class="settings-field">
+          <label>No-Proxy (Ausnahmen)</label>
+          <input type="text" id="search-no-proxy" class="settings-input"
+                 placeholder="localhost,.intern,.local"
+                 value="${escapeHtml(config.no_proxy || '')}">
+          <span style="font-size:11px;color:var(--text-muted)">Kommagetrennte Liste von Hosts ohne Proxy</span>
+        </div>
+        <div class="settings-field">
+          <label>Timeout (Sekunden)</label>
+          <input type="number" id="search-timeout" class="settings-input" style="width:100px"
+                 min="5" max="120"
+                 value="${config.timeout_seconds || 30}">
+        </div>
+        <button class="btn btn-primary" onclick="saveSearchProxyConfig()" style="margin-top:8px">
+          Proxy-Einstellungen speichern
+        </button>
+        <span id="search-proxy-status" style="margin-left:12px;font-size:12px"></span>
+      </div>
+
       <div class="settings-subsection" style="margin-top:16px">
         <h4>Sicherheitsregeln</h4>
         <ul style="font-size:12px;color:var(--text-secondary);padding-left:16px;margin:0">
@@ -5778,6 +5829,46 @@ async function searchSettingsToggle(enabled) {
       : 'Deaktiviert – Agent kann keine Internet-Suchen durchführen';
     panelTxt.style.color = enabled ? 'var(--success)' : 'var(--text-muted)';
   }
+}
+
+async function saveSearchProxyConfig() {
+  const statusEl = document.getElementById('search-proxy-status');
+  statusEl.textContent = 'Speichere...';
+  statusEl.style.color = 'var(--text-muted)';
+
+  const config = {
+    proxy_url: document.getElementById('search-proxy-url')?.value || '',
+    proxy_username: document.getElementById('search-proxy-user')?.value || '',
+    proxy_password: document.getElementById('search-proxy-pass')?.value || '',
+    no_proxy: document.getElementById('search-no-proxy')?.value || '',
+    timeout_seconds: parseInt(document.getElementById('search-timeout')?.value) || 30,
+  };
+
+  try {
+    const res = await fetch('/api/search/config', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(config),
+    });
+    const data = await res.json();
+
+    if (res.ok) {
+      statusEl.textContent = '✓ Gespeichert';
+      statusEl.style.color = 'var(--success)';
+      updateSettingsStatus('Proxy-Einstellungen gespeichert ✓', 'success');
+    } else {
+      statusEl.textContent = '✗ Fehler: ' + (data.detail || 'Unbekannt');
+      statusEl.style.color = 'var(--error)';
+    }
+  } catch (e) {
+    statusEl.textContent = '✗ Fehler: ' + e.message;
+    statusEl.style.color = 'var(--error)';
+  }
+
+  // Status nach 3s ausblenden
+  setTimeout(() => {
+    if (statusEl) statusEl.textContent = '';
+  }, 3000);
 }
 
 // Keyboard shortcut to close modal

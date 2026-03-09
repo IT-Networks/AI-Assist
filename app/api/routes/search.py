@@ -46,6 +46,15 @@ class ToggleRequest(BaseModel):
     enabled: bool
 
 
+class SearchConfigRequest(BaseModel):
+    """Proxy-Konfiguration für Web-Suche."""
+    proxy_url: str = ""
+    proxy_username: str = ""
+    proxy_password: str = ""
+    no_proxy: str = ""
+    timeout_seconds: int = 30
+
+
 # ── DuckDuckGo Search ─────────────────────────────────────────────────────────
 
 _DDG_URL = "https://html.duckduckgo.com/html/"
@@ -66,18 +75,49 @@ def _clean(html: str) -> str:
     return " ".join(s.split()).strip()
 
 
-def _get_proxy_config() -> dict:
+def _should_bypass_proxy(url: str) -> bool:
+    """Prüft ob die URL im no_proxy-List ist und kein Proxy verwendet werden soll."""
+    if not settings.search.no_proxy:
+        return False
+
+    no_proxy_list = [x.strip().lower() for x in settings.search.no_proxy.split(",") if x.strip()]
+    if not no_proxy_list:
+        return False
+
+    # Host aus URL extrahieren
+    from urllib.parse import urlparse
+    try:
+        parsed = urlparse(url)
+        host = (parsed.hostname or "").lower()
+    except Exception:
+        return False
+
+    for pattern in no_proxy_list:
+        # Exakte Übereinstimmung
+        if host == pattern:
+            return True
+        # Wildcard-Suffix (z.B. ".intern" matched "server.intern")
+        if pattern.startswith(".") and host.endswith(pattern):
+            return True
+        # Suffix ohne Punkt (z.B. "intern" matched "server.intern")
+        if not pattern.startswith(".") and host.endswith("." + pattern):
+            return True
+
+    return False
+
+
+def _get_proxy_config(target_url: str = "") -> dict:
     """Erstellt die Proxy-Konfiguration für httpx."""
+    # Kein Proxy wenn in no_proxy-Liste
+    if target_url and _should_bypass_proxy(target_url):
+        return {}
+
     proxy_url = settings.search.get_proxy_url()
     if not proxy_url:
         return {}
 
-    # no_proxy prüfen
-    no_proxy_list = [x.strip() for x in settings.search.no_proxy.split(",") if x.strip()]
-
     return {
         "proxy": proxy_url,
-        # httpx verwendet NO_PROXY automatisch, aber wir setzen es explizit
     }
 
 
@@ -85,9 +125,8 @@ async def _ddg_search(query: str, max_results: int = 5) -> List[Dict[str, str]]:
     """Führt eine DuckDuckGo-HTML-Suche durch und gibt Treffer zurück."""
     timeout = settings.search.timeout_seconds or 30
 
-    # Proxy-Konfiguration
-    proxy_url = settings.search.get_proxy_url()
-    proxy_config = {"proxy": proxy_url} if proxy_url else {}
+    # Proxy-Konfiguration (mit no_proxy-Prüfung)
+    proxy_config = _get_proxy_config(_DDG_URL)
 
     try:
         async with httpx.AsyncClient(
@@ -193,6 +232,45 @@ async def get_status() -> Dict[str, Any]:
 async def toggle_search(req: ToggleRequest) -> Dict[str, Any]:
     settings.search.enabled = req.enabled
     return {"enabled": settings.search.enabled}
+
+
+# ── Proxy-Konfiguration ──────────────────────────────────────────────────────
+
+@router.get("/config")
+async def get_search_config() -> Dict[str, Any]:
+    """Gibt die aktuelle Proxy-Konfiguration zurück (Passwort maskiert)."""
+    return {
+        "enabled": settings.search.enabled,
+        "proxy_url": settings.search.proxy_url,
+        "proxy_username": settings.search.proxy_username,
+        "proxy_password": "***" if settings.search.proxy_password else "",
+        "no_proxy": settings.search.no_proxy,
+        "timeout_seconds": settings.search.timeout_seconds,
+    }
+
+
+@router.put("/config")
+async def update_search_config(req: SearchConfigRequest) -> Dict[str, Any]:
+    """Aktualisiert die Proxy-Konfiguration."""
+    settings.search.proxy_url = req.proxy_url
+    settings.search.proxy_username = req.proxy_username
+    # Passwort nur setzen wenn nicht maskiert
+    if req.proxy_password and req.proxy_password != "***":
+        settings.search.proxy_password = req.proxy_password
+    settings.search.no_proxy = req.no_proxy
+    settings.search.timeout_seconds = max(5, min(req.timeout_seconds, 120))  # 5-120s
+
+    return {
+        "success": True,
+        "message": "Proxy-Konfiguration aktualisiert. POST /api/settings/save zum Persistieren.",
+        "config": {
+            "proxy_url": settings.search.proxy_url,
+            "proxy_username": settings.search.proxy_username,
+            "proxy_password": "***" if settings.search.proxy_password else "",
+            "no_proxy": settings.search.no_proxy,
+            "timeout_seconds": settings.search.timeout_seconds,
+        }
+    }
 
 
 # ── Pending Management ────────────────────────────────────────────────────────
