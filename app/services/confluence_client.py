@@ -43,6 +43,8 @@ class ConfluenceClient:
         self.username = settings.confluence.username
         self.api_token = settings.confluence.api_token
         self.password = settings.confluence.password
+        self.api_path = settings.confluence.api_path
+        self._detected_api_path: Optional[str] = None
 
     def _get_secret(self) -> str:
         """API-Token bevorzugen (Cloud), sonst Passwort (Server/DC)."""
@@ -57,11 +59,66 @@ class ConfluenceClient:
         return headers
 
     def _api_url(self, path: str) -> str:
-        return f"{self.base_url}/wiki/rest/api{path}"
+        """
+        Baut die API-URL.
+
+        Unterstützte Formate:
+        - Cloud: base_url/wiki/rest/api/...
+        - Server: base_url/rest/api/... oder base_url/confluence/rest/api/...
+        """
+        if self.api_path:
+            # Explizit konfiguriert
+            return f"{self.base_url}/{self.api_path}/rest/api{path}"
+        elif self._detected_api_path is not None:
+            # Bereits erkannt
+            if self._detected_api_path:
+                return f"{self.base_url}/{self._detected_api_path}/rest/api{path}"
+            else:
+                return f"{self.base_url}/rest/api{path}"
+        else:
+            # Standard: ohne Prefix (Server/DC)
+            return f"{self.base_url}/rest/api{path}"
+
+    async def _detect_api_path(self) -> str:
+        """Erkennt den korrekten API-Pfad durch Testen verschiedener Endpunkte."""
+        if self._detected_api_path is not None:
+            return self._detected_api_path
+
+        client = _get_http_client()
+
+        # Verschiedene Pfade testen
+        paths_to_try = [
+            "",           # Server/DC ohne Context: /rest/api
+            "wiki",       # Cloud: /wiki/rest/api
+            "confluence", # Manche Server: /confluence/rest/api
+        ]
+
+        for api_path in paths_to_try:
+            try:
+                if api_path:
+                    url = f"{self.base_url}/{api_path}/rest/api/space?limit=1"
+                else:
+                    url = f"{self.base_url}/rest/api/space?limit=1"
+
+                resp = await client.get(url, headers=self._headers(), timeout=10)
+                if resp.status_code == 200:
+                    self._detected_api_path = api_path
+                    return api_path
+            except Exception:
+                continue
+
+        # Fallback: kein Prefix
+        self._detected_api_path = ""
+        return ""
 
     def _check_configured(self):
         if not self.base_url:
             raise ConfluenceError("Confluence ist nicht konfiguriert (base_url fehlt in config.yaml)")
+
+    async def _ensure_api_path(self):
+        """Stellt sicher, dass der API-Pfad erkannt wurde."""
+        if not self.api_path and self._detected_api_path is None:
+            await self._detect_api_path()
 
     def _build_cql(
         self,
@@ -108,6 +165,7 @@ class ConfluenceClient:
         labels: Optional[List[str]] = None,
     ) -> List[Dict]:
         self._check_configured()
+        await self._ensure_api_path()
         cql = self._build_cql(query, space_key, content_type, ancestor_id, labels)
         params = {
             "cql": cql,
@@ -145,6 +203,7 @@ class ConfluenceClient:
 
     async def get_page_by_id(self, page_id: str) -> Dict:
         self._check_configured()
+        await self._ensure_api_path()
         client = _get_http_client()
         try:
             resp = await client.get(

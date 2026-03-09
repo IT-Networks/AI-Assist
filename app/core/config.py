@@ -104,6 +104,9 @@ class ConfluenceConfig(BaseModel):
     password: str = ""    # Atlassian Server/DC Passwort (Fallback wenn api_token leer)
     default_space: str = ""
     verify_ssl: bool = True  # False für selbstsignierte Zertifikate
+    # API-Pfad: "wiki" für Cloud, "" für manche Server, oder custom
+    # Beispiele: "" → /rest/api, "wiki" → /wiki/rest/api, "confluence" → /confluence/rest/api
+    api_path: str = ""  # Leer = auto-detect, sonst z.B. "wiki" oder "confluence"
 
 
 class PythonConfig(BaseModel):

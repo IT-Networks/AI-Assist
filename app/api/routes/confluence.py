@@ -1,9 +1,10 @@
-from typing import List, Optional
+from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
 
 from app.api.schemas import ConfluenceSearchResult, ConfluencePageResponse
+from app.core.config import settings
 from app.core.exceptions import ConfluenceError
 from app.services.confluence_client import ConfluenceClient
 
@@ -16,6 +17,35 @@ class PageByUrlRequest(BaseModel):
 
 def _client() -> ConfluenceClient:
     return ConfluenceClient()
+
+
+@router.post("/test")
+async def test_connection() -> Dict[str, Any]:
+    """
+    Testet die Confluence-Verbindung und erkennt den korrekten API-Pfad.
+    """
+    if not settings.confluence.base_url:
+        return {"success": False, "error": "Base URL nicht konfiguriert"}
+
+    try:
+        client = _client()
+        # Erkennt automatisch den API-Pfad
+        api_path = await client._detect_api_path()
+
+        # Test-Suche durchführen
+        results = await client.search(query="test", limit=1)
+
+        return {
+            "success": True,
+            "message": f"Verbindung erfolgreich",
+            "api_path": api_path or "(root)",
+            "detected_url": client._api_url("/content"),
+            "test_search_works": True,
+        }
+    except ConfluenceError as e:
+        return {"success": False, "error": str(e)}
+    except Exception as e:
+        return {"success": False, "error": f"Unerwarteter Fehler: {e}"}
 
 
 @router.get("/search", response_model=List[ConfluenceSearchResult])
