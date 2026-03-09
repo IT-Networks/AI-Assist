@@ -6,10 +6,16 @@ Tools:
 - github_list_prs: Pull Requests eines Repos auflisten
 - github_pr_details: Details eines Pull Requests (Metadaten, Reviews)
 - github_pr_diff: Code-Änderungen eines PRs analysieren (Diff/Patch)
+- github_get_file: Dateiinhalt von GitHub holen (aus Branch/Commit) - STATT read_file!
+- github_commit_diff: Änderungen eines Commits analysieren
 - github_list_issues: Issues eines Repos auflisten
 - github_issue_details: Details eines Issues
 - github_list_branches: Branches eines Repos auflisten
 - github_recent_commits: Letzte Commits eines Branches
+
+WICHTIG für Agent:
+- Für LOKALE Dateien: read_file, search_code, list_files
+- Für GITHUB Dateien: github_get_file, github_pr_diff, github_commit_diff
 
 Hinweis: Alle Tools unterstützen Repo-Namen ohne Org-Prefix wenn default_org gesetzt ist.
 Beispiel: "AI-Assist" wird zu "IT-Networks/AI-Assist" aufgelöst.
@@ -532,10 +538,10 @@ def register_github_tools(registry: ToolRegistry) -> int:
     registry.register(Tool(
         name="github_pr_diff",
         description=(
-            "Holt die Code-Änderungen (Diff) eines Pull Requests. "
+            "Holt die Code-Änderungen (Diff) eines Pull Requests von GitHub. "
             "Zeigt welche Dateien geändert wurden mit dem konkreten Diff-Patch. "
-            "WICHTIG: Verwende dieses Tool um PR-Code zu analysieren, NICHT search_code! "
-            "Kann nach Dateinamen gefiltert werden."
+            "WICHTIG: Für PR-Analyse dieses Tool verwenden, NICHT search_code oder read_file! "
+            "Für vollständigen Dateiinhalt nach Diff-Analyse: github_get_file verwenden."
         ),
         category=ToolCategory.DEVOPS,
         parameters=[
@@ -909,6 +915,215 @@ def register_github_tools(registry: ToolRegistry) -> int:
             ),
         ],
         handler=github_recent_commits,
+    ))
+    count += 1
+
+    # ── github_get_file ───────────────────────────────────────────────────────
+    async def github_get_file(**kwargs: Any) -> ToolResult:
+        """
+        Holt den vollständigen Inhalt einer Datei von GitHub.
+        Kann aus einem Branch, Commit oder PR gelesen werden.
+        WICHTIG: Verwende dies statt read_file wenn du Dateien aus GitHub brauchst!
+        """
+        if not settings.github.enabled:
+            return ToolResult(success=False, error="GitHub ist nicht aktiviert")
+
+        repo: str = _resolve_repo(kwargs.get("repo", ""))
+        path: str = kwargs.get("path", "").strip()
+        ref: str = kwargs.get("ref", "").strip()  # Branch, Tag oder Commit-SHA
+
+        if not repo:
+            return ToolResult(success=False, error="repo ist erforderlich")
+        if not path:
+            return ToolResult(success=False, error="path ist erforderlich (z.B. 'src/Main.java')")
+
+        api_url = settings.github.get_api_url()
+
+        # Dateiinhalt von GitHub holen
+        params = {}
+        if ref:
+            params["ref"] = ref
+
+        result = await _github_request(
+            method="GET",
+            url=f"{api_url}/repos/{repo}/contents/{path}",
+            token=settings.github.token,
+            verify_ssl=settings.github.verify_ssl,
+            timeout=settings.github.timeout_seconds,
+            params=params if params else None,
+        )
+
+        if not result["success"]:
+            return ToolResult(success=False, error=result["error"])
+
+        data = result["data"]
+
+        # Prüfen ob es eine Datei ist (nicht Verzeichnis)
+        if data.get("type") != "file":
+            return ToolResult(success=False, error=f"'{path}' ist ein Verzeichnis, keine Datei")
+
+        # Inhalt dekodieren (Base64)
+        import base64
+        try:
+            content = base64.b64decode(data.get("content", "")).decode("utf-8")
+        except Exception as e:
+            return ToolResult(success=False, error=f"Fehler beim Dekodieren: {e}")
+
+        # Inhalt auf max 50000 Zeichen begrenzen
+        truncated = False
+        if len(content) > 50000:
+            content = content[:50000]
+            truncated = True
+
+        return ToolResult(
+            success=True,
+            data={
+                "repo": repo,
+                "path": path,
+                "ref": ref or "(default branch)",
+                "size": data.get("size"),
+                "sha": data.get("sha"),
+                "truncated": truncated,
+                "content": content,
+            },
+        )
+
+    registry.register(Tool(
+        name="github_get_file",
+        description=(
+            "Holt den VOLLSTÄNDIGEN Inhalt einer Datei von GitHub (Remote-Repository). "
+            "WICHTIG: Verwende dies statt read_file wenn du Dateien aus GitHub-PRs/Branches lesen willst! "
+            "read_file ist NUR für lokale Dateien. Kann Branch, Tag oder Commit-SHA angeben."
+        ),
+        category=ToolCategory.DEVOPS,
+        parameters=[
+            ToolParameter(
+                name="repo",
+                type="string",
+                description="Repository: 'owner/repo' oder nur 'repo-name'",
+                required=False,
+            ),
+            ToolParameter(
+                name="path",
+                type="string",
+                description="Dateipfad im Repository (z.B. 'src/main/java/Service.java')",
+                required=True,
+            ),
+            ToolParameter(
+                name="ref",
+                type="string",
+                description="Branch, Tag oder Commit-SHA (leer = Default-Branch)",
+                required=False,
+            ),
+        ],
+        handler=github_get_file,
+    ))
+    count += 1
+
+    # ── github_commit_diff ────────────────────────────────────────────────────
+    async def github_commit_diff(**kwargs: Any) -> ToolResult:
+        """
+        Holt die Änderungen eines spezifischen Commits.
+        Zeigt welche Dateien geändert wurden und den Diff.
+        """
+        if not settings.github.enabled:
+            return ToolResult(success=False, error="GitHub ist nicht aktiviert")
+
+        repo: str = _resolve_repo(kwargs.get("repo", ""))
+        commit_sha: str = kwargs.get("commit_sha", "").strip()
+        file_filter: str = kwargs.get("file_filter", "").strip()
+
+        if not repo:
+            return ToolResult(success=False, error="repo ist erforderlich")
+        if not commit_sha:
+            return ToolResult(success=False, error="commit_sha ist erforderlich")
+
+        api_url = settings.github.get_api_url()
+
+        # Commit-Details holen
+        result = await _github_request(
+            method="GET",
+            url=f"{api_url}/repos/{repo}/commits/{commit_sha}",
+            token=settings.github.token,
+            verify_ssl=settings.github.verify_ssl,
+            timeout=settings.github.timeout_seconds,
+        )
+
+        if not result["success"]:
+            return ToolResult(success=False, error=result["error"])
+
+        commit = result["data"]
+        commit_info = commit.get("commit", {})
+
+        files = []
+        for f in commit.get("files", []):
+            filename = f.get("filename", "")
+
+            # Optional: Filter nach Dateiname
+            if file_filter and file_filter.lower() not in filename.lower():
+                continue
+
+            file_info = {
+                "filename": filename,
+                "status": f.get("status"),
+                "additions": f.get("additions", 0),
+                "deletions": f.get("deletions", 0),
+            }
+
+            # Patch (Diff)
+            if f.get("patch"):
+                patch = f.get("patch", "")
+                if len(patch) > 3000:
+                    file_info["patch"] = patch[:3000] + "\n... (truncated)"
+                else:
+                    file_info["patch"] = patch
+
+            files.append(file_info)
+
+        return ToolResult(
+            success=True,
+            data={
+                "repo": repo,
+                "sha": commit.get("sha", "")[:7],
+                "full_sha": commit.get("sha"),
+                "message": commit_info.get("message", "").split("\n")[0],
+                "author": commit_info.get("author", {}).get("name"),
+                "date": commit_info.get("author", {}).get("date"),
+                "stats": commit.get("stats", {}),
+                "file_count": len(files),
+                "files": files,
+            },
+        )
+
+    registry.register(Tool(
+        name="github_commit_diff",
+        description=(
+            "Holt die Code-Änderungen eines spezifischen Commits von GitHub. "
+            "Zeigt welche Dateien geändert wurden mit dem Diff-Patch. "
+            "Verwende dies um Commit-Änderungen zu analysieren."
+        ),
+        category=ToolCategory.DEVOPS,
+        parameters=[
+            ToolParameter(
+                name="repo",
+                type="string",
+                description="Repository: 'owner/repo' oder nur 'repo-name'",
+                required=False,
+            ),
+            ToolParameter(
+                name="commit_sha",
+                type="string",
+                description="Commit-SHA (kurz oder lang)",
+                required=True,
+            ),
+            ToolParameter(
+                name="file_filter",
+                type="string",
+                description="Optional: Nur Dateien die diesen Text im Pfad enthalten",
+                required=False,
+            ),
+        ],
+        handler=github_commit_diff,
     ))
     count += 1
 

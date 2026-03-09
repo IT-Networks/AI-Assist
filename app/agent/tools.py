@@ -1276,7 +1276,11 @@ async def debug_java_with_testdata(
 
 SEARCH_CODE_TOOL = Tool(
     name="search_code",
-    description="Findet Java/Python/SQL-Dateien per Volltextsuche. Nutze für: Klassennamen, Methodennamen, SQL-Patterns, Konzepte.",
+    description=(
+        "Durchsucht das LOKALE Repository nach Java/Python/SQL-Dateien per Volltextsuche. "
+        "WICHTIG: Nur für LOKALE Dateien! Für GitHub-PRs/Branches verwende github_pr_diff oder github_get_file. "
+        "Nutze für: Klassennamen, Methodennamen, SQL-Patterns im lokalen Code."
+    ),
     category=ToolCategory.SEARCH,
     parameters=[
         ToolParameter("query", "string", "Suchbegriff (Klassenname, Methode, Tabellenname, Konzept)"),
@@ -1313,7 +1317,10 @@ SEARCH_SKILLS_TOOL = Tool(
 
 READ_FILE_TOOL = Tool(
     name="read_file",
-    description="Liest Datei vollständig. Pfad: relativ zum Repo-Root (z.B. 'src/Main.java') oder absolut.",
+    description=(
+        "Liest eine LOKALE Datei vollständig. Pfad: relativ zum Repo-Root oder absolut. "
+        "WICHTIG: Nur für LOKALE Dateien! Für Dateien aus GitHub-PRs/Branches verwende github_get_file."
+    ),
     category=ToolCategory.FILE,
     parameters=[
         ToolParameter("path", "string", "Pfad zur Datei"),
@@ -1324,7 +1331,10 @@ READ_FILE_TOOL = Tool(
 
 LIST_FILES_TOOL = Tool(
     name="list_files",
-    description="Listet Dateien in einem Verzeichnis auf. Unterstützt Glob-Patterns.",
+    description=(
+        "Listet Dateien in einem LOKALEN Verzeichnis auf. Unterstützt Glob-Patterns. "
+        "WICHTIG: Nur für LOKALE Verzeichnisse! Für GitHub-Repos verwende github_list_repos."
+    ),
     category=ToolCategory.FILE,
     parameters=[
         ToolParameter("path", "string", "Verzeichnispfad"),
