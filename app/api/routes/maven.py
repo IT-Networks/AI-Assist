@@ -293,8 +293,9 @@ async def run_build(build_id: str, req: RunBuildRequest = RunBuildRequest()) -> 
 
     async def stream_build():
         # Debug: Welche Java- und Maven-Version wird verwendet?
-        java_home = env.get("JAVA_HOME", "nicht gesetzt")
-        yield f"data: {json.dumps({'type': 'output', 'line': f'[DEBUG] JAVA_HOME: {java_home}', 'is_error': False, 'is_warning': False, 'is_success': False})}\n\n"
+        java_home_val = env.get("JAVA_HOME", "nicht gesetzt (System-Default)")
+        java_home_source = "Maven-Config" if settings.maven.java_home else "System"
+        yield f"data: {json.dumps({'type': 'output', 'line': f'[DEBUG] JAVA_HOME ({java_home_source}): {java_home_val}', 'is_error': False, 'is_warning': False, 'is_success': False})}\n\n"
         yield f"data: {json.dumps({'type': 'output', 'line': f'[DEBUG] Maven: {mvn}', 'is_error': False, 'is_warning': False, 'is_success': False})}\n\n"
 
         try:

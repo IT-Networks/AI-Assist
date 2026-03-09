@@ -215,17 +215,19 @@ async def start_server(server_id: str) -> StreamingResponse:
     if srv.extra_jvm_args:
         env_extra["JVM_ARGS"] = srv.extra_jvm_args
 
-    # JAVA_HOME setzen wenn konfiguriert
-    if settings.wlp.java_home:
-        env_extra["JAVA_HOME"] = settings.wlp.java_home
+    # JAVA_HOME setzen wenn konfiguriert (WLP > Maven > System)
+    java_home = settings.wlp.java_home or settings.maven.java_home
+    if java_home:
+        env_extra["JAVA_HOME"] = java_home
 
     async def stream_start():
         import os
         env = {**os.environ, **env_extra}
 
         # Debug: Welche Java-Version wird verwendet?
-        java_home = env.get("JAVA_HOME", "nicht gesetzt")
-        yield f"data: {json.dumps({'type': 'output', 'line': f'[DEBUG] JAVA_HOME: {java_home}', 'is_error': False, 'is_ready': False})}\n\n"
+        java_home_val = env.get("JAVA_HOME", "nicht gesetzt (System-Default)")
+        java_home_source = "WLP" if settings.wlp.java_home else ("Maven" if settings.maven.java_home else "System")
+        yield f"data: {json.dumps({'type': 'output', 'line': f'[DEBUG] JAVA_HOME ({java_home_source}): {java_home_val}', 'is_error': False, 'is_ready': False})}\n\n"
 
         try:
             proc = await asyncio.create_subprocess_exec(
