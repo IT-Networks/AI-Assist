@@ -1293,7 +1293,11 @@ SEARCH_CODE_TOOL = Tool(
 
 SEARCH_HANDBOOK_TOOL = Tool(
     name="search_handbook",
-    description="Durchsucht das Handbuch nach relevanten Service-Dokumentationen, Feldbeschreibungen und Aufrufvarianten.",
+    description=(
+        "Durchsucht das HTML-Handbuch (Netzlaufwerk) nach Service-Dokumentationen und Feldbeschreibungen. "
+        "HINWEIS: Internes Handbuch, nicht Confluence oder GitHub. "
+        "Für Confluence: search_confluence verwenden."
+    ),
     category=ToolCategory.KNOWLEDGE,
     parameters=[
         ToolParameter("query", "string", "Suchbegriff"),
@@ -1346,7 +1350,10 @@ LIST_FILES_TOOL = Tool(
 
 WRITE_FILE_TOOL = Tool(
     name="write_file",
-    description="Erstellt oder überschreibt eine Datei. BENÖTIGT USER-BESTÄTIGUNG.",
+    description=(
+        "Erstellt oder überschreibt eine LOKALE Datei. BENÖTIGT USER-BESTÄTIGUNG. "
+        "WICHTIG: Für LOKALE Dateien! GitHub-Repos können nicht direkt beschrieben werden."
+    ),
     category=ToolCategory.FILE,
     is_write_operation=True,
     parameters=[
@@ -1358,7 +1365,10 @@ WRITE_FILE_TOOL = Tool(
 
 EDIT_FILE_TOOL = Tool(
     name="edit_file",
-    description="Bearbeitet eine Datei durch Ersetzen eines Strings. BENÖTIGT USER-BESTÄTIGUNG.",
+    description=(
+        "Bearbeitet eine LOKALE Datei durch Ersetzen eines Strings. BENÖTIGT USER-BESTÄTIGUNG. "
+        "WICHTIG: Für LOKALE Dateien! GitHub-Repos können nicht direkt bearbeitet werden."
+    ),
     category=ToolCategory.FILE,
     is_write_operation=True,
     parameters=[
@@ -1381,7 +1391,11 @@ GET_SERVICE_INFO_TOOL = Tool(
 
 SEARCH_PDF_TOOL = Tool(
     name="search_pdf",
-    description="Durchsucht hochgeladene PDF-Dokumente nach relevantem Text.",
+    description=(
+        "Durchsucht in dieser Session hochgeladene PDF-Dokumente nach Text. "
+        "HINWEIS: Nur PDFs die der User in diesem Chat hochgeladen hat. "
+        "Für Confluence-PDFs: Seite über search_confluence finden, dann read_confluence_page."
+    ),
     category=ToolCategory.SEARCH,
     parameters=[
         ToolParameter("query", "string", "Suchbegriff"),
@@ -1422,7 +1436,10 @@ READ_PDF_PAGES_TOOL = Tool(
 
 READ_SQLJ_FILE_TOOL = Tool(
     name="read_sqlj_file",
-    description="Liest eine SQLJ-Datei und extrahiert alle SQL-Statements (#sql { ... }) mit Methoden-Kontext und Host-Variablen (:varName). Ideal um SQL zu verstehen das ein Java-Service ausführt.",
+    description=(
+        "Liest eine LOKALE SQLJ-Datei und extrahiert SQL-Statements (#sql { ... }) mit Methoden-Kontext. "
+        "WICHTIG: Nur für LOKALE Dateien! Für GitHub-Dateien: github_get_file verwenden."
+    ),
     category=ToolCategory.ANALYSIS,
     parameters=[
         ToolParameter("path", "string", "Pfad zur SQLJ-Datei (relativ zum Repository oder absolut)"),
@@ -1432,7 +1449,11 @@ READ_SQLJ_FILE_TOOL = Tool(
 
 DEBUG_JAVA_TESTDATA_TOOL = Tool(
     name="debug_java_with_testdata",
-    description="Führt Java-Service mit Testdaten aus: liest Code → SQLJ → substituiert Parameter → SQL-Ergebnis. PFLICHT: class_name angeben.",
+    description=(
+        "Analysiert LOKALEN Java-Code mit Testdaten: liest Code → SQLJ → substituiert Parameter → SQL-Ergebnis. "
+        "WICHTIG: Arbeitet mit LOKALEM Repository! Für GitHub-Code erst mit github_get_file holen. "
+        "PFLICHT: class_name angeben (zuerst search_code aufrufen)."
+    ),
     category=ToolCategory.ANALYSIS,
     parameters=[
         ToolParameter("class_name", "string", "PFLICHT: Java-Klassenname (z.B. 'CustomerService'). Tool schlägt fehl wenn leer — zuerst search_code aufrufen um den Namen zu ermitteln."),
@@ -1444,7 +1465,11 @@ DEBUG_JAVA_TESTDATA_TOOL = Tool(
 
 TRACE_JAVA_REFERENCES_TOOL = Tool(
     name="trace_java_references",
-    description="Findet Interfaces, Parent-Klassen und Implementierungen. Nutze NACH search_code wenn Vererbung relevant ist.",
+    description=(
+        "Findet Interfaces, Parent-Klassen und Implementierungen im LOKALEN Repository. "
+        "WICHTIG: Analysiert nur LOKALE Dateien! Für GitHub: github_get_file + manuelle Analyse. "
+        "Nutze NACH search_code wenn Vererbung relevant ist."
+    ),
     category=ToolCategory.ANALYSIS,
     parameters=[
         ToolParameter("class_name", "string", "Name der Klasse (einfach oder vollqualifiziert)"),
