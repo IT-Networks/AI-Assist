@@ -1783,6 +1783,14 @@ def create_default_registry() -> ToolRegistry:
     # Debug-Modus: Interaktives Rückfrage-Tool
     registry.register(SUGGEST_ANSWERS_TOOL)
 
+    # Web-Suche Tools (mit Bestätigungspflicht)
+    from app.agent.search_tools import register_search_tools
+    register_search_tools(registry)
+
+    # GitHub Tools (PR-Diff, File-Read, Issue-Search etc.)
+    from app.agent.github_tools import register_github_tools
+    register_github_tools(registry)
+
     return registry
 
 
