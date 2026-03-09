@@ -5269,6 +5269,9 @@ async function _pollPendingSearches() {
     if (!res.ok) return;
     const data = await res.json();
     const pending = data.pending || [];
+    if (pending.length > 0) {
+      console.log('[search] Pending searches:', pending.map(p => ({ id: p.id, status: p.status, query: p.query?.substring(0, 30) })));
+    }
 
     // Badge in Sidebar-Tab aktualisieren
     const badge = document.getElementById('search-pending-badge');
@@ -5334,10 +5337,19 @@ async function searchConfirm(searchId) {
   const card = document.getElementById(`sc-${searchId}`);
   if (card) card.innerHTML = '<div class="spinner-inline"></div> Suche wird ausgeführt...';
   try {
-    await fetch(`/api/search/confirm/${searchId}`, { method: 'POST' });
+    const res = await fetch(`/api/search/confirm/${searchId}`, { method: 'POST' });
+    if (!res.ok) {
+      const errData = await res.json().catch(() => ({}));
+      throw new Error(errData.detail || `HTTP ${res.status}`);
+    }
+    const data = await res.json();
+    console.log('[search] Confirm response:', data);
+    // Kurz warten damit der Agent-Poll die Änderung sieht
+    await new Promise(r => setTimeout(r, 500));
     await _pollPendingSearches();
     loadSearchPanel(); // History aktualisieren
   } catch (e) {
+    console.error('[search] Confirm error:', e);
     if (card) card.innerHTML = `<span class="badge badge-error">Fehler: ${e.message}</span>`;
   }
 }

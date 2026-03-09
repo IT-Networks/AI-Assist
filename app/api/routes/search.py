@@ -312,23 +312,29 @@ async def list_pending() -> Dict[str, Any]:
 @router.post("/confirm/{search_id}")
 async def confirm_search(search_id: str) -> Dict[str, Any]:
     """Nutzer bestätigt die Suche – wird sofort ausgeführt."""
+    print(f"[search] Confirm request for {search_id}")
     item = _pending.get(search_id)
     if not item:
+        print(f"[search] ERROR: Search {search_id} not found in pending: {list(_pending.keys())}")
         raise HTTPException(status_code=404, detail=f"Suche '{search_id}' nicht gefunden")
     if item["status"] != "pending":
+        print(f"[search] ERROR: Search {search_id} already in status: {item['status']}")
         raise HTTPException(status_code=409, detail=f"Suche ist bereits im Status: {item['status']}")
 
     item["status"] = "executing"
+    print(f"[search] Executing search: {item['query'][:50]}...")
     try:
         results = await _ddg_search(item["query"], item["max_results"])
         item["results"] = results
         item["status"] = "done"
         item["executed_at"] = datetime.now().isoformat()
+        print(f"[search] Search {search_id} completed with {len(results)} results")
         # In History ablegen
         _history.append({**item})
         if len(_history) > _HISTORY_MAX:
             _history.pop(0)
     except Exception as e:
+        print(f"[search] ERROR during search {search_id}: {e}")
         item["status"] = "done"
         item["error"] = str(e)
         item["results"] = []

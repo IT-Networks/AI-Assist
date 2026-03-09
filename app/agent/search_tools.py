@@ -69,6 +69,7 @@ def register_search_tools(registry: ToolRegistry) -> int:
             "error": None,
             "created_at": datetime.now().isoformat(),
         }
+        print(f"[web_search] Created pending search {search_id}: {query[:50]}...")
 
         # Auf Bestätigung warten (max. 90 Sekunden, alle 2s prüfen)
         timeout_s = 90
@@ -78,6 +79,8 @@ def register_search_tools(registry: ToolRegistry) -> int:
             elapsed += 2
             item = _pending.get(search_id, {})
             status = item.get("status", "missing")
+            if elapsed % 10 == 0:  # Log alle 10 Sekunden
+                print(f"[web_search] Waiting for {search_id}: status={status}, elapsed={elapsed}s")
 
             if status == "done":
                 results = item.get("results") or []
