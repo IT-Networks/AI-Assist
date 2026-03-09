@@ -6084,10 +6084,13 @@ async function saveSearchProxyConfig() {
     proxy_password: document.getElementById('search-proxy-pass')?.value || '',
     no_proxy: document.getElementById('search-no-proxy')?.value || '',
     timeout_seconds: parseInt(document.getElementById('search-timeout')?.value) || 30,
-    verify_ssl: document.getElementById('search-verify-ssl')?.checked !== false,
+    verify_ssl: document.getElementById('search-verify-ssl')?.checked ?? true,
   };
 
+  console.log('[Search] Saving config:', { ...config, proxy_password: '***' });
+
   try {
+    // 1. Config im Speicher aktualisieren
     const res = await fetch('/api/search/config', {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
@@ -6095,15 +6098,25 @@ async function saveSearchProxyConfig() {
     });
     const data = await res.json();
 
-    if (res.ok) {
-      statusEl.textContent = '✓ Gespeichert';
-      statusEl.style.color = 'var(--success)';
-      updateSettingsStatus('Proxy-Einstellungen gespeichert ✓', 'success');
-    } else {
+    if (!res.ok) {
       statusEl.textContent = '✗ Fehler: ' + (data.detail || 'Unbekannt');
       statusEl.style.color = 'var(--error)';
+      return;
+    }
+
+    // 2. Einstellungen in Datei persistieren
+    const saveRes = await fetch('/api/settings/save', { method: 'POST' });
+    if (saveRes.ok) {
+      statusEl.textContent = '✓ Gespeichert & persistiert';
+      statusEl.style.color = 'var(--success)';
+      updateSettingsStatus('Proxy-Einstellungen dauerhaft gespeichert ✓', 'success');
+    } else {
+      statusEl.textContent = '✓ Gespeichert (nicht persistiert)';
+      statusEl.style.color = 'var(--warning)';
+      updateSettingsStatus('Im Speicher aktualisiert, aber nicht in Datei gespeichert', 'warning');
     }
   } catch (e) {
+    console.error('[Search] Save error:', e);
     statusEl.textContent = '✗ Fehler: ' + e.message;
     statusEl.style.color = 'var(--error)';
   }
