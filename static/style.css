@@ -2965,6 +2965,7 @@ body {
 .tool-output .log-error { color: #f85149; }
 .tool-output .log-ready { color: #3fb950; font-weight: bold; }
 .tool-output .log-warn  { color: #d29922; }
+.tool-output .log-info  { color: #58a6ff; font-style: italic; }
 
 /* Log-Server row */
 .ls-server-row {

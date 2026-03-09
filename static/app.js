@@ -5070,10 +5070,15 @@ async function wlpPanelValidate(id) {
 }
 
 function wlpPanelStart(id) {
+  console.log('[WLP] wlpPanelStart called with id:', id);
   const logArea = document.getElementById('wlp-log-area');
   const logOutput = document.getElementById('wlp-log-output');
+  if (!logArea || !logOutput) {
+    console.error('[WLP] Log elements not found!', { logArea, logOutput });
+    return;
+  }
   logArea.style.display = 'block';
-  logOutput.textContent = '';
+  logOutput.textContent = '⏳ Starte Server...\n';
   _streamWLPServer(id, 'start', logOutput);
 }
 
@@ -5098,17 +5103,40 @@ async function wlpPanelLogs(id) {
 
 // Alias-Funktionen für WLP (Button-Callbacks in wlpLoadList)
 function wlpStart(id) {
+  console.log('[WLP] wlpStart called from Settings, id:', id);
   switchRightPanel('wlp-panel');
+  loadWLPPanel(); // Panel-Inhalt aktualisieren
   wlpPanelStart(id);
 }
 
 async function wlpStop(id) {
+  console.log('[WLP] wlpStop called from Settings, id:', id);
   await wlpPanelStop(id);
 }
 
 async function _streamWLPServer(id, action, outputEl) {
+  console.log('[WLP] _streamWLPServer called:', { id, action });
   try {
     const res = await fetch(`/api/wlp/servers/${id}/${action}`, { method: 'POST' });
+    console.log('[WLP] Fetch response:', res.status, res.statusText);
+
+    // Fehlerprüfung
+    if (!res.ok) {
+      let errorMsg = `HTTP ${res.status}: ${res.statusText}`;
+      try {
+        const errData = await res.json();
+        errorMsg = errData.detail || errorMsg;
+      } catch (_) {}
+      outputEl.textContent += `\n❌ Fehler: ${errorMsg}`;
+      console.error('[WLP] API Error:', errorMsg);
+      return;
+    }
+
+    if (!res.body) {
+      outputEl.textContent += '\n❌ Keine Streaming-Antwort vom Server';
+      return;
+    }
+
     const reader = res.body.getReader();
     const decoder = new TextDecoder();
     let buffer = '';
@@ -5122,7 +5150,13 @@ async function _streamWLPServer(id, action, outputEl) {
         if (!line.startsWith('data:')) continue;
         try {
           const ev = JSON.parse(line.slice(5).trim());
-          if (ev.type === 'output') {
+          console.log('[WLP] Event:', ev.type);
+          if (ev.type === 'start') {
+            const span = document.createElement('div');
+            span.className = 'log-info';
+            span.textContent = `$ ${ev.cmd} (PID: ${ev.pid})`;
+            outputEl.appendChild(span);
+          } else if (ev.type === 'output') {
             const span = document.createElement('div');
             span.className = ev.is_error ? 'log-error' : (ev.is_ready ? 'log-ready' : '');
             span.textContent = ev.line;
@@ -5138,15 +5172,26 @@ async function _streamWLPServer(id, action, outputEl) {
             span.className = 'log-warn';
             span.textContent = '⚠ ' + ev.message;
             outputEl.appendChild(span);
+          } else if (ev.type === 'error') {
+            const span = document.createElement('div');
+            span.className = 'log-error';
+            span.textContent = '❌ ' + ev.message;
+            outputEl.appendChild(span);
           } else if (ev.type === 'done') {
-            outputEl.textContent += `\n[Exit: ${ev.exit_code}]`;
+            const span = document.createElement('div');
+            span.className = ev.exit_code === 0 ? 'log-ready' : 'log-error';
+            span.textContent = `[Exit: ${ev.exit_code}]`;
+            outputEl.appendChild(span);
             loadWLPPanel();
           }
-        } catch (_) {}
+        } catch (parseErr) {
+          console.warn('[WLP] Parse error:', parseErr, line);
+        }
       }
     }
   } catch (e) {
-    outputEl.textContent += `\nFehler: ${e.message}`;
+    console.error('[WLP] Stream error:', e);
+    outputEl.textContent += `\n❌ Fehler: ${e.message}`;
   }
 }
 
@@ -5182,10 +5227,15 @@ async function loadMavenPanel() {
 }
 
 function mvnPanelRun(buildId) {
+  console.log('[Maven] mvnPanelRun called with buildId:', buildId);
   const logArea = document.getElementById('maven-log-area');
   const logOutput = document.getElementById('maven-log-output');
+  if (!logArea || !logOutput) {
+    console.error('[Maven] Log elements not found!', { logArea, logOutput });
+    return;
+  }
   logArea.style.display = 'block';
-  logOutput.textContent = '';
+  logOutput.textContent = '⏳ Starte Maven Build...\n';
   _streamMavenBuild(buildId, logOutput);
 }
 
@@ -5198,13 +5248,35 @@ async function mvnStopBuild(buildId) {
 }
 
 async function mvnRunBuild(buildId) {
+  console.log('[Maven] mvnRunBuild called from Settings, buildId:', buildId);
   switchRightPanel('maven-panel');
+  loadMavenPanel(); // Panel-Inhalt aktualisieren
   mvnPanelRun(buildId);
 }
 
 async function _streamMavenBuild(buildId, outputEl) {
+  console.log('[Maven] _streamMavenBuild called:', buildId);
   try {
     const res = await fetch(`/api/maven/builds/${buildId}/run`, { method: 'POST', headers: {'Content-Type':'application/json'}, body: '{}' });
+    console.log('[Maven] Fetch response:', res.status, res.statusText);
+
+    // Fehlerprüfung
+    if (!res.ok) {
+      let errorMsg = `HTTP ${res.status}: ${res.statusText}`;
+      try {
+        const errData = await res.json();
+        errorMsg = errData.detail || errorMsg;
+      } catch (_) {}
+      outputEl.textContent += `\n❌ Fehler: ${errorMsg}`;
+      console.error('[Maven] API Error:', errorMsg);
+      return;
+    }
+
+    if (!res.body) {
+      outputEl.textContent += '\n❌ Keine Streaming-Antwort vom Server';
+      return;
+    }
+
     const reader = res.body.getReader();
     const decoder = new TextDecoder();
     let buffer = '';
@@ -5218,6 +5290,7 @@ async function _streamMavenBuild(buildId, outputEl) {
         if (!line.startsWith('data:')) continue;
         try {
           const ev = JSON.parse(line.slice(5).trim());
+          console.log('[Maven] Event:', ev.type);
           if (ev.type === 'output') {
             const div = document.createElement('div');
             div.className = ev.is_error ? 'log-error' : (ev.is_success ? 'log-ready' : (ev.is_warning ? 'log-warn' : ''));
@@ -5231,13 +5304,24 @@ async function _streamMavenBuild(buildId, outputEl) {
             outputEl.appendChild(div);
             loadMavenPanel();
           } else if (ev.type === 'start') {
-            outputEl.textContent += `$ ${ev.cmd}\n`;
+            const div = document.createElement('div');
+            div.className = 'log-info';
+            div.textContent = `$ ${ev.cmd}`;
+            outputEl.appendChild(div);
+          } else if (ev.type === 'error') {
+            const div = document.createElement('div');
+            div.className = 'log-error';
+            div.textContent = '❌ ' + ev.message;
+            outputEl.appendChild(div);
           }
-        } catch (_) {}
+        } catch (parseErr) {
+          console.warn('[Maven] Parse error:', parseErr, line);
+        }
       }
     }
   } catch (e) {
-    outputEl.textContent += `\nFehler: ${e.message}`;
+    console.error('[Maven] Stream error:', e);
+    outputEl.textContent += `\n❌ Fehler: ${e.message}`;
   }
 }
 
