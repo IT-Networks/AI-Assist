@@ -4169,9 +4169,21 @@ async function renderWLPSection() {
       <h3 class="settings-section-title">WLP SERVER</h3>
       <p class="settings-section-desc">WebSphere Liberty Profile Server starten, server.xml prüfen und Artefakt validieren. Start wird per SSE-Stream überwacht.</p>
     </div>
+
+    <!-- Import aus WLP-Installation -->
+    <div class="settings-subsection" style="background: var(--accent-bg); border-color: var(--accent);">
+      <h4>&#128229; Server aus WLP-Installation importieren</h4>
+      <p style="font-size:12px;color:var(--text-muted);margin-bottom:8px">Scannt einen WLP-Ordner nach vorhandenen Servern (usr/servers/*) inkl. jvm.options.</p>
+      <div class="settings-field-row">
+        <input id="wlp-discover-path" type="text" class="settings-input" placeholder="WLP-Pfad (z.B. C:\\wlp oder /opt/ibm/wlp)">
+        <button class="btn btn-primary" onclick="wlpDiscoverServers()">&#128269; Suchen</button>
+      </div>
+      <div id="wlp-discover-results" style="margin-top:10px"></div>
+    </div>
+
     <div id="wlp-list"><div class="spinner-inline"></div></div>
     <div class="settings-add-form">
-      <h4>Server hinzufügen</h4>
+      <h4>Server manuell hinzufügen</h4>
       <div class="settings-field"><label>Name</label><input id="wlp-new-name" type="text" class="settings-input" placeholder="z.B. Lokaler Dev-Server"></div>
       <div class="settings-field"><label>WLP-Pfad (Verzeichnis, z.B. /opt/ibm/wlp)</label><input id="wlp-new-path" type="text" class="settings-input" placeholder="/opt/ibm/wlp"></div>
       <div class="settings-field"><label>Server-Name (in usr/servers/)</label><input id="wlp-new-srvname" type="text" class="settings-input" placeholder="defaultServer" value="defaultServer"></div>
@@ -4181,6 +4193,66 @@ async function renderWLPSection() {
       <button class="btn btn-primary" onclick="wlpAddServer()">+ Hinzufügen</button>
     </div>
   `;
+  await wlpLoadList();
+}
+
+// ── WLP Discovery & Import ────────────────────────────────────────────────────
+async function wlpDiscoverServers() {
+  const path = document.getElementById('wlp-discover-path').value.trim();
+  const container = document.getElementById('wlp-discover-results');
+  container.innerHTML = '<span class="spinner-inline"></span> Suche Server...';
+
+  const url = path ? `/api/wlp/discover?path=${encodeURIComponent(path)}` : '/api/wlp/discover';
+  const res = await fetch(url);
+  const data = await res.json();
+
+  if (!data.found?.length) {
+    container.innerHTML = `<p class="empty-hint">${escapeHtml(data.message || 'Keine Server gefunden')}</p>`;
+    if (data.hint) container.innerHTML += `<p style="font-size:11px;color:var(--text-muted)">${escapeHtml(data.hint)}</p>`;
+    return;
+  }
+
+  container.innerHTML = `
+    <p style="font-size:12px;margin-bottom:8px">${data.found.length} Server gefunden:</p>
+    ${data.found.map((s, i) => `
+      <div class="ds-item" style="padding:8px;margin-bottom:6px">
+        <label style="display:flex;align-items:flex-start;gap:8px;cursor:pointer">
+          <input type="checkbox" class="wlp-import-check" data-idx="${i}" ${s.already_imported ? 'disabled' : 'checked'}>
+          <div>
+            <strong>${escapeHtml(s.server_name)}</strong>
+            ${s.already_imported ? '<span class="badge">bereits importiert</span>' : ''}
+            <div style="font-size:11px;color:var(--text-muted)">${escapeHtml(s.wlp_path)}</div>
+            ${s.features?.length ? `<div style="font-size:11px;color:var(--text-secondary)">Features: ${escapeHtml(s.features.slice(0,5).join(', '))}${s.features.length > 5 ? '...' : ''}</div>` : ''}
+            ${s.has_jvm_options ? `<div style="font-size:11px;color:var(--accent)">JVM: ${escapeHtml(s.jvm_options.substring(0,80))}${s.jvm_options.length > 80 ? '...' : ''}</div>` : ''}
+          </div>
+        </label>
+      </div>
+    `).join('')}
+    <button class="btn btn-success" onclick="wlpImportSelected()">&#128229; Ausgewählte importieren</button>
+  `;
+  // Speichere Daten für Import
+  window._wlpDiscoveredServers = data.found;
+}
+
+async function wlpImportSelected() {
+  const servers = window._wlpDiscoveredServers || [];
+  const toImport = [];
+  document.querySelectorAll('.wlp-import-check:checked').forEach(cb => {
+    const idx = parseInt(cb.dataset.idx);
+    if (servers[idx] && !servers[idx].already_imported) {
+      toImport.push(servers[idx]);
+    }
+  });
+  if (!toImport.length) { updateSettingsStatus('Keine Server ausgewählt', 'error'); return; }
+
+  const res = await fetch('/api/wlp/import', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ servers: toImport })
+  });
+  const data = await res.json();
+  updateSettingsStatus(`${data.imported_count} Server importiert ✓`, 'success');
+  document.getElementById('wlp-discover-results').innerHTML = '';
   await wlpLoadList();
 }
 
@@ -4262,13 +4334,22 @@ async function renderMavenSection() {
       <h3 class="settings-section-title">MAVEN BUILD</h3>
       <p class="settings-section-desc">Maven-Builds definieren und per Klick ausführen. Build-Ausgabe wird per SSE live gestreamt.</p>
     </div>
+
+    <!-- Import aus Repository -->
+    <div class="settings-subsection" style="background: var(--accent-bg); border-color: var(--accent);">
+      <h4>&#128229; Builds aus Repository importieren</h4>
+      <p style="font-size:12px;color:var(--text-muted);margin-bottom:8px">Findet pom.xml Dateien und IntelliJ Maven Run Configurations im aktiven Java-Repository.</p>
+      <button class="btn btn-primary" onclick="mvnDiscoverProjects()">&#128269; Projekte suchen</button>
+      <div id="mvn-discover-results" style="margin-top:10px"></div>
+    </div>
+
     <div class="settings-field">
       <label>mvn-Executable</label>
       <input id="mvn-exec" type="text" class="settings-input" placeholder="mvn" value="">
     </div>
     <div id="mvn-builds-list"><div class="spinner-inline"></div></div>
     <div class="settings-add-form">
-      <h4>Build hinzufügen</h4>
+      <h4>Build manuell hinzufügen</h4>
       <div class="settings-field-row">
         <input id="mvn-new-name" type="text" class="settings-input" placeholder="Name (z.B. OrderService Build)">
         <input id="mvn-new-desc" type="text" class="settings-input" placeholder="Beschreibung">
@@ -4291,6 +4372,126 @@ async function renderMavenSection() {
       <div id="mvn-pom-detect-result" style="margin-top:8px"></div>
     </div>
   `;
+  await mvnLoadBuilds();
+}
+
+// ── Maven Discovery & Import ──────────────────────────────────────────────────
+async function mvnDiscoverProjects() {
+  const container = document.getElementById('mvn-discover-results');
+  container.innerHTML = '<span class="spinner-inline"></span> Suche Maven-Projekte...';
+
+  const res = await fetch('/api/maven/discover');
+  const data = await res.json();
+
+  const poms = data.pom_projects || [];
+  const intellij = data.intellij_configs || [];
+
+  if (!poms.length && !intellij.length) {
+    container.innerHTML = `<p class="empty-hint">${escapeHtml(data.message || 'Keine Maven-Projekte gefunden')}</p>`;
+    return;
+  }
+
+  let html = '';
+
+  // IntelliJ Configs zuerst (diese haben schon Goals etc.)
+  if (intellij.length) {
+    html += `<p style="font-size:12px;font-weight:600;margin-bottom:6px">IntelliJ Run Configurations (${intellij.length}):</p>`;
+    intellij.forEach((c, i) => {
+      html += `
+        <div class="ds-item" style="padding:8px;margin-bottom:6px">
+          <label style="display:flex;align-items:flex-start;gap:8px;cursor:pointer">
+            <input type="checkbox" class="mvn-import-intellij" data-idx="${i}" ${c.already_imported ? 'disabled' : 'checked'}>
+            <div>
+              <strong>${escapeHtml(c.name)}</strong>
+              <span class="badge badge-info">IntelliJ</span>
+              ${c.already_imported ? '<span class="badge">bereits importiert</span>' : ''}
+              <div style="font-size:11px;color:var(--text-muted)">${escapeHtml(c.pom_path || '?')}</div>
+              <div style="font-size:11px;color:var(--accent)">Goals: ${escapeHtml(c.goals)} ${c.profiles?.length ? `| Profile: ${c.profiles.join(',')}` : ''}</div>
+            </div>
+          </label>
+        </div>
+      `;
+    });
+  }
+
+  // pom.xml Projekte
+  if (poms.length) {
+    html += `<p style="font-size:12px;font-weight:600;margin:10px 0 6px">pom.xml Projekte (${poms.length}):</p>`;
+    poms.forEach((p, i) => {
+      html += `
+        <div class="ds-item" style="padding:8px;margin-bottom:6px">
+          <label style="display:flex;align-items:flex-start;gap:8px;cursor:pointer">
+            <input type="checkbox" class="mvn-import-pom" data-idx="${i}" ${p.already_imported ? 'disabled' : ''}>
+            <div>
+              <strong>${escapeHtml(p.name || p.artifact_id)}</strong>
+              ${p.is_multi_module ? '<span class="badge">multi-module</span>' : ''}
+              ${p.already_imported ? '<span class="badge">bereits importiert</span>' : ''}
+              <div style="font-size:11px;color:var(--text-muted)">${escapeHtml(p.relative_path)}</div>
+              <div style="font-size:11px;color:var(--text-secondary)">${escapeHtml(p.group_id)}:${escapeHtml(p.artifact_id)} (${p.packaging})</div>
+            </div>
+          </label>
+        </div>
+      `;
+    });
+  }
+
+  html += `<button class="btn btn-success" onclick="mvnImportSelected()">&#128229; Ausgewählte importieren</button>`;
+  container.innerHTML = html;
+
+  // Speichere Daten für Import
+  window._mvnDiscoveredPoms = poms;
+  window._mvnDiscoveredIntelliJ = intellij;
+}
+
+async function mvnImportSelected() {
+  const poms = window._mvnDiscoveredPoms || [];
+  const intellij = window._mvnDiscoveredIntelliJ || [];
+  const toImport = [];
+
+  // IntelliJ Configs
+  document.querySelectorAll('.mvn-import-intellij:checked').forEach(cb => {
+    const idx = parseInt(cb.dataset.idx);
+    const c = intellij[idx];
+    if (c && !c.already_imported) {
+      toImport.push({
+        name: c.name,
+        pom_path: c.pom_path,
+        goals: c.goals || 'clean install',
+        profiles: c.profiles || [],
+        skip_tests: c.skip_tests || false,
+        jvm_args: c.jvm_args || '',
+        description: `Importiert aus IntelliJ`
+      });
+    }
+  });
+
+  // pom.xml Projekte
+  document.querySelectorAll('.mvn-import-pom:checked').forEach(cb => {
+    const idx = parseInt(cb.dataset.idx);
+    const p = poms[idx];
+    if (p && !p.already_imported) {
+      toImport.push({
+        name: p.name || p.artifact_id,
+        pom_path: p.pom_path,
+        goals: p.suggested_goals || 'clean install',
+        profiles: [],
+        skip_tests: false,
+        jvm_args: '',
+        description: `${p.group_id}:${p.artifact_id}`
+      });
+    }
+  });
+
+  if (!toImport.length) { updateSettingsStatus('Keine Builds ausgewählt', 'error'); return; }
+
+  const res = await fetch('/api/maven/import', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ builds: toImport })
+  });
+  const data = await res.json();
+  updateSettingsStatus(`${data.imported_count} Builds importiert ✓`, 'success');
+  document.getElementById('mvn-discover-results').innerHTML = '';
   await mvnLoadBuilds();
 }
 

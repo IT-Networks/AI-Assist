@@ -12,6 +12,9 @@ Routes:
   POST   /api/wlp/servers/{id}/stop          – Server stoppen
   GET    /api/wlp/servers/{id}/status        – Server-Status abfragen
   GET    /api/wlp/servers/{id}/logs          – Letzten Log-Auszug holen
+
+  GET    /api/wlp/discover                   – WLP-Server im Repo finden
+  POST   /api/wlp/import                     – Gefundene Server importieren
 """
 
 import asyncio
@@ -348,4 +351,274 @@ async def get_logs(server_id: str, lines: int = 200) -> Dict[str, Any]:
         "log_path": str(log_path),
         "total_lines": len(all_lines),
         "lines": [l.rstrip() for l in tail],
+    }
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Discovery & Import - Server aus Repo importieren
+# ══════════════════════════════════════════════════════════════════════════════
+
+def _parse_jvm_options(jvm_options_path: Path) -> str:
+    """Liest jvm.options und gibt alle JVM-Args als String zurück."""
+    if not jvm_options_path.exists():
+        return ""
+    try:
+        lines = jvm_options_path.read_text(encoding="utf-8", errors="replace").splitlines()
+        # Zeilen ohne Kommentare und leer
+        args = [l.strip() for l in lines if l.strip() and not l.strip().startswith("#")]
+        return " ".join(args)
+    except Exception:
+        return ""
+
+
+def _parse_server_xml_features(server_xml_path: Path) -> list:
+    """Extrahiert Features aus server.xml."""
+    if not server_xml_path.exists():
+        return []
+    try:
+        tree = ET.parse(str(server_xml_path))
+        root = tree.getroot()
+        features = []
+        for fm in root.iter("featureManager"):
+            for feature in fm.iter("feature"):
+                if feature.text:
+                    features.append(feature.text.strip())
+        return features
+    except Exception:
+        return []
+
+
+def _discover_wlp_servers(base_path: Path) -> list:
+    """
+    Sucht nach WLP-Servern in einem Verzeichnis.
+
+    Suchpfade:
+    - {base}/wlp/usr/servers/*/server.xml
+    - {base}/liberty/usr/servers/*/server.xml
+    - {base}/**/usr/servers/*/server.xml (max 5 Ebenen)
+    """
+    discovered = []
+    search_patterns = [
+        "wlp/usr/servers/*/server.xml",
+        "liberty/usr/servers/*/server.xml",
+        "*/wlp/usr/servers/*/server.xml",
+        "*/liberty/usr/servers/*/server.xml",
+    ]
+
+    seen_servers = set()
+
+    for pattern in search_patterns:
+        for server_xml in base_path.glob(pattern):
+            server_dir = server_xml.parent
+            server_name = server_dir.name
+
+            # WLP-Root ermitteln (3 Ebenen hoch: servers/{name}/server.xml → usr/servers/{name})
+            wlp_root = server_dir.parent.parent.parent
+            if not (wlp_root / "bin" / "server").exists() and not (wlp_root / "bin" / "server.bat").exists():
+                # Kein gültiger WLP-Root
+                continue
+
+            # Duplikate vermeiden
+            key = (str(wlp_root), server_name)
+            if key in seen_servers:
+                continue
+            seen_servers.add(key)
+
+            # JVM-Options lesen
+            jvm_options_path = server_dir / "jvm.options"
+            jvm_args = _parse_jvm_options(jvm_options_path)
+
+            # Features aus server.xml
+            features = _parse_server_xml_features(server_xml)
+
+            # Beschreibung generieren
+            desc_parts = []
+            if features:
+                desc_parts.append(f"Features: {', '.join(features[:5])}")
+                if len(features) > 5:
+                    desc_parts.append(f"(+{len(features) - 5} weitere)")
+
+            discovered.append({
+                "server_name": server_name,
+                "wlp_path": str(wlp_root),
+                "server_xml": str(server_xml),
+                "server_dir": str(server_dir),
+                "jvm_options": jvm_args,
+                "features": features,
+                "description": " ".join(desc_parts),
+                "has_jvm_options": bool(jvm_args),
+                "relative_path": str(server_xml.relative_to(base_path)),
+            })
+
+    return discovered
+
+
+@router.get("/discover")
+async def discover_servers(path: Optional[str] = None) -> Dict[str, Any]:
+    """
+    Sucht nach WLP-Servern in einem Verzeichnis.
+
+    Der WLP-Server kann in einem separaten Ordner liegen (nicht im Repo).
+    Gib den WLP-Installationspfad als Query-Parameter an.
+
+    Args:
+        path: WLP-Installationspfad (z.B. C:/wlp oder /opt/ibm/wlp)
+              Wenn leer, wird settings.wlp.repo_path verwendet.
+
+    Findet server.xml Dateien und extrahiert:
+    - Server-Name (aus Ordnername)
+    - WLP-Installationspfad
+    - JVM-Options (aus jvm.options)
+    - Features (aus server.xml)
+    """
+    # Pfad bestimmen: Query-Param > wlp.repo_path > java.repo_path (Fallback)
+    search_path = path or settings.wlp.repo_path or settings.java.get_active_path()
+
+    if not search_path:
+        return {
+            "found": [],
+            "search_path": None,
+            "message": "Kein Suchpfad angegeben. Bitte 'path' Parameter setzen oder wlp.repo_path konfigurieren.",
+            "hint": "Beispiel: /api/wlp/discover?path=C:/wlp oder /api/wlp/discover?path=/opt/ibm/wlp",
+        }
+
+    root = Path(search_path)
+    if not root.exists():
+        return {
+            "found": [],
+            "search_path": str(root),
+            "message": f"Pfad existiert nicht: {root}",
+        }
+
+    # Prüfen ob der Pfad direkt ein WLP-Root ist (hat bin/server)
+    servers = []
+    if (root / "bin" / "server").exists() or (root / "bin" / "server.bat").exists():
+        # Direkt der WLP-Root - suche in usr/servers/
+        servers = _discover_wlp_in_installation(root)
+    else:
+        # Suche rekursiv nach WLP-Installationen
+        servers = _discover_wlp_servers(root)
+
+    # Bereits konfigurierte Server markieren
+    existing_keys = {(s.wlp_path, s.server_name) for s in settings.wlp.servers}
+    for srv in servers:
+        srv["already_imported"] = (srv["wlp_path"], srv["server_name"]) in existing_keys
+
+    return {
+        "found": servers,
+        "search_path": str(root),
+        "existing_count": len(settings.wlp.servers),
+        "message": f"{len(servers)} WLP-Server gefunden" if servers else "Keine WLP-Server gefunden",
+    }
+
+
+def _discover_wlp_in_installation(wlp_root: Path) -> list:
+    """
+    Findet alle Server in einer WLP-Installation.
+
+    Sucht in: {wlp_root}/usr/servers/*/server.xml
+    """
+    discovered = []
+    servers_dir = wlp_root / "usr" / "servers"
+
+    if not servers_dir.exists():
+        return []
+
+    for server_xml in servers_dir.glob("*/server.xml"):
+        server_dir = server_xml.parent
+        server_name = server_dir.name
+
+        # JVM-Options lesen
+        jvm_options_path = server_dir / "jvm.options"
+        jvm_args = _parse_jvm_options(jvm_options_path)
+
+        # Features aus server.xml
+        features = _parse_server_xml_features(server_xml)
+
+        # Beschreibung generieren
+        desc_parts = []
+        if features:
+            desc_parts.append(f"Features: {', '.join(features[:5])}")
+            if len(features) > 5:
+                desc_parts.append(f"(+{len(features) - 5} weitere)")
+
+        discovered.append({
+            "server_name": server_name,
+            "wlp_path": str(wlp_root),
+            "server_xml": str(server_xml),
+            "server_dir": str(server_dir),
+            "jvm_options": jvm_args,
+            "features": features,
+            "description": " ".join(desc_parts),
+            "has_jvm_options": bool(jvm_args),
+            "relative_path": f"usr/servers/{server_name}/server.xml",
+        })
+
+    return discovered
+
+
+class WLPImportRequest(BaseModel):
+    """Request zum Importieren gefundener WLP-Server."""
+    servers: list  # Liste von {wlp_path, server_name, jvm_options?, description?}
+
+
+@router.post("/import")
+async def import_servers(req: WLPImportRequest) -> Dict[str, Any]:
+    """
+    Importiert gefundene WLP-Server in die Konfiguration.
+
+    Erwartet eine Liste von Server-Definitionen aus /discover.
+    """
+    from app.utils.path_validator import validate_identifier
+
+    imported = []
+    errors = []
+
+    for srv in req.servers:
+        wlp_path = srv.get("wlp_path", "")
+        server_name = srv.get("server_name", "defaultServer")
+        jvm_options = srv.get("jvm_options", "")
+        description = srv.get("description", "")
+
+        # Validierung
+        if not wlp_path:
+            errors.append({"server_name": server_name, "error": "wlp_path fehlt"})
+            continue
+
+        wlp = Path(wlp_path)
+        if not wlp.exists():
+            errors.append({"server_name": server_name, "error": f"Pfad existiert nicht: {wlp_path}"})
+            continue
+
+        is_valid, error = validate_identifier(server_name, max_length=64, allow_dots=False)
+        if not is_valid:
+            errors.append({"server_name": server_name, "error": f"Ungültiger server_name: {error}"})
+            continue
+
+        # Bereits vorhanden?
+        exists = any(
+            s.wlp_path == wlp_path and s.server_name == server_name
+            for s in settings.wlp.servers
+        )
+        if exists:
+            errors.append({"server_name": server_name, "error": "Server bereits importiert"})
+            continue
+
+        # Server hinzufügen
+        entry = WLPServerEntry(
+            id=str(uuid.uuid4())[:8],
+            name=f"{server_name} ({wlp.name})",
+            description=description,
+            wlp_path=wlp_path,
+            server_name=server_name,
+            extra_jvm_args=jvm_options,
+        )
+        settings.wlp.servers.append(entry)
+        imported.append(entry.model_dump())
+
+    return {
+        "imported": imported,
+        "imported_count": len(imported),
+        "errors": errors,
+        "total_servers": len(settings.wlp.servers),
     }

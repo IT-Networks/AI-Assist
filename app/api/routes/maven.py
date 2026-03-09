@@ -11,6 +11,9 @@ Routes:
   POST   /api/maven/builds/{id}/stop   – Laufenden Build abbrechen
   GET    /api/maven/detect             – pom.xml im aktiven Repo erkennen
   POST   /api/maven/pom/analyze        – Dependencies aus pom.xml lesen inkl. Exclusions
+
+  GET    /api/maven/discover           – Maven-Projekte + IntelliJ Run Configs finden
+  POST   /api/maven/import             – Gefundene Builds importieren
 """
 
 import asyncio
@@ -324,3 +327,283 @@ async def stop_build(build_id: str) -> Dict[str, Any]:
     except asyncio.TimeoutError:
         proc.kill()
     return {"success": True, "message": "Build abgebrochen"}
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Discovery & Import - Maven-Projekte und IntelliJ Configs finden
+# ══════════════════════════════════════════════════════════════════════════════
+
+def _parse_pom_info(pom_path: Path) -> Dict[str, Any]:
+    """Extrahiert Basis-Infos aus einer pom.xml."""
+    try:
+        tree = ET.parse(str(pom_path))
+        root = tree.getroot()
+
+        # Namespace-agnostisch parsen
+        def get_text(tag: str) -> str:
+            el = root.find(f"{{{_POM_NS}}}{tag}")
+            if el is None:
+                el = root.find(tag)
+            return el.text.strip() if el is not None and el.text else ""
+
+        artifact_id = get_text("artifactId")
+        group_id = get_text("groupId")
+        name = get_text("name")
+        packaging = get_text("packaging") or "jar"
+
+        # Module für Multi-Module-Projekte
+        modules = []
+        modules_el = root.find(f"{{{_POM_NS}}}modules")
+        if modules_el is None:
+            modules_el = root.find("modules")
+        if modules_el is not None:
+            for mod in modules_el:
+                if mod.text:
+                    modules.append(mod.text.strip())
+
+        return {
+            "artifact_id": artifact_id,
+            "group_id": group_id,
+            "name": name or artifact_id,
+            "packaging": packaging,
+            "modules": modules,
+            "is_multi_module": len(modules) > 0,
+        }
+    except Exception as e:
+        return {"error": str(e)}
+
+
+def _parse_intellij_maven_config(xml_path: Path, repo_path: Path) -> Optional[Dict[str, Any]]:
+    """
+    Parst eine IntelliJ Maven Run Configuration.
+
+    Format: .idea/runConfigurations/*.xml
+    """
+    try:
+        tree = ET.parse(str(xml_path))
+        root = tree.getroot()
+
+        # Nur Maven-Configs verarbeiten
+        config = root.find("configuration")
+        if config is None:
+            return None
+
+        config_type = config.get("type", "")
+        if "Maven" not in config_type and config_type != "MavenRunConfiguration":
+            return None
+
+        name = config.get("name", xml_path.stem)
+
+        # Maven-Optionen extrahieren
+        goals = ""
+        profiles = []
+        pom_path = ""
+        jvm_args = ""
+
+        # MavenGeneralSettings
+        general_settings = config.find(".//MavenGeneralSettings")
+        if general_settings is not None:
+            # Working directory / pomxml path
+            working_dir = general_settings.get("pomXmlPath", "")
+            if working_dir:
+                pom_path = working_dir
+
+        # Durch alle Optionen iterieren
+        for option in config.findall(".//option"):
+            opt_name = option.get("name", "")
+            opt_value = option.get("value", "")
+
+            if opt_name == "goals":
+                goals = opt_value
+            elif opt_name == "profiles":
+                if opt_value:
+                    profiles = [p.strip() for p in opt_value.split(",") if p.strip()]
+            elif opt_name == "pomFileName":
+                pom_path = opt_value
+            elif opt_name == "workingDirectory" and not pom_path:
+                # Fallback
+                pom_path = opt_value
+            elif opt_name == "vmOptions":
+                jvm_args = opt_value
+
+        # $PROJECT_DIR$ ersetzen
+        if "$PROJECT_DIR$" in pom_path:
+            pom_path = pom_path.replace("$PROJECT_DIR$", str(repo_path))
+
+        # pom.xml anhängen wenn nur Verzeichnis
+        if pom_path and not pom_path.endswith(".xml"):
+            pom_candidate = Path(pom_path) / "pom.xml"
+            if pom_candidate.exists():
+                pom_path = str(pom_candidate)
+
+        if not goals and not pom_path:
+            return None
+
+        return {
+            "source": "intellij",
+            "config_file": str(xml_path),
+            "name": name,
+            "pom_path": pom_path,
+            "goals": goals or "clean install",
+            "profiles": profiles,
+            "jvm_args": jvm_args,
+            "skip_tests": "-DskipTests" in goals or "-Dmaven.test.skip" in goals,
+        }
+    except Exception:
+        return None
+
+
+def _discover_maven_projects(repo_path: Path) -> Dict[str, Any]:
+    """
+    Findet alle Maven-Projekte und IntelliJ Run Configurations.
+
+    Returns:
+        {
+            "pom_projects": [...],
+            "intellij_configs": [...],
+        }
+    """
+    pom_projects = []
+    intellij_configs = []
+
+    # 1. pom.xml Dateien finden (max 5 Ebenen tief)
+    for pom_file in repo_path.rglob("pom.xml"):
+        rel = pom_file.relative_to(repo_path)
+        depth = len(rel.parts)
+        if depth > 5 or "target" in rel.parts or ".idea" in rel.parts:
+            continue
+
+        info = _parse_pom_info(pom_file)
+        if "error" not in info:
+            pom_projects.append({
+                "pom_path": str(pom_file),
+                "relative_path": str(rel),
+                "depth": depth,
+                **info,
+                "suggested_goals": "clean install" if info.get("packaging") != "pom" else "clean install -N",
+            })
+
+    # Nach Tiefe sortieren (Root-POM zuerst)
+    pom_projects.sort(key=lambda p: p["depth"])
+
+    # 2. IntelliJ Run Configurations
+    idea_dir = repo_path / ".idea" / "runConfigurations"
+    if idea_dir.exists():
+        for config_file in idea_dir.glob("*.xml"):
+            config = _parse_intellij_maven_config(config_file, repo_path)
+            if config:
+                intellij_configs.append(config)
+
+    return {
+        "pom_projects": pom_projects,
+        "intellij_configs": intellij_configs,
+    }
+
+
+@router.get("/discover")
+async def discover_maven_projects() -> Dict[str, Any]:
+    """
+    Sucht nach Maven-Projekten und IntelliJ Run Configurations im aktiven Repository.
+
+    Findet:
+    - pom.xml Dateien mit Projekt-Infos (artifactId, groupId, modules)
+    - IntelliJ Maven Run Configurations (.idea/runConfigurations/*.xml)
+
+    Die gefundenen Projekte können dann mit POST /import importiert werden.
+    """
+    repo_path = settings.java.get_active_path() or settings.wlp.repo_path
+    if not repo_path:
+        return {
+            "pom_projects": [],
+            "intellij_configs": [],
+            "repo_path": None,
+            "message": "Kein aktives Repository konfiguriert.",
+        }
+
+    root = Path(repo_path)
+    if not root.exists():
+        return {
+            "pom_projects": [],
+            "intellij_configs": [],
+            "repo_path": str(root),
+            "message": f"Repository-Pfad existiert nicht: {root}",
+        }
+
+    result = _discover_maven_projects(root)
+
+    # Bereits konfigurierte Builds markieren
+    existing_poms = {b.pom_path for b in settings.maven.builds}
+    for proj in result["pom_projects"]:
+        proj["already_imported"] = proj["pom_path"] in existing_poms
+
+    for conf in result["intellij_configs"]:
+        conf["already_imported"] = conf.get("pom_path", "") in existing_poms
+
+    total = len(result["pom_projects"]) + len(result["intellij_configs"])
+    return {
+        **result,
+        "repo_path": str(root),
+        "existing_count": len(settings.maven.builds),
+        "message": f"{total} Maven-Konfigurationen gefunden" if total else "Keine Maven-Projekte gefunden",
+    }
+
+
+class MavenImportItem(BaseModel):
+    """Ein zu importierender Maven-Build."""
+    name: str
+    pom_path: str
+    goals: str = "clean install"
+    profiles: List[str] = []
+    skip_tests: bool = False
+    jvm_args: str = ""
+    description: str = ""
+
+
+class MavenImportRequest(BaseModel):
+    """Request zum Importieren von Maven-Builds."""
+    builds: List[MavenImportItem]
+
+
+@router.post("/import")
+async def import_builds(req: MavenImportRequest) -> Dict[str, Any]:
+    """
+    Importiert gefundene Maven-Builds in die Konfiguration.
+
+    Erwartet eine Liste von Build-Definitionen aus /discover.
+    """
+    imported = []
+    errors = []
+
+    for item in req.builds:
+        pom = Path(item.pom_path)
+
+        if not pom.exists():
+            errors.append({"name": item.name, "error": f"pom.xml nicht gefunden: {item.pom_path}"})
+            continue
+
+        # Bereits vorhanden?
+        exists = any(b.pom_path == item.pom_path for b in settings.maven.builds)
+        if exists:
+            errors.append({"name": item.name, "error": "Build bereits importiert"})
+            continue
+
+        # Build hinzufügen
+        build = MavenBuild(
+            id=str(uuid.uuid4())[:8],
+            name=item.name,
+            description=item.description,
+            pom_path=item.pom_path,
+            goals=item.goals,
+            profiles=item.profiles,
+            skip_tests=item.skip_tests,
+            jvm_args=item.jvm_args,
+        )
+        settings.maven.builds.append(build)
+        imported.append(build.model_dump())
+
+    return {
+        "imported": imported,
+        "imported_count": len(imported),
+        "errors": errors,
+        "total_builds": len(settings.maven.builds),
+    }
