@@ -5853,11 +5853,11 @@ async function renderInternalFetchSection() {
     </div>
 
     <div class="settings-field">
-      <label for="if-base-urls">Erlaubte Base URLs</label>
-      <textarea id="if-base-urls" rows="4" onchange="markSettingsModified()"
-        placeholder="https://intranet.company.com&#10;http://wiki.intern:8080"
+      <label for="if-base-urls">Erlaubte Base URLs (optional)</label>
+      <textarea id="if-base-urls" rows="3" onchange="markSettingsModified()"
+        placeholder="Leer lassen = alle URLs erlaubt"
         style="font-family:var(--font-mono);font-size:13px">${escapeHtml(baseUrls)}</textarea>
-      <small style="color:var(--text-muted)">Eine URL pro Zeile. Nur URLs die mit diesen Prefixen beginnen sind erlaubt.</small>
+      <small style="color:var(--text-muted)">Optional: Eine URL pro Zeile. Leer = alle URLs erlaubt.</small>
     </div>
 
     <div class="settings-field">
@@ -5941,17 +5941,11 @@ function internalFetchAuthTypeChanged() {
 
 async function internalFetchTestConnection() {
   const resultEl = document.getElementById('if-test-result');
-  resultEl.textContent = '⏳ Teste Verbindung...';
+  resultEl.textContent = '⏳ Teste...';
   resultEl.className = 'test-result testing';
 
   // Erst die aktuellen Werte speichern
   const cfg = collectInternalFetchSettings();
-
-  if (!cfg.base_urls || cfg.base_urls.length === 0) {
-    resultEl.textContent = '✗ Keine Base URLs konfiguriert';
-    resultEl.className = 'test-result error';
-    return;
-  }
 
   try {
     // Temporaer speichern fuer den Test

@@ -31,12 +31,13 @@ class TestRequest(BaseModel):
 # ── Helper Functions ───────────────────────────────────────────────────────────
 
 def _validate_url(url: str) -> tuple[bool, str]:
-    """Validiert URL gegen erlaubte Base URLs."""
+    """Validiert URL gegen erlaubte Base URLs (falls konfiguriert)."""
     if not url:
         return False, "URL darf nicht leer sein"
 
+    # Keine Base URLs = alle URLs erlaubt
     if not settings.internal_fetch.base_urls:
-        return False, "Keine Base URLs konfiguriert"
+        return True, ""
 
     url_lower = url.lower().strip()
     for prefix in settings.internal_fetch.base_urls:
@@ -167,6 +168,7 @@ async def test_connection(request: TestRequest = None) -> Dict[str, Any]:
     Testet die Verbindung zu einer internen URL.
 
     Wenn keine URL angegeben, wird die erste konfigurierte Base URL getestet.
+    Ohne Base URLs und ohne explizite URL wird ein einfacher Konfig-Check gemacht.
     """
     if not settings.internal_fetch.enabled:
         return {
@@ -181,9 +183,10 @@ async def test_connection(request: TestRequest = None) -> Dict[str, Any]:
     elif settings.internal_fetch.base_urls:
         test_url = settings.internal_fetch.base_urls[0].strip()
     else:
+        # Keine Base URLs und keine Test-URL - nur Konfig-Check
         return {
-            "success": False,
-            "error": "Keine Base URLs konfiguriert",
+            "success": True,
+            "message": "Internal Fetch ist aktiviert (keine Base URL-Einschränkung)",
         }
 
     # URL validieren

@@ -19,6 +19,7 @@ from app.agent.tools import Tool, ToolCategory, ToolParameter, ToolResult, ToolR
 def _validate_url(url: str, allowed_prefixes: List[str]) -> tuple[bool, str]:
     """
     Validiert eine URL gegen die erlaubten Prefixe.
+    Wenn keine Prefixe konfiguriert sind, werden alle URLs erlaubt.
 
     Returns:
         Tuple (is_valid, error_message)
@@ -26,11 +27,9 @@ def _validate_url(url: str, allowed_prefixes: List[str]) -> tuple[bool, str]:
     if not url:
         return False, "URL darf nicht leer sein"
 
+    # Keine Base URLs konfiguriert = alle URLs erlaubt
     if not allowed_prefixes:
-        return False, (
-            "Keine erlaubten URLs konfiguriert. "
-            "Bitte in Settings → Internal Fetch mindestens eine Base URL eintragen."
-        )
+        return True, ""
 
     # URL normalisieren
     url_lower = url.lower().strip()
