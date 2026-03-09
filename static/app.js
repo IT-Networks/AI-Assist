@@ -2360,6 +2360,7 @@ const settingsState = {
     jenkins: 'Jenkins CI/CD Server (intern gehostet)',
     github: 'GitHub Enterprise Server (intern gehostet)',
     internal_fetch: 'Intranet-URLs abrufen (HTTP Fetch)',
+    docker_sandbox: 'Container-Sandbox (Docker/Podman)',
     data_sources: 'Interne HTTP-Systeme (Jenkins, GitHub, APIs)',
     mq: 'IBM MQ Series Messaging',
     test_tool: 'Test-Automatisierung',
@@ -2598,6 +2599,11 @@ function renderSettingsSection() {
 
   if (section === 'internal_fetch') {
     renderInternalFetchSection();
+    return;
+  }
+
+  if (section === 'docker_sandbox') {
+    renderDockerSandboxSection();
     return;
   }
 
@@ -3472,6 +3478,25 @@ async function saveCurrentSection() {
       if (!res.ok) throw new Error(data.detail || 'Fehler');
       settingsState.settings.internal_fetch = data.values;
       updateSettingsStatus('Internal-Fetch-Einstellungen angewendet', 'success');
+    } catch (err) {
+      updateSettingsStatus('Fehler: ' + err.message, 'error');
+    }
+    return;
+  }
+
+  // Docker Sandbox hat eigene Felder
+  if (section === 'docker_sandbox') {
+    const values = collectDockerSandboxSettings();
+    try {
+      const res = await fetch('/api/docker-sandbox/config', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(values),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.detail || 'Fehler');
+      settingsState.settings.docker_sandbox = data.config;
+      updateSettingsStatus('Container-Sandbox-Einstellungen angewendet', 'success');
     } catch (err) {
       updateSettingsStatus('Fehler: ' + err.message, 'error');
     }
@@ -5985,6 +6010,238 @@ function collectInternalFetchSettings() {
     auth_password: document.getElementById('if-auth-password')?.value || '',
     auth_token: document.getElementById('if-auth-token')?.value || '',
     proxy_url: document.getElementById('if-proxy-url')?.value?.trim() || '',
+  };
+}
+
+// ── Docker/Podman Sandbox Settings Section ───────────────────────────────────────
+
+async function renderDockerSandboxSection() {
+  // Erst Runtime-Info und Config laden
+  let runtimeInfo = { available: false, runtime: 'none', version: null };
+  let cfg = {};
+
+  try {
+    const [runtimeRes, configRes] = await Promise.all([
+      fetch('/api/docker-sandbox/runtime'),
+      fetch('/api/docker-sandbox/config')
+    ]);
+    if (runtimeRes.ok) runtimeInfo = await runtimeRes.json();
+    if (configRes.ok) cfg = await configRes.json();
+  } catch (e) {
+    console.error('Docker Sandbox config load error:', e);
+  }
+
+  // In Settings-State speichern
+  settingsState.settings.docker_sandbox = cfg;
+
+  const packages = (cfg.preinstalled_packages || []).join('\n');
+  const runtimeBadge = runtimeInfo.available
+    ? `<span class="badge badge-success">${runtimeInfo.runtime} ${runtimeInfo.version || ''}</span>`
+    : `<span class="badge badge-error">Nicht gefunden</span>`;
+
+  const form = document.getElementById('settings-form');
+  form.innerHTML = `
+    <div class="settings-section">
+      <h3 class="settings-section-title">CONTAINER SANDBOX</h3>
+      <p class="settings-section-desc">
+        Sichere Python-Code-Ausfuehrung in isolierten Containern (Docker oder Podman).
+        Die AI kann hier Code ausfuehren ohne das Host-System zu gefaehrden.
+      </p>
+      <p class="settings-section-desc">
+        <strong>Runtime:</strong> ${runtimeBadge}
+      </p>
+    </div>
+
+    <div class="settings-field">
+      <label for="ds-enabled">Aktiviert</label>
+      <label class="checkbox-label">
+        <input type="checkbox" id="ds-enabled" ${cfg.enabled ? 'checked' : ''} onchange="markSettingsModified()">
+        ${cfg.enabled ? 'Aktiviert' : 'Deaktiviert'}
+      </label>
+    </div>
+
+    <div class="settings-section" style="margin-top:20px">
+      <h3 class="settings-section-title">CONTAINER RUNTIME</h3>
+      <p class="settings-section-desc">
+        Waehle Docker oder Podman. Podman ist empfohlen (portable, kein Daemon).
+      </p>
+    </div>
+
+    <div class="settings-field">
+      <label for="ds-backend">Backend</label>
+      <select id="ds-backend" onchange="markSettingsModified()">
+        <option value="auto" ${cfg.backend === 'auto' || !cfg.backend ? 'selected' : ''}>Auto (Podman bevorzugt)</option>
+        <option value="podman" ${cfg.backend === 'podman' ? 'selected' : ''}>Podman</option>
+        <option value="docker" ${cfg.backend === 'docker' ? 'selected' : ''}>Docker</option>
+      </select>
+    </div>
+
+    <div class="settings-field">
+      <label for="ds-podman-path">Podman Pfad (optional)</label>
+      <input type="text" id="ds-podman-path" value="${escapeHtml(cfg.podman_path || '')}"
+        placeholder="C:/podman/bin/podman.exe (leer = aus PATH)" onchange="markSettingsModified()"
+        style="font-family:var(--font-mono);font-size:13px">
+      <small style="color:var(--text-muted)">Fuer portable Podman-Installation</small>
+    </div>
+
+    <div class="settings-field">
+      <label for="ds-docker-path">Docker Pfad (optional)</label>
+      <input type="text" id="ds-docker-path" value="${escapeHtml(cfg.docker_path || '')}"
+        placeholder="C:/Program Files/Docker/docker.exe (leer = aus PATH)" onchange="markSettingsModified()"
+        style="font-family:var(--font-mono);font-size:13px">
+    </div>
+
+    <div class="settings-section" style="margin-top:20px">
+      <h3 class="settings-section-title">CONTAINER IMAGE</h3>
+    </div>
+
+    <div class="settings-field">
+      <label for="ds-image">Base Image</label>
+      <input type="text" id="ds-image" value="${escapeHtml(cfg.image || 'python:3.11-slim')}"
+        placeholder="python:3.11-slim" onchange="markSettingsModified()" style="font-family:var(--font-mono)">
+    </div>
+
+    <div class="settings-field">
+      <label for="ds-custom-image">Custom Image (optional)</label>
+      <input type="text" id="ds-custom-image" value="${escapeHtml(cfg.custom_image || '')}"
+        placeholder="my-sandbox:latest (mit vorinstallierten Paketen)" onchange="markSettingsModified()"
+        style="font-family:var(--font-mono)">
+      <small style="color:var(--text-muted)">Eigenes Image mit vorinstallierten Paketen</small>
+    </div>
+
+    <div class="settings-section" style="margin-top:20px">
+      <h3 class="settings-section-title">RESSOURCEN-LIMITS</h3>
+    </div>
+
+    <div class="settings-field">
+      <label for="ds-memory">Memory Limit</label>
+      <input type="text" id="ds-memory" value="${escapeHtml(cfg.memory_limit || '512m')}"
+        placeholder="512m" onchange="markSettingsModified()" style="width:100px">
+      <small style="color:var(--text-muted)">z.B. 256m, 512m, 1g</small>
+    </div>
+
+    <div class="settings-field">
+      <label for="ds-cpu">CPU Limit</label>
+      <input type="number" id="ds-cpu" value="${cfg.cpu_limit || 1.0}"
+        min="0.1" max="4" step="0.1" onchange="markSettingsModified()" style="width:100px">
+      <small style="color:var(--text-muted)">Anzahl CPU-Cores</small>
+    </div>
+
+    <div class="settings-field">
+      <label for="ds-timeout">Timeout (Sekunden)</label>
+      <input type="number" id="ds-timeout" value="${cfg.timeout_seconds || 60}"
+        min="5" max="300" onchange="markSettingsModified()" style="width:100px">
+    </div>
+
+    <div class="settings-section" style="margin-top:20px">
+      <h3 class="settings-section-title">FEATURES</h3>
+    </div>
+
+    <div class="settings-field">
+      <label for="ds-network">Netzwerkzugriff</label>
+      <label class="checkbox-label">
+        <input type="checkbox" id="ds-network" ${cfg.network_enabled !== false ? 'checked' : ''} onchange="markSettingsModified()">
+        Aktiviert (fuer HTTP-Requests)
+      </label>
+    </div>
+
+    <div class="settings-field">
+      <label for="ds-sessions">Sessions</label>
+      <label class="checkbox-label">
+        <input type="checkbox" id="ds-sessions" ${cfg.session_enabled !== false ? 'checked' : ''} onchange="markSettingsModified()">
+        Aktiviert (Variablen bleiben erhalten)
+      </label>
+    </div>
+
+    <div class="settings-field">
+      <label for="ds-max-sessions">Max Sessions</label>
+      <input type="number" id="ds-max-sessions" value="${cfg.max_sessions || 5}"
+        min="1" max="20" onchange="markSettingsModified()" style="width:100px">
+    </div>
+
+    <div class="settings-field">
+      <label for="ds-upload">Datei-Upload</label>
+      <label class="checkbox-label">
+        <input type="checkbox" id="ds-upload" ${cfg.file_upload_enabled !== false ? 'checked' : ''} onchange="markSettingsModified()">
+        Aktiviert
+      </label>
+    </div>
+
+    <div class="settings-section" style="margin-top:20px">
+      <h3 class="settings-section-title">PYTHON-PAKETE</h3>
+      <p class="settings-section-desc">
+        Diese Pakete werden automatisch installiert (bei Standard-Image).
+      </p>
+    </div>
+
+    <div class="settings-field">
+      <label for="ds-packages">Vorinstallierte Pakete</label>
+      <textarea id="ds-packages" rows="6" onchange="markSettingsModified()"
+        placeholder="requests&#10;pandas&#10;numpy"
+        style="font-family:var(--font-mono);font-size:13px">${escapeHtml(packages)}</textarea>
+      <small style="color:var(--text-muted)">Ein Paket pro Zeile</small>
+    </div>
+
+    <div class="settings-actions-section" style="margin-top:20px">
+      <button class="btn btn-secondary" onclick="dockerSandboxTestConnection()">
+        🔌 Verbindung testen
+      </button>
+      <span id="ds-test-result" class="test-result"></span>
+    </div>
+  `;
+}
+
+async function dockerSandboxTestConnection() {
+  const resultEl = document.getElementById('ds-test-result');
+  resultEl.textContent = '⏳ Teste...';
+  resultEl.className = 'test-result testing';
+
+  // Erst die aktuellen Werte speichern
+  const cfg = collectDockerSandboxSettings();
+
+  try {
+    // Temporaer speichern fuer den Test
+    await fetch('/api/docker-sandbox/config', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(cfg)
+    });
+
+    const res = await fetch('/api/docker-sandbox/test', { method: 'POST' });
+    const data = await res.json();
+
+    if (data.status === 'ok') {
+      resultEl.textContent = `✓ ${data.python_version} (${data.execution_time}s)`;
+      resultEl.className = 'test-result success';
+    } else {
+      resultEl.textContent = `✗ ${data.error || 'Container-Test fehlgeschlagen'}`;
+      resultEl.className = 'test-result error';
+    }
+  } catch (e) {
+    resultEl.textContent = `✗ Fehler: ${e.message}`;
+    resultEl.className = 'test-result error';
+  }
+}
+
+function collectDockerSandboxSettings() {
+  const packagesText = document.getElementById('ds-packages')?.value || '';
+  const packages = packagesText.split('\n').map(p => p.trim()).filter(p => p.length > 0);
+
+  return {
+    enabled: document.getElementById('ds-enabled')?.checked || false,
+    backend: document.getElementById('ds-backend')?.value || 'auto',
+    podman_path: document.getElementById('ds-podman-path')?.value?.trim() || '',
+    docker_path: document.getElementById('ds-docker-path')?.value?.trim() || '',
+    image: document.getElementById('ds-image')?.value?.trim() || 'python:3.11-slim',
+    custom_image: document.getElementById('ds-custom-image')?.value?.trim() || '',
+    memory_limit: document.getElementById('ds-memory')?.value?.trim() || '512m',
+    cpu_limit: parseFloat(document.getElementById('ds-cpu')?.value) || 1.0,
+    timeout_seconds: parseInt(document.getElementById('ds-timeout')?.value) || 60,
+    network_enabled: document.getElementById('ds-network')?.checked || false,
+    session_enabled: document.getElementById('ds-sessions')?.checked || false,
+    max_sessions: parseInt(document.getElementById('ds-max-sessions')?.value) || 5,
+    file_upload_enabled: document.getElementById('ds-upload')?.checked || false,
+    preinstalled_packages: packages,
   };
 }
 

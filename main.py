@@ -5,7 +5,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 from pathlib import Path
 
-from app.api.routes import chat, java, logs, pdf, confluence, models, python_routes, handbook, skills, agent, settings, database, datasources, mq, testtool, log_servers, wlp, maven, search, jenkins, github, internal_fetch
+from app.api.routes import chat, java, logs, pdf, confluence, models, python_routes, handbook, skills, agent, settings, database, datasources, mq, testtool, log_servers, wlp, maven, search, jenkins, github, internal_fetch, docker_sandbox
 
 
 @asynccontextmanager
@@ -164,6 +164,15 @@ async def lifespan(app: FastAPI):
                 print(f"[startup] Git-Tools registriert: {git_count}")
         except Exception as e:
             print(f"[startup] Git-Tools-Registrierung fehlgeschlagen: {e}")
+
+        # Docker-Sandbox-Tools registrieren (sichere Code-Ausführung)
+        try:
+            from app.agent.docker_tools import register_docker_tools
+            docker_count = register_docker_tools(registry)
+            if docker_count:
+                print(f"[startup] Docker-Sandbox-Tools registriert: {docker_count}")
+        except Exception as e:
+            print(f"[startup] Docker-Sandbox-Tools-Registrierung fehlgeschlagen: {e}")
     except Exception as e:
         print(f"[startup] Agent-Initialisierung fehlgeschlagen: {e}")
 
@@ -234,6 +243,14 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         print(f"[shutdown] Jira-Client-Cleanup fehlgeschlagen: {e}")
 
+    # Docker-Sandbox: Alle Sessions beenden
+    try:
+        from app.agent.docker_tools import cleanup_all_sessions
+        await cleanup_all_sessions()
+        print("[shutdown] Docker-Sandbox-Sessions beendet")
+    except Exception as e:
+        print(f"[shutdown] Docker-Sandbox-Cleanup fehlgeschlagen: {e}")
+
     print("[shutdown] Cleanup abgeschlossen")
 
 
@@ -267,6 +284,7 @@ app.include_router(search.router)
 app.include_router(jenkins.router)
 app.include_router(github.router)
 app.include_router(internal_fetch.router)
+app.include_router(docker_sandbox.router)
 
 
 # ══════════════════════════════════════════════════════════════════════════════

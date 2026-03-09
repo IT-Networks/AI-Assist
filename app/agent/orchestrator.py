@@ -1554,6 +1554,32 @@ Nutze git_status/git_diff wenn der User wissen will was sich geändert hat.
 Nutze git_blame um herauszufinden wer Code geschrieben hat.
 """
 
+        if settings.docker_sandbox.enabled:
+            base += """
+**Docker Sandbox (Sichere Code-Ausführung):**
+- docker_execute_python: Führt Python-Code in isoliertem Container aus (stateless)
+- docker_session_create: Erstellt persistente Session (Variablen bleiben erhalten)
+- docker_session_execute: Führt Code in Session aus (mit persistenten Variablen)
+- docker_session_list: Listet aktive Sessions
+- docker_session_close: Schließt eine Session
+- docker_upload_file: Lädt Datei in Session hoch (Base64)
+- docker_list_packages: Zeigt verfügbare Python-Pakete
+
+WANN NUTZEN:
+- Benutzer bittet um Code-Ausführung: "encodiere in Base64", "berechne SHA256 Hash"
+- Datenverarbeitung: JSON parsen, CSV verarbeiten, Regex testen
+- Mathematische Berechnungen
+- Testen von Code-Snippets
+- Daten transformieren oder konvertieren
+
+BEISPIELE:
+- "Encodiere 'Hello' in Base64" → docker_execute_python(code="import base64; print(base64.b64encode(b'Hello').decode())")
+- "Berechne SHA256 von 'password'" → docker_execute_python(code="import hashlib; print(hashlib.sha256(b'password').hexdigest())")
+
+FÜR MEHRERE OPERATIONEN: Erstelle eine Session mit docker_session_create, dann docker_session_execute für jeden Schritt.
+Variablen bleiben zwischen Aufrufen erhalten!
+"""
+
         if db_available:
             base += f"""
 **Datenbank (DB2):**

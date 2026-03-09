@@ -241,7 +241,8 @@ async def start_server(server_id: str) -> StreamingResponse:
                 yield f"data: {json.dumps({'type': 'output', 'line': f'[DEBUG] Java executable gefunden: {java_exe}', 'is_error': False, 'is_ready': False})}\n\n"
 
         # Debug: Zeige den Befehl
-        yield f"data: {json.dumps({'type': 'output', 'line': f'[DEBUG] Befehl: {\" \".join(cmd)}', 'is_error': False, 'is_ready': False})}\n\n"
+        cmd_str = " ".join(cmd)
+        yield f"data: {json.dumps({'type': 'output', 'line': f'[DEBUG] Befehl: {cmd_str}', 'is_error': False, 'is_ready': False})}\n\n"
 
         try:
             proc = await asyncio.create_subprocess_exec(

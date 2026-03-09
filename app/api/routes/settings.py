@@ -93,6 +93,7 @@ def get_section_schema(section: str) -> Dict[str, Any]:
         "jenkins": "JenkinsConfig",
         "github": "GitHubConfig",
         "internal_fetch": "InternalFetchConfig",
+        "docker_sandbox": "DockerSandboxConfig",
     }
 
     if section not in section_classes:
@@ -198,6 +199,7 @@ def _get_section_description(section: str) -> str:
         "jenkins": "Jenkins CI/CD Server (intern gehostet)",
         "github": "GitHub Enterprise Server (intern gehostet)",
         "internal_fetch": "Intranet-URLs abrufen (internes HTTP-Fetch-Tool)",
+        "docker_sandbox": "Container-Sandbox für sichere Code-Ausführung (Docker/Podman)",
     }
     return descriptions.get(section, "")
 
@@ -346,6 +348,7 @@ def _generate_yaml_with_comments(data: Dict[str, Any]) -> str:
         "jenkins": "\n# ═══════════════════════════════════════════════════════════════════\n# Jenkins CI/CD (intern gehostet)",
         "github": "# GitHub Enterprise Server (intern gehostet)",
         "internal_fetch": "# Internal Fetch (Intranet-URLs abrufen)",
+        "docker_sandbox": "# Container Sandbox (Docker/Podman) - Sichere Code-Ausführung",
     }
 
     lines = []

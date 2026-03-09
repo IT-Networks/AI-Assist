@@ -509,6 +509,52 @@ class JenkinsConfig(BaseModel):
 # GitHub Enterprise (intern gehostet)
 # ══════════════════════════════════════════════════════════════════════════════
 
+# ══════════════════════════════════════════════════════════════════════════════
+# Docker Sandbox (Sichere Code-Ausführung)
+# ══════════════════════════════════════════════════════════════════════════════
+
+class DockerSandboxConfig(BaseModel):
+    """Docker/Podman Sandbox für sichere Python-Code-Ausführung."""
+    enabled: bool = False
+    backend: str = "auto"                  # "auto" | "docker" | "podman"
+    # Pfade zu den Container-Runtimes (leer = aus PATH)
+    docker_path: str = ""                  # z.B. "C:/Program Files/Docker/docker.exe"
+    podman_path: str = ""                  # z.B. "C:/podman/bin/podman.exe" (portable)
+    image: str = "python:3.11-slim"       # Base-Image (oder custom mit Paketen)
+    custom_image: str = ""                 # Custom Image mit vorinstallierten Paketen
+    # Ressourcen-Limits
+    memory_limit: str = "512m"             # Max RAM (z.B. "256m", "512m", "1g")
+    cpu_limit: float = 1.0                 # Max CPU-Cores (z.B. 0.5, 1.0, 2.0)
+    timeout_seconds: int = 60              # Max Ausführungszeit
+    max_output_bytes: int = 131072         # Max Output-Größe (128KB)
+    # Netzwerk
+    network_enabled: bool = True           # Lesender Netzwerkzugriff (für requests etc.)
+    # Session-Management
+    session_enabled: bool = True           # Variablen zwischen Aufrufen erhalten
+    session_timeout_minutes: int = 30      # Session-Timeout nach Inaktivität
+    max_sessions: int = 5                  # Max gleichzeitige Sessions
+    # Datei-Upload
+    file_upload_enabled: bool = True       # Dateien in Container hochladen
+    max_upload_size_mb: int = 10           # Max Upload-Größe pro Datei
+    upload_directory: str = "./sandbox_uploads"  # Temporäres Upload-Verzeichnis
+    # Vorinstallierte Pakete (bei Nutzung von python:slim werden diese installiert)
+    preinstalled_packages: List[str] = [
+        "requests",
+        "pandas",
+        "numpy",
+        "cryptography",
+        "beautifulsoup4",
+        "lxml",
+        "pillow",
+        "pyyaml",
+        "python-dateutil",
+        "chardet",
+    ]
+    # Sicherheit
+    read_only_filesystem: bool = False     # Read-only Root (kann pip install verhindern)
+    drop_capabilities: bool = True         # Alle Linux Capabilities entfernen
+
+
 class GitHubConfig(BaseModel):
     """GitHub Enterprise Server Konfiguration (intern gehostet)."""
     enabled: bool = False
@@ -557,6 +603,7 @@ class Settings(BaseModel):
     jenkins: JenkinsConfig = Field(default_factory=JenkinsConfig)
     github: GitHubConfig = Field(default_factory=GitHubConfig)
     internal_fetch: InternalFetchConfig = Field(default_factory=InternalFetchConfig)
+    docker_sandbox: DockerSandboxConfig = Field(default_factory=DockerSandboxConfig)
 
     def apply_env_overrides(self) -> "Settings":
         if os.getenv("LLM_BASE_URL"):
@@ -604,6 +651,8 @@ def load_settings(config_path: str = "config.yaml") -> Settings:
     Path(settings.server.chats_directory).mkdir(parents=True, exist_ok=True)
     if settings.file_operations.backup_enabled:
         Path(settings.file_operations.backup_directory).mkdir(parents=True, exist_ok=True)
+    if settings.docker_sandbox.enabled and settings.docker_sandbox.file_upload_enabled:
+        Path(settings.docker_sandbox.upload_directory).mkdir(parents=True, exist_ok=True)
 
     return settings
 
