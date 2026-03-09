@@ -5194,6 +5194,17 @@ async function _pollPendingSearches() {
 
     if (noConfirm) noConfirm.style.display = 'none';
     searchesDiv.style.display = 'block';
+
+    // Auto-Switch zu Confirm-Panel wenn Suchen ausstehen
+    const confirmPanel = document.getElementById('confirm-panel');
+    if (confirmPanel && !confirmPanel.classList.contains('active')) {
+      // Zum Confirm-Panel wechseln um Buttons anzuzeigen
+      document.querySelectorAll('.sidebar-panel').forEach(p => p.classList.remove('active'));
+      document.querySelectorAll('.sidebar-tabs-compact button').forEach(b => b.classList.remove('active'));
+      confirmPanel.classList.add('active');
+      const confirmTab = document.querySelector('[data-panel="confirm-panel"]');
+      if (confirmTab) confirmTab.classList.add('active');
+    }
     searchesList.innerHTML = pending.map(item => `
       <div class="search-confirm-card" id="sc-${item.id}">
         <div style="font-size:12px;font-weight:600;margin-bottom:4px">&#128269; Agent möchte suchen:</div>

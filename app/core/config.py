@@ -397,6 +397,26 @@ class MavenConfig(BaseModel):
 class WebSearchConfig(BaseModel):
     """Internet-Recherche mit Nutzer-Bestätigungspflicht."""
     enabled: bool = False
+    # Proxy-Konfiguration für Internet-Zugriff
+    proxy_url: str = ""              # z.B. http://proxy.intern:8080
+    proxy_username: str = ""         # Proxy-Benutzername (optional)
+    proxy_password: str = ""         # Proxy-Passwort (optional)
+    no_proxy: str = ""               # Kommagetrennte Liste ohne Proxy (z.B. "localhost,127.0.0.1,.intern")
+    timeout_seconds: int = 30        # Timeout für HTTP-Requests
+
+    def get_proxy_url(self) -> Optional[str]:
+        """Gibt die vollständige Proxy-URL inkl. Auth zurück."""
+        if not self.proxy_url:
+            return None
+        if self.proxy_username and self.proxy_password:
+            # http://user:pass@proxy:port
+            from urllib.parse import urlparse, urlunparse
+            parsed = urlparse(self.proxy_url)
+            auth_netloc = f"{self.proxy_username}:{self.proxy_password}@{parsed.hostname}"
+            if parsed.port:
+                auth_netloc += f":{parsed.port}"
+            return urlunparse((parsed.scheme, auth_netloc, parsed.path, "", "", ""))
+        return self.proxy_url
 
 
 # ══════════════════════════════════════════════════════════════════════════════

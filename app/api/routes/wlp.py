@@ -68,8 +68,8 @@ async def add_server(req: WLPServerRequest) -> Dict[str, Any]:
     if not wlp_path.exists():
         raise HTTPException(status_code=400, detail=f"WLP-Pfad existiert nicht: {req.wlp_path}")
 
-    # server_name validieren (keine Path-Traversal-Zeichen)
-    is_valid, error = validate_identifier(req.server_name, max_length=64, allow_dots=False)
+    # server_name validieren (keine Path-Traversal-Zeichen, aber Punkte erlaubt)
+    is_valid, error = validate_identifier(req.server_name, max_length=64, allow_dots=True)
     if not is_valid:
         raise HTTPException(status_code=400, detail=f"Ungültiger server_name: {error}")
 
@@ -87,8 +87,8 @@ async def update_server(server_id: str, req: WLPServerRequest) -> Dict[str, Any]
     if not wlp_path.exists():
         raise HTTPException(status_code=400, detail=f"WLP-Pfad existiert nicht: {req.wlp_path}")
 
-    # server_name validieren
-    is_valid, error = validate_identifier(req.server_name, max_length=64, allow_dots=False)
+    # server_name validieren (Punkte erlaubt für WLP-Servernamen)
+    is_valid, error = validate_identifier(req.server_name, max_length=64, allow_dots=True)
     if not is_valid:
         raise HTTPException(status_code=400, detail=f"Ungültiger server_name: {error}")
 
@@ -590,7 +590,7 @@ async def import_servers(req: WLPImportRequest) -> Dict[str, Any]:
             errors.append({"server_name": server_name, "error": f"Pfad existiert nicht: {wlp_path}"})
             continue
 
-        is_valid, error = validate_identifier(server_name, max_length=64, allow_dots=False)
+        is_valid, error = validate_identifier(server_name, max_length=64, allow_dots=True)
         if not is_valid:
             errors.append({"server_name": server_name, "error": f"Ungültiger server_name: {error}"})
             continue

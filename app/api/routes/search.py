@@ -66,14 +66,43 @@ def _clean(html: str) -> str:
     return " ".join(s.split()).strip()
 
 
+def _get_proxy_config() -> dict:
+    """Erstellt die Proxy-Konfiguration für httpx."""
+    proxy_url = settings.search.get_proxy_url()
+    if not proxy_url:
+        return {}
+
+    # no_proxy prüfen
+    no_proxy_list = [x.strip() for x in settings.search.no_proxy.split(",") if x.strip()]
+
+    return {
+        "proxy": proxy_url,
+        # httpx verwendet NO_PROXY automatisch, aber wir setzen es explizit
+    }
+
+
 async def _ddg_search(query: str, max_results: int = 5) -> List[Dict[str, str]]:
     """Führt eine DuckDuckGo-HTML-Suche durch und gibt Treffer zurück."""
+    timeout = settings.search.timeout_seconds or 30
+
+    # Proxy-Konfiguration
+    proxy_url = settings.search.get_proxy_url()
+    proxy_config = {"proxy": proxy_url} if proxy_url else {}
+
     try:
         async with httpx.AsyncClient(
-            timeout=15, follow_redirects=True, headers=_DDG_HEADERS
+            timeout=timeout,
+            follow_redirects=True,
+            headers=_DDG_HEADERS,
+            **proxy_config,
         ) as client:
             resp = await client.post(_DDG_URL, data={"q": query, "kl": "de-de"})
             html = resp.text
+    except httpx.TimeoutException:
+        proxy_hint = f" (Proxy: {settings.search.proxy_url})" if settings.search.proxy_url else ""
+        return [{"title": "Timeout", "snippet": f"Verbindung zu DuckDuckGo timed out nach {timeout}s.{proxy_hint}", "url": ""}]
+    except httpx.ProxyError as e:
+        return [{"title": "Proxy-Fehler", "snippet": f"Proxy-Verbindung fehlgeschlagen: {e}", "url": ""}]
     except Exception as e:
         return [{"title": "Fehler", "snippet": str(e), "url": ""}]
 
@@ -100,7 +129,7 @@ async def _ddg_search(query: str, max_results: int = 5) -> List[Dict[str, str]]:
     if not results:
         # Fallback: DuckDuckGo Instant Answer JSON
         try:
-            async with httpx.AsyncClient(timeout=10) as client:
+            async with httpx.AsyncClient(timeout=timeout, **proxy_config) as client:
                 r = await client.get(
                     "https://api.duckduckgo.com/",
                     params={"q": query, "format": "json", "no_html": "1", "skip_disambig": "1"},
