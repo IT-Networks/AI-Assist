@@ -5256,10 +5256,12 @@ document.addEventListener('DOMContentLoaded', () => {
 // ══════════════════════════════════════════════════════════════════════════════
 
 let _searchPollInterval = null;
+let _searchConfirmInProgress = {};  // Track ongoing confirms to prevent double-clicks
 
 function startSearchPolling() {
   if (_searchPollInterval) return;
-  _searchPollInterval = setInterval(_pollPendingSearches, 4000);
+  // Schnelleres Polling (2s statt 4s) für bessere Responsivität
+  _searchPollInterval = setInterval(_pollPendingSearches, 2000);
   _pollPendingSearches(); // Sofort einmal prüfen
 }
 
@@ -5317,25 +5319,39 @@ async function _pollPendingSearches() {
       const confirmTab = document.querySelector('[data-panel="confirm-panel"]');
       if (confirmTab) confirmTab.classList.add('active');
     }
-    searchesList.innerHTML = pending.map(item => `
+    searchesList.innerHTML = pending.map(item => {
+      const isExecuting = item.status === 'executing';
+      return `
       <div class="search-confirm-card" id="sc-${item.id}">
         <div style="font-size:12px;font-weight:600;margin-bottom:4px">&#128269; Agent möchte suchen:</div>
         <div class="sc-query">${escapeHtml(item.query)}</div>
         ${item.reason ? `<div class="sc-reason">Grund: ${escapeHtml(item.reason)}</div>` : ''}
         <div class="sc-actions">
-          <button class="btn btn-xs btn-success" onclick="searchConfirm('${item.id}')">&#10003; Bestätigen</button>
-          <button class="btn btn-xs btn-danger" onclick="searchReject('${item.id}')">&#10005; Ablehnen</button>
+          ${isExecuting
+            ? '<div class="spinner-inline"></div> <span style="color:var(--text-secondary)">Suche läuft...</span>'
+            : `<button class="btn btn-xs btn-success" onclick="searchConfirm('${item.id}')">&#10003; Bestätigen</button>
+               <button class="btn btn-xs btn-danger" onclick="searchReject('${item.id}')">&#10005; Ablehnen</button>`
+          }
         </div>
       </div>
-    `).join('');
+    `;
+    }).join('');
   } catch (e) {
     // Kein Netz oder Server nicht erreichbar – still ignorieren
   }
 }
 
 async function searchConfirm(searchId) {
+  // Verhindere Doppelklicks
+  if (_searchConfirmInProgress[searchId]) {
+    console.log('[search] Confirm already in progress for', searchId);
+    return;
+  }
+  _searchConfirmInProgress[searchId] = true;
+
   const card = document.getElementById(`sc-${searchId}`);
   if (card) card.innerHTML = '<div class="spinner-inline"></div> Suche wird ausgeführt...';
+
   try {
     const res = await fetch(`/api/search/confirm/${searchId}`, { method: 'POST' });
     if (!res.ok) {
@@ -5345,12 +5361,14 @@ async function searchConfirm(searchId) {
     const data = await res.json();
     console.log('[search] Confirm response:', data);
     // Kurz warten damit der Agent-Poll die Änderung sieht
-    await new Promise(r => setTimeout(r, 500));
+    await new Promise(r => setTimeout(r, 300));
     await _pollPendingSearches();
     loadSearchPanel(); // History aktualisieren
   } catch (e) {
     console.error('[search] Confirm error:', e);
     if (card) card.innerHTML = `<span class="badge badge-error">Fehler: ${e.message}</span>`;
+  } finally {
+    delete _searchConfirmInProgress[searchId];
   }
 }
 
