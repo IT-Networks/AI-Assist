@@ -363,6 +363,8 @@ class WLPConfig(BaseModel):
     servers: List[WLPServerEntry] = []
     # Pfad zum aktiven Repo (für Artefakt-Prüfung, Fallback = java.get_active_path())
     repo_path: str = ""
+    # Java-Pfad für WLP (JAVA_HOME). Leer = System-Default
+    java_home: str = ""
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -385,7 +387,10 @@ class MavenBuild(BaseModel):
 class MavenConfig(BaseModel):
     """Maven-Build Konfiguration."""
     enabled: bool = False
-    mvn_executable: str = "mvn"    # Pfad zum mvn-Binary
+    mvn_executable: str = "mvn"    # Pfad zum mvn-Binary (z.B. C:/maven/bin/mvn oder /opt/maven/bin/mvn)
+    java_home: str = ""            # JAVA_HOME für Maven. Leer = System-Default
+    settings_file: str = ""        # Maven User Settings (settings.xml). Leer = Default (~/.m2/settings.xml)
+    local_repo: str = ""           # Lokales Repository. Leer = Default (~/.m2/repository)
     builds: List[MavenBuild] = []
     default_timeout_minutes: int = 15
 

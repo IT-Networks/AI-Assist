@@ -3347,6 +3347,49 @@ async function saveCurrentSection() {
     return;
   }
 
+  // WLP hat eigene Felder (java_home)
+  if (section === 'wlp') {
+    const config = {
+      java_home: document.getElementById('wlp-java-home')?.value || '',
+    };
+    try {
+      const res = await fetch('/api/settings/section/wlp', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(config),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.detail || 'Fehler');
+      updateSettingsStatus('WLP-Einstellungen angewendet', 'success');
+    } catch (err) {
+      updateSettingsStatus('Fehler: ' + err.message, 'error');
+    }
+    return;
+  }
+
+  // Maven hat eigene Felder
+  if (section === 'maven') {
+    const config = {
+      java_home: document.getElementById('maven-java-home')?.value || '',
+      mvn_executable: document.getElementById('maven-mvn-exec')?.value || 'mvn',
+      settings_file: document.getElementById('maven-settings-file')?.value || '',
+      local_repo: document.getElementById('maven-local-repo')?.value || '',
+    };
+    try {
+      const res = await fetch('/api/settings/section/maven', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(config),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.detail || 'Fehler');
+      updateSettingsStatus('Maven-Einstellungen angewendet', 'success');
+    } catch (err) {
+      updateSettingsStatus('Fehler: ' + err.message, 'error');
+    }
+    return;
+  }
+
   // Datenquellen haben eigene Speicher-Buttons (kein generischer Save)
   if (section === 'data_sources') {
     updateSettingsStatus('Datenquellen werden direkt über die Formular-Buttons gespeichert', 'success');
@@ -4376,11 +4419,31 @@ async function lsDeleteServer(stageId, serverId) {
 // ══════════════════════════════════════════════════════════════════════════════
 
 async function renderWLPSection() {
+  // JAVA_HOME aus Settings laden
+  let wlpConfig = settingsState.settings?.wlp || {};
+  try {
+    const res = await fetch('/api/settings/section/wlp');
+    if (res.ok) wlpConfig = (await res.json()).values || wlpConfig;
+  } catch (_) {}
+
   const form = document.getElementById('settings-form');
   form.innerHTML = `
     <div class="settings-section">
       <h3 class="settings-section-title">WLP SERVER</h3>
       <p class="settings-section-desc">WebSphere Liberty Profile Server starten, server.xml prüfen und Artefakt validieren. Start wird per SSE-Stream überwacht.</p>
+    </div>
+
+    <!-- Java-Konfiguration -->
+    <div class="settings-subsection">
+      <h4>&#9749; Java-Konfiguration</h4>
+      <div class="settings-field">
+        <label>JAVA_HOME (für WLP)</label>
+        <input type="text" id="wlp-java-home" class="settings-input"
+               placeholder="z.B. C:\\Program Files\\Java\\jdk-17 oder /usr/lib/jvm/java-17"
+               value="${escapeHtml(wlpConfig.java_home || '')}"
+               onchange="markSettingsModified()">
+        <span style="font-size:11px;color:var(--text-muted)">Leer lassen für System-Default. Wird beim Server-Start als JAVA_HOME gesetzt.</span>
+      </div>
     </div>
 
     <!-- Import aus WLP-Installation -->
@@ -4557,11 +4620,52 @@ async function wlpValidate(id) {
 // ══════════════════════════════════════════════════════════════════════════════
 
 async function renderMavenSection() {
+  // Maven-Config aus Settings laden
+  let mavenConfig = settingsState.settings?.maven || {};
+  try {
+    const res = await fetch('/api/settings/section/maven');
+    if (res.ok) mavenConfig = (await res.json()).values || mavenConfig;
+  } catch (_) {}
+
   const form = document.getElementById('settings-form');
   form.innerHTML = `
     <div class="settings-section">
       <h3 class="settings-section-title">MAVEN BUILD</h3>
       <p class="settings-section-desc">Maven-Builds definieren und per Klick ausführen. Build-Ausgabe wird per SSE live gestreamt.</p>
+    </div>
+
+    <!-- Java & Maven Konfiguration -->
+    <div class="settings-subsection">
+      <h4>&#9749; Java & Maven Konfiguration</h4>
+      <div class="settings-field">
+        <label>JAVA_HOME</label>
+        <input type="text" id="maven-java-home" class="settings-input"
+               placeholder="z.B. C:\\Program Files\\Java\\jdk-17"
+               value="${escapeHtml(mavenConfig.java_home || '')}"
+               onchange="markSettingsModified()">
+        <span style="font-size:11px;color:var(--text-muted)">Leer = System-Default</span>
+      </div>
+      <div class="settings-field">
+        <label>Maven Executable</label>
+        <input type="text" id="maven-mvn-exec" class="settings-input"
+               placeholder="mvn (oder z.B. C:\\maven\\bin\\mvn.cmd)"
+               value="${escapeHtml(mavenConfig.mvn_executable || 'mvn')}"
+               onchange="markSettingsModified()">
+      </div>
+      <div class="settings-field">
+        <label>Maven Settings (settings.xml)</label>
+        <input type="text" id="maven-settings-file" class="settings-input"
+               placeholder="z.B. C:\\Users\\user\\.m2\\settings.xml (leer = Default)"
+               value="${escapeHtml(mavenConfig.settings_file || '')}"
+               onchange="markSettingsModified()">
+      </div>
+      <div class="settings-field">
+        <label>Lokales Repository</label>
+        <input type="text" id="maven-local-repo" class="settings-input"
+               placeholder="z.B. C:\\Users\\user\\.m2\\repository (leer = Default)"
+               value="${escapeHtml(mavenConfig.local_repo || '')}"
+               onchange="markSettingsModified()">
+      </div>
     </div>
 
     <!-- Import aus Repository -->
@@ -4570,11 +4674,6 @@ async function renderMavenSection() {
       <p style="font-size:12px;color:var(--text-muted);margin-bottom:8px">Findet pom.xml Dateien und IntelliJ Maven Run Configurations im aktiven Java-Repository.</p>
       <button class="btn btn-primary" onclick="mvnDiscoverProjects()">&#128269; Projekte suchen</button>
       <div id="mvn-discover-results" style="margin-top:10px"></div>
-    </div>
-
-    <div class="settings-field">
-      <label>mvn-Executable</label>
-      <input id="mvn-exec" type="text" class="settings-input" placeholder="mvn" value="">
     </div>
     <div id="mvn-builds-list"><div class="spinner-inline"></div></div>
     <div class="settings-add-form">
@@ -4744,9 +4843,6 @@ async function mvnLoadBuilds() {
   const res = await fetch('/api/maven/builds');
   const data = await res.json();
 
-  const execInput = document.getElementById('mvn-exec');
-  if (execInput) execInput.value = data.mvn_executable || 'mvn';
-
   const list = document.getElementById('mvn-builds-list');
   if (!list) return;
   list.innerHTML = !data.builds?.length ? '<p class="empty-hint">Keine Builds konfiguriert.</p>' :
@@ -4800,9 +4896,6 @@ async function mvnAddBuild() {
   };
   const res = await fetch('/api/maven/builds', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(body) });
   if (!res.ok) { updateSettingsStatus('Fehler', 'error'); return; }
-  // Executable speichern
-  const exec = document.getElementById('mvn-exec').value;
-  if (exec) await fetch('/api/settings/section/maven', { method: 'PUT', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ mvn_executable: exec }) });
   updateSettingsStatus('Build hinzugefügt ✓', 'success');
   await mvnLoadBuilds();
 }

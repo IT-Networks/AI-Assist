@@ -257,6 +257,13 @@ async def run_build(build_id: str, req: RunBuildRequest = RunBuildRequest()) -> 
     # Befehl zusammenbauen
     mvn = settings.maven.mvn_executable
     cmd = [mvn, "-f", str(pom)]
+
+    # Maven Settings und Local Repo
+    if settings.maven.settings_file:
+        cmd += ["-s", settings.maven.settings_file]
+    if settings.maven.local_repo:
+        cmd += [f"-Dmaven.repo.local={settings.maven.local_repo}"]
+
     cmd += build.goals.split()
 
     profiles = req.profiles if req.profiles is not None else build.profiles
@@ -278,9 +285,18 @@ async def run_build(build_id: str, req: RunBuildRequest = RunBuildRequest()) -> 
     if jvm_args:
         env["MAVEN_OPTS"] = jvm_args
 
+    # JAVA_HOME setzen wenn konfiguriert
+    if settings.maven.java_home:
+        env["JAVA_HOME"] = settings.maven.java_home
+
     cwd = str(pom.parent)
 
     async def stream_build():
+        # Debug: Welche Java- und Maven-Version wird verwendet?
+        java_home = env.get("JAVA_HOME", "nicht gesetzt")
+        yield f"data: {json.dumps({'type': 'output', 'line': f'[DEBUG] JAVA_HOME: {java_home}', 'is_error': False, 'is_warning': False, 'is_success': False})}\n\n"
+        yield f"data: {json.dumps({'type': 'output', 'line': f'[DEBUG] Maven: {mvn}', 'is_error': False, 'is_warning': False, 'is_success': False})}\n\n"
+
         try:
             proc = await asyncio.create_subprocess_exec(
                 *cmd,
