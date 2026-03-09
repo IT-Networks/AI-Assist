@@ -927,9 +927,9 @@ class AgentOrchestrator:
                             continue
                         state.read_files_this_request[file_path] = read_count + 1
 
-                    # Pro-Tool Modell ermitteln
+                    # Pro-Tool Modell ermitteln (Priorität: pro-Tool > tool_model > default)
                     tool_specific_model = settings.llm.tool_models.get(tool_call.name, "")
-                    effective_model = tool_specific_model or last_model or settings.llm.tool_model or settings.llm.default_model
+                    effective_model = tool_specific_model or settings.llm.tool_model or settings.llm.default_model
 
                     yield AgentEvent(AgentEventType.TOOL_START, {
                         "id": tool_call.id,
