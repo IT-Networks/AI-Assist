@@ -53,6 +53,7 @@ class SearchConfigRequest(BaseModel):
     proxy_password: str = ""
     no_proxy: str = ""
     timeout_seconds: int = 30
+    verify_ssl: bool = True
 
 
 # ── DuckDuckGo Search ─────────────────────────────────────────────────────────
@@ -133,6 +134,7 @@ async def _ddg_search(query: str, max_results: int = 5) -> List[Dict[str, str]]:
             timeout=timeout,
             follow_redirects=True,
             headers=_DDG_HEADERS,
+            verify=settings.search.verify_ssl,
             **proxy_config,
         ) as client:
             resp = await client.post(_DDG_URL, data={"q": query, "kl": "de-de"})
@@ -168,7 +170,7 @@ async def _ddg_search(query: str, max_results: int = 5) -> List[Dict[str, str]]:
     if not results:
         # Fallback: DuckDuckGo Instant Answer JSON
         try:
-            async with httpx.AsyncClient(timeout=timeout, **proxy_config) as client:
+            async with httpx.AsyncClient(timeout=timeout, verify=settings.search.verify_ssl, **proxy_config) as client:
                 r = await client.get(
                     "https://api.duckduckgo.com/",
                     params={"q": query, "format": "json", "no_html": "1", "skip_disambig": "1"},
@@ -246,6 +248,7 @@ async def get_search_config() -> Dict[str, Any]:
         "proxy_password": "***" if settings.search.proxy_password else "",
         "no_proxy": settings.search.no_proxy,
         "timeout_seconds": settings.search.timeout_seconds,
+        "verify_ssl": settings.search.verify_ssl,
     }
 
 
@@ -259,6 +262,7 @@ async def update_search_config(req: SearchConfigRequest) -> Dict[str, Any]:
         settings.search.proxy_password = req.proxy_password
     settings.search.no_proxy = req.no_proxy
     settings.search.timeout_seconds = max(5, min(req.timeout_seconds, 120))  # 5-120s
+    settings.search.verify_ssl = req.verify_ssl
 
     return {
         "success": True,
@@ -269,6 +273,7 @@ async def update_search_config(req: SearchConfigRequest) -> Dict[str, Any]:
             "proxy_password": "***" if settings.search.proxy_password else "",
             "no_proxy": settings.search.no_proxy,
             "timeout_seconds": settings.search.timeout_seconds,
+            "verify_ssl": settings.search.verify_ssl,
         }
     }
 

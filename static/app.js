@@ -5907,6 +5907,15 @@ async function renderSearchSettingsSection() {
                  min="5" max="120"
                  value="${config.timeout_seconds || 30}">
         </div>
+        <div class="settings-field" style="margin-top:12px">
+          <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
+            <input type="checkbox" id="search-verify-ssl" ${config.verify_ssl !== false ? 'checked' : ''}>
+            <span>SSL-Zertifikate verifizieren</span>
+          </label>
+          <span style="font-size:11px;color:var(--text-muted);display:block;margin-top:4px">
+            Deaktivieren für selbstsignierte Zertifikate (z.B. interne Proxys)
+          </span>
+        </div>
         <button class="btn btn-primary" onclick="saveSearchProxyConfig()" style="margin-top:8px">
           Proxy-Einstellungen speichern
         </button>
@@ -5991,6 +6000,7 @@ async function saveSearchProxyConfig() {
     proxy_password: document.getElementById('search-proxy-pass')?.value || '',
     no_proxy: document.getElementById('search-no-proxy')?.value || '',
     timeout_seconds: parseInt(document.getElementById('search-timeout')?.value) || 30,
+    verify_ssl: document.getElementById('search-verify-ssl')?.checked !== false,
   };
 
   try {
