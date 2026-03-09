@@ -1133,4 +1133,214 @@ def register_github_tools(registry: ToolRegistry) -> int:
     ))
     count += 1
 
+    # ── github_search_code ──────────────────────────────────────────────────────
+    async def github_search_code(**kwargs: Any) -> ToolResult:
+        """
+        Durchsucht Code in allen GitHub-Repositories nach einem Suchbegriff.
+        Nutzt die GitHub Code Search API für organisationsweite oder globale Suche.
+        """
+        if not settings.github.enabled:
+            return ToolResult(success=False, error="GitHub ist nicht aktiviert")
+
+        query: str = kwargs.get("query", "").strip()
+        org: str = kwargs.get("org", "").strip() or settings.github.default_org
+        repo: str = kwargs.get("repo", "").strip()
+        language: str = kwargs.get("language", "").strip()
+        filename: str = kwargs.get("filename", "").strip()
+        extension: str = kwargs.get("extension", "").strip()
+        max_results: int = min(int(kwargs.get("max_results", 20)), 100)
+        include_content: bool = kwargs.get("include_content", True)
+
+        if not query:
+            return ToolResult(success=False, error="query ist erforderlich (Suchbegriff)")
+
+        api_url = settings.github.get_api_url()
+        if not api_url:
+            return ToolResult(success=False, error="GitHub API-URL ist nicht konfiguriert")
+
+        # GitHub Search Query aufbauen
+        search_parts = [query]
+
+        # Scope einschränken
+        if repo:
+            resolved_repo = _resolve_repo(repo)
+            if resolved_repo:
+                search_parts.append(f"repo:{resolved_repo}")
+        elif org:
+            search_parts.append(f"org:{org}")
+
+        # Sprach-Filter
+        if language:
+            search_parts.append(f"language:{language}")
+
+        # Dateiname-Filter
+        if filename:
+            search_parts.append(f"filename:{filename}")
+
+        # Extension-Filter
+        if extension:
+            ext = extension.lstrip(".")
+            search_parts.append(f"extension:{ext}")
+
+        search_query = " ".join(search_parts)
+
+        # GitHub Code Search API aufrufen
+        headers = {
+            "Accept": "application/vnd.github.v3.text-match+json",  # Text-Matches aktivieren
+            "Authorization": f"token {settings.github.token}",
+        }
+
+        async with httpx.AsyncClient(verify=settings.github.verify_ssl, timeout=30) as client:
+            try:
+                response = await client.get(
+                    f"{api_url}/search/code",
+                    headers=headers,
+                    params={
+                        "q": search_query,
+                        "per_page": max_results,
+                        "sort": "indexed",
+                        "order": "desc",
+                    },
+                )
+                response.raise_for_status()
+                data = response.json()
+            except httpx.HTTPStatusError as e:
+                error_body = ""
+                try:
+                    error_body = e.response.json().get("message", "")
+                except Exception:
+                    error_body = e.response.text[:300]
+                return ToolResult(success=False, error=f"HTTP {e.response.status_code}: {error_body}")
+            except httpx.RequestError as e:
+                return ToolResult(success=False, error=f"Verbindungsfehler: {e}")
+
+        total_count = data.get("total_count", 0)
+        items = data.get("items", [])
+
+        # Ergebnisse aufbereiten
+        results = []
+        for item in items[:max_results]:
+            result_entry = {
+                "repo": item.get("repository", {}).get("full_name"),
+                "path": item.get("path"),
+                "name": item.get("name"),
+                "url": item.get("html_url"),
+                "sha": item.get("sha", "")[:7],
+            }
+
+            # Text-Matches (Kontext um den Treffer)
+            text_matches = item.get("text_matches", [])
+            if text_matches:
+                fragments = []
+                for match in text_matches[:3]:  # Max 3 Matches pro Datei
+                    fragment = match.get("fragment", "")
+                    if len(fragment) > 500:
+                        fragment = fragment[:500] + "..."
+                    fragments.append(fragment)
+                result_entry["matches"] = fragments
+
+            # Optional: Vollständigen Dateiinhalt holen
+            if include_content and len(results) < 5:  # Nur für erste 5 Treffer
+                content_url = item.get("url")  # API-URL zum Dateiinhalt
+                if content_url:
+                    try:
+                        content_resp = await client.get(content_url, headers={
+                            "Accept": "application/vnd.github.v3+json",
+                            "Authorization": f"token {settings.github.token}",
+                        })
+                        if content_resp.status_code == 200:
+                            content_data = content_resp.json()
+                            if content_data.get("encoding") == "base64":
+                                import base64
+                                content = base64.b64decode(content_data.get("content", "")).decode("utf-8", errors="replace")
+                                # Auf max 2000 Zeichen begrenzen
+                                if len(content) > 2000:
+                                    content = content[:2000] + f"\n... [+{len(content) - 2000} Zeichen]"
+                                result_entry["content"] = content
+                    except Exception as e:
+                        logger.warning(f"Fehler beim Holen des Inhalts für {content_url}: {e}")
+
+            results.append(result_entry)
+
+        # Zusammenfassung nach Repos
+        repos_found = {}
+        for r in results:
+            repo_name = r.get("repo", "unknown")
+            repos_found[repo_name] = repos_found.get(repo_name, 0) + 1
+
+        return ToolResult(
+            success=True,
+            data={
+                "query": search_query,
+                "total_count": total_count,
+                "results_returned": len(results),
+                "repos_summary": repos_found,
+                "results": results,
+            },
+        )
+
+    registry.register(Tool(
+        name="github_search_code",
+        description=(
+            "Durchsucht Code in ALLEN GitHub-Repositories nach einem Suchbegriff. "
+            "Nutzt die GitHub Code Search API für organisationsweite Suche. "
+            "Findet Code-Stellen, zeigt Kontext und kann Dateiinhalt laden. "
+            "Unterstützt Filter: Sprache, Dateiname, Extension, Repository. "
+            "Ideal für: Code-Patterns finden, API-Nutzung suchen, Implementierungen finden."
+        ),
+        category=ToolCategory.DEVOPS,
+        parameters=[
+            ToolParameter(
+                name="query",
+                type="string",
+                description="Suchbegriff (Code-Text, Methodenname, Klassename, etc.)",
+                required=True,
+            ),
+            ToolParameter(
+                name="org",
+                type="string",
+                description="GitHub-Organisation einschränken (leer = default_org aus Config)",
+                required=False,
+            ),
+            ToolParameter(
+                name="repo",
+                type="string",
+                description="Auf ein Repo einschränken: 'owner/repo' oder nur 'repo-name'",
+                required=False,
+            ),
+            ToolParameter(
+                name="language",
+                type="string",
+                description="Sprache filtern: java, python, javascript, typescript, etc.",
+                required=False,
+            ),
+            ToolParameter(
+                name="filename",
+                type="string",
+                description="Dateiname filtern (z.B. 'pom.xml', 'Dockerfile')",
+                required=False,
+            ),
+            ToolParameter(
+                name="extension",
+                type="string",
+                description="Dateiendung filtern (z.B. 'java', 'py', 'xml')",
+                required=False,
+            ),
+            ToolParameter(
+                name="max_results",
+                type="integer",
+                description="Max. Anzahl Ergebnisse (1-100, Standard: 20)",
+                required=False,
+            ),
+            ToolParameter(
+                name="include_content",
+                type="boolean",
+                description="Dateiinhalt für erste 5 Treffer laden (Standard: true)",
+                required=False,
+            ),
+        ],
+        handler=github_search_code,
+    ))
+    count += 1
+
     return count

@@ -1522,6 +1522,23 @@ Nutze diese Tools um:
 - Daten von URLs zu holen
 """
 
+        if settings.github.enabled:
+            base += """
+**GitHub (Code-Suche & Repository):**
+- github_search_code: Durchsucht Code in ALLEN Repos nach Beispielen, Patterns, Funktionen
+- github_list_repos: Listet Repositories einer Organisation
+- github_list_prs: Pull Requests eines Repos auflisten
+- github_pr_diff: Code-Änderungen eines PRs anzeigen
+- github_get_file: Dateiinhalt von GitHub holen (aus Branch/Commit)
+- github_recent_commits: Letzte Commits eines Branches
+
+Nutze github_search_code wenn der User nach:
+- Code-Beispielen sucht ("wie wird X implementiert", "Beispiele für Y")
+- Patterns oder Best Practices sucht
+- Wissen will wo eine Funktion/Klasse verwendet wird
+- Nach ähnlichen Implementierungen sucht
+"""
+
         if db_available:
             base += f"""
 **Datenbank (DB2):**
