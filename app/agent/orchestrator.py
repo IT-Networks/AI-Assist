@@ -1490,6 +1490,20 @@ Du bist ein intelligenter Assistent mit Zugriff auf Tools.
 - search_pdf: Durchsuche hochgeladene PDF-Dokumente
 """
 
+        if settings.internal_fetch.enabled:
+            base += """
+**HTTP/URL-Abruf (Internal Fetch):**
+- internal_fetch: Ruft eine URL ab und gibt den Inhalt zurück (HTML, JSON, Text)
+- internal_search: Ruft eine URL ab und durchsucht den Inhalt nach einem Pattern
+- http_request: Führt HTTP-Requests aus (wie curl) - GET, POST, PUT, DELETE, PATCH mit Body und Headers
+
+Nutze diese Tools um:
+- Interne/Intranet-Seiten abzurufen
+- REST-APIs aufzurufen (GET, POST, etc.)
+- Webseiten zu durchsuchen
+- Daten von URLs zu holen
+"""
+
         if db_available:
             base += f"""
 **Datenbank (DB2):**

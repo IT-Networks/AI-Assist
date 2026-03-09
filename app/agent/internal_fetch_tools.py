@@ -205,7 +205,14 @@ def register_internal_fetch_tools(registry: ToolRegistry) -> int:
 
     async def internal_fetch(**kwargs: Any) -> ToolResult:
         """Ruft eine interne URL ab und gibt den Inhalt zurück."""
+        print(f"[internal_fetch] Empfangene kwargs: {kwargs}")
         url: str = kwargs.get("url", "").strip()
+
+        if not url:
+            return ToolResult(
+                success=False,
+                error="URL ist erforderlich. Beispiel: internal_fetch(url=\"https://example.com\")",
+            )
 
         if not settings.internal_fetch.enabled:
             return ToolResult(
@@ -275,9 +282,16 @@ def register_internal_fetch_tools(registry: ToolRegistry) -> int:
 
     async def internal_search(**kwargs: Any) -> ToolResult:
         """Ruft eine interne URL ab und durchsucht den Inhalt nach einem Pattern."""
+        print(f"[internal_search] Empfangene kwargs: {kwargs}")
         url: str = kwargs.get("url", "").strip()
         pattern: str = kwargs.get("pattern", "").strip()
         context_lines: int = int(kwargs.get("context_lines", 3))
+
+        if not url:
+            return ToolResult(
+                success=False,
+                error="URL ist erforderlich. Beispiel: internal_search(url=\"https://example.com\", pattern=\"suchtext\")",
+            )
 
         if not settings.internal_fetch.enabled:
             return ToolResult(
@@ -386,11 +400,24 @@ def register_internal_fetch_tools(registry: ToolRegistry) -> int:
         """Führt einen HTTP-Request aus (curl-Ersatz)."""
         import json as json_module
 
+        # Debug: Log welche Parameter übergeben wurden
+        print(f"[http_request] Empfangene kwargs: {kwargs}")
+
         url: str = kwargs.get("url", "").strip()
         method: str = kwargs.get("method", "GET").upper().strip()
         body: str = kwargs.get("body", "")
         headers_str: str = kwargs.get("headers", "")
         content_type_param: str = kwargs.get("content_type", "")
+
+        # URL ist Pflichtparameter
+        if not url:
+            return ToolResult(
+                success=False,
+                error=(
+                    "URL ist erforderlich. Bitte gib die URL an: "
+                    "http_request(url=\"https://example.com\", method=\"GET\")"
+                ),
+            )
 
         if not settings.internal_fetch.enabled:
             return ToolResult(
