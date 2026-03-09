@@ -296,6 +296,24 @@ def _parse_text_tool_calls(content: str, available_tools: List[Dict]) -> List[Di
             print(f"[agent] Inline JSON Tool-Call Format erkannt: {len(parsed_calls)} calls")
             return parsed_calls
 
+    # Debug: Wenn kein Tool-Call erkannt wurde, hilfreiche Info loggen
+    if content and len(content) > 20:
+        # Prüfe auf mögliche Tool-Call-Patterns die nicht gematcht wurden
+        potential_patterns = [
+            (r'\[TOOL', '[TOOL...'),
+            (r'<tool', '<tool...'),
+            (r'<function', '<function...'),
+            (r'"name"\s*:', '"name":'),
+            (r'"tool"\s*:', '"tool":'),
+        ]
+        found_hints = []
+        for pattern, hint in potential_patterns:
+            if re.search(pattern, content, re.IGNORECASE):
+                found_hints.append(hint)
+        if found_hints:
+            print(f"[agent] Text-Parser: Keine Tool-Calls erkannt, aber Hinweise gefunden: {found_hints}")
+            print(f"[agent] Content-Anfang (100 chars): {content[:100]!r}")
+
     return []
 
 
@@ -1516,6 +1534,22 @@ WICHTIG: Nutze query_database um Daten abzufragen. Beispiel: query_database(quer
 """
 
         base += """
+### Tool-Aufrufe
+
+**WICHTIG - Tool-Aufruf-Format:**
+Wenn du ein Tool aufrufen willst, formatiere es EXAKT so:
+
+```
+[TOOL_CALLS][{"name": "tool_name", "arguments": {"param1": "value1", "param2": "value2"}}]
+```
+
+Beispiele:
+- `[TOOL_CALLS][{"name": "search_code", "arguments": {"query": "PaymentService", "language": "java"}}]`
+- `[TOOL_CALLS][{"name": "read_file", "arguments": {"path": "src/Main.java"}}]`
+- `[TOOL_CALLS][{"name": "http_request", "arguments": {"url": "https://api.example.com", "method": "POST", "body": "{\"key\": \"value\"}"}}]`
+
+Rufe immer nur EIN Tool pro Nachricht auf. Warte auf das Ergebnis bevor du das nächste Tool aufrufst.
+
 ### Vorgehensweise bei jeder Anfrage:
 
 1. **Verstehen**: Was genau wird gefragt? Welche Information fehlt mir?
