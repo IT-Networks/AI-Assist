@@ -3322,6 +3322,31 @@ async function saveCurrentSection() {
     return;
   }
 
+  // Web-Suche hat eigene Felder
+  if (section === 'search') {
+    const config = {
+      proxy_url: document.getElementById('search-proxy-url')?.value || '',
+      proxy_username: document.getElementById('search-proxy-user')?.value || '',
+      proxy_password: document.getElementById('search-proxy-pass')?.value || '',
+      no_proxy: document.getElementById('search-no-proxy')?.value || '',
+      timeout_seconds: parseInt(document.getElementById('search-timeout')?.value) || 30,
+      verify_ssl: document.getElementById('search-verify-ssl')?.checked ?? true,
+    };
+    try {
+      const res = await fetch('/api/search/config', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(config),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.detail || 'Fehler');
+      updateSettingsStatus('Web-Suche-Einstellungen angewendet', 'success');
+    } catch (err) {
+      updateSettingsStatus('Fehler: ' + err.message, 'error');
+    }
+    return;
+  }
+
   // Datenquellen haben eigene Speicher-Buttons (kein generischer Save)
   if (section === 'data_sources') {
     updateSettingsStatus('Datenquellen werden direkt über die Formular-Buttons gespeichert', 'success');
@@ -5962,48 +5987,50 @@ async function renderSearchSettingsSection() {
           <label>Proxy-URL</label>
           <input type="text" id="search-proxy-url" class="settings-input"
                  placeholder="http://proxy.example.com:8080"
-                 value="${escapeHtml(config.proxy_url || '')}">
+                 value="${escapeHtml(config.proxy_url || '')}"
+                 onchange="markSettingsModified()">
         </div>
         <div class="settings-field-row" style="display:flex;gap:12px">
           <div class="settings-field" style="flex:1">
             <label>Benutzername</label>
             <input type="text" id="search-proxy-user" class="settings-input"
                    placeholder="(optional)"
-                   value="${escapeHtml(config.proxy_username || '')}">
+                   value="${escapeHtml(config.proxy_username || '')}"
+                   onchange="markSettingsModified()">
           </div>
           <div class="settings-field" style="flex:1">
             <label>Passwort</label>
             <input type="password" id="search-proxy-pass" class="settings-input"
                    placeholder="(optional)"
-                   value="${config.proxy_password || ''}">
+                   value="${config.proxy_password || ''}"
+                   onchange="markSettingsModified()">
           </div>
         </div>
         <div class="settings-field">
           <label>No-Proxy (Ausnahmen)</label>
           <input type="text" id="search-no-proxy" class="settings-input"
                  placeholder="localhost,.intern,.local"
-                 value="${escapeHtml(config.no_proxy || '')}">
+                 value="${escapeHtml(config.no_proxy || '')}"
+                 onchange="markSettingsModified()">
           <span style="font-size:11px;color:var(--text-muted)">Kommagetrennte Liste von Hosts ohne Proxy</span>
         </div>
         <div class="settings-field">
           <label>Timeout (Sekunden)</label>
           <input type="number" id="search-timeout" class="settings-input" style="width:100px"
                  min="5" max="120"
-                 value="${config.timeout_seconds || 30}">
+                 value="${config.timeout_seconds || 30}"
+                 onchange="markSettingsModified()">
         </div>
         <div class="settings-field" style="margin-top:12px">
           <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
-            <input type="checkbox" id="search-verify-ssl" ${config.verify_ssl !== false ? 'checked' : ''}>
+            <input type="checkbox" id="search-verify-ssl" ${config.verify_ssl !== false ? 'checked' : ''}
+                   onchange="markSettingsModified()">
             <span>SSL-Zertifikate verifizieren</span>
           </label>
           <span style="font-size:11px;color:var(--text-muted);display:block;margin-top:4px">
             Deaktivieren für selbstsignierte Zertifikate (z.B. interne Proxys)
           </span>
         </div>
-        <button class="btn btn-primary" onclick="saveSearchProxyConfig()" style="margin-top:8px">
-          Proxy-Einstellungen speichern
-        </button>
-        <span id="search-proxy-status" style="margin-left:12px;font-size:12px"></span>
       </div>
 
       <div class="settings-subsection" style="margin-top:16px">
