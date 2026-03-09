@@ -174,6 +174,11 @@ async def _ddg_search(query: str, max_results: int = 5) -> List[Dict[str, str]]:
 
     results = []
 
+    # Debug: HTML-Länge und erste Zeichen loggen
+    print(f"[search] HTML response length: {len(html)} chars")
+    if len(html) < 1000:
+        print(f"[search] Short response (possible block/error): {html[:500]}")
+
     # Titel: class="result__a"
     title_blocks = re.findall(
         r'class="result__a"[^>]*>(.*?)</a>', html, re.DOTALL
@@ -185,6 +190,8 @@ async def _ddg_search(query: str, max_results: int = 5) -> List[Dict[str, str]]:
     # URL: uddg=<encoded-url>
     url_blocks = re.findall(r'uddg=([^&"]+)', html)
 
+    print(f"[search] Found: {len(title_blocks)} titles, {len(snippet_blocks)} snippets, {len(url_blocks)} urls")
+
     for i in range(min(max_results, len(title_blocks))):
         results.append({
             "title": _clean(title_blocks[i]),
@@ -194,6 +201,7 @@ async def _ddg_search(query: str, max_results: int = 5) -> List[Dict[str, str]]:
 
     if not results:
         # Fallback: DuckDuckGo Instant Answer JSON
+        print(f"[search] No HTML results, trying JSON API fallback...")
         try:
             async with httpx.AsyncClient(timeout=timeout, verify=settings.search.verify_ssl, **proxy_config) as client:
                 r = await client.get(
@@ -203,6 +211,7 @@ async def _ddg_search(query: str, max_results: int = 5) -> List[Dict[str, str]]:
                 data = r.json()
             abstract = data.get("AbstractText", "")
             abstract_url = data.get("AbstractURL", "")
+            print(f"[search] JSON API response: abstract={bool(abstract)}, topics={len(data.get('RelatedTopics', []))}")
             if abstract:
                 results.append({
                     "title": data.get("Heading", query),
@@ -216,10 +225,21 @@ async def _ddg_search(query: str, max_results: int = 5) -> List[Dict[str, str]]:
                         "snippet": topic.get("Text", "")[:300],
                         "url": topic.get("FirstURL", ""),
                     })
-        except Exception:
-            pass
+        except Exception as e:
+            print(f"[search] JSON API fallback failed: {e}")
 
-    return results or [{"title": "Keine Ergebnisse", "snippet": "DuckDuckGo hat keine Treffer geliefert.", "url": ""}]
+    if not results:
+        print(f"[search] No results found for query: {query[:50]}...")
+        # Hilfreiche Fehlermeldung mit Debug-Info
+        return [{
+            "title": "Keine Ergebnisse",
+            "snippet": f"DuckDuckGo hat keine Treffer geliefert. "
+                      f"HTML-Länge: {len(html)} Zeichen. "
+                      f"Mögliche Ursachen: Proxy blockiert Anfrage, Query zu speziell, oder Captcha/Rate-Limiting.",
+            "url": ""
+        }]
+
+    return results
 
 
 # ── Sanitization ──────────────────────────────────────────────────────────────
