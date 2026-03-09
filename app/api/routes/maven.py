@@ -378,6 +378,7 @@ def _parse_intellij_maven_config(xml_path: Path, repo_path: Path) -> Optional[Di
     Parst eine IntelliJ Maven Run Configuration.
 
     Format: .idea/runConfigurations/*.xml
+    Unterstützt verschiedene IntelliJ-Versionen mit unterschiedlichen Option-Namen.
     """
     try:
         tree = ET.parse(str(xml_path))
@@ -386,10 +387,19 @@ def _parse_intellij_maven_config(xml_path: Path, repo_path: Path) -> Optional[Di
         # Nur Maven-Configs verarbeiten
         config = root.find("configuration")
         if config is None:
+            config = root.find(".//configuration")
+        if config is None:
             return None
 
         config_type = config.get("type", "")
-        if "Maven" not in config_type and config_type != "MavenRunConfiguration":
+        factory_name = config.get("factoryName", "")
+        # Verschiedene Möglichkeiten für Maven-Configs
+        is_maven = (
+            "Maven" in config_type or
+            config_type == "MavenRunConfiguration" or
+            factory_name == "Maven"
+        )
+        if not is_maven:
             return None
 
         name = config.get("name", xml_path.stem)
@@ -399,35 +409,58 @@ def _parse_intellij_maven_config(xml_path: Path, repo_path: Path) -> Optional[Di
         profiles = []
         pom_path = ""
         jvm_args = ""
+        working_dir = ""
 
-        # MavenGeneralSettings
+        # MavenSettings Block (neuere IntelliJ-Versionen)
+        maven_settings = config.find(".//MavenSettings")
+        if maven_settings is not None:
+            for option in maven_settings.findall("option"):
+                opt_name = option.get("name", "")
+                opt_value = option.get("value", "")
+
+                # Verschiedene Option-Namen für Working Directory
+                if opt_name in ("myWorkingDirectoryPath", "workingDirectoryPath"):
+                    working_dir = opt_value
+
+        # MavenGeneralSettings (ältere Versionen)
         general_settings = config.find(".//MavenGeneralSettings")
         if general_settings is not None:
-            # Working directory / pomxml path
-            working_dir = general_settings.get("pomXmlPath", "")
-            if working_dir:
-                pom_path = working_dir
+            wd = general_settings.get("pomXmlPath", "") or general_settings.get("workingDirectoryPath", "")
+            if wd:
+                working_dir = wd
 
-        # Durch alle Optionen iterieren
+        # Durch alle Optionen iterieren (verschiedene Namenskonventionen)
         for option in config.findall(".//option"):
             opt_name = option.get("name", "")
             opt_value = option.get("value", "")
 
-            if opt_name == "goals":
-                goals = opt_value
-            elif opt_name == "profiles":
+            # Goals (verschiedene Namen)
+            if opt_name in ("goals", "myGoals", "commandLine"):
+                if opt_value:
+                    goals = opt_value
+            # Profiles
+            elif opt_name in ("profiles", "myProfiles", "enabledProfiles"):
                 if opt_value:
                     profiles = [p.strip() for p in opt_value.split(",") if p.strip()]
-            elif opt_name == "pomFileName":
-                pom_path = opt_value
-            elif opt_name == "workingDirectory" and not pom_path:
-                # Fallback
-                pom_path = opt_value
-            elif opt_name == "vmOptions":
-                jvm_args = opt_value
+            # POM-Pfad
+            elif opt_name in ("pomFileName", "myPomFileName", "pomFile"):
+                if opt_value:
+                    pom_path = opt_value
+            # Working Directory
+            elif opt_name in ("workingDirectory", "myWorkingDirectoryPath", "workingDirectoryPath"):
+                if opt_value and not working_dir:
+                    working_dir = opt_value
+            # JVM Options
+            elif opt_name in ("vmOptions", "myVmOptions", "jvmOptions"):
+                if opt_value:
+                    jvm_args = opt_value
+
+        # Working Directory als Fallback für pom_path
+        if not pom_path and working_dir:
+            pom_path = working_dir
 
         # $PROJECT_DIR$ ersetzen
-        if "$PROJECT_DIR$" in pom_path:
+        if pom_path and "$PROJECT_DIR$" in pom_path:
             pom_path = pom_path.replace("$PROJECT_DIR$", str(repo_path))
 
         # pom.xml anhängen wenn nur Verzeichnis
@@ -435,10 +468,16 @@ def _parse_intellij_maven_config(xml_path: Path, repo_path: Path) -> Optional[Di
             pom_candidate = Path(pom_path) / "pom.xml"
             if pom_candidate.exists():
                 pom_path = str(pom_candidate)
+            elif Path(pom_path).exists() and Path(pom_path).is_file():
+                # pom_path ist bereits eine Datei
+                pass
+            else:
+                # Versuche pom.xml im Verzeichnis zu finden
+                pom_candidate = Path(pom_path) / "pom.xml"
+                pom_path = str(pom_candidate)  # Auch wenn nicht existent, für spätere Validierung
 
-        if not goals and not pom_path:
-            return None
-
+        # Auch ohne goals oder pom_path zurückgeben, wenn Name vorhanden
+        # (goals können in der UI hinzugefügt werden)
         return {
             "source": "intellij",
             "config_file": str(xml_path),

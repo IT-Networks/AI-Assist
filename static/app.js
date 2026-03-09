@@ -4256,15 +4256,31 @@ async function wlpImportSelected() {
   });
   if (!toImport.length) { updateSettingsStatus('Keine Server ausgewählt', 'error'); return; }
 
-  const res = await fetch('/api/wlp/import', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ servers: toImport })
-  });
-  const data = await res.json();
-  updateSettingsStatus(`${data.imported_count} Server importiert ✓`, 'success');
-  document.getElementById('wlp-discover-results').innerHTML = '';
-  await wlpLoadList();
+  try {
+    const res = await fetch('/api/wlp/import', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ servers: toImport })
+    });
+    const data = await res.json();
+
+    if (data.errors?.length) {
+      console.warn('WLP Import Fehler:', data.errors);
+      const errMsg = data.errors.map(e => `${e.server_name}: ${e.error}`).join(', ');
+      if (data.imported_count > 0) {
+        updateSettingsStatus(`${data.imported_count} importiert, Fehler: ${errMsg}`, 'warning');
+      } else {
+        updateSettingsStatus(`Import fehlgeschlagen: ${errMsg}`, 'error');
+      }
+    } else {
+      updateSettingsStatus(`${data.imported_count} Server importiert ✓`, 'success');
+    }
+    document.getElementById('wlp-discover-results').innerHTML = '';
+    await wlpLoadList();
+  } catch (e) {
+    console.error('WLP Import Fehler:', e);
+    updateSettingsStatus('Import fehlgeschlagen: ' + e.message, 'error');
+  }
 }
 
 async function wlpLoadList() {
@@ -4432,7 +4448,7 @@ async function mvnDiscoverProjects() {
       html += `
         <div class="ds-item" style="padding:8px;margin-bottom:6px">
           <label style="display:flex;align-items:flex-start;gap:8px;cursor:pointer">
-            <input type="checkbox" class="mvn-import-pom" data-idx="${i}" ${p.already_imported ? 'disabled' : ''}>
+            <input type="checkbox" class="mvn-import-pom" data-idx="${i}" ${p.already_imported ? 'disabled' : 'checked'}>
             <div>
               <strong>${escapeHtml(p.name || p.artifact_id)}</strong>
               ${p.is_multi_module ? '<span class="badge">multi-module</span>' : ''}
@@ -4495,15 +4511,31 @@ async function mvnImportSelected() {
 
   if (!toImport.length) { updateSettingsStatus('Keine Builds ausgewählt', 'error'); return; }
 
-  const res = await fetch('/api/maven/import', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ builds: toImport })
-  });
-  const data = await res.json();
-  updateSettingsStatus(`${data.imported_count} Builds importiert ✓`, 'success');
-  document.getElementById('mvn-discover-results').innerHTML = '';
-  await mvnLoadBuilds();
+  try {
+    const res = await fetch('/api/maven/import', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ builds: toImport })
+    });
+    const data = await res.json();
+
+    if (data.errors?.length) {
+      console.warn('Maven Import Fehler:', data.errors);
+      const errMsg = data.errors.map(e => `${e.name}: ${e.error}`).join(', ');
+      if (data.imported_count > 0) {
+        updateSettingsStatus(`${data.imported_count} importiert, Fehler: ${errMsg}`, 'warning');
+      } else {
+        updateSettingsStatus(`Import fehlgeschlagen: ${errMsg}`, 'error');
+      }
+    } else {
+      updateSettingsStatus(`${data.imported_count} Builds importiert ✓`, 'success');
+    }
+    document.getElementById('mvn-discover-results').innerHTML = '';
+    await mvnLoadBuilds();
+  } catch (e) {
+    console.error('Maven Import Fehler:', e);
+    updateSettingsStatus('Import fehlgeschlagen: ' + e.message, 'error');
+  }
 }
 
 async function mvnLoadBuilds() {
