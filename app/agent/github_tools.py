@@ -226,29 +226,44 @@ def register_github_tools(registry: ToolRegistry) -> int:
     ))
     count += 1
 
+    # ── Hilfsfunktion: Repo-Name zu vollständigem Pfad ──────────────────────────
+    def _resolve_repo(repo_input: str) -> str:
+        """
+        Löst Repo-Namen auf: Wenn kein '/' enthalten, wird default_org vorangestellt.
+        Beispiel: 'AI-Assist' → 'IT-Networks/AI-Assist'
+        """
+        repo = repo_input.strip()
+        if not repo:
+            return settings.github.default_repo
+        if "/" not in repo and settings.github.default_org:
+            return f"{settings.github.default_org}/{repo}"
+        return repo
+
     # ── github_list_prs ────────────────────────────────────────────────────────
     async def github_list_prs(**kwargs: Any) -> ToolResult:
-        """Listet Pull Requests eines Repositories auf."""
+        """Listet Pull Requests eines Repositories auf (mit Pagination, neueste zuerst)."""
         if not settings.github.enabled:
             return ToolResult(success=False, error="GitHub ist nicht aktiviert")
 
-        repo: str = kwargs.get("repo", "").strip() or settings.github.default_repo
+        repo: str = _resolve_repo(kwargs.get("repo", ""))
         if not repo:
-            return ToolResult(success=False, error="repo ist erforderlich (Format: owner/repo)")
+            return ToolResult(success=False, error="repo ist erforderlich (Format: owner/repo oder nur repo-name wenn default_org gesetzt)")
 
         state: str = kwargs.get("state", settings.github.pr_state_filter)
+        max_prs: int = int(kwargs.get("max_prs", 0))  # 0 = alle
 
         api_url = settings.github.get_api_url()
         if not api_url:
             return ToolResult(success=False, error="GitHub API-URL ist nicht konfiguriert")
 
-        result = await _github_request(
-            method="GET",
+        # Paginierte Abfrage mit direction=desc für neueste zuerst
+        result = await _github_paginated_request(
             url=f"{api_url}/repos/{repo}/pulls",
             token=settings.github.token,
             verify_ssl=settings.github.verify_ssl,
             timeout=settings.github.timeout_seconds,
-            params={"state": state, "per_page": settings.github.max_items, "sort": "updated"},
+            params={"state": state, "per_page": 100, "sort": "updated", "direction": "desc"},
+            max_items=max_prs,
         )
 
         if not result["success"]:
@@ -275,6 +290,7 @@ def register_github_tools(registry: ToolRegistry) -> int:
                 "repo": repo,
                 "state_filter": state,
                 "pr_count": len(prs),
+                "pages_fetched": result.get("pages_fetched", 1),
                 "pull_requests": prs,
             },
         )
@@ -282,22 +298,28 @@ def register_github_tools(registry: ToolRegistry) -> int:
     registry.register(Tool(
         name="github_list_prs",
         description=(
-            "Listet Pull Requests eines GitHub-Repositories auf. "
+            "Listet Pull Requests eines GitHub-Repositories auf (neueste zuerst, mit Pagination). "
             "Zeigt Nummer, Titel, Autor, Status und Branches. "
-            "Verwende dies um offene PRs zu sehen oder den Review-Status zu prüfen."
+            "Repo kann als 'owner/repo' oder nur 'repo-name' angegeben werden (default_org wird verwendet)."
         ),
         category=ToolCategory.DEVOPS,
         parameters=[
             ToolParameter(
                 name="repo",
                 type="string",
-                description="Repository im Format 'owner/repo' (leer = Standard-Repository)",
+                description="Repository: 'owner/repo' oder nur 'repo-name' (dann wird default_org verwendet)",
                 required=False,
             ),
             ToolParameter(
                 name="state",
                 type="string",
                 description="Filter: 'open', 'closed', oder 'all' (Standard: open)",
+                required=False,
+            ),
+            ToolParameter(
+                name="max_prs",
+                type="integer",
+                description="Maximale Anzahl PRs (0 = alle, Standard: 0)",
                 required=False,
             ),
         ],
@@ -311,11 +333,11 @@ def register_github_tools(registry: ToolRegistry) -> int:
         if not settings.github.enabled:
             return ToolResult(success=False, error="GitHub ist nicht aktiviert")
 
-        repo: str = kwargs.get("repo", "").strip() or settings.github.default_repo
+        repo: str = _resolve_repo(kwargs.get("repo", ""))
         pr_number: int = int(kwargs.get("pr_number", 0))
 
         if not repo:
-            return ToolResult(success=False, error="repo ist erforderlich")
+            return ToolResult(success=False, error="repo ist erforderlich (oder default_repo/default_org konfigurieren)")
         if not pr_number:
             return ToolResult(success=False, error="pr_number ist erforderlich")
 
@@ -398,7 +420,7 @@ def register_github_tools(registry: ToolRegistry) -> int:
             ToolParameter(
                 name="repo",
                 type="string",
-                description="Repository im Format 'owner/repo'",
+                description="Repository: 'owner/repo' oder nur 'repo-name' (dann wird default_org verwendet)",
                 required=False,
             ),
             ToolParameter(
@@ -414,34 +436,36 @@ def register_github_tools(registry: ToolRegistry) -> int:
 
     # ── github_list_issues ─────────────────────────────────────────────────────
     async def github_list_issues(**kwargs: Any) -> ToolResult:
-        """Listet Issues eines Repositories auf."""
+        """Listet Issues eines Repositories auf (mit Pagination, neueste zuerst)."""
         if not settings.github.enabled:
             return ToolResult(success=False, error="GitHub ist nicht aktiviert")
 
-        repo: str = kwargs.get("repo", "").strip() or settings.github.default_repo
+        repo: str = _resolve_repo(kwargs.get("repo", ""))
         if not repo:
-            return ToolResult(success=False, error="repo ist erforderlich")
+            return ToolResult(success=False, error="repo ist erforderlich (oder default_repo/default_org konfigurieren)")
 
         state: str = kwargs.get("state", settings.github.issue_state_filter)
         labels: str = kwargs.get("labels", "")
+        max_issues: int = int(kwargs.get("max_issues", 0))  # 0 = alle
 
         api_url = settings.github.get_api_url()
 
         params = {
             "state": state,
-            "per_page": settings.github.max_items,
+            "per_page": 100,
             "sort": "updated",
+            "direction": "desc",
         }
         if labels:
             params["labels"] = labels
 
-        result = await _github_request(
-            method="GET",
+        result = await _github_paginated_request(
             url=f"{api_url}/repos/{repo}/issues",
             token=settings.github.token,
             verify_ssl=settings.github.verify_ssl,
             timeout=settings.github.timeout_seconds,
             params=params,
+            max_items=max_issues,
         )
 
         if not result["success"]:
@@ -469,6 +493,7 @@ def register_github_tools(registry: ToolRegistry) -> int:
                 "repo": repo,
                 "state_filter": state,
                 "issue_count": len(issues),
+                "pages_fetched": result.get("pages_fetched", 1),
                 "issues": issues,
             },
         )
@@ -476,16 +501,16 @@ def register_github_tools(registry: ToolRegistry) -> int:
     registry.register(Tool(
         name="github_list_issues",
         description=(
-            "Listet Issues eines GitHub-Repositories auf (ohne Pull Requests). "
+            "Listet Issues eines GitHub-Repositories auf (neueste zuerst, mit Pagination). "
             "Zeigt Nummer, Titel, Labels und Kommentar-Anzahl. "
-            "Verwende dies um offene Bugs oder Feature-Requests zu sehen."
+            "Repo kann als 'owner/repo' oder nur 'repo-name' angegeben werden."
         ),
         category=ToolCategory.DEVOPS,
         parameters=[
             ToolParameter(
                 name="repo",
                 type="string",
-                description="Repository im Format 'owner/repo'",
+                description="Repository: 'owner/repo' oder nur 'repo-name' (dann wird default_org verwendet)",
                 required=False,
             ),
             ToolParameter(
@@ -500,6 +525,12 @@ def register_github_tools(registry: ToolRegistry) -> int:
                 description="Komma-separierte Labels zum Filtern",
                 required=False,
             ),
+            ToolParameter(
+                name="max_issues",
+                type="integer",
+                description="Maximale Anzahl Issues (0 = alle, Standard: 0)",
+                required=False,
+            ),
         ],
         handler=github_list_issues,
     ))
@@ -511,11 +542,11 @@ def register_github_tools(registry: ToolRegistry) -> int:
         if not settings.github.enabled:
             return ToolResult(success=False, error="GitHub ist nicht aktiviert")
 
-        repo: str = kwargs.get("repo", "").strip() or settings.github.default_repo
+        repo: str = _resolve_repo(kwargs.get("repo", ""))
         issue_number: int = int(kwargs.get("issue_number", 0))
 
         if not repo:
-            return ToolResult(success=False, error="repo ist erforderlich")
+            return ToolResult(success=False, error="repo ist erforderlich (oder default_repo/default_org konfigurieren)")
         if not issue_number:
             return ToolResult(success=False, error="issue_number ist erforderlich")
 
@@ -576,14 +607,14 @@ def register_github_tools(registry: ToolRegistry) -> int:
         description=(
             "Holt detaillierte Informationen zu einem GitHub Issue: "
             "Beschreibung, Labels, Assignees, Milestone und letzte Kommentare. "
-            "Verwende dies um den Kontext eines Bugs oder Features zu verstehen."
+            "Repo kann als 'owner/repo' oder nur 'repo-name' angegeben werden."
         ),
         category=ToolCategory.DEVOPS,
         parameters=[
             ToolParameter(
                 name="repo",
                 type="string",
-                description="Repository im Format 'owner/repo'",
+                description="Repository: 'owner/repo' oder nur 'repo-name' (dann wird default_org verwendet)",
                 required=False,
             ),
             ToolParameter(
@@ -599,23 +630,23 @@ def register_github_tools(registry: ToolRegistry) -> int:
 
     # ── github_list_branches ───────────────────────────────────────────────────
     async def github_list_branches(**kwargs: Any) -> ToolResult:
-        """Listet Branches eines Repositories auf."""
+        """Listet Branches eines Repositories auf (mit Pagination)."""
         if not settings.github.enabled:
             return ToolResult(success=False, error="GitHub ist nicht aktiviert")
 
-        repo: str = kwargs.get("repo", "").strip() or settings.github.default_repo
+        repo: str = _resolve_repo(kwargs.get("repo", ""))
         if not repo:
-            return ToolResult(success=False, error="repo ist erforderlich")
+            return ToolResult(success=False, error="repo ist erforderlich (oder default_repo/default_org konfigurieren)")
 
         api_url = settings.github.get_api_url()
 
-        result = await _github_request(
-            method="GET",
+        result = await _github_paginated_request(
             url=f"{api_url}/repos/{repo}/branches",
             token=settings.github.token,
             verify_ssl=settings.github.verify_ssl,
             timeout=settings.github.timeout_seconds,
-            params={"per_page": settings.github.max_items},
+            params={"per_page": 100},
+            max_items=0,
         )
 
         if not result["success"]:
@@ -633,6 +664,7 @@ def register_github_tools(registry: ToolRegistry) -> int:
             data={
                 "repo": repo,
                 "branch_count": len(branches),
+                "pages_fetched": result.get("pages_fetched", 1),
                 "branches": branches,
             },
         )
@@ -640,16 +672,16 @@ def register_github_tools(registry: ToolRegistry) -> int:
     registry.register(Tool(
         name="github_list_branches",
         description=(
-            "Listet alle Branches eines GitHub-Repositories auf. "
+            "Listet alle Branches eines GitHub-Repositories auf (mit Pagination). "
             "Zeigt Name und ob der Branch geschützt ist. "
-            "Verwende dies um verfügbare Branches zu sehen."
+            "Repo kann als 'owner/repo' oder nur 'repo-name' angegeben werden."
         ),
         category=ToolCategory.DEVOPS,
         parameters=[
             ToolParameter(
                 name="repo",
                 type="string",
-                description="Repository im Format 'owner/repo'",
+                description="Repository: 'owner/repo' oder nur 'repo-name' (dann wird default_org verwendet)",
                 required=False,
             ),
         ],
@@ -663,12 +695,12 @@ def register_github_tools(registry: ToolRegistry) -> int:
         if not settings.github.enabled:
             return ToolResult(success=False, error="GitHub ist nicht aktiviert")
 
-        repo: str = kwargs.get("repo", "").strip() or settings.github.default_repo
+        repo: str = _resolve_repo(kwargs.get("repo", ""))
         branch: str = kwargs.get("branch", "").strip()
         limit: int = min(int(kwargs.get("limit", 10)), 50)
 
         if not repo:
-            return ToolResult(success=False, error="repo ist erforderlich")
+            return ToolResult(success=False, error="repo ist erforderlich (oder default_repo/default_org konfigurieren)")
 
         api_url = settings.github.get_api_url()
 
@@ -713,14 +745,14 @@ def register_github_tools(registry: ToolRegistry) -> int:
         description=(
             "Holt die letzten Commits eines GitHub-Repositories. "
             "Zeigt SHA (gekürzt), Commit-Message und Autor. "
-            "Verwende dies um die Commit-Historie zu prüfen."
+            "Repo kann als 'owner/repo' oder nur 'repo-name' angegeben werden."
         ),
         category=ToolCategory.DEVOPS,
         parameters=[
             ToolParameter(
                 name="repo",
                 type="string",
-                description="Repository im Format 'owner/repo'",
+                description="Repository: 'owner/repo' oder nur 'repo-name' (dann wird default_org verwendet)",
                 required=False,
             ),
             ToolParameter(
