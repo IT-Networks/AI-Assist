@@ -833,8 +833,8 @@ _"Wechsel in den Lese-Modus"_, _"Suche einschalten"_ usw.`;
  * @returns {boolean} true wenn der Befehl erkannt und verarbeitet wurde
  */
 async function handleChatCommand(text) {
-  // Normalisieren: "/Mode Lesen" → "mode lesen"
-  const raw = text.slice(1).trim().toLowerCase();
+  // Normalisieren: "/Mode Lesen" → "mode lesen", "/ plan" → "plan"
+  const raw = text.slice(1).replace(/\s+/g, ' ').trim().toLowerCase();
 
   // Hilfe
   if (raw === 'hilfe' || raw === 'help' || raw === '?') {
@@ -844,16 +844,35 @@ async function handleChatCommand(text) {
 
   // Modus-Shortcuts: /mode lesen | /lesen | /r | usw.
   // Unterstütze auch "/mode schreiben" als Alias
-  const modePrefix = raw.startsWith('mode ') ? raw.slice(5) : raw;
+  const modePrefix = raw.startsWith('mode ') ? raw.slice(5).trim() : raw;
 
   const modeMap = {
-    'lesen': 'read_only',   'r': 'read_only',      'read': 'read_only',     'read_only': 'read_only',
-    'schreiben': 'write_with_confirm', 's': 'write_with_confirm', 'write': 'write_with_confirm',
-    'plan': 'plan_then_execute', 'p': 'plan_then_execute', 'planning': 'plan_then_execute',
-    'auto': 'autonomous',   'a': 'autonomous',     'autonomous': 'autonomous',
-    'debug': 'debug',       'd': 'debug',
+    // Lesen
+    'lesen': 'read_only',
+    'r': 'read_only',
+    'read': 'read_only',
+    'read_only': 'read_only',
+    'readonly': 'read_only',
+    // Schreiben
+    'schreiben': 'write_with_confirm',
+    's': 'write_with_confirm',
+    'write': 'write_with_confirm',
+    'write_with_confirm': 'write_with_confirm',
+    // Plan
+    'plan': 'plan_then_execute',
+    'p': 'plan_then_execute',
+    'planning': 'plan_then_execute',
+    'plan_then_execute': 'plan_then_execute',
+    // Auto
+    'auto': 'autonomous',
+    'a': 'autonomous',
+    'autonomous': 'autonomous',
+    // Debug
+    'debug': 'debug',
+    'd': 'debug',
   };
-  if (modeMap[modePrefix]) {
+
+  if (Object.prototype.hasOwnProperty.call(modeMap, modePrefix)) {
     const modeKey = modeMap[modePrefix];
     await setAgentMode(modeKey);
     appendMessage('system', `Modus gewechselt: ${_MODE_LABELS[modeKey] || modeKey}`);
