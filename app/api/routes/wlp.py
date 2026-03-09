@@ -229,16 +229,32 @@ async def start_server(server_id: str) -> StreamingResponse:
         java_home_source = "WLP" if settings.wlp.java_home else ("Maven" if settings.maven.java_home else "System")
         yield f"data: {json.dumps({'type': 'output', 'line': f'[DEBUG] JAVA_HOME ({java_home_source}): {java_home_val}', 'is_error': False, 'is_ready': False})}\n\n"
 
+        # Debug: Prüfe ob JAVA_HOME existiert
+        if java_home_val and java_home_val != "nicht gesetzt (System-Default)":
+            java_path = Path(java_home_val)
+            java_exe = java_path / "bin" / "java.exe" if os.name == 'nt' else java_path / "bin" / "java"
+            if not java_path.exists():
+                yield f"data: {json.dumps({'type': 'output', 'line': f'[WARNUNG] JAVA_HOME Pfad existiert nicht: {java_home_val}', 'is_error': True, 'is_ready': False})}\n\n"
+            elif not java_exe.exists():
+                yield f"data: {json.dumps({'type': 'output', 'line': f'[WARNUNG] java executable nicht gefunden: {java_exe}', 'is_error': True, 'is_ready': False})}\n\n"
+            else:
+                yield f"data: {json.dumps({'type': 'output', 'line': f'[DEBUG] Java executable gefunden: {java_exe}', 'is_error': False, 'is_ready': False})}\n\n"
+
+        # Debug: Zeige den Befehl
+        yield f"data: {json.dumps({'type': 'output', 'line': f'[DEBUG] Befehl: {\" \".join(cmd)}', 'is_error': False, 'is_ready': False})}\n\n"
+
         try:
             proc = await asyncio.create_subprocess_exec(
                 *cmd,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.STDOUT,
                 env=env,
+                cwd=str(Path(srv.wlp_path)),  # Working Directory setzen
             )
             _running_processes[server_id] = proc
 
             yield f"data: {json.dumps({'type': 'start', 'cmd': ' '.join(cmd), 'pid': proc.pid})}\n\n"
+            yield f"data: {json.dumps({'type': 'output', 'line': f'[DEBUG] Prozess gestartet mit PID {proc.pid}', 'is_error': False, 'is_ready': False})}\n\n"
 
             # Ausgabe streamen; Fehler-Muster erkennen
             error_patterns = [
@@ -252,8 +268,10 @@ async def start_server(server_id: str) -> StreamingResponse:
             ready_pattern = re.compile(r"CWWKF0011I|The server .* is ready to run a smarter planet")
             error_re = [re.compile(p, re.IGNORECASE) for p in error_patterns]
 
+            line_count = 0
             async for raw_line in proc.stdout:
                 line = raw_line.decode(errors="replace").rstrip()
+                line_count += 1
                 is_error = any(r.search(line) for r in error_re)
                 is_ready = bool(ready_pattern.search(line))
                 yield f"data: {json.dumps({'type': 'output', 'line': line, 'is_error': is_error, 'is_ready': is_ready})}\n\n"
@@ -265,11 +283,22 @@ async def start_server(server_id: str) -> StreamingResponse:
 
             await proc.wait()
             _running_processes.pop(server_id, None)
+
+            # Debug: Wenn keine Ausgabe kam
+            if line_count == 0:
+                yield f"data: {json.dumps({'type': 'output', 'line': '[DEBUG] Prozess beendet ohne Ausgabe - prüfe JAVA_HOME und Pfade', 'is_error': True, 'is_ready': False})}\n\n"
+
             yield f"data: {json.dumps({'type': 'done', 'exit_code': proc.returncode})}\n\n"
 
+        except FileNotFoundError as e:
+            _running_processes.pop(server_id, None)
+            yield f"data: {json.dumps({'type': 'error', 'message': f'Skript nicht gefunden: {e}'})}\n\n"
+        except PermissionError as e:
+            _running_processes.pop(server_id, None)
+            yield f"data: {json.dumps({'type': 'error', 'message': f'Keine Ausführungsrechte: {e}'})}\n\n"
         except Exception as e:
             _running_processes.pop(server_id, None)
-            yield f"data: {json.dumps({'type': 'error', 'message': str(e)})}\n\n"
+            yield f"data: {json.dumps({'type': 'error', 'message': f'{type(e).__name__}: {str(e)}'})}\n\n"
 
     return StreamingResponse(stream_start(), media_type="text/event-stream")
 
