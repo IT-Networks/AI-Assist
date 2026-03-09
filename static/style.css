@@ -3127,3 +3127,76 @@ body {
   border-color: #7c3aed;
   color: #a78bfa;
 }
+
+/* ══════════════════════════════════════════════════════════════════════════════
+   Compact Sidebar Tabs (Right Sidebar)
+   ══════════════════════════════════════════════════════════════════════════════ */
+
+.sidebar-tabs-compact {
+  justify-content: center;
+}
+
+.sidebar-tabs-compact .sidebar-tab {
+  flex: 0 0 auto;
+  padding: 10px 12px;
+  font-size: 1rem;
+  min-width: 36px;
+  text-align: center;
+}
+
+.sidebar-tabs-compact .sidebar-tab:hover {
+  background: var(--surface-hover);
+}
+
+/* ══════════════════════════════════════════════════════════════════════════════
+   Search Panel Improvements
+   ══════════════════════════════════════════════════════════════════════════════ */
+
+.search-help-text {
+  font-size: 0.78rem;
+  color: var(--text-muted);
+  line-height: 1.5;
+  margin-bottom: 10px;
+  padding: 8px 10px;
+  background: var(--surface);
+  border-radius: 6px;
+  border-left: 3px solid var(--accent);
+}
+
+.search-help-text em {
+  display: block;
+  margin-top: 4px;
+  font-size: 0.72rem;
+  color: var(--warning);
+}
+
+.search-empty-hint {
+  font-size: 0.8rem;
+  color: var(--text-muted);
+  text-align: center;
+  padding: 16px 12px;
+  line-height: 1.6;
+}
+
+.search-empty-hint em {
+  display: block;
+  margin-top: 6px;
+  font-size: 0.75rem;
+  color: var(--text-muted);
+}
+
+.search-error-hint {
+  font-size: 0.8rem;
+  color: var(--danger);
+  padding: 12px;
+  background: var(--danger-bg);
+  border-radius: 6px;
+  line-height: 1.5;
+}
+
+.search-error-hint em {
+  display: block;
+  margin-top: 6px;
+  font-size: 0.75rem;
+  color: var(--warning);
+}

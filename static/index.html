@@ -94,6 +94,8 @@
           <button class="settings-nav-item" data-section="log_servers">Log-Server</button>
           <button class="settings-nav-item" data-section="wlp">WLP Server</button>
           <button class="settings-nav-item" data-section="maven">Maven</button>
+          <button class="settings-nav-item" data-section="jenkins">Jenkins</button>
+          <button class="settings-nav-item" data-section="github">GitHub</button>
           <button class="settings-nav-item" data-section="search">&#128269; Suche</button>
         </nav>
 
@@ -222,14 +224,22 @@
     <!-- Search Panel -->
     <div class="sidebar-panel" id="search-panel">
       <div class="panel-content">
-        <div class="search-type-tabs">
-          <button class="search-type active" data-type="code">Code</button>
-          <button class="search-type" data-type="handbook">Handbuch</button>
-          <button class="search-type" data-type="skills">Skills</button>
+        <div class="search-help-text">
+          Durchsuche den Java/Python-Index, das Handbuch oder die Skills.
+          <em>Hinweis: Der Index muss zuerst im Explorer aufgebaut werden.</em>
         </div>
-        <input class="sb-input" id="global-search" placeholder="Suchen...">
+        <div class="search-type-tabs">
+          <button class="search-type active" data-type="code" title="Suche in Java/Python-Klassen und Methoden">Code</button>
+          <button class="search-type" data-type="handbook" title="Suche in Handbuch-Services und Feldern">Handbuch</button>
+          <button class="search-type" data-type="skills" title="Suche in Skill-Beschreibungen">Skills</button>
+        </div>
+        <input class="sb-input" id="global-search" placeholder="Suchbegriff eingeben..." onkeydown="if(event.key==='Enter')globalSearch()">
         <button class="sb-btn" onclick="globalSearch()">&#128269; Suchen</button>
-        <div id="global-search-results" class="search-results"></div>
+        <div id="global-search-results" class="search-results">
+          <div class="search-empty-hint">
+            Gib einen Suchbegriff ein und wähle den Typ (Code/Handbuch/Skills).
+          </div>
+        </div>
       </div>
     </div>
   </aside>
@@ -267,18 +277,18 @@
 
   <!-- Right Sidebar - Context & Confirmation -->
   <aside id="sidebar-right" class="sidebar">
-    <div class="sidebar-tabs">
-      <button class="sidebar-tab active" data-panel="tools-panel">Tools</button>
-      <button class="sidebar-tab" data-panel="confirm-panel">
-        Bestätigung <span class="badge" id="pending-count" style="display:none">1</span>
+    <div class="sidebar-tabs sidebar-tabs-compact">
+      <button class="sidebar-tab active" data-panel="tools-panel" title="Tool-Aktivität">&#128295;</button>
+      <button class="sidebar-tab" data-panel="confirm-panel" title="Ausstehende Bestätigungen">
+        &#9888; <span class="badge" id="pending-count" style="display:none">1</span>
       </button>
-      <button class="sidebar-tab" data-panel="search-panel">
-        &#128269; Suche <span class="badge badge-info" id="search-pending-badge" style="display:none">0</span>
+      <button class="sidebar-tab" data-panel="search-panel" title="Web-Suche">
+        &#128269; <span class="badge badge-info" id="search-pending-badge" style="display:none">0</span>
       </button>
-      <button class="sidebar-tab" data-panel="mq-panel">MQ</button>
-      <button class="sidebar-tab" data-panel="testtool-panel">Test</button>
-      <button class="sidebar-tab" data-panel="wlp-panel">WLP</button>
-      <button class="sidebar-tab" data-panel="maven-panel">Build</button>
+      <button class="sidebar-tab" data-panel="mq-panel" title="MQ Series">&#128233;</button>
+      <button class="sidebar-tab" data-panel="testtool-panel" title="Test-Tool">&#128296;</button>
+      <button class="sidebar-tab" data-panel="wlp-panel" title="WLP Server">&#9881;</button>
+      <button class="sidebar-tab" data-panel="maven-panel" title="Maven Build">&#128736;</button>
     </div>
 
     <!-- Tools Panel -->

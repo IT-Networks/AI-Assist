@@ -2208,12 +2208,27 @@ async function globalSearch() {
 
   try {
     const res = await fetch(endpoint);
-    const data = await res.json();
 
+    if (!res.ok) {
+      const errData = await res.json().catch(() => ({}));
+      const detail = errData.detail || `HTTP ${res.status}`;
+      container.innerHTML = `
+        <div class="search-error-hint">
+          <strong>Suche fehlgeschlagen:</strong> ${escapeHtml(detail)}<br>
+          <em>Tipp: Für Code-Suche muss der Index im Explorer aufgebaut sein.</em>
+        </div>`;
+      return;
+    }
+
+    const data = await res.json();
     const results = data.matches || data.results || data || [];
 
     if (!results || results.length === 0) {
-      container.innerHTML = '<span style="color:var(--text-muted)">Keine Ergebnisse</span>';
+      container.innerHTML = `
+        <div class="search-empty-hint">
+          Keine Ergebnisse für "<strong>${escapeHtml(q)}</strong>"<br>
+          <em>Versuche andere Suchbegriffe oder prüfe den Index-Status.</em>
+        </div>`;
       return;
     }
 
