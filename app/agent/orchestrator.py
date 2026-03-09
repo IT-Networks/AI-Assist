@@ -34,6 +34,7 @@ class AgentMode(str, Enum):
     WRITE_WITH_CONFIRM = "write_with_confirm"  # Schreiben mit Bestätigung
     AUTONOMOUS = "autonomous"          # Schreiben ohne Bestätigung (gefährlich)
     PLAN_THEN_EXECUTE = "plan_then_execute"    # Erst planen, dann mit Bestätigung ausführen
+    DEBUG = "debug"                    # Fehler-Analyse: Rückfragen + Tools zum Nachstellen
 
 
 class AgentEventType(str, Enum):
@@ -57,6 +58,8 @@ class AgentEventType(str, Enum):
     PLAN_READY = "plan_ready"              # Plan erstellt – wartet auf User-Genehmigung
     PLAN_APPROVED = "plan_approved"        # Plan genehmigt, Ausführung startet
     PLAN_REJECTED = "plan_rejected"        # Plan abgelehnt
+    # Debug-Modus Events
+    QUESTION = "question"                  # Agent stellt Rückfrage mit Vorschlägen
 
 
 @dataclass
@@ -481,8 +484,10 @@ class AgentOrchestrator:
         # Schreib-Ops: In Planungsphase nur erlaubt wenn Plan bereits genehmigt
         if state.mode == AgentMode.PLAN_THEN_EXECUTE:
             include_write_ops = state.plan_approved
+        elif state.mode in (AgentMode.READ_ONLY, AgentMode.DEBUG):
+            include_write_ops = False
         else:
-            include_write_ops = state.mode != AgentMode.READ_ONLY
+            include_write_ops = True
 
         # System-Prompt bauen
         system_prompt = SYSTEM_PROMPT
@@ -914,6 +919,36 @@ class AgentOrchestrator:
                         "arguments": tool_call.arguments,
                         "model": effective_model
                     })
+
+                    # ── suggest_answers: Display-only Tool im Debug-Modus ────
+                    if tool_call.name == "suggest_answers":
+                        question = tool_call.arguments.get("question", "")
+                        options = tool_call.arguments.get("options", [])
+                        yield AgentEvent(AgentEventType.QUESTION, {
+                            "question": question,
+                            "options": options,
+                        })
+                        result = ToolResult(
+                            success=True,
+                            data={"status": "options_presented_to_user", "count": len(options)}
+                        )
+                        tool_call.result = result
+                        has_used_tools = True
+                        current_tool_calls_for_messages.append(tc)
+                        messages.append({
+                            "role": "tool",
+                            "tool_call_id": tool_call.id,
+                            "content": result.to_context()
+                        })
+                        state.tool_calls_history.append(tool_call)
+                        yield AgentEvent(AgentEventType.TOOL_RESULT, {
+                            "id": tool_call.id,
+                            "name": tool_call.name,
+                            "result": result.to_context()[:500],
+                            "success": True,
+                        })
+                        continue  # Nächsten Tool-Call verarbeiten
+                    # ────────────────────────────────────────────────────────
 
                     # Tool ausführen
                     result = await self.tools.execute(
@@ -1553,6 +1588,32 @@ Zusätzliche Tools:
 
 Führe den genehmigten Plan jetzt Schritt für Schritt aus.
 Der User muss jede Datei-Operation einzeln bestätigen.
+"""
+
+        elif mode == AgentMode.DEBUG:
+            return base + """
+MODUS: Debug & Fehleranalyse
+Du hilfst beim systematischen Verstehen und Lösen von Fehlern. Keine Datei-Änderungen erlaubt.
+
+**Dein Vorgehen:**
+1. **Verstehen**: Stelle gezielte Rückfragen bevor du analysierst. Nutze das Tool `suggest_answers` um dem User Antwort-Optionen anzubieten.
+2. **Nachstellen**: Nutze Log-Tools, Code-Suche und Datenbank-Abfragen um den Fehler zu reproduzieren.
+3. **Analysieren**: Suche nach Root-Cause im Code, Konfiguration und Logs.
+4. **Lösungsvorschlag**: Erkläre die Ursache und schlage Korrekturen als Codeblöcke vor (keine Datei-Schreiboperationen).
+
+**Rückfragen mit suggest_answers:**
+Wenn du mehr Kontext brauchst, rufe `suggest_answers` auf BEVOR du mit der Analyse beginnst:
+- Formuliere eine klare Frage
+- Gib 3-5 konkrete Antwort-Optionen vor
+- Der User kann eine Option wählen oder frei antworten
+
+**Typische Rückfragen:**
+- Wann tritt der Fehler auf? (immer / sporadisch / nach bestimmten Aktionen)
+- In welcher Umgebung? (dev / test / prod)
+- Gibt es eine Fehlermeldung/Exception? (ja, welche / nein, nur falsches Verhalten)
+- Ist das Verhalten neu? (seit letztem Deployment / schon immer / nach Konfigurationsänderung)
+
+Verfügbare Diagnose-Tools: search_code, read_file, search_handbook, Log-Tools, Datenbank-Abfragen (SELECT).
 """
 
         else:  # AUTONOMOUS

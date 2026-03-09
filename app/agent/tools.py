@@ -1666,6 +1666,46 @@ READ_JIRA_ISSUE_TOOL = Tool(
 
 
 # ══════════════════════════════════════════════════════════════════════════════
+# Debug-Modus: suggest_answers (interaktive Rückfrage mit Vorschlägen)
+# ══════════════════════════════════════════════════════════════════════════════
+
+async def _handle_suggest_answers(question: str, options: list) -> ToolResult:
+    """Pseudo-Handler – die eigentliche Verarbeitung erfolgt im Orchestrator."""
+    return ToolResult(
+        success=True,
+        data={"status": "options_presented_to_user", "question": question, "count": len(options)}
+    )
+
+
+SUGGEST_ANSWERS_TOOL = Tool(
+    name="suggest_answers",
+    description=(
+        "Stellt dem User eine Rückfrage und zeigt ihm Antwort-Optionen als klickbare Buttons an. "
+        "Nutze dieses Tool wenn du vor der Analyse mehr Kontext benötigst. "
+        "Der User kann eine Option klicken oder eine eigene Antwort eingeben. "
+        "Rufe dieses Tool auf BEVOR du mit der eigentlichen Fehleranalyse beginnst."
+    ),
+    category=ToolCategory.ANALYSIS,
+    parameters=[
+        ToolParameter(
+            name="question",
+            type="string",
+            description="Die Frage die dem User gestellt wird (kurz und präzise)",
+            required=True,
+        ),
+        ToolParameter(
+            name="options",
+            type="array",
+            description="Liste von 2-5 Antwort-Optionen die dem User als Buttons angezeigt werden",
+            required=True,
+        ),
+    ],
+    is_write_operation=False,
+    handler=_handle_suggest_answers,
+)
+
+
+# ══════════════════════════════════════════════════════════════════════════════
 # Default Registry
 # ══════════════════════════════════════════════════════════════════════════════
 
@@ -1707,6 +1747,9 @@ def create_default_registry() -> ToolRegistry:
     # Jira Tools
     registry.register(SEARCH_JIRA_TOOL)
     registry.register(READ_JIRA_ISSUE_TOOL)
+
+    # Debug-Modus: Interaktives Rückfrage-Tool
+    registry.register(SUGGEST_ANSWERS_TOOL)
 
     return registry
 

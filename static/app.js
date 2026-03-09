@@ -134,6 +134,19 @@ function setupInputHandlers() {
   input.addEventListener('input', function() {
     this.style.height = 'auto';
     this.style.height = Math.min(this.scrollHeight, 150) + 'px';
+    _updateCommandSuggestions(this.value);
+  });
+
+  input.addEventListener('keydown', (e) => {
+    if (_commandDropdownVisible()) {
+      if (e.key === 'ArrowDown') { e.preventDefault(); _commandSelectNext(1); return; }
+      if (e.key === 'ArrowUp')   { e.preventDefault(); _commandSelectNext(-1); return; }
+      if (e.key === 'Tab' || e.key === 'Enter') {
+        const active = document.querySelector('.cmd-suggestion.active');
+        if (active) { e.preventDefault(); _applyCommandSuggestion(active.dataset.cmd); return; }
+      }
+      if (e.key === 'Escape') { _hideCommandSuggestions(); return; }
+    }
   });
 }
 
@@ -457,8 +470,63 @@ function updateModeIndicator() {
       indicator.innerHTML = '<span class="mode-icon">&#128203;</span><span class="mode-text">Plan &amp; Ausführen</span>';
       if (welcomeMode) welcomeMode.textContent = 'Plan & Ausführen';
       break;
+    case 'debug':
+      indicator.classList.add('mode-debug');
+      indicator.innerHTML = '<span class="mode-icon">&#128269;</span><span class="mode-text">Debug</span>';
+      if (welcomeMode) welcomeMode.textContent = 'Debug';
+      break;
   }
 }
+
+// ── Suggestion Bar (Debug-Modus Rückfragen) ──────────────────────────────────
+
+/**
+ * Zeigt Antwort-Vorschläge als klickbare Chips über dem Input-Feld an.
+ * Wird vom QUESTION-SSE-Event getriggert wenn der Agent suggest_answers aufruft.
+ */
+function showSuggestions(question, options) {
+  const bar = document.getElementById('suggestion-bar');
+  const questionEl = document.getElementById('suggestion-question');
+  const chipsEl = document.getElementById('suggestion-chips');
+
+  if (!bar || !chipsEl) return;
+
+  questionEl.textContent = question || '';
+  chipsEl.innerHTML = '';
+
+  options.forEach(opt => {
+    const btn = document.createElement('button');
+    btn.className = 'suggestion-chip';
+    btn.textContent = opt;
+    btn.addEventListener('click', () => {
+      hideSuggestions();
+      const input = document.getElementById('message-input');
+      input.value = opt;
+      sendMessage();
+    });
+    chipsEl.appendChild(btn);
+  });
+
+  bar.style.display = 'flex';
+}
+
+function hideSuggestions() {
+  const bar = document.getElementById('suggestion-bar');
+  if (bar) bar.style.display = 'none';
+}
+
+// Suggestions ausblenden wenn User selbst zu tippen beginnt
+document.addEventListener('DOMContentLoaded', () => {
+  const input = document.getElementById('message-input');
+  if (input) {
+    input.addEventListener('keydown', (e) => {
+      // Nur ausblenden wenn User echten Text tippt (keine Navigation)
+      if (e.key.length === 1 && !e.ctrlKey && !e.metaKey) {
+        hideSuggestions();
+      }
+    });
+  }
+});
 
 // ── Models ──
 async function loadModels() {
@@ -602,10 +670,238 @@ async function cancelRequest() {
   _setStreamingMode(false);
 }
 
+// ══════════════════════════════════════════════════════════════════════════════
+// Chat Slash-Command-Router + Autocomplete
+// ══════════════════════════════════════════════════════════════════════════════
+
+// Alle Befehle mit Beschreibung (für Autocomplete)
+const _CMD_LIST = [
+  { cmd: '/lesen',      desc: 'Modus: Nur Lesen 🔒',             alias: '/r' },
+  { cmd: '/schreiben',  desc: 'Modus: Schreiben mit Bestätigung ✏️', alias: '/s' },
+  { cmd: '/plan',       desc: 'Modus: Plan & Ausführen 📋',       alias: '/p' },
+  { cmd: '/auto',       desc: 'Modus: Autonom ⚠️',               alias: '/a' },
+  { cmd: '/debug',      desc: 'Modus: Debug & Fehleranalyse 🔍',  alias: '/d' },
+  { cmd: '/suche an',   desc: 'Web-Suche aktivieren 🔍',          alias: null },
+  { cmd: '/suche aus',  desc: 'Web-Suche deaktivieren',           alias: null },
+  { cmd: '/neu',        desc: 'Neuen Chat öffnen',                alias: '/neuer chat' },
+  { cmd: '/hilfe',      desc: 'Alle Befehle anzeigen',            alias: '/?' },
+];
+
+function _commandDropdownVisible() {
+  const el = document.getElementById('cmd-suggestions');
+  return el && el.style.display !== 'none';
+}
+
+function _updateCommandSuggestions(text) {
+  let el = document.getElementById('cmd-suggestions');
+  if (!el) {
+    el = document.createElement('div');
+    el.id = 'cmd-suggestions';
+    el.className = 'cmd-suggestions-dropdown';
+    const input = document.getElementById('message-input');
+    input.parentElement.style.position = 'relative';
+    input.parentElement.appendChild(el);
+  }
+
+  if (!text.startsWith('/') || text.includes('\n')) {
+    el.style.display = 'none';
+    return;
+  }
+
+  const filter = text.toLowerCase();
+  const matches = _CMD_LIST.filter(c =>
+    c.cmd.startsWith(filter) || (c.alias && c.alias.startsWith(filter))
+  );
+
+  if (!matches.length) { el.style.display = 'none'; return; }
+
+  el.innerHTML = matches.map((c, i) => `
+    <div class="cmd-suggestion ${i === 0 ? 'active' : ''}" data-cmd="${escapeHtml(c.cmd)}"
+         onclick="_applyCommandSuggestion('${escapeHtml(c.cmd)}')">
+      <span class="cmd-name">${escapeHtml(c.cmd)}</span>
+      <span class="cmd-desc">${c.desc}</span>
+      ${c.alias ? `<span class="cmd-alias">${escapeHtml(c.alias)}</span>` : ''}
+    </div>
+  `).join('');
+  el.style.display = 'block';
+}
+
+function _hideCommandSuggestions() {
+  const el = document.getElementById('cmd-suggestions');
+  if (el) el.style.display = 'none';
+}
+
+function _commandSelectNext(dir) {
+  const items = document.querySelectorAll('.cmd-suggestion');
+  if (!items.length) return;
+  const current = [...items].findIndex(i => i.classList.contains('active'));
+  const next = (current + dir + items.length) % items.length;
+  items.forEach((el, i) => el.classList.toggle('active', i === next));
+}
+
+function _applyCommandSuggestion(cmd) {
+  const input = document.getElementById('message-input');
+  input.value = cmd + ' ';
+  input.focus();
+  _hideCommandSuggestions();
+  // Dropdown erneut triggern für Unterparameter (z.B. "/mode ")
+  _updateCommandSuggestions(input.value);
+}
+
+const _COMMANDS = {
+  // Modus-Befehle
+  'lesen':     () => setAgentMode('read_only'),
+  'r':         () => setAgentMode('read_only'),
+  'schreiben': () => setAgentMode('write_with_confirm'),
+  's':         () => setAgentMode('write_with_confirm'),
+  'plan':      () => setAgentMode('plan_then_execute'),
+  'p':         () => setAgentMode('plan_then_execute'),
+  'auto':      () => setAgentMode('autonomous'),
+  'a':         () => setAgentMode('autonomous'),
+
+  // Web-Suche
+  'suche an':    () => _searchSetEnabled(true),
+  'suche aus':   () => _searchSetEnabled(false),
+  'search on':   () => _searchSetEnabled(true),
+  'search off':  () => _searchSetEnabled(false),
+
+  // Chat-Management
+  'neu':         () => chatManager.createChat(),
+  'neuer chat':  () => chatManager.createChat(),
+  'new':         () => chatManager.createChat(),
+
+  // Hilfe
+  'hilfe':  null,
+  'help':   null,
+  '?':      null,
+};
+
+const _MODE_LABELS = {
+  read_only:          '&#128274; Nur Lesen',
+  write_with_confirm: '&#128221; Schreiben (mit Bestätigung)',
+  plan_then_execute:  '&#128203; Plan & Ausführen',
+  autonomous:         '&#9888; Autonom',
+  debug:              '&#128269; Debug & Fehleranalyse',
+};
+
+async function _searchSetEnabled(enabled) {
+  await fetch('/api/search/toggle', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ enabled }),
+  });
+  // Sync toggle-Elemente
+  ['search-enabled-toggle', 'search-settings-toggle'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.checked = enabled;
+  });
+  const txt = document.getElementById('search-status-text');
+  if (txt) {
+    txt.textContent = enabled
+      ? 'Aktiviert – Agent kann Internet-Suchen anfragen (Bestätigung erforderlich)'
+      : 'Deaktiviert – Agent kann keine Internet-Suchen durchführen';
+    txt.style.color = enabled ? 'var(--success)' : 'var(--text-muted)';
+  }
+  return `Web-Suche ${enabled ? 'aktiviert ✓' : 'deaktiviert'}.`;
+}
+
+function _buildHelpText() {
+  return `**Chat-Befehle** (beginnen mit \`/\`)
+
+**Modus wechseln:**
+\`/lesen\` \`/r\`  → Nur Lesen &#128274;
+\`/schreiben\` \`/s\`  → Schreiben mit Bestätigung &#128221;
+\`/plan\` \`/p\`  → Plan & Ausführen &#128203;
+\`/auto\` \`/a\`  → Autonom &#9888;
+\`/debug\` \`/d\`  → Debug & Fehleranalyse &#128269;
+
+**Web-Suche:**
+\`/suche an\`  → Web-Suche aktivieren
+\`/suche aus\`  → Web-Suche deaktivieren
+
+**Chat:**
+\`/neu\`  → Neuen Chat öffnen
+
+\`/hilfe\` \`/?\`  → Diese Hilfe anzeigen
+
+Alternativ kannst du dem Agenten auch auf Deutsch sagen:
+_"Wechsel in den Lese-Modus"_, _"Suche einschalten"_ usw.`;
+}
+
+/**
+ * Verarbeitet Slash-Befehle aus dem Chat-Eingabefeld.
+ * @returns {boolean} true wenn der Befehl erkannt und verarbeitet wurde
+ */
+async function handleChatCommand(text) {
+  // Normalisieren: "/Mode Lesen" → "mode lesen"
+  const raw = text.slice(1).trim().toLowerCase();
+
+  // Hilfe
+  if (raw === 'hilfe' || raw === 'help' || raw === '?') {
+    appendMessage('system', _buildHelpText());
+    return true;
+  }
+
+  // Modus-Shortcuts: /mode lesen | /lesen | /r | usw.
+  // Unterstütze auch "/mode schreiben" als Alias
+  const modePrefix = raw.startsWith('mode ') ? raw.slice(5) : raw;
+
+  const modeMap = {
+    'lesen': 'read_only',   'r': 'read_only',      'read': 'read_only',     'read_only': 'read_only',
+    'schreiben': 'write_with_confirm', 's': 'write_with_confirm', 'write': 'write_with_confirm',
+    'plan': 'plan_then_execute', 'p': 'plan_then_execute', 'planning': 'plan_then_execute',
+    'auto': 'autonomous',   'a': 'autonomous',     'autonomous': 'autonomous',
+    'debug': 'debug',       'd': 'debug',
+  };
+  if (modeMap[modePrefix]) {
+    const modeKey = modeMap[modePrefix];
+    await setAgentMode(modeKey);
+    appendMessage('system', `Modus gewechselt: ${_MODE_LABELS[modeKey] || modeKey}`);
+    return true;
+  }
+
+  // Suche
+  if (raw === 'suche an' || raw === 'search on') {
+    const msg = await _searchSetEnabled(true);
+    appendMessage('system', msg);
+    return true;
+  }
+  if (raw === 'suche aus' || raw === 'search off') {
+    const msg = await _searchSetEnabled(false);
+    appendMessage('system', msg);
+    return true;
+  }
+
+  // Neuer Chat
+  if (raw === 'neu' || raw === 'new' || raw === 'neuer chat' || raw === 'new chat') {
+    chatManager.createChat();
+    appendMessage('system', 'Neuer Chat geöffnet.');
+    return true;
+  }
+
+  // Unbekannter Befehl → System-Hinweis, aber trotzdem als normaler Text weiterleiten
+  appendMessage('system',
+    `Unbekannter Befehl \`/${raw}\`. Tippe \`/hilfe\` für alle Befehle.\n` +
+    `Die Nachricht wird dennoch an den Agenten gesendet.`
+  );
+  return false;  // false = weiter normal senden
+}
+
 async function sendMessage() {
   const input = document.getElementById('message-input');
   const text = input.value.trim();
   if (!text) return;
+
+  // ── Slash-Command-Router ─────────────────────────────────────────────────
+  if (text.startsWith('/')) {
+    const handled = await handleChatCommand(text);
+    if (handled) {
+      input.value = '';
+      input.style.height = 'auto';
+      return;
+    }
+  }
+  // ─────────────────────────────────────────────────────────────────────────
 
   const activeChat = chatManager.getActive();
   // Verhindere Doppel-Senden wenn dieser Chat bereits streamt
@@ -613,6 +909,7 @@ async function sendMessage() {
 
   input.value = '';
   input.style.height = 'auto';
+  hideSuggestions();
   appendMessage('user', text);
 
   updateActiveChatTitle(text);
@@ -919,6 +1216,10 @@ async function processAgentEvent(event, bubble, msgDiv, chat) {
 
     case 'done':
       if (data.usage) displayTokenUsage(data.usage, chat);
+      break;
+
+    case 'question':
+      showSuggestions(data.question, data.options || []);
       break;
   }
 }
@@ -2121,6 +2422,11 @@ function renderSettingsSection() {
 
   if (section === 'maven') {
     renderMavenSection();
+    return;
+  }
+
+  if (section === 'search') {
+    renderSearchSettingsSection();
     return;
   }
 
@@ -4494,16 +4800,268 @@ document.addEventListener('DOMContentLoaded', () => {
   // Panel-Tab-Klick-Handler für operative Panels
   document.querySelectorAll('[data-panel]').forEach(tab => {
     const panel = tab.getAttribute('data-panel');
-    if (['mq-panel','testtool-panel','wlp-panel','maven-panel'].includes(panel)) {
+    if (['mq-panel','testtool-panel','wlp-panel','maven-panel','search-panel'].includes(panel)) {
       tab.addEventListener('click', () => {
         if (panel === 'mq-panel') loadMQPanel();
         else if (panel === 'testtool-panel') loadTestToolPanel();
         else if (panel === 'wlp-panel') loadWLPPanel();
         else if (panel === 'maven-panel') loadMavenPanel();
+        else if (panel === 'search-panel') loadSearchPanel();
       });
     }
   });
+
+  // Web-Such-Polling starten (alle 4 Sekunden auf ausstehende Anfragen prüfen)
+  startSearchPolling();
 });
+
+// ══════════════════════════════════════════════════════════════════════════════
+// Web-Suche
+// ══════════════════════════════════════════════════════════════════════════════
+
+let _searchPollInterval = null;
+
+function startSearchPolling() {
+  if (_searchPollInterval) return;
+  _searchPollInterval = setInterval(_pollPendingSearches, 4000);
+  _pollPendingSearches(); // Sofort einmal prüfen
+}
+
+async function _pollPendingSearches() {
+  try {
+    const res = await fetch('/api/search/pending');
+    if (!res.ok) return;
+    const data = await res.json();
+    const pending = data.pending || [];
+
+    // Badge in Sidebar-Tab aktualisieren
+    const badge = document.getElementById('search-pending-badge');
+    if (badge) {
+      badge.textContent = pending.length;
+      badge.style.display = pending.length ? 'inline' : 'none';
+    }
+
+    // Badge in "Bestätigung"-Tab
+    const confirmBadge = document.getElementById('pending-count');
+    if (confirmBadge) {
+      const hasPlan = document.getElementById('pending-confirmation')?.style.display !== 'none';
+      const total = (hasPlan ? 1 : 0) + pending.length;
+      confirmBadge.textContent = total;
+      confirmBadge.style.display = total ? 'inline' : 'none';
+    }
+
+    // Ausstehende Suchen in confirm-panel rendern
+    const searchesDiv = document.getElementById('pending-searches');
+    const searchesList = document.getElementById('pending-searches-list');
+    const noConfirm = document.getElementById('no-confirmation');
+
+    if (!searchesDiv || !searchesList) return;
+
+    if (pending.length === 0) {
+      searchesDiv.style.display = 'none';
+      if (noConfirm && document.getElementById('pending-confirmation')?.style.display === 'none') {
+        noConfirm.style.display = 'flex';
+      }
+      return;
+    }
+
+    if (noConfirm) noConfirm.style.display = 'none';
+    searchesDiv.style.display = 'block';
+    searchesList.innerHTML = pending.map(item => `
+      <div class="search-confirm-card" id="sc-${item.id}">
+        <div style="font-size:12px;font-weight:600;margin-bottom:4px">&#128269; Agent möchte suchen:</div>
+        <div class="sc-query">${escapeHtml(item.query)}</div>
+        ${item.reason ? `<div class="sc-reason">Grund: ${escapeHtml(item.reason)}</div>` : ''}
+        <div class="sc-actions">
+          <button class="btn btn-xs btn-success" onclick="searchConfirm('${item.id}')">&#10003; Bestätigen</button>
+          <button class="btn btn-xs btn-danger" onclick="searchReject('${item.id}')">&#10005; Ablehnen</button>
+        </div>
+      </div>
+    `).join('');
+  } catch (e) {
+    // Kein Netz oder Server nicht erreichbar – still ignorieren
+  }
+}
+
+async function searchConfirm(searchId) {
+  const card = document.getElementById(`sc-${searchId}`);
+  if (card) card.innerHTML = '<div class="spinner-inline"></div> Suche wird ausgeführt...';
+  try {
+    await fetch(`/api/search/confirm/${searchId}`, { method: 'POST' });
+    await _pollPendingSearches();
+    loadSearchPanel(); // History aktualisieren
+  } catch (e) {
+    if (card) card.innerHTML = `<span class="badge badge-error">Fehler: ${e.message}</span>`;
+  }
+}
+
+async function searchReject(searchId) {
+  await fetch(`/api/search/cancel/${searchId}`, { method: 'DELETE' });
+  await _pollPendingSearches();
+}
+
+async function searchToggle(enabled) {
+  await fetch('/api/search/toggle', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ enabled }),
+  });
+  const txt = document.getElementById('search-status-text');
+  if (txt) {
+    txt.textContent = enabled
+      ? 'Aktiviert – Agent kann Internet-Suchen anfragen (Bestätigung erforderlich)'
+      : 'Deaktiviert – Agent kann keine Internet-Suchen durchführen';
+    txt.style.color = enabled ? 'var(--success)' : 'var(--text-muted)';
+  }
+}
+
+async function loadSearchPanel() {
+  try {
+    const [statusRes, histRes] = await Promise.all([
+      fetch('/api/search/status'),
+      fetch('/api/search/history'),
+    ]);
+    const status = await statusRes.json();
+    const hist = await histRes.json();
+
+    // Toggle-Zustand setzen
+    const toggle = document.getElementById('search-enabled-toggle');
+    if (toggle) toggle.checked = status.enabled;
+    const txt = document.getElementById('search-status-text');
+    if (txt) {
+      txt.textContent = status.enabled
+        ? 'Aktiviert – Agent kann Internet-Suchen anfragen (Bestätigung erforderlich)'
+        : 'Deaktiviert – Agent kann keine Internet-Suchen durchführen';
+      txt.style.color = status.enabled ? 'var(--success)' : 'var(--text-muted)';
+    }
+
+    // History rendern
+    const content = document.getElementById('search-history-content');
+    if (!content) return;
+    const history = hist.history || [];
+    if (!history.length) {
+      content.innerHTML = '<div class="empty-state"><span>&#128269;</span><p>Noch keine Suchanfragen</p></div>';
+      return;
+    }
+    content.innerHTML = history.map(item => `
+      <div style="margin-bottom:12px">
+        <div style="font-size:11px;color:var(--text-muted);margin-bottom:4px">
+          ${item.executed_at ? new Date(item.executed_at).toLocaleTimeString('de-DE') : ''} –
+          <span style="font-family:var(--font-mono)">${escapeHtml(item.query)}</span>
+        </div>
+        ${(item.results || []).map(r => `
+          <div class="search-result-card">
+            <div class="sr-title">${escapeHtml(r.title)}</div>
+            ${r.snippet ? `<div class="sr-snippet">${escapeHtml(r.snippet.substring(0, 180))}</div>` : ''}
+            ${r.url ? `<div class="sr-url"><a href="${escapeHtml(r.url)}" target="_blank" rel="noopener">${escapeHtml(r.url.substring(0, 60))}...</a></div>` : ''}
+          </div>
+        `).join('')}
+      </div>
+    `).join('<hr style="border-color:var(--border);margin:8px 0">');
+  } catch (e) {
+    const content = document.getElementById('search-history-content');
+    if (content) content.innerHTML = `<p class="error-hint">Fehler: ${e.message}</p>`;
+  }
+}
+
+// ── Search Settings Section ────────────────────────────────────────────────────
+
+async function renderSearchSettingsSection() {
+  const form = document.getElementById('settings-form');
+  try {
+    const res = await fetch('/api/search/status');
+    const data = await res.json();
+    form.innerHTML = `
+      <div class="settings-section">
+        <h3 class="settings-section-title">WEB-SUCHE</h3>
+        <p class="settings-section-desc">
+          Der Agent kann Internet-Recherchen durchführen (z.B. Fehlercodes nachschlagen).
+          Jede Anfrage muss vom Nutzer einzeln bestätigt werden.
+          Interne IPs, Hostnamen und Dateipfade werden automatisch geblockt.
+        </p>
+      </div>
+      <div class="settings-subsection">
+        <h4>Status</h4>
+        <div style="display:flex;align-items:center;gap:12px;margin-bottom:8px">
+          <label class="toggle-switch">
+            <input type="checkbox" id="search-settings-toggle" ${data.enabled ? 'checked' : ''} onchange="searchSettingsToggle(this.checked)">
+            <span class="toggle-slider"></span>
+          </label>
+          <span id="search-settings-status" style="font-size:13px;color:${data.enabled ? 'var(--success)' : 'var(--text-muted)'}">
+            ${data.enabled ? '&#10003; Aktiviert' : 'Deaktiviert'}
+          </span>
+        </div>
+        <p style="font-size:12px;color:var(--text-muted)">
+          Der Agent kann die Suche auch selbst ein-/ausschalten wenn du schreibst:<br>
+          <code>"Websuche einschalten"</code> oder <code>"Suche ausschalten"</code>
+        </p>
+      </div>
+      <div class="settings-subsection" style="margin-top:16px">
+        <h4>Sicherheitsregeln</h4>
+        <ul style="font-size:12px;color:var(--text-secondary);padding-left:16px;margin:0">
+          <li>Interne IP-Adressen (10.x, 192.168.x, 172.16-31.x) werden geblockt</li>
+          <li>Interne Hostnamen (.local, .intern, .corp, .lan) werden geblockt</li>
+          <li>Lokale Dateipfade werden geblockt</li>
+          <li>Jede Suche erscheint im "Bestätigung"-Panel zur Freigabe</li>
+          <li>Abgelehnte Suchen werden nicht ausgeführt</li>
+        </ul>
+      </div>
+      <div class="settings-subsection" style="margin-top:16px">
+        <h4>Verlauf (letzte Suchen)</h4>
+        <div id="search-settings-history"><div class="spinner-inline"></div></div>
+      </div>
+    `;
+    // History laden
+    const histRes = await fetch('/api/search/history');
+    const histData = await histRes.json();
+    const histEl = document.getElementById('search-settings-history');
+    if (!histEl) return;
+    const history = histData.history || [];
+    if (!history.length) {
+      histEl.innerHTML = '<p class="empty-hint">Noch keine Suchanfragen.</p>';
+      return;
+    }
+    histEl.innerHTML = history.slice(0, 10).map(item => `
+      <div class="ds-item">
+        <div class="ds-item-header">
+          <span class="ds-item-name">${escapeHtml(item.query)}</span>
+          <span class="badge ${item.status === 'done' ? 'badge-success' : 'badge-error'}">${item.status}</span>
+        </div>
+        <div class="ds-item-detail">
+          ${item.reason ? escapeHtml(item.reason) + ' – ' : ''}
+          ${item.results?.length || 0} Ergebnis(se)
+          ${item.executed_at ? '– ' + new Date(item.executed_at).toLocaleString('de-DE') : ''}
+        </div>
+      </div>
+    `).join('');
+  } catch (e) {
+    form.innerHTML = `<p class="error-hint">Fehler: ${e.message}</p>`;
+  }
+}
+
+async function searchSettingsToggle(enabled) {
+  await fetch('/api/search/toggle', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ enabled }),
+  });
+  const el = document.getElementById('search-settings-status');
+  if (el) {
+    el.textContent = enabled ? '✓ Aktiviert' : 'Deaktiviert';
+    el.style.color = enabled ? 'var(--success)' : 'var(--text-muted)';
+  }
+  updateSettingsStatus(enabled ? 'Web-Suche aktiviert ✓' : 'Web-Suche deaktiviert', 'success');
+  // Auch Search-Panel-Toggle synchronisieren
+  const panelToggle = document.getElementById('search-enabled-toggle');
+  if (panelToggle) panelToggle.checked = enabled;
+  const panelTxt = document.getElementById('search-status-text');
+  if (panelTxt) {
+    panelTxt.textContent = enabled
+      ? 'Aktiviert – Agent kann Internet-Suchen anfragen (Bestätigung erforderlich)'
+      : 'Deaktiviert – Agent kann keine Internet-Suchen durchführen';
+    panelTxt.style.color = enabled ? 'var(--success)' : 'var(--text-muted)';
+  }
+}
 
 // Keyboard shortcut to close modal
 document.addEventListener('keydown', (e) => {

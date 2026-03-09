@@ -2927,3 +2927,203 @@ body {
   padding: 4px 10px;
   font-size: 12px;
 }
+
+/* Toggle Switch */
+.toggle-switch {
+  position: relative;
+  display: inline-block;
+  width: 40px;
+  height: 22px;
+  cursor: pointer;
+}
+.toggle-switch input {
+  opacity: 0;
+  width: 0;
+  height: 0;
+}
+.toggle-slider {
+  position: absolute;
+  inset: 0;
+  background: var(--border);
+  border-radius: 22px;
+  transition: background 0.2s;
+}
+.toggle-slider::before {
+  content: "";
+  position: absolute;
+  height: 16px;
+  width: 16px;
+  left: 3px;
+  bottom: 3px;
+  background: #fff;
+  border-radius: 50%;
+  transition: transform 0.2s;
+}
+.toggle-switch input:checked + .toggle-slider {
+  background: var(--accent);
+}
+.toggle-switch input:checked + .toggle-slider::before {
+  transform: translateX(18px);
+}
+
+/* Search Result Cards */
+.search-result-card {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 8px 10px;
+  margin-bottom: 6px;
+}
+.search-result-card .sr-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--accent);
+  margin-bottom: 2px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.search-result-card .sr-snippet {
+  font-size: 11px;
+  color: var(--text-secondary);
+  line-height: 1.4;
+}
+.search-result-card .sr-url {
+  font-size: 10px;
+  color: var(--text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  margin-top: 2px;
+}
+
+/* Pending Search Confirm */
+.search-confirm-card {
+  background: var(--bg-secondary);
+  border: 1px solid var(--accent);
+  border-radius: 6px;
+  padding: 10px;
+  margin-bottom: 8px;
+}
+.search-confirm-card .sc-query {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  background: var(--bg-tertiary, var(--bg));
+  padding: 4px 6px;
+  border-radius: 4px;
+  margin: 4px 0 6px;
+  word-break: break-word;
+}
+.search-confirm-card .sc-reason {
+  font-size: 11px;
+  color: var(--text-muted);
+  margin-bottom: 6px;
+}
+.search-confirm-card .sc-actions {
+  display: flex;
+  gap: 6px;
+}
+
+/* Slash-Command Autocomplete Dropdown */
+.cmd-suggestions-dropdown {
+  position: absolute;
+  bottom: calc(100% + 4px);
+  left: 0;
+  right: 0;
+  background: var(--bg-secondary);
+  border: 1px solid var(--accent);
+  border-radius: 8px;
+  box-shadow: 0 -4px 16px rgba(0,0,0,0.3);
+  z-index: 200;
+  overflow: hidden;
+  max-height: 240px;
+  overflow-y: auto;
+}
+.cmd-suggestion {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 12px;
+  cursor: pointer;
+  font-size: 13px;
+  transition: background 0.1s;
+}
+.cmd-suggestion:hover,
+.cmd-suggestion.active {
+  background: var(--bg-tertiary, rgba(255,255,255,0.06));
+}
+.cmd-suggestion .cmd-name {
+  font-family: var(--font-mono);
+  font-weight: 600;
+  color: var(--accent);
+  min-width: 110px;
+}
+.cmd-suggestion .cmd-desc {
+  color: var(--text-secondary);
+  flex: 1;
+  font-size: 12px;
+}
+.cmd-suggestion .cmd-alias {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-muted);
+  background: var(--bg);
+  padding: 1px 5px;
+  border-radius: 4px;
+}
+
+/* ── Suggestion Bar (Debug-Modus Rückfragen) ─────────────────────────────── */
+#suggestion-bar {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px 12px 6px;
+  border-top: 1px solid var(--border);
+  background: linear-gradient(to bottom, var(--bg-secondary), transparent);
+  animation: slideUp 0.2s ease;
+}
+
+@keyframes slideUp {
+  from { opacity: 0; transform: translateY(6px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+.suggestion-bar-label {
+  font-size: 12px;
+  color: var(--text-muted);
+  font-style: italic;
+  line-height: 1.3;
+}
+
+#suggestion-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.suggestion-chip {
+  background: var(--bg-tertiary, rgba(255,255,255,0.07));
+  border: 1px solid var(--accent, #6366f1);
+  color: var(--accent, #6366f1);
+  border-radius: 20px;
+  padding: 5px 14px;
+  font-size: 13px;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s, transform 0.1s;
+  white-space: nowrap;
+}
+.suggestion-chip:hover {
+  background: var(--accent, #6366f1);
+  color: #fff;
+  transform: translateY(-1px);
+}
+.suggestion-chip:active {
+  transform: translateY(0);
+}
+
+/* ── Debug Mode Badge ────────────────────────────────────────────────────── */
+.mode-badge.mode-debug {
+  background: linear-gradient(135deg, #7c3aed22, #4f46e522);
+  border-color: #7c3aed;
+  color: #a78bfa;
+}
