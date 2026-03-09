@@ -4,11 +4,15 @@ Agent-Tools für GitHub Enterprise Server (intern gehostet).
 Tools:
 - github_list_repos: Repositories einer Organisation auflisten
 - github_list_prs: Pull Requests eines Repos auflisten
-- github_pr_details: Details eines Pull Requests
+- github_pr_details: Details eines Pull Requests (Metadaten, Reviews)
+- github_pr_diff: Code-Änderungen eines PRs analysieren (Diff/Patch)
 - github_list_issues: Issues eines Repos auflisten
 - github_issue_details: Details eines Issues
 - github_list_branches: Branches eines Repos auflisten
 - github_recent_commits: Letzte Commits eines Branches
+
+Hinweis: Alle Tools unterstützen Repo-Namen ohne Org-Prefix wenn default_org gesetzt ist.
+Beispiel: "AI-Assist" wird zu "IT-Networks/AI-Assist" aufgelöst.
 """
 
 import logging
@@ -431,6 +435,142 @@ def register_github_tools(registry: ToolRegistry) -> int:
             ),
         ],
         handler=github_pr_details,
+    ))
+    count += 1
+
+    # ── github_pr_diff ────────────────────────────────────────────────────────
+    async def github_pr_diff(**kwargs: Any) -> ToolResult:
+        """
+        Holt die Code-Änderungen (Diff) eines Pull Requests.
+        Zeigt welche Dateien geändert wurden und den konkreten Code-Diff.
+        """
+        if not settings.github.enabled:
+            return ToolResult(success=False, error="GitHub ist nicht aktiviert")
+
+        repo: str = _resolve_repo(kwargs.get("repo", ""))
+        pr_number: int = int(kwargs.get("pr_number", 0))
+        file_filter: str = kwargs.get("file_filter", "").strip()
+        max_files: int = int(kwargs.get("max_files", 20))
+        include_patch: bool = kwargs.get("include_patch", True)
+
+        if not repo:
+            return ToolResult(success=False, error="repo ist erforderlich (oder default_repo/default_org konfigurieren)")
+        if not pr_number:
+            return ToolResult(success=False, error="pr_number ist erforderlich")
+
+        api_url = settings.github.get_api_url()
+
+        # Geänderte Dateien holen (mit Patch/Diff)
+        result = await _github_paginated_request(
+            url=f"{api_url}/repos/{repo}/pulls/{pr_number}/files",
+            token=settings.github.token,
+            verify_ssl=settings.github.verify_ssl,
+            timeout=settings.github.timeout_seconds,
+            params={"per_page": 100},
+            max_items=0,  # Alle Dateien holen
+        )
+
+        if not result["success"]:
+            return ToolResult(success=False, error=result["error"])
+
+        files = []
+        total_additions = 0
+        total_deletions = 0
+
+        for f in result["data"]:
+            filename = f.get("filename", "")
+
+            # Optional: Filter nach Dateiname/Pfad
+            if file_filter and file_filter.lower() not in filename.lower():
+                continue
+
+            total_additions += f.get("additions", 0)
+            total_deletions += f.get("deletions", 0)
+
+            file_info = {
+                "filename": filename,
+                "status": f.get("status"),  # added, removed, modified, renamed
+                "additions": f.get("additions", 0),
+                "deletions": f.get("deletions", 0),
+                "changes": f.get("changes", 0),
+            }
+
+            # Rename-Info
+            if f.get("previous_filename"):
+                file_info["previous_filename"] = f.get("previous_filename")
+
+            # Patch (der eigentliche Diff) - kann sehr groß sein
+            if include_patch and f.get("patch"):
+                patch = f.get("patch", "")
+                # Patch auf max 3000 Zeichen pro Datei begrenzen
+                if len(patch) > 3000:
+                    file_info["patch"] = patch[:3000] + "\n... (truncated)"
+                    file_info["patch_truncated"] = True
+                else:
+                    file_info["patch"] = patch
+
+            files.append(file_info)
+
+            # Max Dateien Limit
+            if len(files) >= max_files:
+                break
+
+        return ToolResult(
+            success=True,
+            data={
+                "repo": repo,
+                "pr_number": pr_number,
+                "total_files_in_pr": len(result["data"]),
+                "files_returned": len(files),
+                "total_additions": total_additions,
+                "total_deletions": total_deletions,
+                "file_filter": file_filter or "(none)",
+                "files": files,
+            },
+        )
+
+    registry.register(Tool(
+        name="github_pr_diff",
+        description=(
+            "Holt die Code-Änderungen (Diff) eines Pull Requests. "
+            "Zeigt welche Dateien geändert wurden mit dem konkreten Diff-Patch. "
+            "WICHTIG: Verwende dieses Tool um PR-Code zu analysieren, NICHT search_code! "
+            "Kann nach Dateinamen gefiltert werden."
+        ),
+        category=ToolCategory.DEVOPS,
+        parameters=[
+            ToolParameter(
+                name="repo",
+                type="string",
+                description="Repository: 'owner/repo' oder nur 'repo-name'",
+                required=False,
+            ),
+            ToolParameter(
+                name="pr_number",
+                type="integer",
+                description="Pull Request Nummer",
+                required=True,
+            ),
+            ToolParameter(
+                name="file_filter",
+                type="string",
+                description="Optional: Nur Dateien die diesen Text im Pfad enthalten (z.B. 'service' oder '.java')",
+                required=False,
+            ),
+            ToolParameter(
+                name="max_files",
+                type="integer",
+                description="Max. Anzahl Dateien zurückgeben (Standard: 20)",
+                required=False,
+            ),
+            ToolParameter(
+                name="include_patch",
+                type="boolean",
+                description="Diff-Patch einschließen (Standard: true). False für nur Dateiliste.",
+                required=False,
+            ),
+        ],
+        handler=github_pr_diff,
     ))
     count += 1
 
