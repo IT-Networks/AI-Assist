@@ -872,6 +872,8 @@ body {
   background: var(--accent);
   color: var(--bg);
   border-bottom-right-radius: 4px;
+  white-space: pre-wrap;
+  word-break: break-word;
 }
 
 .message.assistant .message-bubble {
@@ -3133,14 +3135,17 @@ body {
    ══════════════════════════════════════════════════════════════════════════════ */
 
 .sidebar-tabs-compact {
-  justify-content: center;
+  justify-content: flex-start;
+  flex-wrap: wrap;
+  gap: 4px;
+  padding: 6px 8px;
 }
 
 .sidebar-tabs-compact .sidebar-tab {
   flex: 0 0 auto;
-  padding: 10px 12px;
-  font-size: 1rem;
-  min-width: 36px;
+  padding: 6px 8px;
+  font-size: 0.9rem;
+  min-width: 28px;
   text-align: center;
 }
 

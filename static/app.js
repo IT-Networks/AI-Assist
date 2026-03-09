@@ -2336,7 +2336,18 @@ const settingsState = {
     agent_tools: 'Agent-Tools mit Modell-Zuweisungen',
     jira: 'Jira-Anbindung für Issue-Suche',
     context: 'Kontext-Limits für LLM',
-    uploads: 'Upload-Verzeichnis und Limits'
+    uploads: 'Upload-Verzeichnis und Limits',
+    jenkins: 'Jenkins CI/CD Server (intern gehostet)',
+    github: 'GitHub Enterprise Server (intern gehostet)',
+    data_sources: 'Interne HTTP-Systeme (Jenkins, GitHub, APIs)',
+    mq: 'IBM MQ Series Messaging',
+    test_tool: 'Test-Automatisierung',
+    log_servers: 'Log-Server für Analyse',
+    wlp: 'WebSphere Liberty Profile Server',
+    maven: 'Maven Build-Konfigurationen',
+    sub_agents: 'Parallele Sub-Agenten für Recherche',
+    search: 'Suche-Einstellungen',
+    database: 'DB2-Datenbankverbindung für Abfragen'
   }
 };
 

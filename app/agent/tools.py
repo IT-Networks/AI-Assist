@@ -1014,7 +1014,7 @@ async def read_sqlj_file(path: str) -> ToolResult:
     # Pfad auflösen
     file_path = Path(path)
     if not file_path.is_absolute():
-        for base in [settings.repository.path, "."]:
+        for base in [settings.java.get_active_path(), "."]:
             candidate = Path(base) / path
             if candidate.exists():
                 file_path = candidate
@@ -1125,7 +1125,7 @@ async def debug_java_with_testdata(
         output += f".{method_name}()"
     output += " ===\n\n"
 
-    repo_path = Path(settings.repository.path) if settings.repository.path else Path(".")
+    repo_path = Path(settings.java.get_active_path()) if settings.java.get_active_path() else Path(".")
 
     # 1. Java-Klasse finden
     simple_name = class_name.split(".")[-1]  # com.example.Foo → Foo
