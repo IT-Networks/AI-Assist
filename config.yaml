@@ -7,12 +7,34 @@ llm:
   temperature: 0.2
   verify_ssl: false  # false für selbstsignierte Zertifikate (interne Server)
   streaming: true    # true für Token-Streaming bei Antworten
-  # Modell-Aufteilung für Agent (optional)
-  tool_model: "gptoss120b"     # Schnelles Modell für Tool-Aufrufe/Suche
-  analysis_model: ""           # Großes Modell für finale Analyse (leer = default_model)
+
+  # ═══════════════════════════════════════════════════════════════════
+  # Modell-Strategie für große Codebases
+  # ═══════════════════════════════════════════════════════════════════
+
+  # Phase-spezifische Modelle
+  tool_model: "qwen-7b"          # Schnell für Suche/Navigation/Tool-Calls
+  analysis_model: "mistral-678b" # Groß für finale Analyse & Code-Generierung
+
+  # Pro-Tool Modell-Zuweisung (überschreibt tool_model für spezifische Tools)
+  tool_models:
+    # Lese-Operationen: Schnelles Modell reicht
+    search_code: "qwen-7b"
+    list_files: "qwen-7b"
+    read_file: "qwen-7b"
+    search_handbook: "qwen-7b"
+
+    # Schreib-Operationen: Qualität wichtig
+    write_file: "mistral-678b"
+    edit_file: "mistral-678b"
+
+    # Code-Review: Qualität wichtig
+    github_pr_diff: "mistral-678b"
+    github_commit_diff: "mistral-678b"
+
   # Phase-spezifische Temperature
-  tool_temperature: 0.0        # Tool-Call-Phase deterministisch (Mistral-optimiert)
-  analysis_temperature: 0.1    # Analyse-Phase: niedrig für präzise Faktenextraktion (0.0-0.2 empfohlen)
+  tool_temperature: 0.0        # Tool-Calls: deterministisch (gleiche Suche = gleiche Ergebnisse)
+  analysis_temperature: 0.2    # Analyse: etwas Kreativität für Code-Lösungen
 
 models:
   - id: "gptoss120b"
@@ -32,11 +54,29 @@ java:
   active_repo: "Beispiel-Projekt"  # Name des aktiven Repos
   repo_path: "/home/user/projects/my-java-app"  # Legacy-Kompatibilität
   exclude_dirs:
+    # Build-Output
     - "target"
+    - "build"
+    - "out"
+    - "bin"
+    - "classes"
+    # Version Control
     - ".git"
-    - "node_modules"
+    - ".svn"
+    # IDE-spezifisch (IntelliJ, Eclipse, VS Code)
     - ".idea"
+    - ".settings"
+    - ".project"
+    - ".classpath"
+    - ".vscode"
+    # Maven/Gradle
     - ".mvn"
+    - ".gradle"
+    - "gradle"
+    # Sonstige
+    - "node_modules"
+    - "logs"
+    - "tmp"
   max_file_size_kb: 500
 
 confluence:
@@ -57,8 +97,8 @@ jira:
   verify_ssl: false   # false für selbstsignierte Zertifikate (interne Server)
 
 context:
-  max_tokens: 32000
-  max_file_context_kb: 100
+  max_tokens: 64000            # Erhöht für große Codebases
+  max_file_context_kb: 200     # Größere Dateien erlauben
 
 uploads:
   directory: "./uploads"
@@ -123,21 +163,66 @@ file_operations:
   default_mode: "read_only"                # read_only | write_with_confirm
   allowed_paths: []                        # Pfade in denen geschrieben werden darf
   allowed_extensions:
+    # Java-Dateien
     - ".java"
-    - ".py"
+    - ".sqlj"
+    - ".jspx"
+    - ".jsp"
+    # Konfiguration
     - ".xml"
     - ".yaml"
     - ".yml"
     - ".json"
-    - ".md"
     - ".properties"
+    - ".cfg"
+    - ".conf"
+    # Build-Dateien
+    - ".gradle"
+    - ".kts"             # Kotlin DSL für Gradle
+    # Web
+    - ".html"
+    - ".htm"
+    - ".css"
+    - ".js"
+    - ".ts"
+    # Datenbank
     - ".sql"
-    - ".sqlj"
+    - ".ddl"
+    # Dokumentation
+    - ".md"
+    - ".txt"
+    - ".adoc"            # AsciiDoc
+    # Python
+    - ".py"
+    # Sonstige
+    - ".sh"
+    - ".bat"
+    - ".cmd"
   denied_patterns:
+    # Dependencies & Build-Output
     - "**/node_modules/**"
-    - "**/.git/**"
     - "**/target/**"
+    - "**/build/**"
+    - "**/out/**"
+    - "**/bin/**"
     - "**/__pycache__/**"
+    - "**/.gradle/**"
+    # Version Control
+    - "**/.git/**"
+    - "**/.svn/**"
+    # IDE-Metadaten
+    - "**/.idea/**"
+    - "**/.settings/**"
+    - "**/.vscode/**"
+    # Logs & Temporär
+    - "**/logs/**"
+    - "**/tmp/**"
+    - "**/*.log"
+    # Sensible Dateien
+    - "**/*.key"
+    - "**/*.pem"
+    - "**/*.jks"
+    - "**/secrets/**"
   backup_enabled: true
   backup_directory: "./backups"
 
@@ -160,6 +245,81 @@ database:
   jdbc_driver_path: ""                     # Pfad zur db2jcc4.jar
   jdbc_driver_class: "com.ibm.db2.jcc.DB2Driver"
 
+# Sub-Agenten für parallele Codebase-Exploration
+sub_agents:
+  enabled: true
+  timeout_seconds: 120           # 2 Min für komplexe Suchen (große Codebases)
+  max_iterations: 15             # Mehr Tool-Calls pro Sub-Agent
+  min_query_length: 10           # Kürzere Queries auch verarbeiten
+  routing_model: "qwen-7b"       # Schnelles Modell für Intent-Routing
+  agents:
+    - "code_explorer"            # Java/Python Code-Suche
+    - "wiki_agent"               # Confluence-Suche
+    - "knowledge_agent"          # Handbuch/Skills-Suche
+    - "datasource_agent"         # Interne HTTP-APIs
+
+# ═══════════════════════════════════════════════════════════════════
+# WLP (WebSphere Liberty Profile) - Lokaler App-Server
+# ═══════════════════════════════════════════════════════════════════
+wlp:
+  enabled: false
+  java_home: ""                            # JAVA_HOME für WLP (leer = System-Default)
+  # Mehrere Server möglich
+  servers:
+    - id: "local-dev"
+      name: "Lokaler Entwicklungsserver"
+      description: "WLP für lokale Entwicklung und Tests"
+      wlp_path: ""                         # z.B. "C:/wlp" oder "/opt/wlp"
+      server_name: "defaultServer"         # Name des Liberty-Servers
+      start_timeout_seconds: 300           # Max. Zeit für Server-Start
+      extra_jvm_args: ""                   # z.B. "-Xmx1024m -Xms512m"
+    # Beispiel für weiteren Server:
+    # - id: "integration"
+    #   name: "Integration Server"
+    #   wlp_path: "C:/wlp-integration"
+    #   server_name: "integrationServer"
+  repo_path: ""                            # Java-Repo für Artefakt-Prüfung (leer = java.get_active_path())
+
+# ═══════════════════════════════════════════════════════════════════
+# Maven Build - Build-Automatisierung
+# ═══════════════════════════════════════════════════════════════════
+maven:
+  enabled: false
+  mvn_executable: "mvn"                    # Pfad zum Maven-Binary (z.B. "C:/maven/bin/mvn.cmd")
+  java_home: ""                            # JAVA_HOME für Maven (leer = System-Default)
+  settings_file: ""                        # User Settings (leer = ~/.m2/settings.xml)
+  local_repo: ""                           # Lokales Repository (leer = ~/.m2/repository)
+  default_timeout_minutes: 15              # Build-Timeout
+  # Vordefinierte Builds (für schnellen Zugriff)
+  builds:
+    - id: "full-build"
+      name: "Vollständiger Build"
+      description: "Clean + Install mit allen Tests"
+      pom_path: ""                         # Relativ zum aktiven Java-Repo oder absolut
+      goals: "clean install"
+      profiles: []                         # z.B. ["dev", "local"]
+      skip_tests: false
+      jvm_args: "-Xmx1024m"
+      extra_args: ""                       # z.B. "-DskipITs" für Integration-Tests überspringen
+    - id: "quick-build"
+      name: "Schneller Build"
+      description: "Compile ohne Tests (für schnelle Iterationen)"
+      pom_path: ""
+      goals: "clean compile"
+      profiles: []
+      skip_tests: true
+      jvm_args: "-Xmx512m"
+      extra_args: ""
+    - id: "package-only"
+      name: "Nur Paketieren"
+      description: "Package ohne Clean (für Deployment)"
+      pom_path: ""
+      goals: "package"
+      profiles: []
+      skip_tests: true
+      jvm_args: "-Xmx1024m"
+      extra_args: "-Dmaven.test.skip=true"
+
 # ═══════════════════════════════════════════════════════════════════
 # MCP (Model Context Protocol) - Lokale Implementation
 # ═══════════════════════════════════════════════════════════════════
@@ -176,8 +336,8 @@ mcp:
     #   auto_start: true
   # Sequential Thinking (lokale Implementation ohne externen Server)
   sequential_thinking_enabled: true        # Lokale Seq-Thinking Implementation
-  max_thinking_steps: 10                   # Max. Denkschritte pro Anfrage
-  thinking_timeout_seconds: 120
+  max_thinking_steps: 15                   # Max. Denkschritte pro Anfrage (erhöht für Planung)
+  thinking_timeout_seconds: 180            # 3 Min für komplexe Planungsaufgaben
   # Automatische Aktivierung
   auto_activate_on_error: true             # Bei komplexen Fehlern
   auto_activate_on_planning: true          # Bei Planungsaufgaben

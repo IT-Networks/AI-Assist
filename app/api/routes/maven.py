@@ -255,8 +255,21 @@ async def run_build(build_id: str, req: RunBuildRequest = RunBuildRequest()) -> 
         raise HTTPException(status_code=400, detail=f"pom.xml nicht gefunden: {pom}")
 
     # Befehl zusammenbauen
+    import shutil
     mvn = settings.maven.mvn_executable
-    cmd = [mvn, "-f", str(pom)]
+    is_windows = os.name == 'nt'
+
+    # Windows: Wenn mvn ohne Extension angegeben, nach mvn.cmd suchen
+    if is_windows and mvn == "mvn":
+        mvn_found = shutil.which("mvn.cmd") or shutil.which("mvn.bat") or shutil.which("mvn")
+        if mvn_found:
+            mvn = mvn_found
+
+    # Windows: .cmd/.bat Dateien müssen über cmd.exe ausgeführt werden
+    if is_windows and (mvn.endswith(".cmd") or mvn.endswith(".bat")):
+        cmd = ["cmd.exe", "/c", mvn, "-f", str(pom)]
+    else:
+        cmd = [mvn, "-f", str(pom)]
 
     # Maven Settings und Local Repo
     if settings.maven.settings_file:

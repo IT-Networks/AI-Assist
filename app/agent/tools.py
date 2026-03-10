@@ -2047,6 +2047,46 @@ def create_default_registry() -> ToolRegistry:
     from app.agent.github_tools import register_github_tools
     register_github_tools(registry)
 
+    # Maven Build Tools
+    from app.agent.maven_tools import register_maven_tools
+    register_maven_tools(registry)
+
+    # WLP Server Tools
+    from app.agent.wlp_tools import register_wlp_tools
+    register_wlp_tools(registry)
+
+    # Jenkins CI/CD Tools
+    from app.agent.jenkins_tools import register_jenkins_tools
+    register_jenkins_tools(registry)
+
+    # Test-Tool (HTTP Service Execution)
+    from app.agent.testtool_tools import register_testtool_tools
+    register_testtool_tools(registry)
+
+    # Log Server Tools
+    from app.agent.log_tools import register_log_tools
+    register_log_tools(registry)
+
+    # MQ Tools (Message Queue)
+    from app.agent.mq_tools import register_mq_tools
+    register_mq_tools(registry)
+
+    # Internal Fetch Tools (Intranet URLs)
+    from app.agent.internal_fetch_tools import register_internal_fetch_tools
+    register_internal_fetch_tools(registry)
+
+    # Datasource Tools (HTTP APIs)
+    from app.agent.datasource_tools import register_datasource_tools
+    register_datasource_tools(registry)
+
+    # Docker/Podman Sandbox Tools (sichere Code-Ausführung)
+    from app.agent.docker_tools import register_docker_tools
+    register_docker_tools(registry)
+
+    # Git Tools (lokale Git-Operationen)
+    from app.agent.git_tools import register_git_tools
+    register_git_tools(registry)
+
     return registry
 
 

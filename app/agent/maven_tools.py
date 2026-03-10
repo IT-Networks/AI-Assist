@@ -58,7 +58,20 @@ def register_maven_tools(registry: ToolRegistry) -> int:
             return ToolResult(success=False, error=f"pom.xml nicht gefunden: {pom}")
 
         mvn = settings.maven.mvn_executable
-        cmd = [mvn, "-f", str(pom)] + build.goals.split()
+        is_windows = os.name == 'nt'
+
+        # Windows: Wenn mvn ohne Extension angegeben, nach mvn.cmd suchen
+        if is_windows and mvn == "mvn":
+            import shutil
+            mvn_cmd = shutil.which("mvn.cmd") or shutil.which("mvn.bat") or shutil.which("mvn")
+            if mvn_cmd:
+                mvn = mvn_cmd
+
+        # Windows: .cmd/.bat Dateien müssen über cmd.exe ausgeführt werden
+        if is_windows and (mvn.endswith(".cmd") or mvn.endswith(".bat")):
+            cmd = ["cmd.exe", "/c", mvn, "-f", str(pom)] + build.goals.split()
+        else:
+            cmd = [mvn, "-f", str(pom)] + build.goals.split()
         if build.profiles:
             cmd += ["-P", ",".join(build.profiles)]
         if (skip_tests is True) or (skip_tests is None and build.skip_tests):

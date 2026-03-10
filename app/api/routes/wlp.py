@@ -203,14 +203,23 @@ async def start_server(server_id: str) -> StreamingResponse:
         if proc.returncode is None:
             raise HTTPException(status_code=409, detail="Server läuft bereits")
 
-    server_script = Path(srv.wlp_path) / "bin" / "server"
-    if not server_script.exists():
-        # Fallback für Windows
+    import os as _os
+    is_windows = _os.name == 'nt'
+
+    # Skript finden (Unix: server, Windows: server.bat)
+    if is_windows:
         server_script = Path(srv.wlp_path) / "bin" / "server.bat"
+    else:
+        server_script = Path(srv.wlp_path) / "bin" / "server"
+
     if not server_script.exists():
         raise HTTPException(status_code=400, detail=f"WLP server-Skript nicht gefunden in: {srv.wlp_path}/bin/")
 
-    cmd = [str(server_script), "run", srv.server_name]
+    # Windows: Batch-Dateien müssen über cmd.exe ausgeführt werden
+    if is_windows:
+        cmd = ["cmd.exe", "/c", str(server_script), "run", srv.server_name]
+    else:
+        cmd = [str(server_script), "run", srv.server_name]
     env_extra = {}
     if srv.extra_jvm_args:
         env_extra["JVM_ARGS"] = srv.extra_jvm_args
@@ -307,16 +316,25 @@ async def start_server(server_id: str) -> StreamingResponse:
 @router.post("/servers/{server_id}/stop")
 async def stop_server(server_id: str) -> Dict[str, Any]:
     """Stoppt den laufenden WLP-Server."""
+    import os as _os
     srv = _get_server(server_id)
+    is_windows = _os.name == 'nt'
 
     # Prozess über WLP-Skript stoppen (bevorzugt)
-    server_script = Path(srv.wlp_path) / "bin" / "server"
-    if not server_script.exists():
+    if is_windows:
         server_script = Path(srv.wlp_path) / "bin" / "server.bat"
+    else:
+        server_script = Path(srv.wlp_path) / "bin" / "server"
+
+    # Windows: Batch-Dateien über cmd.exe ausführen
+    if is_windows:
+        cmd = ["cmd.exe", "/c", str(server_script), "stop", srv.server_name]
+    else:
+        cmd = [str(server_script), "stop", srv.server_name]
 
     try:
         proc = await asyncio.create_subprocess_exec(
-            str(server_script), "stop", srv.server_name,
+            *cmd,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.STDOUT,
         )
@@ -341,21 +359,30 @@ async def stop_server(server_id: str) -> Dict[str, Any]:
 @router.get("/servers/{server_id}/status")
 async def server_status(server_id: str) -> Dict[str, Any]:
     """Prüft ob der Server läuft."""
+    import os as _os
     srv = _get_server(server_id)
+    is_windows = _os.name == 'nt'
 
     running_proc = _running_processes.get(server_id)
     is_running_proc = running_proc is not None and running_proc.returncode is None
 
     # WLP status-Befehl ausführen
-    server_script = Path(srv.wlp_path) / "bin" / "server"
-    if not server_script.exists():
+    if is_windows:
         server_script = Path(srv.wlp_path) / "bin" / "server.bat"
+    else:
+        server_script = Path(srv.wlp_path) / "bin" / "server"
 
     wlp_status = None
     if server_script.exists():
+        # Windows: Batch-Dateien über cmd.exe ausführen
+        if is_windows:
+            cmd = ["cmd.exe", "/c", str(server_script), "status", srv.server_name]
+        else:
+            cmd = [str(server_script), "status", srv.server_name]
+
         try:
             proc = await asyncio.create_subprocess_exec(
-                str(server_script), "status", srv.server_name,
+                *cmd,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.STDOUT,
             )
