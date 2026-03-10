@@ -4,7 +4,6 @@ from typing import Dict, List, Optional
 from urllib.parse import urlparse, parse_qs
 
 import httpx
-from lxml import etree
 
 from app.core.config import settings
 from app.core.exceptions import ConfluenceError
@@ -206,10 +205,11 @@ class ConfluenceClient:
         await self._ensure_api_path()
         client = _get_http_client()
         try:
+            # export_view liefert sauberes HTML ohne Confluence-Makros
             resp = await client.get(
                 self._api_url(f"/content/{page_id}"),
                 headers=self._headers(),
-                params={"expand": "body.storage,version,space"},
+                params={"expand": "body.export_view,version,space"},
             )
             resp.raise_for_status()
             data = resp.json()
@@ -218,7 +218,7 @@ class ConfluenceClient:
         except httpx.RequestError as e:
             raise ConfluenceError(f"Verbindungsfehler: {e}") from e
 
-        storage = data.get("body", {}).get("storage", {}).get("value", "")
+        html_content = data.get("body", {}).get("export_view", {}).get("value", "")
         base = data.get("_links", {}).get("base", self.base_url)
         web_ui = data.get("_links", {}).get("webui", "")
 
@@ -227,7 +227,7 @@ class ConfluenceClient:
             "title": data.get("title", ""),
             "url": f"{base}{web_ui}",
             "space": data.get("space", {}).get("name", ""),
-            "content": self.extract_text_from_storage(storage),
+            "content": self.extract_text_from_html(html_content),
         }
 
     async def get_page_by_url(self, url: str) -> Dict:
@@ -247,23 +247,67 @@ class ConfluenceClient:
 
         raise ConfluenceError(f"Keine Seiten-ID in der URL gefunden: {url}. Bitte die Seiten-ID direkt angeben.")
 
-    def extract_text_from_storage(self, storage_body: str) -> str:
-        """Convert Confluence storage format (XML/HTML) to readable plain text."""
-        if not storage_body:
+    def extract_text_from_html(self, html_content: str) -> str:
+        """
+        Konvertiert HTML (export_view oder storage) in lesbaren Text.
+
+        export_view liefert sauberes HTML ohne Confluence-Makros,
+        daher ist diese Methode einfacher als der alte XML-Parser.
+        """
+        if not html_content:
             return ""
+
+        # Versuche mit lxml zu parsen (robuster)
         try:
-            root = etree.fromstring(f"<root>{storage_body}</root>")
-        except etree.XMLSyntaxError:
-            # Fallback: strip HTML tags with regex
-            text = re.sub(r"<[^>]+>", " ", storage_body)
-            return re.sub(r"\s{2,}", " ", text).strip()
+            from lxml import html as lxml_html
+            doc = lxml_html.fromstring(f"<div>{html_content}</div>")
+        except Exception:
+            # Fallback: Regex-basierte Extraktion
+            return self._extract_text_regex(html_content)
 
         lines = []
-        self._traverse_node(root, lines, indent=0)
+        self._traverse_html_node(doc, lines, indent=0)
         return "\n".join(lines).strip()
 
-    def _traverse_node(self, node, lines: List[str], indent: int):
-        tag = node.tag.split("}")[-1] if "}" in node.tag else node.tag
+    def _extract_text_regex(self, html_content: str) -> str:
+        """Fallback: Extrahiert Text aus HTML mit Regex."""
+        # Code-Blöcke erhalten
+        code_blocks = []
+        def save_code(match):
+            code_blocks.append(f"```\n{match.group(1)}\n```")
+            return f"__CODE_BLOCK_{len(code_blocks) - 1}__"
+
+        text = re.sub(r'<pre[^>]*>(.*?)</pre>', save_code, html_content, flags=re.DOTALL)
+        text = re.sub(r'<code[^>]*>(.*?)</code>', r'`\1`', text, flags=re.DOTALL)
+
+        # Block-Elemente → Zeilenumbrüche
+        text = re.sub(r'</(p|div|tr|li|h[1-6])>', '\n', text, flags=re.IGNORECASE)
+        text = re.sub(r'<(br|hr)[^>]*/?>', '\n', text, flags=re.IGNORECASE)
+
+        # Alle anderen Tags entfernen
+        text = re.sub(r'<[^>]+>', ' ', text)
+
+        # Code-Blöcke wiederherstellen
+        for i, code in enumerate(code_blocks):
+            text = text.replace(f"__CODE_BLOCK_{i}__", code)
+
+        # HTML-Entities dekodieren
+        text = re.sub(r'&nbsp;', ' ', text)
+        text = re.sub(r'&lt;', '<', text)
+        text = re.sub(r'&gt;', '>', text)
+        text = re.sub(r'&amp;', '&', text)
+        text = re.sub(r'&quot;', '"', text)
+        text = re.sub(r'&#(\d+);', lambda m: chr(int(m.group(1))), text)
+
+        # Mehrfache Leerzeichen/Zeilenumbrüche bereinigen
+        text = re.sub(r'[ \t]+', ' ', text)
+        text = re.sub(r'\n\s*\n', '\n\n', text)
+
+        return text.strip()
+
+    def _traverse_html_node(self, node, lines: List[str], indent: int):
+        """Traversiert HTML-Knoten und extrahiert strukturierten Text."""
+        tag = node.tag if isinstance(node.tag, str) else ""
 
         # Headings
         if tag in ("h1", "h2", "h3", "h4", "h5", "h6"):
@@ -271,51 +315,121 @@ class ConfluenceClient:
             text = "".join(node.itertext()).strip()
             if text:
                 lines.append(f"\n{prefix} {text}")
-        # Code blocks
-        elif tag == "code":
+            return
+
+        # Code-Blöcke (pre, code)
+        if tag == "pre":
             code_text = "".join(node.itertext()).strip()
             if code_text:
-                lang = node.get("language", "")
+                # Versuche Sprache aus class zu extrahieren
+                lang = ""
+                cls = node.get("class", "")
+                lang_match = re.search(r'language-(\w+)', cls)
+                if lang_match:
+                    lang = lang_match.group(1)
                 lines.append(f"```{lang}\n{code_text}\n```")
-            return  # Don't recurse
-        # Structured macros (Confluence-specific)
-        elif tag == "structured-macro":
-            macro_name = node.get("ac:name", node.get("name", ""))
-            if macro_name == "code":
-                body = node.find(".//{http://atlassian.com/content}plain-text-body")
-                if body is None:
-                    body = node.find(".//plain-text-body")
-                code = body.text if body is not None else ""
-                lines.append(f"```\n{code}\n```")
             return
-        # List items
-        elif tag in ("li", "dt", "dd"):
-            text = "".join(node.itertext()).strip()
-            if text:
-                lines.append(f"{'  ' * indent}- {text}")
+
+        if tag == "code":
+            # Inline-Code
+            code_text = "".join(node.itertext()).strip()
+            if code_text and "\n" not in code_text:
+                lines.append(f"`{code_text}`")
+            elif code_text:
+                lines.append(f"```\n{code_text}\n```")
             return
-        # Paragraphs and divs
-        elif tag in ("p", "div", "td", "th"):
+
+        # Listen
+        if tag in ("ul", "ol"):
+            for child in node:
+                self._traverse_html_node(child, lines, indent)
+            return
+
+        if tag == "li":
+            # Direkten Text des List-Items
+            direct_text = (node.text or "").strip()
+            bullet = f"{'  ' * indent}- "
+
+            if direct_text:
+                lines.append(f"{bullet}{direct_text}")
+            else:
+                # Prüfe ob erstes Kind ein Text-Element ist
+                first_child = node[0] if len(node) > 0 else None
+                if first_child is not None and first_child.tag not in ("ul", "ol"):
+                    lines.append(bullet.rstrip())
+
+            # In Kinder rekursieren
+            for child in node:
+                if child.tag in ("ul", "ol"):
+                    # Verschachtelte Liste
+                    self._traverse_html_node(child, lines, indent + 1)
+                else:
+                    self._traverse_html_node(child, lines, indent)
+                if child.tail and child.tail.strip():
+                    lines.append(f"{'  ' * indent}  {child.tail.strip()}")
+            return
+
+        # Tabellen
+        if tag == "table":
+            for child in node:
+                self._traverse_html_node(child, lines, indent)
+            return
+
+        if tag in ("thead", "tbody"):
+            for child in node:
+                self._traverse_html_node(child, lines, indent)
+            return
+
+        if tag == "tr":
+            cells = []
+            for cell in node:
+                cell_text = "".join(cell.itertext()).strip()
+                cells.append(cell_text)
+            if any(cells):
+                lines.append(" | ".join(cells))
+            return
+
+        # Paragraphen und Divs
+        if tag in ("p", "div", "span"):
             text = "".join(node.itertext()).strip()
             if text:
                 lines.append(text)
             return
-        # Table rows
-        elif tag == "tr":
-            cells = ["".join(cell.itertext()).strip() for cell in node]
-            if any(cells):
-                lines.append(" | ".join(cells))
+
+        # Blockquote / Info-Boxen
+        if tag == "blockquote":
+            text = "".join(node.itertext()).strip()
+            if text:
+                # Jede Zeile mit > prefixen
+                for line in text.split("\n"):
+                    lines.append(f"> {line}")
             return
-        # Root or container tags: recurse
-        else:
-            if node.text and node.text.strip():
-                lines.append(node.text.strip())
+
+        # Links - Text extrahieren
+        if tag == "a":
+            text = "".join(node.itertext()).strip()
+            href = node.get("href", "")
+            if text and href:
+                lines.append(f"[{text}]({href})")
+            elif text:
+                lines.append(text)
+            return
+
+        # Bilder - Alt-Text
+        if tag == "img":
+            alt = node.get("alt", "")
+            if alt:
+                lines.append(f"[Bild: {alt}]")
+            return
+
+        # Standard: Text und Rekursion
+        if node.text and node.text.strip():
+            lines.append(node.text.strip())
 
         for child in node:
-            self._traverse_node(child, lines, indent + 1)
+            self._traverse_html_node(child, lines, indent)
             if child.tail and child.tail.strip():
                 lines.append(child.tail.strip())
-
 
 # Singleton
 _confluence_client: Optional[ConfluenceClient] = None
