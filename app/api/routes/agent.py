@@ -394,8 +394,9 @@ async def set_mode(
             detail=f"Ungültiger Modus: {request.mode}. Erlaubt: {valid_modes}"
         )
 
-    # File-Operations muss aktiviert sein für Schreibmodi
-    if mode != AgentMode.READ_ONLY and not settings.file_operations.enabled:
+    # File-Operations muss aktiviert sein für Schreibmodi (nicht für read_only, plan, debug)
+    write_modes = {AgentMode.WRITE_WITH_CONFIRM, AgentMode.AUTONOMOUS}
+    if mode in write_modes and not settings.file_operations.enabled:
         raise HTTPException(
             status_code=400,
             detail="Datei-Operationen sind nicht aktiviert. Setze file_operations.enabled=true in config.yaml"

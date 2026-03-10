@@ -410,6 +410,54 @@ class WebSearchConfig(BaseModel):
     verify_ssl: bool = True          # SSL-Zertifikate prüfen (False für selbstsignierte Proxy-Zertifikate)
     timeout_seconds: int = 30        # Timeout für HTTP-Requests
 
+    def get_proxy_url(self) -> Optional[str]:
+        """
+        Gibt die vollständige Proxy-URL inkl. Auth zurück.
+
+        Akzeptiert verschiedene Formate:
+        - proxy.intern:8080           → http://proxy.intern:8080
+        - http://proxy.intern:8080    → http://proxy.intern:8080
+        - https://proxy.intern:8080   → https://proxy.intern:8080
+
+        Mit Username/Password:
+        - proxy.intern:8080 + user + pass → http://user:pass@proxy.intern:8080
+        """
+        if not self.proxy_url:
+            return None
+
+        from urllib.parse import urlparse, urlunparse, quote
+
+        url = self.proxy_url.strip()
+
+        # Schema ergänzen wenn nicht vorhanden
+        if not url.startswith(("http://", "https://")):
+            url = f"http://{url}"
+
+        parsed = urlparse(url)
+
+        # Hostname und Port extrahieren
+        hostname = parsed.hostname or ""
+        port = parsed.port
+
+        if not hostname:
+            return None
+
+        # Mit Auth?
+        if self.proxy_username and self.proxy_password:
+            # Credentials URL-encoden (für Sonderzeichen)
+            user = quote(self.proxy_username, safe="")
+            passwd = quote(self.proxy_password, safe="")
+            auth_netloc = f"{user}:{passwd}@{hostname}"
+            if port:
+                auth_netloc += f":{port}"
+            return urlunparse((parsed.scheme or "http", auth_netloc, "", "", "", ""))
+
+        # Ohne Auth - URL normalisiert zurückgeben
+        netloc = hostname
+        if port:
+            netloc += f":{port}"
+        return urlunparse((parsed.scheme or "http", netloc, "", "", "", ""))
+
 
 # ══════════════════════════════════════════════════════════════════════════════
 # Internal Fetch (Intranet-URLs abrufen)

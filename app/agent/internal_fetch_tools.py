@@ -205,8 +205,11 @@ def register_internal_fetch_tools(registry: ToolRegistry) -> int:
 
     async def internal_fetch(**kwargs: Any) -> ToolResult:
         """Ruft eine interne URL ab und gibt den Inhalt zurück."""
+        import json as json_module
+
         print(f"[internal_fetch] Empfangene kwargs: {kwargs}")
         url: str = kwargs.get("url", "").strip()
+        headers_str: str = kwargs.get("headers", "")
 
         if not url:
             return ToolResult(
@@ -228,8 +231,28 @@ def register_internal_fetch_tools(registry: ToolRegistry) -> int:
         if not is_valid:
             return ToolResult(success=False, error=error)
 
+        # Headers parsen (Format: "Header1: Value1\nHeader2: Value2" oder JSON)
+        custom_headers = {}
+        if headers_str:
+            headers_str = headers_str.strip()
+            if headers_str.startswith("{"):
+                try:
+                    custom_headers = json_module.loads(headers_str)
+                except json_module.JSONDecodeError as e:
+                    return ToolResult(success=False, error=f"Ungültiges Header-JSON: {e}")
+            else:
+                for line in headers_str.split("\n"):
+                    line = line.strip()
+                    if ":" in line:
+                        key, val = line.split(":", 1)
+                        custom_headers[key.strip()] = val.strip()
+
         # Request ausführen
-        result = await _fetch_url(url, settings.internal_fetch)
+        result = await _fetch_url(
+            url=url,
+            config=settings.internal_fetch,
+            custom_headers=custom_headers if custom_headers else None,
+        )
 
         if result["error"]:
             return ToolResult(success=False, error=result["error"])
@@ -262,6 +285,7 @@ def register_internal_fetch_tools(registry: ToolRegistry) -> int:
         description=(
             "Ruft eine beliebige URL ab und gibt den Inhalt zurück. "
             "Unterstützt HTTP/HTTPS, HTML, JSON und Text. "
+            "Custom HTTP-Headers können optional übergeben werden. "
             "Ideal für: Interne APIs, Intranet-Seiten, Wikis, externe Webseiten. "
             "Verwendet konfigurierten Proxy und Auth falls eingerichtet."
         ),
@@ -273,6 +297,16 @@ def register_internal_fetch_tools(registry: ToolRegistry) -> int:
                 description="Die abzurufende URL (HTTP oder HTTPS)",
                 required=True,
             ),
+            ToolParameter(
+                name="headers",
+                type="string",
+                description=(
+                    "Optionale HTTP-Header. "
+                    "Format JSON: {\"Authorization\": \"Bearer xyz\"} "
+                    "oder Zeilen: Authorization: Bearer xyz"
+                ),
+                required=False,
+            ),
         ],
         handler=internal_fetch,
     ))
@@ -282,10 +316,13 @@ def register_internal_fetch_tools(registry: ToolRegistry) -> int:
 
     async def internal_search(**kwargs: Any) -> ToolResult:
         """Ruft eine interne URL ab und durchsucht den Inhalt nach einem Pattern."""
+        import json as json_module
+
         print(f"[internal_search] Empfangene kwargs: {kwargs}")
         url: str = kwargs.get("url", "").strip()
         pattern: str = kwargs.get("pattern", "").strip()
         context_lines: int = int(kwargs.get("context_lines", 3))
+        headers_str: str = kwargs.get("headers", "")
 
         if not url:
             return ToolResult(
@@ -310,8 +347,28 @@ def register_internal_fetch_tools(registry: ToolRegistry) -> int:
         if not is_valid:
             return ToolResult(success=False, error=error)
 
+        # Headers parsen
+        custom_headers = {}
+        if headers_str:
+            headers_str = headers_str.strip()
+            if headers_str.startswith("{"):
+                try:
+                    custom_headers = json_module.loads(headers_str)
+                except json_module.JSONDecodeError as e:
+                    return ToolResult(success=False, error=f"Ungültiges Header-JSON: {e}")
+            else:
+                for line in headers_str.split("\n"):
+                    line = line.strip()
+                    if ":" in line:
+                        key, val = line.split(":", 1)
+                        custom_headers[key.strip()] = val.strip()
+
         # Request ausführen
-        result = await _fetch_url(url, settings.internal_fetch)
+        result = await _fetch_url(
+            url=url,
+            config=settings.internal_fetch,
+            custom_headers=custom_headers if custom_headers else None,
+        )
 
         if result["error"]:
             return ToolResult(success=False, error=result["error"])
@@ -366,6 +423,7 @@ def register_internal_fetch_tools(registry: ToolRegistry) -> int:
         description=(
             "Ruft eine URL ab und durchsucht den Inhalt nach einem Regex-Pattern. "
             "Gibt passende Zeilen mit Kontext zurück. "
+            "Custom HTTP-Headers werden unterstützt. "
             "Ideal zum Suchen von Informationen in Webseiten, APIs, Dokumentationen."
         ),
         category=ToolCategory.SEARCH,
@@ -388,6 +446,16 @@ def register_internal_fetch_tools(registry: ToolRegistry) -> int:
                 description="Anzahl Kontext-Zeilen vor/nach Treffer (default: 3)",
                 required=False,
                 default=3,
+            ),
+            ToolParameter(
+                name="headers",
+                type="string",
+                description=(
+                    "Optionale HTTP-Header. "
+                    "Format JSON: {\"Authorization\": \"Bearer xyz\"} "
+                    "oder Zeilen: Authorization: Bearer xyz"
+                ),
+                required=False,
             ),
         ],
         handler=internal_search,
@@ -502,23 +570,26 @@ def register_internal_fetch_tools(registry: ToolRegistry) -> int:
     registry.register(Tool(
         name="http_request",
         description=(
-            "Führt HTTP-Requests aus (curl-Ersatz). "
-            "Unterstützt alle Methoden: GET, POST, PUT, DELETE, PATCH, HEAD, OPTIONS. "
-            "Mit Body (JSON/Text) und Custom Headers. "
-            "Für: REST-APIs, Webhooks, Service-Tests, Daten senden/empfangen."
+            "Führt HTTP-Requests aus (vollwertiger curl-Ersatz). "
+            "Unterstützt ALLE HTTP-Methoden: GET, POST, PUT, DELETE, PATCH, HEAD, OPTIONS. "
+            "WICHTIG: Custom HTTP-Headers werden vollständig unterstützt! "
+            "Verwende den 'headers' Parameter für Authorization, API-Keys, Accept, "
+            "X-Custom-Header oder beliebige andere HTTP-Header. "
+            "Beispiel: headers='{\"Authorization\": \"Bearer token123\", \"X-API-Key\": \"abc\"}' "
+            "Ideal für: REST-APIs, authentifizierte Endpoints, Webhooks, Service-Tests."
         ),
         category=ToolCategory.SEARCH,
         parameters=[
             ToolParameter(
                 name="url",
                 type="string",
-                description="Ziel-URL",
+                description="Ziel-URL (HTTP oder HTTPS)",
                 required=True,
             ),
             ToolParameter(
                 name="method",
                 type="string",
-                description="HTTP-Methode: GET, POST, PUT, DELETE, PATCH (default: GET)",
+                description="HTTP-Methode: GET, POST, PUT, DELETE, PATCH, HEAD, OPTIONS (default: GET)",
                 required=False,
                 default="GET",
                 enum=["GET", "POST", "PUT", "DELETE", "PATCH", "HEAD", "OPTIONS"],
@@ -526,19 +597,24 @@ def register_internal_fetch_tools(registry: ToolRegistry) -> int:
             ToolParameter(
                 name="body",
                 type="string",
-                description="Request-Body (für POST/PUT/PATCH). JSON wird automatisch erkannt.",
+                description="Request-Body für POST/PUT/PATCH. JSON-Objekte werden automatisch erkannt.",
                 required=False,
             ),
             ToolParameter(
                 name="headers",
                 type="string",
-                description="Custom Headers als JSON ({\"Header\": \"Value\"}) oder zeilenweise (Header: Value)",
+                description=(
+                    "Benutzerdefinierte HTTP-Header. "
+                    "Format 1 (JSON): {\"Authorization\": \"Bearer xyz\", \"X-API-Key\": \"abc123\"} "
+                    "Format 2 (Zeilen): Authorization: Bearer xyz\\nX-API-Key: abc123 "
+                    "Beliebige Header erlaubt: Authorization, Accept, X-Custom-*, Cookie, etc."
+                ),
                 required=False,
             ),
             ToolParameter(
                 name="content_type",
                 type="string",
-                description="Content-Type für Body (default: auto-detect, application/json für JSON)",
+                description="Content-Type Header für den Body (default: auto-detect basierend auf Body-Format)",
                 required=False,
             ),
         ],
