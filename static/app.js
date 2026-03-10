@@ -1026,6 +1026,52 @@ async function sendMessage() {
   }
 }
 
+/**
+ * Sendet eine interne Chat-Nachricht (z.B. für Continue nach Bestätigung)
+ * Zeigt die Nachricht nicht im Chat an, wenn sie mit [ beginnt.
+ */
+async function sendChatInternal(message) {
+  const activeChat = chatManager.getActive();
+  if (!activeChat) return;
+
+  // Verhindere Doppel-Senden wenn bereits am Streamen
+  if (activeChat.streamingState || _chatAbortController) {
+    console.log('[sendChatInternal] Bereits am Streamen, überspringe');
+    return;
+  }
+
+  // Nur interne Nachrichten ([CONTINUE], etc.) nicht anzeigen
+  if (!message.startsWith('[')) {
+    appendMessage('user', message);
+    updateActiveChatTitle(message);
+  }
+
+  const ac = new AbortController();
+  activeChat.streamingState = {
+    abortController: ac,
+    statusBar: null,
+    startTime: null,
+    liveTokenCount: 0,
+    timerInterval: null,
+  };
+  _chatAbortController = ac;
+  _setStreamingMode(true);
+
+  try {
+    await sendAgentChat(message, ac.signal, activeChat);
+  } catch (e) {
+    if (e.name !== 'AbortError') {
+      appendMessageToPane(activeChat.pane, 'error', 'Fehler: ' + e.message);
+    }
+  } finally {
+    activeChat.streamingState = null;
+    if (chatManager.activeId === activeChat.id) {
+      _chatAbortController = null;
+      _setStreamingMode(false);
+    }
+  }
+}
+
 async function sendAgentChat(message, abortSignal, chat) {
   const ctx = chat.context || state.context;
   const payload = {
@@ -1614,6 +1660,16 @@ async function confirmOperation(confirmed) {
 
     hideConfirmationPanel();
     switchRightPanel('tools-panel');
+
+    // Automatisch weitermachen wenn noch Arbeit offen ist
+    // Das Backend signalisiert dies mit continue: true
+    if (data.continue) {
+      // Kurze Pause für visuelle Feedback, dann weitermachen
+      setTimeout(() => {
+        // Sende eine unsichtbare "continue" Anfrage
+        sendChatInternal('[CONTINUE]');
+      }, 500);
+    }
   } catch (e) {
     appendMessage('error', 'Bestätigung fehlgeschlagen: ' + e.message);
   }

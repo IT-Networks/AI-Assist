@@ -233,6 +233,8 @@ async def confirm_operation(
     Bestätigt oder lehnt eine ausstehende Schreib-Operation ab.
 
     Wird nach einem confirm_required Event aufgerufen.
+    Aktualisiert die Message-Historie damit das LLM bei der nächsten
+    Anfrage weiß, dass die Operation ausgeführt wurde.
 
     Args:
         session_id: Session-ID
@@ -253,35 +255,69 @@ async def confirm_operation(
         )
 
     tool_call = state.pending_confirmation
+    confirmation_data = tool_call.result.confirmation_data if tool_call.result else {}
+    file_path = confirmation_data.get("path", "unbekannt")
 
     if request.confirmed:
         # Operation ausführen
         try:
-            result = await orchestrator._execute_confirmed_operation(
-                tool_call.result.confirmation_data
-            )
+            result = await orchestrator._execute_confirmed_operation(confirmation_data)
+
+            # Message-Historie aktualisieren damit LLM weiß was passiert ist
+            if result.success:
+                result_text = f"✓ Datei erfolgreich geschrieben: {file_path}"
+            else:
+                result_text = f"✗ Fehler beim Schreiben: {result.error}"
+
+            # Tool-Result zur Message-Historie hinzufügen
+            state.messages_history.append({
+                "role": "tool",
+                "tool_call_id": tool_call.id,
+                "content": result_text
+            })
+
+            # Tool-Call als abgeschlossen markieren
+            tool_call.result.data = result_text
+            tool_call.result.requires_confirmation = False
+            tool_call.confirmed = True
+            state.tool_calls_history.append(tool_call)
+
             state.pending_confirmation = None
 
             if result.success:
                 return {
                     "status": "executed",
                     "message": f"Operation '{tool_call.name}' ausgeführt",
-                    "data": result.data
+                    "data": result.data,
+                    "continue": True  # Signal ans Frontend: weitere Anfrage starten
                 }
             else:
                 return {
                     "status": "error",
-                    "message": f"Operation fehlgeschlagen: {result.error}"
+                    "message": f"Operation fehlgeschlagen: {result.error}",
+                    "continue": True
                 }
         except Exception as e:
             state.pending_confirmation = None
             raise HTTPException(status_code=500, detail=str(e))
     else:
-        # Operation abbrechen
+        # Operation abbrechen - auch dies in History dokumentieren
+        result_text = f"⚠️ Operation abgebrochen: {file_path}"
+        state.messages_history.append({
+            "role": "tool",
+            "tool_call_id": tool_call.id,
+            "content": result_text
+        })
+
+        tool_call.result.data = result_text
+        tool_call.confirmed = False
+        state.tool_calls_history.append(tool_call)
+
         state.pending_confirmation = None
         return {
             "status": "cancelled",
-            "message": f"Operation '{tool_call.name}' abgebrochen"
+            "message": f"Operation '{tool_call.name}' abgebrochen",
+            "continue": True  # Auch bei Abbruch kann weitergemacht werden
         }
 
 

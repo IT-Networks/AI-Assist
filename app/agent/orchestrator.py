@@ -513,6 +513,17 @@ class AgentOrchestrator:
             forced_capability = mcp_match.group(1)
             user_message = mcp_match.group(2).strip()
             print(f"[agent] Forced MCP capability: {forced_capability}")
+
+        # ── Continue-Handling (nach Bestätigung) ───────────────────────────────
+        # [CONTINUE] wird nach Schreibbestätigung gesendet um weitere Tools auszuführen
+        is_continue = user_message.strip() == "[CONTINUE]"
+        if is_continue:
+            print("[agent] Continue nach Bestätigung erkannt")
+            # Ersetze durch System-Hinweis statt User-Message
+            user_message = (
+                "Die letzte Datei-Operation wurde bestätigt und ausgeführt. "
+                "Setze die Arbeit fort und führe die verbleibenden Schritte aus."
+            )
         # ─────────────────────────────────────────────────────────────────────
 
         # Schreib-Ops: In Planungsphase nur erlaubt wenn Plan bereits genehmigt
@@ -1117,6 +1128,14 @@ class AgentOrchestrator:
                     if result.requires_confirmation and state.mode == AgentMode.WRITE_WITH_CONFIRM:
                         state.pending_confirmation = tool_call
 
+                        # Tool-Card auf "Wartet auf Bestätigung" setzen
+                        yield AgentEvent(AgentEventType.TOOL_RESULT, {
+                            "id": tool_call.id,
+                            "name": tool_call.name,
+                            "success": True,
+                            "data": f"⏳ Wartet auf Bestätigung: {result.confirmation_data.get('path', '')}"
+                        })
+
                         yield AgentEvent(AgentEventType.CONFIRM_REQUIRED, {
                             "id": tool_call.id,
                             "name": tool_call.name,
@@ -1135,20 +1154,59 @@ class AgentOrchestrator:
                             if exec_result.success:
                                 yield AgentEvent(AgentEventType.CONFIRMED, {
                                     "id": tool_call.id,
-                                    "message": "Operation ausgeführt"
+                                    "message": f"✓ Datei geschrieben: {result.confirmation_data.get('path', '')}"
                                 })
+                                # Tool-Result aktualisieren auf Erfolg
+                                result = ToolResult(
+                                    success=True,
+                                    data=f"Datei erfolgreich geschrieben: {result.confirmation_data.get('path', '')}"
+                                )
+                                tool_call.result = result
                                 state.context_items.append(
                                     f"[{tool_call.name}] Ausgeführt: {result.confirmation_data.get('path', '')}"
                                 )
+                                # WICHTIG: Finales TOOL_RESULT senden um UI zu aktualisieren
+                                yield AgentEvent(AgentEventType.TOOL_RESULT, {
+                                    "id": tool_call.id,
+                                    "name": tool_call.name,
+                                    "success": True,
+                                    "data": f"✓ Datei geschrieben: {result.confirmation_data.get('path', '')}"
+                                })
                             else:
                                 yield AgentEvent(AgentEventType.ERROR, {
                                     "id": tool_call.id,
                                     "error": exec_result.error
                                 })
+                                # Tool-Result aktualisieren auf Fehler
+                                result = ToolResult(
+                                    success=False,
+                                    error=exec_result.error
+                                )
+                                tool_call.result = result
+                                # Finales TOOL_RESULT für UI
+                                yield AgentEvent(AgentEventType.TOOL_RESULT, {
+                                    "id": tool_call.id,
+                                    "name": tool_call.name,
+                                    "success": False,
+                                    "data": f"❌ Fehler: {exec_result.error}"
+                                })
                         else:
                             yield AgentEvent(AgentEventType.CANCELLED, {
                                 "id": tool_call.id,
                                 "message": "Operation abgebrochen"
+                            })
+                            # Bei Ablehnung: Tool als abgebrochen markieren
+                            result = ToolResult(
+                                success=False,
+                                data="Operation vom Benutzer abgebrochen"
+                            )
+                            tool_call.result = result
+                            # Finales TOOL_RESULT für UI
+                            yield AgentEvent(AgentEventType.TOOL_RESULT, {
+                                "id": tool_call.id,
+                                "name": tool_call.name,
+                                "success": False,
+                                "data": "⚠️ Operation abgebrochen"
                             })
 
                         state.pending_confirmation = None
