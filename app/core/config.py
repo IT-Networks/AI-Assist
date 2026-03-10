@@ -558,6 +558,39 @@ class JenkinsConfig(BaseModel):
 # ══════════════════════════════════════════════════════════════════════════════
 
 # ══════════════════════════════════════════════════════════════════════════════
+# MCP (Model Context Protocol) - Lokale Implementation
+# ══════════════════════════════════════════════════════════════════════════════
+
+class MCPServerEntry(BaseModel):
+    """Ein lokaler MCP-Server-Eintrag."""
+    id: str = ""
+    name: str = ""
+    description: str = ""
+    command: str = ""                  # Ausführbares Kommando (z.B. "python", "node")
+    args: List[str] = []               # Argumente für das Kommando
+    env: Dict[str, str] = {}           # Zusätzliche Umgebungsvariablen
+    working_dir: str = ""              # Arbeitsverzeichnis (leer = aktuelles)
+    timeout_seconds: int = 30          # Timeout pro Request
+    auto_start: bool = True            # Server beim App-Start starten
+
+
+class MCPConfig(BaseModel):
+    """MCP (Model Context Protocol) Konfiguration - Lokale Implementation."""
+    enabled: bool = False
+    servers: List[MCPServerEntry] = []
+    # Sequential Thinking (lokale Implementation)
+    sequential_thinking_enabled: bool = True
+    max_thinking_steps: int = 10       # Max. Denkschritte pro Anfrage
+    thinking_timeout_seconds: int = 120
+    # Wann Sequential Thinking automatisch aktivieren
+    auto_activate_on_error: bool = True     # Bei komplexen Fehlern
+    auto_activate_on_planning: bool = True  # Bei Planungsaufgaben
+    min_complexity_score: float = 0.7       # Komplexitätsschwelle (0.0-1.0)
+    # Debug
+    debug_logging: bool = False
+
+
+# ══════════════════════════════════════════════════════════════════════════════
 # Docker Sandbox (Sichere Code-Ausführung)
 # ══════════════════════════════════════════════════════════════════════════════
 
@@ -652,6 +685,7 @@ class Settings(BaseModel):
     github: GitHubConfig = Field(default_factory=GitHubConfig)
     internal_fetch: InternalFetchConfig = Field(default_factory=InternalFetchConfig)
     docker_sandbox: DockerSandboxConfig = Field(default_factory=DockerSandboxConfig)
+    mcp: MCPConfig = Field(default_factory=MCPConfig)
 
     def apply_env_overrides(self) -> "Settings":
         if os.getenv("LLM_BASE_URL"):

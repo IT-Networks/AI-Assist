@@ -1,0 +1,529 @@
+"""
+Sequential Thinking - Lokale Implementation für strukturiertes Denken.
+
+Implementiert das Sequential-Thinking-Pattern lokal, ohne externen MCP-Server.
+Wird für komplexe Planungsaufgaben und Fehleranalysen verwendet.
+"""
+
+import asyncio
+import logging
+import re
+from dataclasses import dataclass, field
+from datetime import datetime
+from enum import Enum
+from typing import Any, Dict, List, Optional, Callable
+
+from app.core.config import settings
+
+logger = logging.getLogger(__name__)
+
+
+class ThinkingType(Enum):
+    """Typ des Denkschritts."""
+    ANALYSIS = "analysis"           # Problemanalyse
+    HYPOTHESIS = "hypothesis"       # Hypothese aufstellen
+    VERIFICATION = "verification"   # Hypothese prüfen
+    PLANNING = "planning"           # Schritte planen
+    DECISION = "decision"           # Entscheidung treffen
+    REVISION = "revision"           # Überarbeitung
+    CONCLUSION = "conclusion"       # Schlussfolgerung
+
+
+@dataclass
+class ThinkingStep:
+    """Ein einzelner Denkschritt."""
+    step_number: int
+    type: ThinkingType
+    title: str
+    content: str
+    timestamp: str = field(default_factory=lambda: datetime.utcnow().isoformat())
+    confidence: float = 0.5         # 0.0 - 1.0
+    dependencies: List[int] = field(default_factory=list)  # Abhängige Schritte
+    metadata: Dict[str, Any] = field(default_factory=dict)
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "step_number": self.step_number,
+            "type": self.type.value,
+            "title": self.title,
+            "content": self.content,
+            "timestamp": self.timestamp,
+            "confidence": self.confidence,
+            "dependencies": self.dependencies,
+            "metadata": self.metadata
+        }
+
+
+@dataclass
+class ThinkingSession:
+    """Eine komplette Thinking-Session."""
+    session_id: str
+    query: str
+    steps: List[ThinkingStep] = field(default_factory=list)
+    started_at: str = field(default_factory=lambda: datetime.utcnow().isoformat())
+    completed_at: Optional[str] = None
+    final_conclusion: Optional[str] = None
+    total_branches: int = 0
+
+    @property
+    def is_complete(self) -> bool:
+        return self.completed_at is not None
+
+    @property
+    def current_step(self) -> int:
+        return len(self.steps)
+
+    def add_step(self, step: ThinkingStep) -> None:
+        self.steps.append(step)
+
+    def get_context(self, max_steps: int = 5) -> str:
+        """Gibt den Kontext der letzten Schritte zurück."""
+        recent = self.steps[-max_steps:] if len(self.steps) > max_steps else self.steps
+        lines = []
+        for step in recent:
+            lines.append(f"[Schritt {step.step_number}] {step.type.value}: {step.title}")
+            lines.append(f"  {step.content[:200]}...")
+        return "\n".join(lines)
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "session_id": self.session_id,
+            "query": self.query,
+            "steps": [s.to_dict() for s in self.steps],
+            "started_at": self.started_at,
+            "completed_at": self.completed_at,
+            "final_conclusion": self.final_conclusion,
+            "total_branches": self.total_branches
+        }
+
+
+class SequentialThinking:
+    """
+    Lokale Implementation von Sequential Thinking.
+
+    Ermöglicht strukturiertes, schrittweises Denken für:
+    - Komplexe Fehleranalysen
+    - Planungsaufgaben
+    - Multi-Step Problemlösung
+
+    Funktioniert ohne externen MCP-Server.
+    """
+
+    def __init__(self, llm_callback: Optional[Callable] = None):
+        """
+        Args:
+            llm_callback: Optional - Callback für LLM-Aufrufe.
+                          Signatur: async def callback(prompt: str) -> str
+        """
+        self.llm_callback = llm_callback
+        self._sessions: Dict[str, ThinkingSession] = {}
+        self._current_session: Optional[ThinkingSession] = None
+
+    @property
+    def is_enabled(self) -> bool:
+        """Prüft ob Sequential Thinking aktiviert ist."""
+        return settings.mcp.sequential_thinking_enabled
+
+    @property
+    def max_steps(self) -> int:
+        return settings.mcp.max_thinking_steps
+
+    def create_session(self, query: str) -> ThinkingSession:
+        """Erstellt eine neue Thinking-Session."""
+        import uuid
+        session_id = str(uuid.uuid4())[:12]
+        session = ThinkingSession(session_id=session_id, query=query)
+        self._sessions[session_id] = session
+        self._current_session = session
+
+        if settings.mcp.debug_logging:
+            logger.debug(f"[SeqThink] New session: {session_id} for query: {query[:50]}...")
+
+        return session
+
+    def get_session(self, session_id: str) -> Optional[ThinkingSession]:
+        """Gibt eine Session zurück."""
+        return self._sessions.get(session_id)
+
+    def add_step(
+        self,
+        session_id: str,
+        step_type: ThinkingType,
+        title: str,
+        content: str,
+        confidence: float = 0.5,
+        dependencies: List[int] = None
+    ) -> ThinkingStep:
+        """Fügt einen Denkschritt zu einer Session hinzu."""
+        session = self._sessions.get(session_id)
+        if not session:
+            raise ValueError(f"Session not found: {session_id}")
+
+        if session.current_step >= self.max_steps:
+            raise ValueError(f"Max steps ({self.max_steps}) reached")
+
+        step = ThinkingStep(
+            step_number=session.current_step + 1,
+            type=step_type,
+            title=title,
+            content=content,
+            confidence=confidence,
+            dependencies=dependencies or []
+        )
+
+        session.add_step(step)
+
+        if settings.mcp.debug_logging:
+            logger.debug(f"[SeqThink:{session_id}] Step {step.step_number}: {step_type.value} - {title}")
+
+        return step
+
+    def complete_session(self, session_id: str, conclusion: str) -> ThinkingSession:
+        """Schließt eine Session mit einer Schlussfolgerung ab."""
+        session = self._sessions.get(session_id)
+        if not session:
+            raise ValueError(f"Session not found: {session_id}")
+
+        session.completed_at = datetime.utcnow().isoformat()
+        session.final_conclusion = conclusion
+
+        # Füge Conclusion als letzten Schritt hinzu
+        self.add_step(
+            session_id,
+            ThinkingType.CONCLUSION,
+            "Schlussfolgerung",
+            conclusion,
+            confidence=0.8
+        )
+
+        if settings.mcp.debug_logging:
+            logger.debug(f"[SeqThink:{session_id}] Completed with {len(session.steps)} steps")
+
+        return session
+
+    async def think(
+        self,
+        query: str,
+        context: Optional[str] = None,
+        max_steps: Optional[int] = None
+    ) -> ThinkingSession:
+        """
+        Führt strukturiertes Denken durch.
+
+        Args:
+            query: Die zu analysierende Frage/Problem
+            context: Optional zusätzlicher Kontext
+            max_steps: Optional - Override für max_steps
+
+        Returns:
+            ThinkingSession mit allen Schritten
+        """
+        if not self.is_enabled:
+            # Fallback: Einfache Session ohne LLM
+            session = self.create_session(query)
+            self.add_step(
+                session.session_id,
+                ThinkingType.ANALYSIS,
+                "Direkte Analyse",
+                f"Sequential Thinking deaktiviert. Query: {query}",
+                confidence=0.5
+            )
+            return self.complete_session(session.session_id, "Sequential Thinking ist deaktiviert.")
+
+        session = self.create_session(query)
+        effective_max = max_steps or self.max_steps
+
+        try:
+            # Schritt 1: Problemanalyse
+            self.add_step(
+                session.session_id,
+                ThinkingType.ANALYSIS,
+                "Problemanalyse",
+                f"Analysiere: {query}\n\nKontext: {context or 'Kein zusätzlicher Kontext'}",
+                confidence=0.6
+            )
+
+            # Wenn LLM-Callback verfügbar, nutze ihn für weitere Schritte
+            if self.llm_callback:
+                await self._think_with_llm(session, effective_max)
+            else:
+                # Ohne LLM: Grundlegende Strukturierung
+                self._think_without_llm(session, query)
+
+        except asyncio.TimeoutError:
+            self.add_step(
+                session.session_id,
+                ThinkingType.CONCLUSION,
+                "Timeout",
+                "Thinking-Prozess hat Timeout erreicht.",
+                confidence=0.3
+            )
+            session.completed_at = datetime.utcnow().isoformat()
+            session.final_conclusion = "Prozess durch Timeout beendet."
+
+        except Exception as e:
+            logger.error(f"[SeqThink] Error in think(): {e}")
+            self.add_step(
+                session.session_id,
+                ThinkingType.CONCLUSION,
+                "Fehler",
+                f"Fehler im Thinking-Prozess: {str(e)}",
+                confidence=0.2
+            )
+            session.completed_at = datetime.utcnow().isoformat()
+            session.final_conclusion = f"Fehler: {str(e)}"
+
+        return session
+
+    async def _think_with_llm(self, session: ThinkingSession, max_steps: int) -> None:
+        """Thinking mit LLM-Unterstützung."""
+        thinking_prompt = self._build_thinking_prompt(session)
+
+        for step_num in range(2, max_steps + 1):  # Step 1 ist bereits Analyse
+            if session.is_complete:
+                break
+
+            # LLM für nächsten Schritt befragen
+            response = await asyncio.wait_for(
+                self.llm_callback(thinking_prompt),
+                timeout=settings.mcp.thinking_timeout_seconds
+            )
+
+            # Response parsen
+            step_type, title, content, should_continue = self._parse_thinking_response(response)
+
+            self.add_step(
+                session.session_id,
+                step_type,
+                title,
+                content,
+                confidence=0.7
+            )
+
+            if not should_continue or step_type == ThinkingType.CONCLUSION:
+                session.completed_at = datetime.utcnow().isoformat()
+                session.final_conclusion = content
+                break
+
+            # Prompt für nächsten Schritt aktualisieren
+            thinking_prompt = self._build_continuation_prompt(session)
+
+    def _think_without_llm(self, session: ThinkingSession, query: str) -> None:
+        """Grundlegende Strukturierung ohne LLM."""
+        # Hypothese
+        self.add_step(
+            session.session_id,
+            ThinkingType.HYPOTHESIS,
+            "Initiale Hypothese",
+            f"Basierend auf der Anfrage '{query}' werden mögliche Ansätze identifiziert.",
+            confidence=0.5
+        )
+
+        # Planung
+        self.add_step(
+            session.session_id,
+            ThinkingType.PLANNING,
+            "Lösungsansatz",
+            "Empfohlene Vorgehensweise:\n1. Kontext analysieren\n2. Relevante Informationen sammeln\n3. Lösung entwickeln",
+            confidence=0.5
+        )
+
+        # Conclusion
+        self.complete_session(
+            session.session_id,
+            "Strukturierte Analyse abgeschlossen. Für detailliertere Ergebnisse wird LLM-Integration empfohlen."
+        )
+
+    def _build_thinking_prompt(self, session: ThinkingSession) -> str:
+        """Erstellt den Prompt für den Thinking-Prozess."""
+        return f"""Du bist ein strukturierter Denker. Analysiere das folgende Problem schrittweise.
+
+PROBLEM:
+{session.query}
+
+BISHERIGE SCHRITTE:
+{session.get_context()}
+
+Dein nächster Denkschritt sollte einer dieser Typen sein:
+- HYPOTHESIS: Eine Vermutung aufstellen
+- VERIFICATION: Eine Hypothese prüfen
+- PLANNING: Konkrete Schritte planen
+- DECISION: Eine Entscheidung treffen
+- REVISION: Bisheriges überdenken
+- CONCLUSION: Finale Schlussfolgerung (wenn fertig)
+
+Antworte im Format:
+TYPE: [typ]
+TITLE: [kurzer Titel]
+CONTENT: [Inhalt des Schritts]
+CONTINUE: [yes/no]
+"""
+
+    def _build_continuation_prompt(self, session: ThinkingSession) -> str:
+        """Erstellt den Prompt für die Fortsetzung."""
+        return f"""Setze die strukturierte Analyse fort.
+
+URSPRÜNGLICHES PROBLEM:
+{session.query}
+
+BISHERIGE SCHRITTE:
+{session.get_context()}
+
+Was ist der nächste logische Denkschritt?
+
+Antworte im Format:
+TYPE: [typ]
+TITLE: [kurzer Titel]
+CONTENT: [Inhalt des Schritts]
+CONTINUE: [yes/no]
+"""
+
+    def _parse_thinking_response(self, response: str) -> tuple[ThinkingType, str, str, bool]:
+        """Parst die LLM-Antwort."""
+        # Defaults
+        step_type = ThinkingType.ANALYSIS
+        title = "Denkschritt"
+        content = response
+        should_continue = True
+
+        # TYPE extrahieren
+        type_match = re.search(r'TYPE:\s*(\w+)', response, re.IGNORECASE)
+        if type_match:
+            type_str = type_match.group(1).upper()
+            type_mapping = {
+                'ANALYSIS': ThinkingType.ANALYSIS,
+                'HYPOTHESIS': ThinkingType.HYPOTHESIS,
+                'VERIFICATION': ThinkingType.VERIFICATION,
+                'PLANNING': ThinkingType.PLANNING,
+                'DECISION': ThinkingType.DECISION,
+                'REVISION': ThinkingType.REVISION,
+                'CONCLUSION': ThinkingType.CONCLUSION
+            }
+            step_type = type_mapping.get(type_str, ThinkingType.ANALYSIS)
+
+        # TITLE extrahieren
+        title_match = re.search(r'TITLE:\s*(.+?)(?:\n|CONTENT:|$)', response, re.IGNORECASE)
+        if title_match:
+            title = title_match.group(1).strip()
+
+        # CONTENT extrahieren
+        content_match = re.search(r'CONTENT:\s*(.+?)(?:\nCONTINUE:|$)', response, re.IGNORECASE | re.DOTALL)
+        if content_match:
+            content = content_match.group(1).strip()
+
+        # CONTINUE extrahieren
+        continue_match = re.search(r'CONTINUE:\s*(yes|no)', response, re.IGNORECASE)
+        if continue_match:
+            should_continue = continue_match.group(1).lower() == 'yes'
+
+        return step_type, title, content, should_continue
+
+    def should_auto_activate(self, query: str, is_error: bool = False) -> bool:
+        """
+        Prüft ob Sequential Thinking automatisch aktiviert werden soll.
+
+        Args:
+            query: Die Benutzeranfrage
+            is_error: True wenn es sich um eine Fehleranalyse handelt
+        """
+        if not self.is_enabled:
+            return False
+
+        # Bei Fehlern
+        if is_error and settings.mcp.auto_activate_on_error:
+            return True
+
+        # Bei Planungsaufgaben
+        if settings.mcp.auto_activate_on_planning:
+            planning_keywords = [
+                'plan', 'design', 'architect', 'strateg',
+                'implementier', 'develop', 'build',
+                'analysier', 'evaluat', 'compar'
+            ]
+            query_lower = query.lower()
+            if any(kw in query_lower for kw in planning_keywords):
+                return True
+
+        # Komplexitätsprüfung
+        complexity = self.estimate_complexity(query)
+        if complexity >= settings.mcp.min_complexity_score:
+            return True
+
+        return False
+
+    def estimate_complexity(self, query: str) -> float:
+        """
+        Schätzt die Komplexität einer Anfrage (0.0 - 1.0).
+
+        Faktoren:
+        - Länge der Anfrage
+        - Anzahl technischer Begriffe
+        - Vorhandensein von Multi-Step-Indikatoren
+        """
+        score = 0.0
+
+        # Länge (normalisiert auf 0-0.3)
+        length_score = min(len(query) / 500, 0.3)
+        score += length_score
+
+        # Technische Begriffe (0-0.3)
+        tech_terms = [
+            'error', 'exception', 'bug', 'debug', 'trace',
+            'implement', 'refactor', 'optimize', 'architect',
+            'integrate', 'migrate', 'deploy', 'configure',
+            'fehler', 'problem', 'analysier', 'komplex'
+        ]
+        query_lower = query.lower()
+        tech_count = sum(1 for term in tech_terms if term in query_lower)
+        tech_score = min(tech_count * 0.1, 0.3)
+        score += tech_score
+
+        # Multi-Step-Indikatoren (0-0.4)
+        multi_step_patterns = [
+            r'\d+\.\s',           # Nummerierte Liste
+            r'first.*then',      # Sequenz
+            r'step\s*\d',        # Schritte
+            r'and\s+then',       # Verkettung
+            r'after\s+that',     # Sequenz
+            r'zunächst.*dann',   # Deutsch
+            r'erstens.*zweitens' # Deutsch
+        ]
+        multi_count = sum(1 for p in multi_step_patterns if re.search(p, query_lower))
+        multi_score = min(multi_count * 0.15, 0.4)
+        score += multi_score
+
+        return min(score, 1.0)
+
+    def format_session_for_context(self, session: ThinkingSession) -> str:
+        """Formatiert eine Session für den Agent-Kontext."""
+        lines = [
+            "=== SEQUENTIAL THINKING ===",
+            f"Session: {session.session_id}",
+            f"Query: {session.query}",
+            ""
+        ]
+
+        for step in session.steps:
+            lines.append(f"[{step.step_number}] {step.type.value.upper()}: {step.title}")
+            lines.append(f"    {step.content}")
+            lines.append("")
+
+        if session.final_conclusion:
+            lines.append("=== CONCLUSION ===")
+            lines.append(session.final_conclusion)
+
+        return "\n".join(lines)
+
+
+# Singleton
+_sequential_thinking: Optional[SequentialThinking] = None
+
+
+def get_sequential_thinking(llm_callback: Optional[Callable] = None) -> SequentialThinking:
+    """Gibt die Singleton-Instanz zurück."""
+    global _sequential_thinking
+    if _sequential_thinking is None:
+        _sequential_thinking = SequentialThinking(llm_callback)
+    elif llm_callback and _sequential_thinking.llm_callback is None:
+        _sequential_thinking.llm_callback = llm_callback
+    return _sequential_thinking

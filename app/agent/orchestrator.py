@@ -21,6 +21,7 @@ from typing import Any, AsyncGenerator, Dict, List, Optional, Set
 from app.agent.entity_tracker import EntityTracker
 from app.agent.tools import ToolRegistry, ToolResult, get_tool_registry
 from app.core.config import settings
+from app.mcp.tool_bridge import get_tool_bridge, MCPToolBridge
 from app.core.token_budget import TokenBudget, create_budget_from_config
 from app.core.conversation_summarizer import get_summarizer
 from app.services.llm_client import SYSTEM_PROMPT, _get_http_client, _RETRY_DELAYS, _is_retryable
@@ -336,6 +337,8 @@ class AgentOrchestrator:
         # Token Management Components
         self.memory_store = get_memory_store()
         self.summarizer = get_summarizer()
+        # MCP Tool Bridge (für Sequential Thinking und externe MCP-Server)
+        self._mcp_bridge: Optional[MCPToolBridge] = None
 
     def _get_state(self, session_id: str) -> AgentState:
         """Holt oder erstellt den State für eine Session. Stellt bei Bedarf vom Disk wieder her."""
@@ -534,6 +537,18 @@ class AgentOrchestrator:
 
         # Tool-Definitionen
         tool_schemas = self.tools.get_openai_schemas(include_write_ops=include_write_ops)
+
+        # MCP-Tools hinzufügen (Sequential Thinking, etc.)
+        if settings.mcp.sequential_thinking_enabled or settings.mcp.enabled:
+            try:
+                if self._mcp_bridge is None:
+                    self._mcp_bridge = get_tool_bridge()
+                mcp_tools = self._mcp_bridge.get_tool_definitions()
+                tool_schemas.extend(mcp_tools)
+                if mcp_tools:
+                    print(f"[agent] MCP tools added: {len(mcp_tools)}")
+            except Exception as e:
+                print(f"[agent] MCP bridge initialization failed: {e}")
 
         # Agent-Instruktionen
         agent_instructions = self._build_agent_instructions(state.mode, state.plan_approved)
@@ -983,11 +998,26 @@ class AgentOrchestrator:
                         continue  # Nächsten Tool-Call verarbeiten
                     # ────────────────────────────────────────────────────────
 
-                    # Tool ausführen
-                    result = await self.tools.execute(
-                        tool_call.name,
-                        **tool_call.arguments
-                    )
+                    # Tool ausführen - MCP-Tools speziell behandeln
+                    if tool_call.name.startswith("mcp_") or tool_call.name in ("sequential_thinking", "seq_think"):
+                        # MCP-Tool über Bridge ausführen
+                        if self._mcp_bridge is None:
+                            self._mcp_bridge = get_tool_bridge()
+                        mcp_result = await self._mcp_bridge.call_tool(
+                            tool_call.name,
+                            tool_call.arguments
+                        )
+                        result = ToolResult(
+                            success=mcp_result.get("success", False),
+                            data=mcp_result.get("result") or mcp_result.get("formatted_output") or mcp_result,
+                            error=mcp_result.get("error")
+                        )
+                    else:
+                        # Standard-Tool über ToolRegistry ausführen
+                        result = await self.tools.execute(
+                            tool_call.name,
+                            **tool_call.arguments
+                        )
                     tool_call.result = result
                     has_used_tools = True
                     current_tool_calls_for_messages.append(tc)

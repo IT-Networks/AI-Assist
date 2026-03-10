@@ -159,3 +159,27 @@ database:
   # Für JDBC (jaydebeapi)
   jdbc_driver_path: ""                     # Pfad zur db2jcc4.jar
   jdbc_driver_class: "com.ibm.db2.jcc.DB2Driver"
+
+# ═══════════════════════════════════════════════════════════════════
+# MCP (Model Context Protocol) - Lokale Implementation
+# ═══════════════════════════════════════════════════════════════════
+mcp:
+  enabled: false                           # true um MCP zu aktivieren
+  servers: []                              # Lokale MCP-Server (stdio-basiert)
+    # Beispiel:
+    # - id: "seq-thinking"
+    #   name: "Sequential Thinking"
+    #   description: "Strukturiertes Denken für komplexe Aufgaben"
+    #   command: "python"
+    #   args: ["-m", "mcp_server_seq"]
+    #   timeout_seconds: 60
+    #   auto_start: true
+  # Sequential Thinking (lokale Implementation ohne externen Server)
+  sequential_thinking_enabled: true        # Lokale Seq-Thinking Implementation
+  max_thinking_steps: 10                   # Max. Denkschritte pro Anfrage
+  thinking_timeout_seconds: 120
+  # Automatische Aktivierung
+  auto_activate_on_error: true             # Bei komplexen Fehlern
+  auto_activate_on_planning: true          # Bei Planungsaufgaben
+  min_complexity_score: 0.7                # Schwelle für Auto-Aktivierung (0.0-1.0)
+  debug_logging: false
