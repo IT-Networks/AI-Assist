@@ -3,40 +3,12 @@ Agent-Tools für das Test-Tool (HTTP-Service-Ausführung + lokale Ausführung).
 """
 
 import json
-from typing import Any, Optional
+from typing import Any
 
 import httpx
 
 from app.agent.tools import Tool, ToolCategory, ToolParameter, ToolResult, ToolRegistry
-
-# ══════════════════════════════════════════════════════════════════════════════
-# Shared HTTP Client für Connection-Pooling (Performance-Optimierung)
-# ══════════════════════════════════════════════════════════════════════════════
-_testtool_http_client: Optional[httpx.AsyncClient] = None
-
-
-def _get_testtool_client(timeout: int = 30, verify_ssl: bool = True) -> httpx.AsyncClient:
-    """Gibt den shared TestTool HTTP-Client zurück (Lazy Init)."""
-    global _testtool_http_client
-    if _testtool_http_client is None:
-        _testtool_http_client = httpx.AsyncClient(
-            timeout=timeout,
-            verify=verify_ssl,
-            limits=httpx.Limits(
-                max_connections=10,
-                max_keepalive_connections=5,
-                keepalive_expiry=30.0
-            )
-        )
-    return _testtool_http_client
-
-
-async def close_testtool_client():
-    """Schließt den shared TestTool HTTP-Client (für Shutdown)."""
-    global _testtool_http_client
-    if _testtool_http_client is not None:
-        await _testtool_http_client.aclose()
-        _testtool_http_client = None
+from app.core.http_client import get_testtool_client
 
 
 def register_testtool_tools(registry: ToolRegistry) -> int:
@@ -143,7 +115,7 @@ def register_testtool_tools(registry: ToolRegistry) -> int:
         try:
             # SSL-Verifizierung aus Config (nicht hardcoded False)
             verify_ssl = getattr(settings.test_tool, 'verify_ssl', True)
-            client = _get_testtool_client(timeout, verify_ssl)
+            client = get_testtool_client(verify_ssl, timeout)
             resp = await client.request(
                 method=svc.method,
                 url=url,

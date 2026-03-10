@@ -1,10 +1,70 @@
 import os
 from pathlib import Path
 from typing import Dict, List, Optional
+from urllib.parse import urlparse, urlunparse, quote
 
 import yaml
 from pydantic import BaseModel, Field, field_validator
 from pydantic_settings import BaseSettings
+
+
+def build_proxy_url(
+    proxy_url: str,
+    proxy_username: str = "",
+    proxy_password: str = ""
+) -> Optional[str]:
+    """
+    Baut eine vollständige Proxy-URL inkl. Auth.
+
+    Akzeptiert verschiedene Formate:
+    - proxy.intern:8080           → http://proxy.intern:8080
+    - http://proxy.intern:8080    → http://proxy.intern:8080
+    - https://proxy.intern:8080   → https://proxy.intern:8080
+
+    Mit Username/Password:
+    - proxy.intern:8080 + user + pass → http://user:pass@proxy.intern:8080
+
+    Args:
+        proxy_url: Proxy-URL (mit oder ohne Schema)
+        proxy_username: Optional - Benutzername für Proxy-Auth
+        proxy_password: Optional - Passwort für Proxy-Auth
+
+    Returns:
+        Vollständige Proxy-URL oder None wenn leer
+    """
+    if not proxy_url:
+        return None
+
+    url = proxy_url.strip()
+
+    # Schema ergänzen wenn nicht vorhanden
+    if not url.startswith(("http://", "https://")):
+        url = f"http://{url}"
+
+    parsed = urlparse(url)
+
+    # Hostname und Port extrahieren
+    hostname = parsed.hostname or ""
+    port = parsed.port
+
+    if not hostname:
+        return None
+
+    # Mit Auth?
+    if proxy_username and proxy_password:
+        # Credentials URL-encoden (für Sonderzeichen)
+        user = quote(proxy_username, safe="")
+        passwd = quote(proxy_password, safe="")
+        auth_netloc = f"{user}:{passwd}@{hostname}"
+        if port:
+            auth_netloc += f":{port}"
+        return urlunparse((parsed.scheme or "http", auth_netloc, "", "", "", ""))
+
+    # Ohne Auth - URL normalisiert zurückgeben
+    netloc = hostname
+    if port:
+        netloc += f":{port}"
+    return urlunparse((parsed.scheme or "http", netloc, "", "", "", ""))
 
 
 class ModelEntry(BaseModel):
@@ -411,52 +471,8 @@ class WebSearchConfig(BaseModel):
     timeout_seconds: int = 30        # Timeout für HTTP-Requests
 
     def get_proxy_url(self) -> Optional[str]:
-        """
-        Gibt die vollständige Proxy-URL inkl. Auth zurück.
-
-        Akzeptiert verschiedene Formate:
-        - proxy.intern:8080           → http://proxy.intern:8080
-        - http://proxy.intern:8080    → http://proxy.intern:8080
-        - https://proxy.intern:8080   → https://proxy.intern:8080
-
-        Mit Username/Password:
-        - proxy.intern:8080 + user + pass → http://user:pass@proxy.intern:8080
-        """
-        if not self.proxy_url:
-            return None
-
-        from urllib.parse import urlparse, urlunparse, quote
-
-        url = self.proxy_url.strip()
-
-        # Schema ergänzen wenn nicht vorhanden
-        if not url.startswith(("http://", "https://")):
-            url = f"http://{url}"
-
-        parsed = urlparse(url)
-
-        # Hostname und Port extrahieren
-        hostname = parsed.hostname or ""
-        port = parsed.port
-
-        if not hostname:
-            return None
-
-        # Mit Auth?
-        if self.proxy_username and self.proxy_password:
-            # Credentials URL-encoden (für Sonderzeichen)
-            user = quote(self.proxy_username, safe="")
-            passwd = quote(self.proxy_password, safe="")
-            auth_netloc = f"{user}:{passwd}@{hostname}"
-            if port:
-                auth_netloc += f":{port}"
-            return urlunparse((parsed.scheme or "http", auth_netloc, "", "", "", ""))
-
-        # Ohne Auth - URL normalisiert zurückgeben
-        netloc = hostname
-        if port:
-            netloc += f":{port}"
-        return urlunparse((parsed.scheme or "http", netloc, "", "", "", ""))
+        """Gibt die vollständige Proxy-URL inkl. Auth zurück."""
+        return build_proxy_url(self.proxy_url, self.proxy_username, self.proxy_password)
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -476,55 +492,12 @@ class InternalFetchConfig(BaseModel):
     auth_token: str = ""             # Bearer Token
     # Proxy-Konfiguration
     proxy_url: str = ""              # Proxy für interne Requests (optional)
+    proxy_username: str = ""         # Proxy-Benutzername (optional)
+    proxy_password: str = ""         # Proxy-Passwort (optional)
 
     def get_proxy_url(self) -> Optional[str]:
-        """
-        Gibt die vollständige Proxy-URL inkl. Auth zurück.
-
-        Akzeptiert verschiedene Formate:
-        - proxy.intern:8080           → http://proxy.intern:8080
-        - http://proxy.intern:8080    → http://proxy.intern:8080
-        - https://proxy.intern:8080   → https://proxy.intern:8080
-
-        Mit Username/Password:
-        - proxy.intern:8080 + user + pass → http://user:pass@proxy.intern:8080
-        """
-        if not self.proxy_url:
-            return None
-
-        from urllib.parse import urlparse, urlunparse, quote
-
-        url = self.proxy_url.strip()
-
-        # Schema ergänzen wenn nicht vorhanden
-        if not url.startswith(("http://", "https://")):
-            url = f"http://{url}"
-
-        parsed = urlparse(url)
-
-        # Hostname und Port extrahieren
-        hostname = parsed.hostname or ""
-        port = parsed.port
-
-        if not hostname:
-            # Fallback: URL ist nur host:port ohne Schema
-            return None
-
-        # Mit Auth?
-        if self.proxy_username and self.proxy_password:
-            # Credentials URL-encoden (für Sonderzeichen)
-            user = quote(self.proxy_username, safe="")
-            passwd = quote(self.proxy_password, safe="")
-            auth_netloc = f"{user}:{passwd}@{hostname}"
-            if port:
-                auth_netloc += f":{port}"
-            return urlunparse((parsed.scheme or "http", auth_netloc, "", "", "", ""))
-
-        # Ohne Auth - URL normalisiert zurückgeben
-        netloc = hostname
-        if port:
-            netloc += f":{port}"
-        return urlunparse((parsed.scheme or "http", netloc, "", "", "", ""))
+        """Gibt die vollständige Proxy-URL inkl. Auth zurück."""
+        return build_proxy_url(self.proxy_url, self.proxy_username, self.proxy_password)
 
 
 # ══════════════════════════════════════════════════════════════════════════════

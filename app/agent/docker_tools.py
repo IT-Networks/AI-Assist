@@ -25,6 +25,7 @@ Container Runtime:
 import asyncio
 import base64
 import json
+import logging
 import os
 import shutil
 import tempfile
@@ -36,6 +37,8 @@ from typing import Any, Dict, List, Optional
 
 from app.agent.tool_registry import ToolDefinition, ToolRegistry
 from app.core.config import settings
+
+logger = logging.getLogger(__name__)
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -72,14 +75,14 @@ def _detect_container_runtime() -> Optional[str]:
         if os.path.isfile(cfg.docker_path):
             _container_runtime = cfg.docker_path
             _runtime_version = _get_runtime_version(cfg.docker_path)
-            print(f"[sandbox] Using configured Docker: {cfg.docker_path} {_runtime_version or ''}")
+            logger.info("Sandbox: Using configured Docker: %s %s", cfg.docker_path, _runtime_version or "")
             return _container_runtime
 
     if cfg.backend == "podman" and cfg.podman_path:
         if os.path.isfile(cfg.podman_path):
             _container_runtime = cfg.podman_path
             _runtime_version = _get_runtime_version(cfg.podman_path)
-            print(f"[sandbox] Using configured Podman: {cfg.podman_path} {_runtime_version or ''}")
+            logger.info("Sandbox: Using configured Podman: %s %s", cfg.podman_path, _runtime_version or "")
             return _container_runtime
 
     # Explizite Konfiguration ohne Pfad (aus PATH suchen)
@@ -90,10 +93,10 @@ def _detect_container_runtime() -> Optional[str]:
         if runtime_path:
             _container_runtime = runtime_path
             _runtime_version = _get_runtime_version(runtime_path)
-            print(f"[sandbox] Using configured runtime: {runtime_path} {_runtime_version or ''}")
+            logger.info("Sandbox: Using configured runtime: %s %s", runtime_path, _runtime_version or "")
             return _container_runtime
         else:
-            print(f"[sandbox] WARNING: Configured runtime '{cfg.backend}' not found!")
+            logger.warning("Sandbox: Configured runtime '%s' not found!", cfg.backend)
             _container_runtime = ""  # Markiere als "nicht gefunden"
             return None
 
@@ -112,10 +115,10 @@ def _detect_container_runtime() -> Optional[str]:
             if actual_path:
                 _container_runtime = actual_path
                 _runtime_version = _get_runtime_version(actual_path)
-                print(f"[sandbox] Auto-detected runtime: {name} at {actual_path} {_runtime_version or ''}")
+                logger.info("Sandbox: Auto-detected runtime: %s at %s %s", name, actual_path, _runtime_version or "")
                 return _container_runtime
 
-    print("[sandbox] WARNING: No container runtime (docker/podman) found!")
+    logger.warning("Sandbox: No container runtime (docker/podman) found!")
     _container_runtime = ""  # Markiere als "nicht gefunden"
     return None
 
@@ -208,7 +211,7 @@ async def _cleanup_expired_sessions():
             session = _sessions.pop(sid, None)
             if session:
                 await _stop_container(session.container_id)
-                print(f"[docker_sandbox] Session {sid} expired and cleaned up")
+                logger.debug("Docker sandbox session %s expired and cleaned up", sid)
 
 
 async def _stop_container(container_id: str):
@@ -222,7 +225,7 @@ async def _stop_container(container_id: str):
         )
         await proc.wait()
     except Exception as e:
-        print(f"[sandbox] Error stopping container {container_id}: {e}")
+        logger.warning("Sandbox: Error stopping container %s: %s", container_id, e)
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -553,6 +556,9 @@ async def docker_session_execute(
     # Wir nutzen ein Python-Skript das in einer persistenten Shell läuft
     # Um Variablen zu erhalten, speichern wir den Zustand in einer Pickle-Datei
 
+    # Escape für Python 3.11+ (backslash nicht erlaubt in f-string expression)
+    escaped_code = code.replace('"', '\\"')
+
     wrapper_code = f'''
 import pickle
 import sys
@@ -566,7 +572,7 @@ if os.path.exists(state_file):
 
 # User-Code ausführen
 try:
-    exec("""{code.replace('"', '\\"')}""")
+    exec("""{escaped_code}""")
 except Exception as e:
     print(f"Error: {{type(e).__name__}}: {{e}}", file=sys.stderr)
     sys.exit(1)
@@ -977,5 +983,5 @@ async def cleanup_all_sessions():
     async with _session_lock:
         for session_id, session in list(_sessions.items()):
             await _stop_container(session.container_id)
-            print(f"[docker_sandbox] Session {session_id} cleaned up")
+            logger.debug("Docker sandbox session %s cleaned up", session_id)
         _sessions.clear()

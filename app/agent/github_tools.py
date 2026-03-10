@@ -23,43 +23,14 @@ Beispiel: "AI-Assist" wird zu "IT-Networks/AI-Assist" aufgelöst.
 
 import logging
 import re
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List
 
 import httpx
 
 from app.agent.tools import Tool, ToolCategory, ToolParameter, ToolResult, ToolRegistry
+from app.core.http_client import get_github_client
 
 logger = logging.getLogger(__name__)
-
-# ══════════════════════════════════════════════════════════════════════════════
-# Shared HTTP Client für Connection-Pooling (Performance-Optimierung)
-# Vermeidet TCP/TLS-Handshake bei jedem Request (~200ms Ersparnis)
-# ══════════════════════════════════════════════════════════════════════════════
-_github_http_client: Optional[httpx.AsyncClient] = None
-
-
-def _get_github_client(verify_ssl: bool = False, timeout: int = 30) -> httpx.AsyncClient:
-    """Gibt den shared GitHub HTTP-Client zurück (Lazy Init mit Connection-Pooling)."""
-    global _github_http_client
-    if _github_http_client is None:
-        _github_http_client = httpx.AsyncClient(
-            verify=verify_ssl,
-            timeout=timeout,
-            limits=httpx.Limits(
-                max_connections=20,
-                max_keepalive_connections=10,
-                keepalive_expiry=30.0
-            )
-        )
-    return _github_http_client
-
-
-async def close_github_client():
-    """Schließt den shared GitHub HTTP-Client (für Shutdown)."""
-    global _github_http_client
-    if _github_http_client is not None:
-        await _github_http_client.aclose()
-        _github_http_client = None
 
 
 def _parse_link_header(link_header: str) -> Dict[str, str]:
@@ -89,7 +60,7 @@ async def _github_request(
         "Authorization": f"token {token}",
     }
 
-    client = _get_github_client(verify_ssl, timeout)
+    client = get_github_client(verify_ssl, timeout)
     try:
         response = await client.request(
             method=method,
@@ -136,7 +107,7 @@ async def _github_paginated_request(
     page_count = 0
     max_pages = 100  # Sicherheitslimit
 
-    client = _get_github_client(verify_ssl, timeout)
+    client = get_github_client(verify_ssl, timeout)
     while current_url and page_count < max_pages:
         try:
             response = await client.get(
@@ -1220,7 +1191,7 @@ def register_github_tools(registry: ToolRegistry) -> int:
             "Authorization": f"token {settings.github.token}",
         }
 
-        client = _get_github_client(settings.github.verify_ssl, 30)
+        client = get_github_client(settings.github.verify_ssl, 30)
         try:
             response = await client.get(
                 f"{api_url}/search/code",

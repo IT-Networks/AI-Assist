@@ -8,11 +8,14 @@ manuell oder per KI-Erkundung befüllt.
 """
 
 import json
+import logging
 import re
 from typing import Any, Dict
 
 from app.agent.tools import Tool, ToolCategory, ToolParameter, ToolResult
 from app.core.config import DataSourceConfig
+
+logger = logging.getLogger(__name__)
 
 
 def _slugify(name: str) -> str:
@@ -152,9 +155,9 @@ def register_datasource_tools(registry) -> int:
                 tool = create_datasource_tool(source)
                 registry.register(tool)
                 count += 1
-                print(f"[datasource] Tool registriert: {tool.name} ({source.base_url})")
+                logger.debug("Datasource-Tool registriert: %s (%s)", tool.name, source.base_url)
             except Exception as e:
-                print(f"[datasource] Fehler bei Tool für '{source.name}': {e}")
+                logger.warning("Datasource-Tool Fehler für '%s': %s", source.name, e)
     return count
 
 

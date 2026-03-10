@@ -9,48 +9,19 @@ Tools:
 - jenkins_queue_info: Build-Queue anzeigen
 """
 
-import asyncio
 import base64
 import logging
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List
 
 import httpx
 
 from app.agent.tools import Tool, ToolCategory, ToolParameter, ToolResult, ToolRegistry
+from app.core.http_client import get_jenkins_client
 
 logger = logging.getLogger(__name__)
 
 # Pending Build-Trigger für Bestätigung
 _pending_builds: Dict[str, dict] = {}
-
-# ══════════════════════════════════════════════════════════════════════════════
-# Shared HTTP Client für Connection-Pooling (Performance-Optimierung)
-# ══════════════════════════════════════════════════════════════════════════════
-_jenkins_http_client: Optional[httpx.AsyncClient] = None
-
-
-def _get_jenkins_client(verify_ssl: bool = False, timeout: int = 30) -> httpx.AsyncClient:
-    """Gibt den shared Jenkins HTTP-Client zurück (Lazy Init)."""
-    global _jenkins_http_client
-    if _jenkins_http_client is None:
-        _jenkins_http_client = httpx.AsyncClient(
-            verify=verify_ssl,
-            timeout=timeout,
-            limits=httpx.Limits(
-                max_connections=10,
-                max_keepalive_connections=5,
-                keepalive_expiry=30.0
-            )
-        )
-    return _jenkins_http_client
-
-
-async def close_jenkins_client():
-    """Schließt den shared Jenkins HTTP-Client (für Shutdown)."""
-    global _jenkins_http_client
-    if _jenkins_http_client is not None:
-        await _jenkins_http_client.aclose()
-        _jenkins_http_client = None
 
 
 def _get_auth_header(username: str, api_token: str) -> Dict[str, str]:
@@ -75,7 +46,7 @@ async def _jenkins_request(
     headers = _get_auth_header(username, api_token)
     headers["Accept"] = "application/json"
 
-    client = _get_jenkins_client(verify_ssl, timeout)
+    client = get_jenkins_client(verify_ssl, timeout)
     try:
         response = await client.request(
             method=method,

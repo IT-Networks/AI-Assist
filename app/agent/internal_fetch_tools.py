@@ -7,44 +7,17 @@ z.B. interne APIs, Wikis, oder andere Intranet-Ressourcen.
 Sicherheit: URLs werden gegen konfigurierte base_urls validiert.
 """
 
+import logging
 import re
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List
 from urllib.parse import urlparse
 
 import httpx
 
 from app.agent.tools import Tool, ToolCategory, ToolParameter, ToolResult, ToolRegistry
+from app.core.http_client import get_internal_client
 
-# ══════════════════════════════════════════════════════════════════════════════
-# Shared HTTP Client für Connection-Pooling (Performance-Optimierung)
-# Wird nur verwendet wenn kein Proxy konfiguriert ist
-# ══════════════════════════════════════════════════════════════════════════════
-_internal_http_client: Optional[httpx.AsyncClient] = None
-
-
-def _get_internal_client(timeout: int = 30, verify_ssl: bool = False) -> httpx.AsyncClient:
-    """Gibt den shared Internal-Fetch HTTP-Client zurück (Lazy Init)."""
-    global _internal_http_client
-    if _internal_http_client is None:
-        _internal_http_client = httpx.AsyncClient(
-            timeout=timeout,
-            verify=verify_ssl,
-            follow_redirects=True,
-            limits=httpx.Limits(
-                max_connections=10,
-                max_keepalive_connections=5,
-                keepalive_expiry=30.0
-            )
-        )
-    return _internal_http_client
-
-
-async def close_internal_client():
-    """Schließt den shared Internal-Fetch HTTP-Client (für Shutdown)."""
-    global _internal_http_client
-    if _internal_http_client is not None:
-        await _internal_http_client.aclose()
-        _internal_http_client = None
+logger = logging.getLogger(__name__)
 
 
 def _validate_url(url: str, allowed_prefixes: List[str]) -> tuple[bool, str]:
@@ -165,7 +138,7 @@ async def _fetch_url(
                 )
         else:
             # Ohne Proxy: Shared Client für Connection-Pooling
-            client = _get_internal_client(config.timeout_seconds, config.verify_ssl)
+            client = get_internal_client(config.timeout_seconds, config.verify_ssl)
             response = await client.request(
                 method=method.upper(),
                 url=url,
@@ -249,7 +222,7 @@ def register_internal_fetch_tools(registry: ToolRegistry) -> int:
         """Ruft eine interne URL ab und gibt den Inhalt zurück."""
         import json as json_module
 
-        print(f"[internal_fetch] Empfangene kwargs: {kwargs}")
+        logger.debug("internal_fetch kwargs: %s", kwargs)
         url: str = kwargs.get("url", "").strip()
         headers_str: str = kwargs.get("headers", "")
 
@@ -360,7 +333,7 @@ def register_internal_fetch_tools(registry: ToolRegistry) -> int:
         """Ruft eine interne URL ab und durchsucht den Inhalt nach einem Pattern."""
         import json as json_module
 
-        print(f"[internal_search] Empfangene kwargs: {kwargs}")
+        logger.debug("internal_search kwargs: %s", kwargs)
         url: str = kwargs.get("url", "").strip()
         pattern: str = kwargs.get("pattern", "").strip()
         context_lines: int = int(kwargs.get("context_lines", 3))
@@ -511,7 +484,7 @@ def register_internal_fetch_tools(registry: ToolRegistry) -> int:
         import json as json_module
 
         # Debug: Log welche Parameter übergeben wurden
-        print(f"[http_request] Empfangene kwargs: {kwargs}")
+        logger.debug("http_request kwargs: %s", kwargs)
 
         url: str = kwargs.get("url", "").strip()
         method: str = kwargs.get("method", "GET").upper().strip()

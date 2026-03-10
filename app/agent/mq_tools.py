@@ -3,40 +3,12 @@ Agent-Tools für MQ-Series-Integration.
 Werden in der Tool-Registry des Orchestrators registriert.
 """
 
-from typing import Any, Optional
+from typing import Any
 
 import httpx
 
 from app.agent.tools import Tool, ToolCategory, ToolParameter, ToolResult, ToolRegistry
-
-# ══════════════════════════════════════════════════════════════════════════════
-# Shared HTTP Client für Connection-Pooling (Performance-Optimierung)
-# ══════════════════════════════════════════════════════════════════════════════
-_mq_http_client: Optional[httpx.AsyncClient] = None
-
-
-def _get_mq_client(verify_ssl: bool = False, timeout: int = 30) -> httpx.AsyncClient:
-    """Gibt den shared MQ HTTP-Client zurück (Lazy Init)."""
-    global _mq_http_client
-    if _mq_http_client is None:
-        _mq_http_client = httpx.AsyncClient(
-            verify=verify_ssl,
-            timeout=timeout,
-            limits=httpx.Limits(
-                max_connections=10,
-                max_keepalive_connections=5,
-                keepalive_expiry=30.0
-            )
-        )
-    return _mq_http_client
-
-
-async def close_mq_client():
-    """Schließt den shared MQ HTTP-Client (für Shutdown)."""
-    global _mq_http_client
-    if _mq_http_client is not None:
-        await _mq_http_client.aclose()
-        _mq_http_client = None
+from app.core.http_client import get_mq_client
 
 
 def register_mq_tools(registry: ToolRegistry) -> int:
@@ -96,7 +68,7 @@ def register_mq_tools(registry: ToolRegistry) -> int:
         merged_headers = dict(queue.headers)
         merged_headers.update(extra_headers)
         try:
-            client = _get_mq_client(queue.verify_ssl, queue.timeout_seconds)
+            client = get_mq_client(queue.verify_ssl, queue.timeout_seconds)
             resp = await client.get(queue.url, headers=merged_headers)
             text = resp.text
             try:
@@ -167,7 +139,7 @@ def register_mq_tools(registry: ToolRegistry) -> int:
         method = queue.method if queue.method in ("POST", "PUT", "PATCH") else "POST"
 
         try:
-            client = _get_mq_client(queue.verify_ssl, queue.timeout_seconds)
+            client = get_mq_client(queue.verify_ssl, queue.timeout_seconds)
             resp = await client.request(
                 method=method,
                 url=queue.url,

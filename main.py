@@ -227,7 +227,15 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         print(f"[shutdown] Maven-Cleanup fehlgeschlagen: {e}")
 
-    # HTTP-Clients schließen
+    # HTTP-Clients schließen (zentrale Pool + Service-Clients)
+    try:
+        from app.core.http_client import close_all_http_clients
+        pool_count = await close_all_http_clients()
+        if pool_count:
+            print(f"[shutdown] {pool_count} HTTP-Pool-Clients geschlossen")
+    except Exception as e:
+        print(f"[shutdown] HTTP-Pool-Cleanup fehlgeschlagen: {e}")
+
     try:
         from app.services.llm_client import close_http_client
         await close_http_client()
