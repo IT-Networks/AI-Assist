@@ -497,12 +497,24 @@ class AgentOrchestrator:
         """
         from app.services.llm_client import llm_client
         from app.services.skill_manager import get_skill_manager
+        import re
 
         state = self._get_state(session_id)
         # Gelesene Dateien für diese Anfrage zurücksetzen (Loop-Prävention)
         state.read_files_this_request = {}
         # Abbruch-Flag zurücksetzen
         state.cancelled = False
+
+        # ── MCP Force-Capability Detection ────────────────────────────────────
+        # Format: [MCP:capability_name] actual query
+        forced_capability = None
+        mcp_match = re.match(r'^\[MCP:(\w+)\]\s*(.+)$', user_message, re.DOTALL)
+        if mcp_match:
+            forced_capability = mcp_match.group(1)
+            user_message = mcp_match.group(2).strip()
+            print(f"[agent] Forced MCP capability: {forced_capability}")
+        # ─────────────────────────────────────────────────────────────────────
+
         # Schreib-Ops: In Planungsphase nur erlaubt wenn Plan bereits genehmigt
         if state.mode == AgentMode.PLAN_THEN_EXECUTE:
             include_write_ops = state.plan_approved
@@ -681,11 +693,72 @@ class AgentOrchestrator:
         if (
             settings.sub_agents.enabled
             and len(user_message) >= settings.sub_agents.min_query_length
+            and not forced_capability  # Skip sub-agents when forcing capability
         ):
             async for event in self._run_sub_agents_phase(
                 user_message, model, messages, budget
             ):
                 yield event
+
+        # === FORCED CAPABILITY EXECUTION ===
+        # Wenn User /brainstorm, /design etc. nutzt, direkt ausführen
+        if forced_capability:
+            print(f"[agent] Executing forced capability: {forced_capability}")
+
+            if self._mcp_bridge is None:
+                self._mcp_bridge = get_tool_bridge()
+
+            # TOOL_START Event
+            yield AgentEvent(AgentEventType.TOOL_START, {
+                "id": f"forced_{forced_capability}",
+                "name": forced_capability,
+                "arguments": {"query": user_message},
+                "model": "MCP"
+            })
+
+            try:
+                # Capability direkt ausführen
+                mcp_result = await self._mcp_bridge.call_tool(
+                    forced_capability,
+                    {"query": user_message, "context": None}
+                )
+
+                # Ergebnis formatieren
+                if mcp_result.get("success"):
+                    output = mcp_result.get("formatted_output") or mcp_result.get("result") or str(mcp_result)
+
+                    # TOOL_RESULT Event
+                    yield AgentEvent(AgentEventType.TOOL_RESULT, {
+                        "id": f"forced_{forced_capability}",
+                        "name": forced_capability,
+                        "success": True,
+                        "data": output[:500] if len(output) > 500 else output
+                    })
+
+                    # Streaming-Antwort mit formatiertem Output
+                    for chunk in output.split('\n'):
+                        yield AgentEvent(AgentEventType.TOKEN, chunk + '\n')
+
+                    # Handoff-Vorschlag wenn vorhanden
+                    next_cap = mcp_result.get("next_capability")
+                    if next_cap:
+                        yield AgentEvent(AgentEventType.TOKEN, f"\n\n---\n➡️ **Nächster Schritt:** `/{next_cap}` für die Weiterführung\n")
+
+                else:
+                    error_msg = mcp_result.get("error", "Unbekannter Fehler")
+                    yield AgentEvent(AgentEventType.TOOL_RESULT, {
+                        "id": f"forced_{forced_capability}",
+                        "name": forced_capability,
+                        "success": False,
+                        "data": error_msg
+                    })
+                    yield AgentEvent(AgentEventType.ERROR, {"error": f"Capability {forced_capability} fehlgeschlagen: {error_msg}"})
+
+            except Exception as e:
+                yield AgentEvent(AgentEventType.ERROR, {"error": f"Capability-Ausführung fehlgeschlagen: {str(e)}"})
+
+            yield AgentEvent(AgentEventType.DONE, {})
+            return  # Beende hier - kein normaler Agent-Loop
 
         # Agent-Loop
         has_used_tools = False

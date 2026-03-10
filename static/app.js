@@ -676,11 +676,19 @@ async function cancelRequest() {
 
 // Alle Befehle mit Beschreibung (für Autocomplete)
 const _CMD_LIST = [
+  // Modus-Befehle
   { cmd: '/lesen',      desc: 'Modus: Nur Lesen 🔒',             alias: '/r' },
   { cmd: '/schreiben',  desc: 'Modus: Schreiben mit Bestätigung ✏️', alias: '/s' },
   { cmd: '/plan',       desc: 'Modus: Plan & Ausführen 📋',       alias: '/p' },
   { cmd: '/auto',       desc: 'Modus: Autonom ⚠️',               alias: '/a' },
   { cmd: '/debug',      desc: 'Modus: Debug & Fehleranalyse 🔍',  alias: '/d' },
+  // MCP Capabilities
+  { cmd: '/brainstorm', desc: 'MCP: Ideen & Requirements 💡',     alias: '/bs' },
+  { cmd: '/design',     desc: 'MCP: Architektur & Design 📐',     alias: '/des' },
+  { cmd: '/implement',  desc: 'MCP: Code-Generierung 💻',         alias: '/impl' },
+  { cmd: '/analyze',    desc: 'MCP: Code-Analyse 🔍',             alias: '/ana' },
+  { cmd: '/think',      desc: 'MCP: Sequential Thinking 🧠',      alias: '/t' },
+  // Sonstige
   { cmd: '/suche an',   desc: 'Web-Suche aktivieren 🔍',          alias: null },
   { cmd: '/suche aus',  desc: 'Web-Suche deaktivieren',           alias: null },
   { cmd: '/neu',        desc: 'Neuen Chat öffnen',                alias: '/neuer chat' },
@@ -815,6 +823,15 @@ function _buildHelpText() {
 \`/auto\` \`/a\`  → Autonom &#9888;
 \`/debug\` \`/d\`  → Debug & Fehleranalyse &#128269;
 
+**MCP Capabilities:**
+\`/brainstorm\` \`/bs\`  → Ideen & Requirements Discovery 💡
+\`/design\` \`/des\`  → Architektur & System-Design 📐
+\`/implement\` \`/impl\`  → Code-Generierung 💻
+\`/analyze\` \`/ana\`  → Code-Analyse & Review 🔍
+\`/think\` \`/t\`  → Sequential Thinking 🧠
+
+_Beispiel: \`/brainstorm Neues Feature für User-Login\`_
+
 **Web-Suche:**
 \`/suche an\`  → Web-Suche aktivieren
 \`/suche aus\`  → Web-Suche deaktivieren
@@ -822,10 +839,7 @@ function _buildHelpText() {
 **Chat:**
 \`/neu\`  → Neuen Chat öffnen
 
-\`/hilfe\` \`/?\`  → Diese Hilfe anzeigen
-
-Alternativ kannst du dem Agenten auch auf Deutsch sagen:
-_"Wechsel in den Lese-Modus"_, _"Suche einschalten"_ usw.`;
+\`/hilfe\` \`/?\`  → Diese Hilfe anzeigen`;
 }
 
 /**
@@ -899,6 +913,55 @@ async function handleChatCommand(text) {
     appendMessage('system', 'Neuer Chat geöffnet.');
     return true;
   }
+
+  // ── MCP Capability Commands ───────────────────────────────────────────────
+  const capabilityMap = {
+    'brainstorm': { name: 'brainstorm', icon: '💡', label: 'Brainstorm' },
+    'bs': { name: 'brainstorm', icon: '💡', label: 'Brainstorm' },
+    'brain': { name: 'brainstorm', icon: '💡', label: 'Brainstorm' },
+    'design': { name: 'design', icon: '📐', label: 'Design' },
+    'des': { name: 'design', icon: '📐', label: 'Design' },
+    'arch': { name: 'design', icon: '📐', label: 'Design' },
+    'implement': { name: 'implement', icon: '💻', label: 'Implement' },
+    'impl': { name: 'implement', icon: '💻', label: 'Implement' },
+    'code': { name: 'implement', icon: '💻', label: 'Implement' },
+    'analyze': { name: 'analyze', icon: '🔍', label: 'Analyze' },
+    'ana': { name: 'analyze', icon: '🔍', label: 'Analyze' },
+    'review': { name: 'analyze', icon: '🔍', label: 'Analyze' },
+    'think': { name: 'sequential_thinking', icon: '🧠', label: 'Sequential Thinking' },
+    'seq': { name: 'sequential_thinking', icon: '🧠', label: 'Sequential Thinking' },
+    't': { name: 'sequential_thinking', icon: '🧠', label: 'Sequential Thinking' },
+  };
+
+  // Parse: /brainstorm Was soll das Feature können?
+  const parts = raw.split(' ');
+  const cmdKey = parts[0];
+  const capQuery = parts.slice(1).join(' ').trim();
+
+  if (capabilityMap[cmdKey]) {
+    const cap = capabilityMap[cmdKey];
+    console.log('[cmd] MCP Capability:', { capability: cap.name, query: capQuery });
+
+    if (!capQuery) {
+      appendMessage('system',
+        `${cap.icon} **${cap.label}** benötigt eine Anfrage.\n` +
+        `Beispiel: \`/${cmdKey} Beschreibe hier dein Vorhaben\``
+      );
+      return true;
+    }
+
+    // Capability-spezifischen Prefix an die Nachricht anhängen
+    // Das signalisiert dem Agent, welches Tool forciert werden soll
+    const prefixedMessage = `[MCP:${cap.name}] ${capQuery}`;
+
+    appendMessage('system', `${cap.icon} **${cap.label}** wird ausgeführt...`);
+
+    // Message mit Capability-Marker senden (wird nicht als handled markiert)
+    const input = document.getElementById('message-input');
+    input.value = prefixedMessage;
+    return false;  // false = normal senden mit prefixed message
+  }
+  // ─────────────────────────────────────────────────────────────────────────
 
   // Unbekannter Befehl → System-Hinweis, aber trotzdem als normaler Text weiterleiten
   console.log('[cmd] Unbekannter Befehl:', { raw, modePrefix });
