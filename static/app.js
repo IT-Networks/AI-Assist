@@ -835,6 +835,7 @@ _"Wechsel in den Lese-Modus"_, _"Suche einschalten"_ usw.`;
 async function handleChatCommand(text) {
   // Normalisieren: "/Mode Lesen" → "mode lesen", "/ plan" → "plan"
   const raw = text.slice(1).replace(/\s+/g, ' ').trim().toLowerCase();
+  console.log('[cmd] Befehl erkannt:', { original: text, normalized: raw });
 
   // Hilfe
   if (raw === 'hilfe' || raw === 'help' || raw === '?') {
@@ -874,6 +875,7 @@ async function handleChatCommand(text) {
 
   if (Object.prototype.hasOwnProperty.call(modeMap, modePrefix)) {
     const modeKey = modeMap[modePrefix];
+    console.log('[cmd] Modus-Befehl erkannt:', { modePrefix, modeKey });
     await setAgentMode(modeKey);
     appendMessage('system', `Modus gewechselt: ${_MODE_LABELS[modeKey] || modeKey}`);
     return true;
@@ -899,6 +901,7 @@ async function handleChatCommand(text) {
   }
 
   // Unbekannter Befehl → System-Hinweis, aber trotzdem als normaler Text weiterleiten
+  console.log('[cmd] Unbekannter Befehl:', { raw, modePrefix });
   appendMessage('system',
     `Unbekannter Befehl \`/${raw}\`. Tippe \`/hilfe\` für alle Befehle.\n` +
     `Die Nachricht wird dennoch an den Agenten gesendet.`

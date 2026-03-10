@@ -160,8 +160,9 @@ class MemoryStore:
         Kombiniert FTS-Suche mit Importance und Access-Count.
         """
         with self._connect() as con:
-            # FTS-Suche
-            safe_query = query.replace('"', '""')
+            # FTS5-sichere Query: Anführungszeichen escapen und als Phrase wrappen
+            # Dies behandelt Sonderzeichen wie /, *, -, + als Literal
+            safe_query = '"' + query.replace('"', '""') + '"'
 
             if category:
                 rows = con.execute("""
