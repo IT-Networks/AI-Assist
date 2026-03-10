@@ -23,6 +23,35 @@ logger = logging.getLogger(__name__)
 # Pending Build-Trigger für Bestätigung
 _pending_builds: Dict[str, dict] = {}
 
+# ══════════════════════════════════════════════════════════════════════════════
+# Shared HTTP Client für Connection-Pooling (Performance-Optimierung)
+# ══════════════════════════════════════════════════════════════════════════════
+_jenkins_http_client: Optional[httpx.AsyncClient] = None
+
+
+def _get_jenkins_client(verify_ssl: bool = False, timeout: int = 30) -> httpx.AsyncClient:
+    """Gibt den shared Jenkins HTTP-Client zurück (Lazy Init)."""
+    global _jenkins_http_client
+    if _jenkins_http_client is None:
+        _jenkins_http_client = httpx.AsyncClient(
+            verify=verify_ssl,
+            timeout=timeout,
+            limits=httpx.Limits(
+                max_connections=10,
+                max_keepalive_connections=5,
+                keepalive_expiry=30.0
+            )
+        )
+    return _jenkins_http_client
+
+
+async def close_jenkins_client():
+    """Schließt den shared Jenkins HTTP-Client (für Shutdown)."""
+    global _jenkins_http_client
+    if _jenkins_http_client is not None:
+        await _jenkins_http_client.aclose()
+        _jenkins_http_client = None
+
 
 def _get_auth_header(username: str, api_token: str) -> Dict[str, str]:
     """Erstellt Basic-Auth Header für Jenkins API."""
@@ -42,32 +71,32 @@ async def _jenkins_request(
     timeout: int = 30,
     params: Optional[dict] = None,
 ) -> Dict[str, Any]:
-    """Führt einen Jenkins API Request aus."""
+    """Führt einen Jenkins API Request aus (nutzt shared HTTP Client)."""
     headers = _get_auth_header(username, api_token)
     headers["Accept"] = "application/json"
 
-    async with httpx.AsyncClient(verify=verify_ssl, timeout=timeout) as client:
-        try:
-            response = await client.request(
-                method=method,
-                url=url,
-                headers=headers,
-                params=params,
-            )
-            response.raise_for_status()
+    client = _get_jenkins_client(verify_ssl, timeout)
+    try:
+        response = await client.request(
+            method=method,
+            url=url,
+            headers=headers,
+            params=params,
+        )
+        response.raise_for_status()
 
-            # Jenkins gibt oft JSON zurück, manchmal auch Text
-            content_type = response.headers.get("content-type", "")
-            if "application/json" in content_type:
-                return {"success": True, "data": response.json()}
-            else:
-                return {"success": True, "data": {"text": response.text}}
-        except httpx.HTTPStatusError as e:
-            return {"success": False, "error": f"HTTP {e.response.status_code}: {e.response.text[:500]}"}
-        except httpx.RequestError as e:
-            return {"success": False, "error": f"Verbindungsfehler: {e}"}
-        except Exception as e:
-            return {"success": False, "error": str(e)}
+        # Jenkins gibt oft JSON zurück, manchmal auch Text
+        content_type = response.headers.get("content-type", "")
+        if "application/json" in content_type:
+            return {"success": True, "data": response.json()}
+        else:
+            return {"success": True, "data": {"text": response.text}}
+    except httpx.HTTPStatusError as e:
+        return {"success": False, "error": f"HTTP {e.response.status_code}: {e.response.text[:500]}"}
+    except httpx.RequestError as e:
+        return {"success": False, "error": f"Verbindungsfehler: {e}"}
+    except Exception as e:
+        return {"success": False, "error": str(e)}
 
 
 def register_jenkins_tools(registry: ToolRegistry) -> int:

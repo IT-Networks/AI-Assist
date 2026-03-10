@@ -15,6 +15,37 @@ import httpx
 
 from app.agent.tools import Tool, ToolCategory, ToolParameter, ToolResult, ToolRegistry
 
+# ══════════════════════════════════════════════════════════════════════════════
+# Shared HTTP Client für Connection-Pooling (Performance-Optimierung)
+# Wird nur verwendet wenn kein Proxy konfiguriert ist
+# ══════════════════════════════════════════════════════════════════════════════
+_internal_http_client: Optional[httpx.AsyncClient] = None
+
+
+def _get_internal_client(timeout: int = 30, verify_ssl: bool = False) -> httpx.AsyncClient:
+    """Gibt den shared Internal-Fetch HTTP-Client zurück (Lazy Init)."""
+    global _internal_http_client
+    if _internal_http_client is None:
+        _internal_http_client = httpx.AsyncClient(
+            timeout=timeout,
+            verify=verify_ssl,
+            follow_redirects=True,
+            limits=httpx.Limits(
+                max_connections=10,
+                max_keepalive_connections=5,
+                keepalive_expiry=30.0
+            )
+        )
+    return _internal_http_client
+
+
+async def close_internal_client():
+    """Schließt den shared Internal-Fetch HTTP-Client (für Shutdown)."""
+    global _internal_http_client
+    if _internal_http_client is not None:
+        await _internal_http_client.aclose()
+        _internal_http_client = None
+
 
 def _validate_url(url: str, allowed_prefixes: List[str]) -> tuple[bool, str]:
     """
@@ -117,13 +148,24 @@ async def _fetch_url(
     proxy_config = _get_proxy_config(config)
 
     try:
-        async with httpx.AsyncClient(
-            timeout=config.timeout_seconds,
-            verify=config.verify_ssl,
-            follow_redirects=True,
-            **proxy_config,
-        ) as client:
-            # Request ausführen
+        # Shared Client nutzen wenn kein Proxy, sonst neuen Client erstellen
+        if proxy_config:
+            # Mit Proxy: neuer Client pro Request (Proxy-Einstellungen können variieren)
+            async with httpx.AsyncClient(
+                timeout=config.timeout_seconds,
+                verify=config.verify_ssl,
+                follow_redirects=True,
+                **proxy_config,
+            ) as client:
+                response = await client.request(
+                    method=method.upper(),
+                    url=url,
+                    headers=headers,
+                    content=body if body else None,
+                )
+        else:
+            # Ohne Proxy: Shared Client für Connection-Pooling
+            client = _get_internal_client(config.timeout_seconds, config.verify_ssl)
             response = await client.request(
                 method=method.upper(),
                 url=url,
@@ -131,25 +173,25 @@ async def _fetch_url(
                 content=body if body else None,
             )
 
-            resp_content_type = response.headers.get("content-type", "")
+        resp_content_type = response.headers.get("content-type", "")
 
-            # Content lesen (Text oder JSON)
-            if "application/json" in resp_content_type:
-                try:
-                    content = response.json()
-                except Exception:
-                    content = response.text
-            else:
+        # Content lesen (Text oder JSON)
+        if "application/json" in resp_content_type:
+            try:
+                content = response.json()
+            except Exception:
                 content = response.text
+        else:
+            content = response.text
 
-            return {
-                "status_code": response.status_code,
-                "content_type": resp_content_type,
-                "content": content,
-                "url": str(response.url),
-                "headers": dict(response.headers),
-                "error": None,
-            }
+        return {
+            "status_code": response.status_code,
+            "content_type": resp_content_type,
+            "content": content,
+            "url": str(response.url),
+            "headers": dict(response.headers),
+            "error": None,
+        }
 
     except httpx.TimeoutException:
         return {

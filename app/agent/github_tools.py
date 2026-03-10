@@ -31,6 +31,36 @@ from app.agent.tools import Tool, ToolCategory, ToolParameter, ToolResult, ToolR
 
 logger = logging.getLogger(__name__)
 
+# ══════════════════════════════════════════════════════════════════════════════
+# Shared HTTP Client für Connection-Pooling (Performance-Optimierung)
+# Vermeidet TCP/TLS-Handshake bei jedem Request (~200ms Ersparnis)
+# ══════════════════════════════════════════════════════════════════════════════
+_github_http_client: Optional[httpx.AsyncClient] = None
+
+
+def _get_github_client(verify_ssl: bool = False, timeout: int = 30) -> httpx.AsyncClient:
+    """Gibt den shared GitHub HTTP-Client zurück (Lazy Init mit Connection-Pooling)."""
+    global _github_http_client
+    if _github_http_client is None:
+        _github_http_client = httpx.AsyncClient(
+            verify=verify_ssl,
+            timeout=timeout,
+            limits=httpx.Limits(
+                max_connections=20,
+                max_keepalive_connections=10,
+                keepalive_expiry=30.0
+            )
+        )
+    return _github_http_client
+
+
+async def close_github_client():
+    """Schließt den shared GitHub HTTP-Client (für Shutdown)."""
+    global _github_http_client
+    if _github_http_client is not None:
+        await _github_http_client.aclose()
+        _github_http_client = None
+
 
 def _parse_link_header(link_header: str) -> Dict[str, str]:
     """Parst den GitHub Link-Header für Pagination."""
@@ -53,33 +83,33 @@ async def _github_request(
     timeout: int = 30,
     params: Optional[dict] = None,
 ) -> Dict[str, Any]:
-    """Führt einen GitHub API Request aus."""
+    """Führt einen GitHub API Request aus (nutzt shared HTTP Client)."""
     headers = {
         "Accept": "application/vnd.github.v3+json",
         "Authorization": f"token {token}",
     }
 
-    async with httpx.AsyncClient(verify=verify_ssl, timeout=timeout) as client:
+    client = _get_github_client(verify_ssl, timeout)
+    try:
+        response = await client.request(
+            method=method,
+            url=url,
+            headers=headers,
+            params=params,
+        )
+        response.raise_for_status()
+        return {"success": True, "data": response.json()}
+    except httpx.HTTPStatusError as e:
+        error_body = ""
         try:
-            response = await client.request(
-                method=method,
-                url=url,
-                headers=headers,
-                params=params,
-            )
-            response.raise_for_status()
-            return {"success": True, "data": response.json()}
-        except httpx.HTTPStatusError as e:
-            error_body = ""
-            try:
-                error_body = e.response.json().get("message", "")
-            except Exception:
-                error_body = e.response.text[:200]
-            return {"success": False, "error": f"HTTP {e.response.status_code}: {error_body}"}
-        except httpx.RequestError as e:
-            return {"success": False, "error": f"Verbindungsfehler: {e}"}
-        except Exception as e:
-            return {"success": False, "error": str(e)}
+            error_body = e.response.json().get("message", "")
+        except Exception:
+            error_body = e.response.text[:200]
+        return {"success": False, "error": f"HTTP {e.response.status_code}: {error_body}"}
+    except httpx.RequestError as e:
+        return {"success": False, "error": f"Verbindungsfehler: {e}"}
+    except Exception as e:
+        return {"success": False, "error": str(e)}
 
 
 async def _github_paginated_request(
@@ -91,7 +121,7 @@ async def _github_paginated_request(
     max_items: int = 0,
 ) -> Dict[str, Any]:
     """
-    Führt paginierte GitHub API Requests aus.
+    Führt paginierte GitHub API Requests aus (nutzt shared HTTP Client).
 
     Args:
         max_items: Maximale Anzahl Items (0 = alle)
@@ -106,45 +136,45 @@ async def _github_paginated_request(
     page_count = 0
     max_pages = 100  # Sicherheitslimit
 
-    async with httpx.AsyncClient(verify=verify_ssl, timeout=timeout) as client:
-        while current_url and page_count < max_pages:
+    client = _get_github_client(verify_ssl, timeout)
+    while current_url and page_count < max_pages:
+        try:
+            response = await client.get(
+                current_url,
+                headers=headers,
+                params=params if page_count == 0 else None,
+            )
+            response.raise_for_status()
+
+            data = response.json()
+            if isinstance(data, list):
+                all_data.extend(data)
+            else:
+                all_data.append(data)
+
+            page_count += 1
+
+            # Prüfen ob max_items erreicht
+            if max_items > 0 and len(all_data) >= max_items:
+                all_data = all_data[:max_items]
+                break
+
+            # Nächste Seite aus Link-Header
+            link_header = response.headers.get("Link", "")
+            links = _parse_link_header(link_header)
+            current_url = links.get("next")
+
+        except httpx.HTTPStatusError as e:
+            error_body = ""
             try:
-                response = await client.get(
-                    current_url,
-                    headers=headers,
-                    params=params if page_count == 0 else None,
-                )
-                response.raise_for_status()
-
-                data = response.json()
-                if isinstance(data, list):
-                    all_data.extend(data)
-                else:
-                    all_data.append(data)
-
-                page_count += 1
-
-                # Prüfen ob max_items erreicht
-                if max_items > 0 and len(all_data) >= max_items:
-                    all_data = all_data[:max_items]
-                    break
-
-                # Nächste Seite aus Link-Header
-                link_header = response.headers.get("Link", "")
-                links = _parse_link_header(link_header)
-                current_url = links.get("next")
-
-            except httpx.HTTPStatusError as e:
-                error_body = ""
-                try:
-                    error_body = e.response.json().get("message", "")
-                except Exception:
-                    error_body = e.response.text[:200]
-                return {"success": False, "error": f"HTTP {e.response.status_code}: {error_body}"}
-            except httpx.RequestError as e:
-                return {"success": False, "error": f"Verbindungsfehler: {e}"}
-            except Exception as e:
-                return {"success": False, "error": str(e)}
+                error_body = e.response.json().get("message", "")
+            except Exception:
+                error_body = e.response.text[:200]
+            return {"success": False, "error": f"HTTP {e.response.status_code}: {error_body}"}
+        except httpx.RequestError as e:
+            return {"success": False, "error": f"Verbindungsfehler: {e}"}
+        except Exception as e:
+            return {"success": False, "error": str(e)}
 
     return {
         "success": True,
@@ -1190,29 +1220,29 @@ def register_github_tools(registry: ToolRegistry) -> int:
             "Authorization": f"token {settings.github.token}",
         }
 
-        async with httpx.AsyncClient(verify=settings.github.verify_ssl, timeout=30) as client:
+        client = _get_github_client(settings.github.verify_ssl, 30)
+        try:
+            response = await client.get(
+                f"{api_url}/search/code",
+                headers=headers,
+                params={
+                    "q": search_query,
+                    "per_page": max_results,
+                    "sort": "indexed",
+                    "order": "desc",
+                },
+            )
+            response.raise_for_status()
+            data = response.json()
+        except httpx.HTTPStatusError as e:
+            error_body = ""
             try:
-                response = await client.get(
-                    f"{api_url}/search/code",
-                    headers=headers,
-                    params={
-                        "q": search_query,
-                        "per_page": max_results,
-                        "sort": "indexed",
-                        "order": "desc",
-                    },
-                )
-                response.raise_for_status()
-                data = response.json()
-            except httpx.HTTPStatusError as e:
-                error_body = ""
-                try:
-                    error_body = e.response.json().get("message", "")
-                except Exception:
-                    error_body = e.response.text[:300]
-                return ToolResult(success=False, error=f"HTTP {e.response.status_code}: {error_body}")
-            except httpx.RequestError as e:
-                return ToolResult(success=False, error=f"Verbindungsfehler: {e}")
+                error_body = e.response.json().get("message", "")
+            except Exception:
+                error_body = e.response.text[:300]
+            return ToolResult(success=False, error=f"HTTP {e.response.status_code}: {error_body}")
+        except httpx.RequestError as e:
+            return ToolResult(success=False, error=f"Verbindungsfehler: {e}")
 
         total_count = data.get("total_count", 0)
         items = data.get("items", [])
