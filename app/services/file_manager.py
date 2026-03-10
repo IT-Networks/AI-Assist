@@ -9,12 +9,13 @@ Features:
 """
 
 import difflib
+import re
 import shutil
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 from fnmatch import fnmatch
 from pathlib import Path
-from typing import List, Optional
+from typing import List, Optional, Dict, Any
 import os
 
 
@@ -46,6 +47,26 @@ class EditPreview:
     new_string: str
     diff: str
     new_content: str
+    replacements_count: int = 1  # Anzahl der Ersetzungen
+
+
+@dataclass
+class GlobResult:
+    """Ergebnis einer Glob-Suche."""
+    path: str
+    size_bytes: int
+    modified: datetime
+    is_dir: bool = False
+
+
+@dataclass
+class GrepMatch:
+    """Ein Treffer bei der Inhaltssuche."""
+    file_path: str
+    line_number: int
+    line_content: str
+    context_before: List[str] = field(default_factory=list)
+    context_after: List[str] = field(default_factory=list)
 
 
 class FileManager:
@@ -217,6 +238,147 @@ class FileManager:
 
         return sorted(result)
 
+    async def glob_files(
+        self,
+        pattern: str,
+        path: str = ".",
+        sort_by: str = "mtime",
+        max_results: int = 100
+    ) -> List[GlobResult]:
+        """
+        Sucht Dateien nach Glob-Pattern (wie Claude Code).
+
+        Args:
+            pattern: Glob-Pattern (z.B. "**/*.py", "src/**/*.java")
+            path: Basisverzeichnis
+            sort_by: Sortierung - "mtime" (neueste zuerst), "name", "size"
+            max_results: Maximale Anzahl Ergebnisse
+
+        Returns:
+            Liste von GlobResult mit Pfad, Größe, Änderungsdatum
+        """
+        resolved = self._validate_path(path, for_write=False)
+
+        if not resolved.exists():
+            raise FileNotFoundError(f"Verzeichnis nicht gefunden: {path}")
+
+        # Glob ausführen
+        matches = list(resolved.rglob(pattern))
+
+        # Nur Dateien, Verzeichnisse filtern
+        files = []
+        for f in matches:
+            if not f.is_file():
+                continue
+            # Denied patterns filtern
+            f_str = str(f).replace("\\", "/")
+            if any(fnmatch(f_str, p) for p in self.denied_patterns):
+                continue
+            try:
+                stat = f.stat()
+                files.append(GlobResult(
+                    path=str(f.relative_to(resolved)),
+                    size_bytes=stat.st_size,
+                    modified=datetime.fromtimestamp(stat.st_mtime),
+                    is_dir=False
+                ))
+            except OSError:
+                continue
+
+        # Sortieren
+        if sort_by == "mtime":
+            files.sort(key=lambda x: x.modified, reverse=True)
+        elif sort_by == "name":
+            files.sort(key=lambda x: x.path.lower())
+        elif sort_by == "size":
+            files.sort(key=lambda x: x.size_bytes, reverse=True)
+
+        return files[:max_results]
+
+    async def grep_content(
+        self,
+        pattern: str,
+        path: str = ".",
+        file_pattern: str = "*",
+        context_lines: int = 2,
+        max_results: int = 50,
+        case_sensitive: bool = False
+    ) -> List[GrepMatch]:
+        """
+        Durchsucht Dateiinhalte nach Pattern (Regex) - wie Claude Code Grep.
+
+        Args:
+            pattern: Regex-Pattern zum Suchen
+            path: Verzeichnis oder einzelne Datei
+            file_pattern: Datei-Filter (z.B. "*.py", "*.java")
+            context_lines: Zeilen vor/nach Match anzeigen
+            max_results: Maximale Anzahl Treffer
+            case_sensitive: Groß-/Kleinschreibung beachten
+
+        Returns:
+            Liste von GrepMatch mit Datei, Zeile, Inhalt, Kontext
+        """
+        resolved = self._validate_path(path, for_write=False)
+
+        if not resolved.exists():
+            raise FileNotFoundError(f"Pfad nicht gefunden: {path}")
+
+        # Regex kompilieren
+        flags = 0 if case_sensitive else re.IGNORECASE
+        try:
+            regex = re.compile(pattern, flags)
+        except re.error as e:
+            raise ValueError(f"Ungültiges Regex-Pattern: {e}")
+
+        results: List[GrepMatch] = []
+
+        # Dateien sammeln
+        if resolved.is_file():
+            files_to_search = [resolved]
+        else:
+            files_to_search = list(resolved.rglob(file_pattern))
+
+        for file_path in files_to_search:
+            if not file_path.is_file():
+                continue
+
+            # Denied patterns filtern
+            f_str = str(file_path).replace("\\", "/")
+            if any(fnmatch(f_str, p) for p in self.denied_patterns):
+                continue
+
+            # Binärdateien überspringen
+            try:
+                content = file_path.read_text(encoding="utf-8", errors="replace")
+            except Exception:
+                continue
+
+            lines = content.splitlines()
+
+            for i, line in enumerate(lines):
+                if regex.search(line):
+                    # Kontext extrahieren
+                    ctx_before = lines[max(0, i - context_lines):i]
+                    ctx_after = lines[i + 1:i + 1 + context_lines]
+
+                    try:
+                        rel_path = str(file_path.relative_to(resolved))
+                    except ValueError:
+                        rel_path = str(file_path)
+
+                    results.append(GrepMatch(
+                        file_path=rel_path,
+                        line_number=i + 1,  # 1-basiert
+                        line_content=line,
+                        context_before=ctx_before,
+                        context_after=ctx_after
+                    ))
+
+                    if len(results) >= max_results:
+                        return results
+
+        return results
+
     # ══════════════════════════════════════════════════════════════════════════
     # Write Operations (mit Preview)
     # ══════════════════════════════════════════════════════════════════════════
@@ -292,7 +454,8 @@ class FileManager:
         self,
         path: str,
         old_string: str,
-        new_string: str
+        new_string: str,
+        replace_all: bool = False
     ) -> EditPreview:
         """
         Bereitet eine Edit-Operation vor (ohne auszuführen).
@@ -303,13 +466,15 @@ class FileManager:
             path: Pfad zur Datei
             old_string: Zu ersetzender Text
             new_string: Neuer Text
+            replace_all: Wenn True, werden ALLE Vorkommen ersetzt.
+                         Wenn False, muss old_string eindeutig sein (Fehler bei mehrfach).
 
         Returns:
-            EditPreview mit Diff
+            EditPreview mit Diff und Anzahl der Ersetzungen
 
         Raises:
             FileNotFoundError: Datei existiert nicht
-            ValueError: old_string nicht gefunden oder nicht eindeutig
+            ValueError: old_string nicht gefunden oder nicht eindeutig (bei replace_all=False)
         """
         resolved = self._validate_path(path, for_write=True)
 
@@ -322,16 +487,24 @@ class FileManager:
         if old_string not in content:
             raise ValueError(f"String nicht gefunden in {path}:\n{old_string[:100]}...")
 
-        # Prüfen ob eindeutig
+        # Anzahl der Vorkommen zählen
         count = content.count(old_string)
-        if count > 1:
-            raise ValueError(
-                f"String kommt {count}x vor in {path}. "
-                "Bitte mehr Kontext angeben für eindeutige Ersetzung."
-            )
 
-        # Neuen Inhalt berechnen
-        new_content = content.replace(old_string, new_string, 1)
+        if replace_all:
+            # Alle Vorkommen ersetzen
+            new_content = content.replace(old_string, new_string)
+            replacements = count
+        else:
+            # Eindeutigkeit prüfen
+            if count > 1:
+                raise ValueError(
+                    f"String kommt {count}x vor in {path}. "
+                    "Optionen: 1) Mehr Kontext in old_string für Eindeutigkeit, "
+                    "oder 2) replace_all=true für alle Ersetzungen."
+                )
+            new_content = content.replace(old_string, new_string, 1)
+            replacements = 1
+
         diff = self._generate_diff(content, new_content, str(resolved))
 
         return EditPreview(
@@ -339,7 +512,8 @@ class FileManager:
             old_string=old_string,
             new_string=new_string,
             diff=diff,
-            new_content=new_content
+            new_content=new_content,
+            replacements_count=replacements
         )
 
     async def execute_edit(

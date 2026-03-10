@@ -375,8 +375,23 @@ async def search_skills(
         return ToolResult(success=False, error=str(e))
 
 
-async def read_file(path: str, encoding: str = "utf-8") -> ToolResult:
-    """Liest den Inhalt einer Datei."""
+async def read_file(
+    path: str,
+    encoding: str = "utf-8",
+    offset: int = 0,
+    limit: int = 0,
+    show_line_numbers: bool = True
+) -> ToolResult:
+    """
+    Liest den Inhalt einer Datei (wie Claude Code Read Tool).
+
+    Args:
+        path: Pfad zur Datei
+        encoding: Encoding (default: utf-8)
+        offset: Startzeile, 1-basiert (0 = Anfang)
+        limit: Max Zeilen (0 = unbegrenzt, empfohlen: 500 für große Dateien)
+        show_line_numbers: Zeilennummern im Output anzeigen
+    """
     from app.core.config import settings
     from pathlib import Path
 
@@ -397,19 +412,51 @@ async def read_file(path: str, encoding: str = "utf-8") -> ToolResult:
                 resolved_path = str(python_full)
 
     try:
-        # Direkt lesen ohne file_manager Permission-Check für Repo-Dateien
         file_path = Path(resolved_path)
         if not file_path.exists():
             return ToolResult(success=False, error=f"Datei nicht gefunden: {path}")
 
         content = file_path.read_text(encoding=encoding, errors="replace")
-        char_count = len(content)
+        lines = content.splitlines()
+        total_lines = len(lines)
 
-        # Vollständig lesen - keine Kürzung mehr
-        return ToolResult(
-            success=True,
-            data=f"=== Datei: {path} ({char_count:,} Zeichen) ===\n{content}"
-        )
+        # Offset und Limit anwenden
+        start_line = max(0, offset - 1) if offset > 0 else 0  # 1-basiert zu 0-basiert
+        if limit > 0:
+            end_line = min(start_line + limit, total_lines)
+        else:
+            end_line = total_lines
+
+        selected_lines = lines[start_line:end_line]
+
+        # Output formatieren (wie Claude Code)
+        if show_line_numbers:
+            # Format: "   123→content" mit Tab nach Nummer
+            max_line_num = end_line
+            num_width = len(str(max_line_num))
+            formatted_lines = []
+            for i, line in enumerate(selected_lines):
+                line_num = start_line + i + 1  # 1-basiert
+                formatted_lines.append(f"{line_num:>{num_width}}→{line}")
+            output_content = "\n".join(formatted_lines)
+        else:
+            output_content = "\n".join(selected_lines)
+
+        # Header mit Range-Info
+        if offset > 0 or (limit > 0 and end_line < total_lines):
+            header = f"=== Datei: {path} (Zeilen {start_line + 1}-{end_line} von {total_lines}) ==="
+        else:
+            header = f"=== Datei: {path} ({total_lines} Zeilen) ==="
+
+        result = f"{header}\n{output_content}"
+
+        # Hinweis wenn mehr Zeilen verfügbar
+        remaining = total_lines - end_line
+        if remaining > 0:
+            result += f"\n\n[HINWEIS: {remaining} weitere Zeilen. Nutze offset={end_line + 1} für nächsten Abschnitt]"
+
+        return ToolResult(success=True, data=result)
+
     except PermissionError as e:
         return ToolResult(success=False, error=f"Zugriff verweigert: {e}")
     except Exception as e:
@@ -438,6 +485,112 @@ async def list_files(
             output += f"\n  ... und {len(files) - 50} weitere"
 
         return ToolResult(success=True, data=output)
+    except Exception as e:
+        return ToolResult(success=False, error=str(e))
+
+
+async def glob_files(
+    pattern: str,
+    path: str = ".",
+    sort_by: str = "mtime",
+    max_results: int = 100
+) -> ToolResult:
+    """
+    Sucht Dateien nach Glob-Pattern (wie Claude Code Glob Tool).
+    """
+    from app.core.config import settings
+    from pathlib import Path as PyPath
+
+    # Basis-Pfad auflösen
+    base_path = path
+    if not PyPath(path).is_absolute():
+        # Versuche in Repos
+        if settings.java.get_active_path() and PyPath(settings.java.get_active_path()).exists():
+            base_path = settings.java.get_active_path()
+        elif settings.python.get_active_path() and PyPath(settings.python.get_active_path()).exists():
+            base_path = settings.python.get_active_path()
+
+    try:
+        from app.services.file_manager import get_file_manager
+        manager = get_file_manager()
+        results = await manager.glob_files(pattern, base_path, sort_by, max_results)
+
+        if not results:
+            return ToolResult(success=True, data=f"Keine Dateien gefunden für Pattern '{pattern}'")
+
+        # Formatieren (wie Claude Code)
+        output = f"Gefunden: {len(results)} Dateien für '{pattern}'\n\n"
+        for i, r in enumerate(results, 1):
+            size_str = f"{r.size_bytes / 1024:.1f} KB" if r.size_bytes > 1024 else f"{r.size_bytes} B"
+            date_str = r.modified.strftime("%Y-%m-%d %H:%M")
+            output += f"  {i:3}. {r.path:<50} ({size_str}, {date_str})\n"
+
+        return ToolResult(success=True, data=output)
+    except Exception as e:
+        return ToolResult(success=False, error=str(e))
+
+
+async def grep_content(
+    pattern: str,
+    path: str = ".",
+    file_pattern: str = "*",
+    context_lines: int = 2,
+    max_results: int = 50,
+    case_sensitive: bool = False
+) -> ToolResult:
+    """
+    Durchsucht Dateiinhalte nach Text/Regex (wie Claude Code Grep Tool).
+    """
+    from app.core.config import settings
+    from pathlib import Path as PyPath
+
+    # Basis-Pfad auflösen
+    base_path = path
+    if not PyPath(path).is_absolute():
+        if settings.java.get_active_path() and PyPath(settings.java.get_active_path()).exists():
+            base_path = settings.java.get_active_path()
+        elif settings.python.get_active_path() and PyPath(settings.python.get_active_path()).exists():
+            base_path = settings.python.get_active_path()
+
+    try:
+        from app.services.file_manager import get_file_manager
+        manager = get_file_manager()
+        results = await manager.grep_content(
+            pattern, base_path, file_pattern, context_lines, max_results, case_sensitive
+        )
+
+        if not results:
+            return ToolResult(success=True, data=f"Keine Treffer für '{pattern}'")
+
+        # Formatieren (wie Claude Code Grep Output)
+        output = f"Gefunden: {len(results)} Treffer für '{pattern}'\n\n"
+
+        current_file = None
+        for match in results:
+            # Datei-Header wenn neue Datei
+            if match.file_path != current_file:
+                current_file = match.file_path
+                output += f"{match.file_path}\n"
+
+            # Zeilen mit Kontext
+            line_num_width = len(str(match.line_number + context_lines))
+
+            for i, ctx_line in enumerate(match.context_before):
+                ctx_num = match.line_number - len(match.context_before) + i
+                output += f"  {ctx_num:>{line_num_width}}│ {ctx_line}\n"
+
+            # Match-Zeile hervorheben
+            output += f"  {match.line_number:>{line_num_width}}│ {match.line_content}  ◀━━\n"
+
+            for i, ctx_line in enumerate(match.context_after):
+                ctx_num = match.line_number + 1 + i
+                output += f"  {ctx_num:>{line_num_width}}│ {ctx_line}\n"
+
+            output += "\n"
+
+        return ToolResult(success=True, data=output)
+    except ValueError as e:
+        return ToolResult(success=False, error=str(e))
     except Exception as e:
         return ToolResult(success=False, error=str(e))
 
@@ -490,25 +643,43 @@ async def create_directory(path: str) -> ToolResult:
         return ToolResult(success=False, error=str(e))
 
 
-async def edit_file(path: str, old_string: str, new_string: str) -> ToolResult:
+async def edit_file(
+    path: str,
+    old_string: str,
+    new_string: str,
+    replace_all: bool = False
+) -> ToolResult:
     """
     Bearbeitet eine Datei durch String-Ersetzung (benötigt Bestätigung).
+
+    Args:
+        path: Pfad zur Datei
+        old_string: Zu ersetzender Text (muss eindeutig sein bei replace_all=False)
+        new_string: Neuer Text
+        replace_all: Wenn True, werden ALLE Vorkommen ersetzt
     """
     try:
         from app.services.file_manager import get_file_manager
         manager = get_file_manager()
-        preview = await manager.edit_file(path, old_string, new_string)
+        preview = await manager.edit_file(path, old_string, new_string, replace_all)
+
+        # Info über Anzahl der Ersetzungen
+        count_info = ""
+        if preview.replacements_count > 1:
+            count_info = f" ({preview.replacements_count} Ersetzungen)"
 
         return ToolResult(
             success=True,
             requires_confirmation=True,
-            data=f"Datei wird bearbeitet: {path}",
+            data=f"Datei wird bearbeitet: {path}{count_info}",
             confirmation_data={
                 "operation": "edit_file",
                 "path": path,
                 "diff": preview.diff,
                 "old_string": old_string,
                 "new_string": new_string,
+                "replace_all": replace_all,
+                "replacements_count": preview.replacements_count,
             }
         )
     except Exception as e:
@@ -1335,13 +1506,18 @@ SEARCH_SKILLS_TOOL = Tool(
 READ_FILE_TOOL = Tool(
     name="read_file",
     description=(
-        "Liest eine LOKALE Datei vollständig. Pfad: relativ zum Repo-Root oder absolut. "
-        "WICHTIG: Nur für LOKALE Dateien! Für Dateien aus GitHub-PRs/Branches verwende github_get_file."
+        "Liest eine LOKALE Datei mit Zeilennummern. Für große Dateien: nutze offset/limit. "
+        "Output zeigt Zeilennummern für präzise Referenzierung (wie Claude Code). "
+        "Bei Dateien >500 Zeilen: erst mit limit=100 lesen, dann gezielt mit offset nachlesen. "
+        "WICHTIG: Für GitHub-Dateien verwende github_get_file."
     ),
     category=ToolCategory.FILE,
     parameters=[
         ToolParameter("path", "string", "Pfad zur Datei"),
         ToolParameter("encoding", "string", "Encoding der Datei", required=False, default="utf-8"),
+        ToolParameter("offset", "integer", "Startzeile, 1-basiert (0=Anfang)", required=False, default=0),
+        ToolParameter("limit", "integer", "Max Zeilen (0=alle, empfohlen: 500)", required=False, default=0),
+        ToolParameter("show_line_numbers", "boolean", "Zeilennummern anzeigen", required=False, default=True),
     ],
     handler=read_file
 )
@@ -1349,8 +1525,8 @@ READ_FILE_TOOL = Tool(
 LIST_FILES_TOOL = Tool(
     name="list_files",
     description=(
-        "Listet Dateien in einem LOKALEN Verzeichnis auf. Unterstützt Glob-Patterns. "
-        "WICHTIG: Nur für LOKALE Verzeichnisse! Für GitHub-Repos verwende github_list_repos."
+        "Listet Dateien in einem LOKALEN Verzeichnis auf. Für Pattern-Suche nutze glob_files. "
+        "WICHTIG: Für GitHub-Repos verwende github_list_repos."
     ),
     category=ToolCategory.FILE,
     parameters=[
@@ -1359,6 +1535,42 @@ LIST_FILES_TOOL = Tool(
         ToolParameter("recursive", "boolean", "Auch Unterverzeichnisse durchsuchen", required=False, default=False),
     ],
     handler=list_files
+)
+
+GLOB_FILES_TOOL = Tool(
+    name="glob_files",
+    description=(
+        "Sucht Dateien nach Glob-Pattern (wie Claude Code). Schneller als list_files für Pattern-Suche. "
+        "Patterns: '**/*.py' (rekursiv), 'src/**/*.java', '*.md'. "
+        "Sortiert standardmäßig nach Änderungsdatum (neueste zuerst)."
+    ),
+    category=ToolCategory.FILE,
+    parameters=[
+        ToolParameter("pattern", "string", "Glob-Pattern (z.B. '**/*.py', 'src/**/*.java')"),
+        ToolParameter("path", "string", "Basisverzeichnis", required=False, default="."),
+        ToolParameter("sort_by", "string", "Sortierung: mtime|name|size", required=False, default="mtime"),
+        ToolParameter("max_results", "integer", "Max Ergebnisse", required=False, default=100),
+    ],
+    handler=glob_files
+)
+
+GREP_CONTENT_TOOL = Tool(
+    name="grep_content",
+    description=(
+        "Durchsucht Dateiinhalte nach Text/Regex (wie Claude Code Grep). Funktioniert OHNE Index! "
+        "Nutze für: Funktionen finden ('def process_'), Klassen ('class.*Handler'), Imports, Fehlermeldungen. "
+        "Zeigt Kontext-Zeilen vor/nach dem Treffer. Schneller als search_code für gezielte Suchen."
+    ),
+    category=ToolCategory.SEARCH,
+    parameters=[
+        ToolParameter("pattern", "string", "Suchtext oder Regex (z.B. 'def process_', 'class.*Handler')"),
+        ToolParameter("path", "string", "Verzeichnis oder Datei", required=False, default="."),
+        ToolParameter("file_pattern", "string", "Datei-Filter (z.B. '*.py', '*.java')", required=False, default="*"),
+        ToolParameter("context_lines", "integer", "Zeilen vor/nach Match", required=False, default=2),
+        ToolParameter("max_results", "integer", "Max Treffer", required=False, default=50),
+        ToolParameter("case_sensitive", "boolean", "Groß-/Kleinschreibung beachten", required=False, default=False),
+    ],
+    handler=grep_content
 )
 
 WRITE_FILE_TOOL = Tool(
@@ -1394,15 +1606,18 @@ CREATE_DIRECTORY_TOOL = Tool(
 EDIT_FILE_TOOL = Tool(
     name="edit_file",
     description=(
-        "Bearbeitet eine LOKALE Datei durch Ersetzen eines Strings. BENÖTIGT USER-BESTÄTIGUNG. "
-        "WICHTIG: Für LOKALE Dateien! GitHub-Repos können nicht direkt bearbeitet werden."
+        "Bearbeitet eine Datei durch String-Ersetzung (wie Claude Code Edit). BENÖTIGT BESTÄTIGUNG. "
+        "WICHTIG: old_string muss EINDEUTIG sein! Bei mehrfachem Vorkommen: "
+        "1) Mehr Kontext in old_string aufnehmen, oder 2) replace_all=true für alle Ersetzungen. "
+        "Für GitHub-Repos: Nicht direkt möglich."
     ),
     category=ToolCategory.FILE,
     is_write_operation=True,
     parameters=[
         ToolParameter("path", "string", "Pfad zur Datei"),
-        ToolParameter("old_string", "string", "Zu ersetzender Text"),
+        ToolParameter("old_string", "string", "Zu ersetzender Text (muss eindeutig sein!)"),
         ToolParameter("new_string", "string", "Neuer Text"),
+        ToolParameter("replace_all", "boolean", "Alle Vorkommen ersetzen (default: false)", required=False, default=False),
     ],
     handler=edit_file
 )
@@ -1792,6 +2007,8 @@ def create_default_registry() -> ToolRegistry:
     # File Tools
     registry.register(READ_FILE_TOOL)
     registry.register(LIST_FILES_TOOL)
+    registry.register(GLOB_FILES_TOOL)
+    registry.register(GREP_CONTENT_TOOL)
     registry.register(WRITE_FILE_TOOL)
     registry.register(EDIT_FILE_TOOL)
     registry.register(CREATE_DIRECTORY_TOOL)
