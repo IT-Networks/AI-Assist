@@ -343,3 +343,69 @@ mcp:
   auto_activate_on_planning: true          # Bei Planungsaufgaben
   min_complexity_score: 0.7                # Schwelle für Auto-Aktivierung (0.0-1.0)
   debug_logging: false
+
+# ═══════════════════════════════════════════════════════════════════
+# API Tools - SOAP und REST
+# ═══════════════════════════════════════════════════════════════════
+api_tools:
+  enabled: true                           # API Tools aktivieren
+
+  soap:
+    default_timeout: 30                   # Timeout für SOAP-Requests (Sekunden)
+    cache_wsdl: true                      # WSDL-Definitionen cachen
+    cache_ttl_minutes: 60                 # Cache-Gültigkeitsdauer
+    verify_ssl: false                     # SSL-Zertifikate prüfen (false für interne Server)
+
+  rest:
+    default_timeout: 30                   # Timeout für REST-Requests
+    auto_format_response: true            # JSON/XML automatisch formatieren
+    max_response_size_kb: 500             # Max. Response-Größe
+    verify_ssl: false                     # SSL-Zertifikate prüfen (false für interne Server)
+
+# ═══════════════════════════════════════════════════════════════════
+# Internal Fetch - Intranet-URLs und Webseiten abrufen
+# ═══════════════════════════════════════════════════════════════════
+internal_fetch:
+  enabled: false                             # true um Internal Fetch zu aktivieren
+  base_urls: []                              # Erlaubte URL-Prefixe (leer = alle erlaubt)
+    # Beispiel:
+    # - "https://wiki.intern.example.com"
+    # - "https://docs.intern.example.com"
+  verify_ssl: true                           # SSL-Zertifikate prüfen
+  timeout_seconds: 30                        # Request-Timeout
+  # Authentifizierung
+  auth_type: "none"                          # none | basic | bearer
+  auth_username: ""                          # Benutzername für Basic Auth
+  auth_password: ""                          # Passwort für Basic Auth
+  auth_token: ""                             # Bearer Token
+  # Proxy (optional)
+  proxy_url: ""                              # z.B. "http://proxy.intern:8080"
+  proxy_username: ""
+  proxy_password: ""
+
+  # ─── HTML Processing ─────────────────────────────────────────────
+  html_processing:
+    enabled: true                            # HTML automatisch parsen
+    default_extract_mode: "text"             # text | structured | full
+    max_output_length: 30000                 # Max. Zeichen im Output
+    chunk_size: 8000                         # Chunk-Größe für große Seiten
+    chunk_overlap: 200                       # Überlappung zwischen Chunks
+    remove_navigation: true                  # Nav/Header/Footer entfernen
+    # Elemente die entfernt werden (CSS-Selektoren)
+    remove_selectors:
+      - "script"
+      - "style"
+      - "nav"
+      - "footer"
+      - ".sidebar"
+      - ".advertisement"
+      - ".ad"
+      - "#cookie-banner"
+      - "#cookie-consent"
+    # Elemente die erhalten bleiben (Whitelist, leer = alles)
+    preserve_selectors: []
+      # Beispiel für spezifische Seiten:
+      # - "article"
+      # - "main"
+      # - ".content"
+      # - "#main-content"

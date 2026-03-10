@@ -476,6 +476,55 @@ class WebSearchConfig(BaseModel):
 
 
 # ══════════════════════════════════════════════════════════════════════════════
+# HTML Processing (für Internal Fetch)
+# ══════════════════════════════════════════════════════════════════════════════
+
+class HtmlProcessingConfig(BaseModel):
+    """Konfiguration für HTML-Verarbeitung bei Internal Fetch."""
+    enabled: bool = True                     # HTML automatisch parsen
+    default_extract_mode: str = "text"       # text | structured | full
+    max_output_length: int = 30000           # Max. Zeichen im Output
+    chunk_size: int = 8000                   # Chunk-Größe für große Seiten
+    chunk_overlap: int = 200                 # Überlappung zwischen Chunks
+    remove_navigation: bool = True           # Nav/Header/Footer entfernen
+    # Elemente die entfernt werden (CSS-Selektoren)
+    remove_selectors: List[str] = [
+        "script", "style", "nav", "footer",
+        ".sidebar", ".advertisement", ".ad",
+        "#cookie-banner", "#cookie-consent",
+    ]
+    # Elemente die erhalten bleiben (Whitelist, leer = alles)
+    preserve_selectors: List[str] = []
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# API Tools (SOAP und REST)
+# ══════════════════════════════════════════════════════════════════════════════
+
+class SoapConfig(BaseModel):
+    """SOAP-spezifische Konfiguration."""
+    default_timeout: int = 30          # Timeout für SOAP-Requests
+    cache_wsdl: bool = True            # WSDL-Definitionen cachen
+    cache_ttl_minutes: int = 60        # Cache-Gültigkeitsdauer
+    verify_ssl: bool = True            # SSL-Zertifikate prüfen
+
+
+class RestConfig(BaseModel):
+    """REST-spezifische Konfiguration."""
+    default_timeout: int = 30          # Timeout für REST-Requests
+    auto_format_response: bool = True  # JSON/XML automatisch formatieren
+    max_response_size_kb: int = 500    # Max. Response-Größe
+    verify_ssl: bool = True            # SSL-Zertifikate prüfen
+
+
+class ApiToolsConfig(BaseModel):
+    """Konfiguration für SOAP und REST API Tools."""
+    enabled: bool = True               # API Tools aktivieren
+    soap: SoapConfig = Field(default_factory=SoapConfig)
+    rest: RestConfig = Field(default_factory=RestConfig)
+
+
+# ══════════════════════════════════════════════════════════════════════════════
 # Internal Fetch (Intranet-URLs abrufen)
 # ══════════════════════════════════════════════════════════════════════════════
 
@@ -494,6 +543,8 @@ class InternalFetchConfig(BaseModel):
     proxy_url: str = ""              # Proxy für interne Requests (optional)
     proxy_username: str = ""         # Proxy-Benutzername (optional)
     proxy_password: str = ""         # Proxy-Passwort (optional)
+    # HTML Processing
+    html_processing: HtmlProcessingConfig = Field(default_factory=HtmlProcessingConfig)
 
     def get_proxy_url(self) -> Optional[str]:
         """Gibt die vollständige Proxy-URL inkl. Auth zurück."""
@@ -659,6 +710,7 @@ class Settings(BaseModel):
     internal_fetch: InternalFetchConfig = Field(default_factory=InternalFetchConfig)
     docker_sandbox: DockerSandboxConfig = Field(default_factory=DockerSandboxConfig)
     mcp: MCPConfig = Field(default_factory=MCPConfig)
+    api_tools: ApiToolsConfig = Field(default_factory=ApiToolsConfig)
 
     def apply_env_overrides(self) -> "Settings":
         if os.getenv("LLM_BASE_URL"):

@@ -4,18 +4,32 @@ Agent-Tools zum Abrufen interner/Intranet-URLs.
 Diese Tools erlauben dem Agent, interne HTTP-Endpunkte abzurufen,
 z.B. interne APIs, Wikis, oder andere Intranet-Ressourcen.
 
+Features:
+- HTML-Parsing und Text-Extraktion
+- Chunk-Verarbeitung für große Dokumente
+- Section-Extraktion via CSS-Selektoren
+- Suche auf geparstem Content
+
 Sicherheit: URLs werden gegen konfigurierte base_urls validiert.
 """
 
 import logging
 import re
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 from urllib.parse import urlparse
 
 import httpx
 
 from app.agent.tools import Tool, ToolCategory, ToolParameter, ToolResult, ToolRegistry
 from app.core.http_client import get_internal_client
+from app.utils.html_parser import (
+    parse_html,
+    chunk_content,
+    extract_section,
+    format_parsed_output,
+    ParsedHTML,
+    ContentChunk,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -226,6 +240,14 @@ def register_internal_fetch_tools(registry: ToolRegistry) -> int:
         url: str = kwargs.get("url", "").strip()
         headers_str: str = kwargs.get("headers", "")
 
+        # Neue Parameter für HTML-Verarbeitung
+        parse_html_param: bool = kwargs.get("parse_html", True)
+        extract_mode: str = kwargs.get("extract_mode", "").strip() or \
+            settings.internal_fetch.html_processing.default_extract_mode
+        max_length: int = int(kwargs.get("max_length", 0)) or \
+            settings.internal_fetch.html_processing.max_output_length
+        chunk_index: int = int(kwargs.get("chunk_index", -1))
+
         if not url:
             return ToolResult(
                 success=False,
@@ -279,17 +301,100 @@ def register_internal_fetch_tools(registry: ToolRegistry) -> int:
         output += f"URL (nach Redirects): {result['url']}\n\n"
 
         content = result["content"]
+        content_type = result.get("content_type", "")
+
+        # JSON direkt ausgeben
         if isinstance(content, dict) or isinstance(content, list):
             import json
             output += "```json\n"
             output += json.dumps(content, ensure_ascii=False, indent=2)
             output += "\n```"
+            return ToolResult(success=True, data=output)
+
+        content_str = str(content)
+
+        # HTML-Verarbeitung wenn aktiviert und Content ist HTML
+        is_html = "text/html" in content_type or content_str.strip().startswith("<")
+        html_cfg = settings.internal_fetch.html_processing
+
+        if parse_html_param and html_cfg.enabled and is_html:
+            try:
+                # HTML parsen
+                parsed = parse_html(
+                    content_str,
+                    extract_mode=extract_mode,
+                    remove_navigation=html_cfg.remove_navigation,
+                    remove_selectors=html_cfg.remove_selectors,
+                    preserve_selectors=html_cfg.preserve_selectors if html_cfg.preserve_selectors else None,
+                )
+
+                # Bei großem Content: Chunking
+                if parsed.char_count > html_cfg.chunk_size:
+                    chunks = chunk_content(
+                        parsed.text,
+                        max_chunk_size=html_cfg.chunk_size,
+                        overlap=html_cfg.chunk_overlap,
+                        headings=parsed.headings,
+                    )
+
+                    total_chunks = len(chunks)
+
+                    # Spezifischen Chunk ausgeben
+                    if chunk_index >= 0:
+                        if chunk_index >= total_chunks:
+                            return ToolResult(
+                                success=False,
+                                error=f"Chunk {chunk_index} existiert nicht. Verfügbar: 0-{total_chunks-1}"
+                            )
+                        chunk = chunks[chunk_index]
+                        output += f"[Chunk {chunk_index + 1}/{total_chunks}]\n"
+                        if chunk.heading_context:
+                            output += f"Kontext: {chunk.heading_context}\n"
+                        output += f"\n{chunk.text}"
+                    else:
+                        # Alle Chunks mit Übersicht
+                        formatted, remaining = format_parsed_output(
+                            parsed,
+                            max_length=max_length,
+                            include_toc=(extract_mode != "text"),
+                            include_links=(extract_mode in ("structured", "full")),
+                        )
+                        output += formatted
+
+                        if remaining > 0:
+                            output += f"\n\n[{total_chunks} Chunks verfügbar. "
+                            output += f"Nutze chunk_index=0,1,... für weitere Inhalte]"
+                else:
+                    # Kleiner Content: Direkt ausgeben
+                    formatted, _ = format_parsed_output(
+                        parsed,
+                        max_length=max_length,
+                        include_toc=(extract_mode != "text"),
+                        include_links=(extract_mode in ("structured", "full")),
+                    )
+                    output += formatted
+
+                # Statistik
+                output += f"\n\n[Parsed: {parsed.char_count:,} Zeichen, {parsed.word_count:,} Wörter"
+                if parsed.headings:
+                    output += f", {len(parsed.headings)} Überschriften"
+                if parsed.links:
+                    output += f", {len(parsed.links)} Links"
+                output += "]"
+
+            except Exception as e:
+                logger.warning(f"HTML-Parsing fehlgeschlagen: {e}")
+                # Fallback auf rohes HTML
+                if len(content_str) > max_length:
+                    output += content_str[:max_length]
+                    output += f"\n\n... [+{len(content_str) - max_length} Zeichen abgeschnitten]"
+                else:
+                    output += content_str
         else:
-            # HTML/Text - auf sinnvolle Länge kürzen
-            content_str = str(content)
-            if len(content_str) > 50000:
-                output += content_str[:50000]
-                output += f"\n\n... [+{len(content_str) - 50000} Zeichen abgeschnitten]"
+            # Kein HTML oder Parsing deaktiviert
+            if len(content_str) > max_length:
+                output += content_str[:max_length]
+                output += f"\n\n... [+{len(content_str) - max_length} Zeichen abgeschnitten]"
             else:
                 output += content_str
 
@@ -298,11 +403,11 @@ def register_internal_fetch_tools(registry: ToolRegistry) -> int:
     registry.register(Tool(
         name="internal_fetch",
         description=(
-            "Ruft eine beliebige URL ab und gibt den Inhalt zurück. "
+            "Ruft eine URL ab und gibt den Inhalt zurück. "
+            "HTML wird automatisch geparst und in lesbaren Text umgewandelt. "
+            "Für große Seiten wird Chunking verwendet - nutze chunk_index für weitere Inhalte. "
             "Unterstützt HTTP/HTTPS, HTML, JSON und Text. "
-            "Custom HTTP-Headers können optional übergeben werden. "
-            "Ideal für: Interne APIs, Intranet-Seiten, Wikis, externe Webseiten. "
-            "Verwendet konfigurierten Proxy und Auth falls eingerichtet."
+            "Ideal für: Interne APIs, Intranet-Seiten, Wikis, Dokumentationen."
         ),
         category=ToolCategory.SEARCH,
         parameters=[
@@ -322,6 +427,33 @@ def register_internal_fetch_tools(registry: ToolRegistry) -> int:
                 ),
                 required=False,
             ),
+            ToolParameter(
+                name="parse_html",
+                type="boolean",
+                description="HTML parsen und nur Text extrahieren (default: true)",
+                required=False,
+                default=True,
+            ),
+            ToolParameter(
+                name="extract_mode",
+                type="string",
+                description="Extraktionsmodus: text | structured (mit Headings/Links) | full (inkl. Tabellen)",
+                required=False,
+                enum=["text", "structured", "full"],
+            ),
+            ToolParameter(
+                name="max_length",
+                type="integer",
+                description="Max. Zeichen im Output (default: 30000, 0 = unbegrenzt)",
+                required=False,
+            ),
+            ToolParameter(
+                name="chunk_index",
+                type="integer",
+                description="Welcher Chunk bei großen Seiten (-1 = erster mit Übersicht, 0,1,2... = spezifischer Chunk)",
+                required=False,
+                default=-1,
+            ),
         ],
         handler=internal_fetch,
     ))
@@ -338,6 +470,7 @@ def register_internal_fetch_tools(registry: ToolRegistry) -> int:
         pattern: str = kwargs.get("pattern", "").strip()
         context_lines: int = int(kwargs.get("context_lines", 3))
         headers_str: str = kwargs.get("headers", "")
+        search_parsed: bool = kwargs.get("search_parsed", True)
 
         if not url:
             return ToolResult(
@@ -389,11 +522,30 @@ def register_internal_fetch_tools(registry: ToolRegistry) -> int:
             return ToolResult(success=False, error=result["error"])
 
         content = result["content"]
+        content_type = result.get("content_type", "")
+
         if isinstance(content, dict) or isinstance(content, list):
             import json
             content = json.dumps(content, ensure_ascii=False, indent=2)
         else:
             content = str(content)
+
+        # HTML parsen wenn aktiviert
+        is_html = "text/html" in content_type or content.strip().startswith("<")
+        html_cfg = settings.internal_fetch.html_processing
+
+        if search_parsed and html_cfg.enabled and is_html:
+            try:
+                parsed = parse_html(
+                    content,
+                    extract_mode="text",
+                    remove_navigation=html_cfg.remove_navigation,
+                    remove_selectors=html_cfg.remove_selectors,
+                )
+                content = parsed.text
+            except Exception as e:
+                logger.debug(f"HTML-Parsing für Suche fehlgeschlagen: {e}")
+                # Fallback auf rohen Content
 
         # Pattern suchen (case-insensitive)
         lines = content.splitlines()
@@ -417,7 +569,10 @@ def register_internal_fetch_tools(registry: ToolRegistry) -> int:
 
         output = f"=== Internal Search: {url} ===\n"
         output += f"Pattern: {pattern}\n"
-        output += f"Status: {result['status_code']}\n\n"
+        output += f"Status: {result['status_code']}\n"
+        if is_html and search_parsed:
+            output += "[Suche auf geparstem Text]\n"
+        output += "\n"
 
         if not matches:
             output += f"Keine Treffer für '{pattern}' gefunden.\n"
@@ -437,9 +592,9 @@ def register_internal_fetch_tools(registry: ToolRegistry) -> int:
         name="internal_search",
         description=(
             "Ruft eine URL ab und durchsucht den Inhalt nach einem Regex-Pattern. "
+            "HTML wird vor der Suche geparst (nur Text, keine Tags). "
             "Gibt passende Zeilen mit Kontext zurück. "
-            "Custom HTTP-Headers werden unterstützt. "
-            "Ideal zum Suchen von Informationen in Webseiten, APIs, Dokumentationen."
+            "Ideal zum Suchen von Informationen in Webseiten und Dokumentationen."
         ),
         category=ToolCategory.SEARCH,
         parameters=[
@@ -463,6 +618,13 @@ def register_internal_fetch_tools(registry: ToolRegistry) -> int:
                 default=3,
             ),
             ToolParameter(
+                name="search_parsed",
+                type="boolean",
+                description="Auf geparstem Text suchen statt rohem HTML (default: true)",
+                required=False,
+                default=True,
+            ),
+            ToolParameter(
                 name="headers",
                 type="string",
                 description=(
@@ -474,6 +636,146 @@ def register_internal_fetch_tools(registry: ToolRegistry) -> int:
             ),
         ],
         handler=internal_search,
+    ))
+    count += 1
+
+    # ── internal_fetch_section ─────────────────────────────────────────────────
+
+    async def internal_fetch_section(**kwargs: Any) -> ToolResult:
+        """Extrahiert einen bestimmten Abschnitt aus einer HTML-Seite."""
+        import json as json_module
+
+        logger.debug("internal_fetch_section kwargs: %s", kwargs)
+        url: str = kwargs.get("url", "").strip()
+        selector: str = kwargs.get("selector", "").strip()
+        include_children: bool = kwargs.get("include_children", True)
+        headers_str: str = kwargs.get("headers", "")
+
+        if not url:
+            return ToolResult(
+                success=False,
+                error="URL ist erforderlich.",
+            )
+
+        if not selector:
+            return ToolResult(
+                success=False,
+                error="selector ist erforderlich. Beispiel: '#main-content', 'h2', '.article'",
+            )
+
+        if not settings.internal_fetch.enabled:
+            return ToolResult(
+                success=False,
+                error="Internal Fetch ist deaktiviert.",
+            )
+
+        # URL validieren
+        is_valid, error = _validate_url(url, settings.internal_fetch.base_urls)
+        if not is_valid:
+            return ToolResult(success=False, error=error)
+
+        # Headers parsen
+        custom_headers = {}
+        if headers_str:
+            headers_str = headers_str.strip()
+            if headers_str.startswith("{"):
+                try:
+                    custom_headers = json_module.loads(headers_str)
+                except json_module.JSONDecodeError as e:
+                    return ToolResult(success=False, error=f"Ungültiges Header-JSON: {e}")
+            else:
+                for line in headers_str.split("\n"):
+                    line = line.strip()
+                    if ":" in line:
+                        key, val = line.split(":", 1)
+                        custom_headers[key.strip()] = val.strip()
+
+        # Request ausführen
+        result = await _fetch_url(
+            url=url,
+            config=settings.internal_fetch,
+            custom_headers=custom_headers if custom_headers else None,
+        )
+
+        if result["error"]:
+            return ToolResult(success=False, error=result["error"])
+
+        content = result["content"]
+        if not isinstance(content, str):
+            return ToolResult(
+                success=False,
+                error="Content ist kein HTML. Nutze internal_fetch für JSON/Text.",
+            )
+
+        # Section extrahieren
+        try:
+            section = extract_section(content, selector, include_children)
+        except Exception as e:
+            return ToolResult(success=False, error=f"Section-Extraktion fehlgeschlagen: {e}")
+
+        if section is None:
+            return ToolResult(
+                success=False,
+                error=f"Abschnitt '{selector}' nicht gefunden. "
+                      f"Versuche einen anderen Selektor (CSS, ID oder Heading-Text).",
+            )
+
+        # Output formatieren
+        output = f"=== Section: {selector} ===\n"
+        output += f"URL: {url}\n\n"
+
+        formatted, remaining = format_parsed_output(
+            section,
+            max_length=settings.internal_fetch.html_processing.max_output_length,
+            include_toc=True,
+            include_links=True,
+        )
+        output += formatted
+
+        output += f"\n\n[Section: {section.char_count:,} Zeichen, {section.word_count:,} Wörter]"
+
+        return ToolResult(success=True, data=output)
+
+    registry.register(Tool(
+        name="internal_fetch_section",
+        description=(
+            "Extrahiert einen bestimmten Abschnitt aus einer HTML-Seite. "
+            "Kann nach CSS-Selektor (#id, .class), Heading-Text oder Element-ID suchen. "
+            "Bei Headings werden alle Inhalte bis zum nächsten gleichen/höheren Heading extrahiert. "
+            "Ideal für: Spezifische Dokumentations-Abschnitte, Artikel-Inhalte."
+        ),
+        category=ToolCategory.SEARCH,
+        parameters=[
+            ToolParameter(
+                name="url",
+                type="string",
+                description="Die abzurufende URL",
+                required=True,
+            ),
+            ToolParameter(
+                name="selector",
+                type="string",
+                description=(
+                    "CSS-Selektor, Element-ID oder Heading-Text. "
+                    "Beispiele: '#main-content', '.article', 'h2', 'Installation'"
+                ),
+                required=True,
+            ),
+            ToolParameter(
+                name="include_children",
+                type="boolean",
+                description="Bei Headings: Alle Unterabschnitte einschließen (default: true)",
+                required=False,
+                default=True,
+            ),
+            ToolParameter(
+                name="headers",
+                type="string",
+                description="Optionale HTTP-Header (JSON oder Zeilen-Format)",
+                required=False,
+            ),
+        ],
+        handler=internal_fetch_section,
     ))
     count += 1
 
