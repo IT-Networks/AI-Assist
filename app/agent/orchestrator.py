@@ -1695,8 +1695,13 @@ Datenbank-Abfragen (SELECT) sind erlaubt.
             return base + """
 MODUS: Schreiben mit Bestätigung
 Zusätzliche Tools:
-- write_file: Erstelle oder überschreibe eine Datei (benötigt Bestätigung)
+- write_file: Erstelle oder überschreibe eine DATEI (benötigt Bestätigung) - NUR für Dateien mit Endung!
 - edit_file: Bearbeite eine Datei (benötigt Bestätigung)
+- create_directory: Erstelle einen ORDNER (benötigt Bestätigung) - NUR für Verzeichnisse!
+
+**ORDNER vs DATEI:**
+- Pfad OHNE Dateiendung (z.B. `src/components`) → verwende create_directory
+- Pfad MIT Dateiendung (z.B. `src/app.py`) → verwende write_file
 
 Der User muss Datei-Operationen bestätigen bevor sie ausgeführt werden.
 Datenbank-Abfragen (SELECT) sind ohne Bestätigung erlaubt.
@@ -1734,11 +1739,20 @@ Schreibe NUR den [PLAN]-Block als deine finale Antwort. Führe keine Datei-Ände
 MODUS: Ausführungsphase (Plan genehmigt)
 Der User hat deinen Plan genehmigt.
 Zusätzliche Tools:
-- write_file: Erstelle oder überschreibe eine Datei (benötigt Bestätigung)
+- write_file: Erstelle oder überschreibe eine DATEI (benötigt Bestätigung) - NUR für Dateien mit Endung!
 - edit_file: Bearbeite eine Datei (benötigt Bestätigung)
+- create_directory: Erstelle einen ORDNER - NUR für Verzeichnisse ohne Dateiendung!
 
-Führe den genehmigten Plan jetzt Schritt für Schritt aus.
-Der User muss jede Datei-Operation einzeln bestätigen.
+**WICHTIG - VOLLSTÄNDIGE PLAN-AUSFÜHRUNG:**
+Du MUSST den gesamten Plan abarbeiten und ALLE Dateien erstellen/ändern, nicht nur eine!
+- Führe JEDEN Schritt des Plans aus, einen nach dem anderen
+- Nach jeder bestätigten Datei-Operation: Fahre SOFORT mit dem nächsten Schritt fort
+- Höre NICHT nach der ersten Datei auf - arbeite den kompletten Plan ab
+- Erst wenn ALLE Schritte erledigt sind, gib eine Zusammenfassung
+
+**ORDNER vs DATEI:**
+- Pfad OHNE Dateiendung (z.B. `src/components`) → verwende create_directory
+- Pfad MIT Dateiendung (z.B. `src/app.py`) → verwende write_file
 """
 
         elif mode == AgentMode.DEBUG:
@@ -1771,8 +1785,13 @@ Verfügbare Diagnose-Tools: search_code, read_file, search_handbook, Log-Tools, 
             return base + """
 MODUS: Autonom
 Zusätzliche Tools:
-- write_file: Erstelle oder überschreibe eine Datei
+- write_file: Erstelle oder überschreibe eine DATEI - NUR für Dateien mit Endung!
 - edit_file: Bearbeite eine Datei
+- create_directory: Erstelle einen ORDNER - NUR für Verzeichnisse!
+
+**ORDNER vs DATEI:**
+- Pfad OHNE Dateiendung (z.B. `src/components`) → verwende create_directory
+- Pfad MIT Dateiendung (z.B. `src/app.py`) → verwende write_file
 
 Du kannst Dateien ohne Bestätigung schreiben/bearbeiten.
 Sei vorsichtig und mache nur notwendige Änderungen.

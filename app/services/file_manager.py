@@ -382,6 +382,35 @@ class FileManager:
         return True
 
     # ══════════════════════════════════════════════════════════════════════════
+    # Directory Operations
+    # ══════════════════════════════════════════════════════════════════════════
+
+    async def create_directory(self, path: str) -> dict:
+        """
+        Erstellt ein Verzeichnis (inkl. Elternverzeichnisse).
+
+        Args:
+            path: Pfad zum Verzeichnis
+
+        Returns:
+            Dict mit path, created (bool), already_existed (bool)
+        """
+        resolved = self._validate_path(path, for_write=True)
+
+        already_existed = resolved.exists()
+
+        if already_existed and resolved.is_file():
+            raise ValueError(f"Pfad existiert bereits als Datei: {path}")
+
+        resolved.mkdir(parents=True, exist_ok=True)
+
+        return {
+            "path": str(resolved),
+            "created": not already_existed,
+            "already_existed": already_existed
+        }
+
+    # ══════════════════════════════════════════════════════════════════════════
     # Helpers
     # ══════════════════════════════════════════════════════════════════════════
 

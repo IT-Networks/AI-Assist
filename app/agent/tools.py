@@ -467,6 +467,29 @@ async def write_file(path: str, content: str) -> ToolResult:
         return ToolResult(success=False, error=str(e))
 
 
+async def create_directory(path: str) -> ToolResult:
+    """
+    Erstellt ein Verzeichnis (Ordner).
+    """
+    try:
+        from app.services.file_manager import get_file_manager
+        manager = get_file_manager()
+        result = await manager.create_directory(path)
+
+        if result["already_existed"]:
+            return ToolResult(
+                success=True,
+                data=f"Verzeichnis existiert bereits: {result['path']}"
+            )
+        else:
+            return ToolResult(
+                success=True,
+                data=f"Verzeichnis erstellt: {result['path']}"
+            )
+    except Exception as e:
+        return ToolResult(success=False, error=str(e))
+
+
 async def edit_file(path: str, old_string: str, new_string: str) -> ToolResult:
     """
     Bearbeitet eine Datei durch String-Ersetzung (benötigt Bestätigung).
@@ -1341,16 +1364,31 @@ LIST_FILES_TOOL = Tool(
 WRITE_FILE_TOOL = Tool(
     name="write_file",
     description=(
-        "Erstellt oder überschreibt eine LOKALE Datei. BENÖTIGT USER-BESTÄTIGUNG. "
-        "WICHTIG: Für LOKALE Dateien! GitHub-Repos können nicht direkt beschrieben werden."
+        "Erstellt oder überschreibt eine LOKALE DATEI (keine Ordner!). BENÖTIGT USER-BESTÄTIGUNG. "
+        "WICHTIG: Für Ordner verwende create_directory! Pfad muss Dateiendung haben (z.B. .py, .java, .md). "
+        "GitHub-Repos können nicht direkt beschrieben werden."
     ),
     category=ToolCategory.FILE,
     is_write_operation=True,
     parameters=[
-        ToolParameter("path", "string", "Pfad zur Datei"),
+        ToolParameter("path", "string", "Pfad zur Datei (mit Dateiendung!)"),
         ToolParameter("content", "string", "Neuer Dateiinhalt"),
     ],
     handler=write_file
+)
+
+CREATE_DIRECTORY_TOOL = Tool(
+    name="create_directory",
+    description=(
+        "Erstellt ein Verzeichnis (Ordner). Erstellt auch alle Elternverzeichnisse falls nötig. "
+        "WICHTIG: Für Ordner, NICHT für Dateien! Für Dateien verwende write_file."
+    ),
+    category=ToolCategory.FILE,
+    is_write_operation=True,
+    parameters=[
+        ToolParameter("path", "string", "Pfad zum Verzeichnis das erstellt werden soll"),
+    ],
+    handler=create_directory
 )
 
 EDIT_FILE_TOOL = Tool(
@@ -1756,6 +1794,7 @@ def create_default_registry() -> ToolRegistry:
     registry.register(LIST_FILES_TOOL)
     registry.register(WRITE_FILE_TOOL)
     registry.register(EDIT_FILE_TOOL)
+    registry.register(CREATE_DIRECTORY_TOOL)
 
     # Knowledge Tools
     registry.register(GET_SERVICE_INFO_TOOL)
