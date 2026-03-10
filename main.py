@@ -1,9 +1,16 @@
+import asyncio
+import sys
 from contextlib import asynccontextmanager
 from typing import Any, Dict
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 from pathlib import Path
+
+# Windows: ProactorEventLoop für asyncio.create_subprocess_exec()
+# Muss VOR Import von asyncio-abhängigen Modulen gesetzt werden
+if sys.platform == 'win32':
+    asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())
 
 from app.api.routes import chat, java, logs, pdf, confluence, models, python_routes, handbook, skills, agent, settings, database, datasources, mq, testtool, log_servers, wlp, maven, search, jenkins, github, internal_fetch, docker_sandbox
 
@@ -12,7 +19,6 @@ from app.api.routes import chat, java, logs, pdf, confluence, models, python_rou
 async def lifespan(app: FastAPI):
     # Startup: optionaler automatischer Index-Build
     from app.core.config import settings
-    import asyncio
 
     # Java Index
     if settings.index.auto_build_on_start and settings.java.get_active_path():
