@@ -999,7 +999,13 @@ class AgentOrchestrator:
                     # ────────────────────────────────────────────────────────
 
                     # Tool ausführen - MCP-Tools speziell behandeln
-                    if tool_call.name.startswith("mcp_") or tool_call.name in ("sequential_thinking", "seq_think"):
+                    # Capabilities: brainstorm, design, implement, analyze, capability_handoff
+                    MCP_CAPABILITY_TOOLS = {
+                        "sequential_thinking", "seq_think",
+                        "brainstorm", "design", "implement", "analyze",
+                        "capability_handoff"
+                    }
+                    if tool_call.name.startswith("mcp_") or tool_call.name in MCP_CAPABILITY_TOOLS:
                         # MCP-Tool über Bridge ausführen
                         if self._mcp_bridge is None:
                             self._mcp_bridge = get_tool_bridge()
