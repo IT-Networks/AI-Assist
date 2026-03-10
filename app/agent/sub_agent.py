@@ -237,10 +237,19 @@ class SubAgent:
         )
 
         # Tool-Schemas nur für erlaubte Tools
+        all_schemas = tool_registry.get_openai_schemas(include_write_ops=False)
         tool_schemas = [
-            schema for schema in tool_registry.get_openai_schemas(include_write_ops=False)
+            schema for schema in all_schemas
             if schema["function"]["name"] in self.allowed_tools
         ]
+
+        # Debug: Log welche Tools verfügbar vs. erlaubt
+        available_tools = [s["function"]["name"] for s in all_schemas]
+        matching = [t for t in self.allowed_tools if t in available_tools]
+        missing = [t for t in self.allowed_tools if t not in available_tools]
+        if missing:
+            print(f"[sub_agent:{self.name}] Fehlende Tools: {missing}")
+        print(f"[sub_agent:{self.name}] {len(tool_schemas)} Tools verfügbar: {matching[:5]}...")
 
         if not tool_schemas:
             return SubAgentResult(
@@ -262,11 +271,14 @@ class SubAgent:
         final_result: Optional[SubAgentResult] = None
 
         for iteration in range(max_iterations):
+            print(f"[sub_agent:{self.name}] Iteration {iteration + 1}/{max_iterations}")
             try:
                 response_text, tool_calls_raw = await self._call_llm(
                     llm_client, messages, tool_schemas
                 )
+                print(f"[sub_agent:{self.name}] LLM response: {len(tool_calls_raw)} tool_calls, {len(response_text or '')} chars text")
             except Exception as e:
+                print(f"[sub_agent:{self.name}] LLM-Fehler in Iteration {iteration + 1}: {e}")
                 return SubAgentResult(
                     agent_name=self.display_name,
                     success=False,
@@ -384,10 +396,13 @@ class SubAgent:
         """
         from app.services.llm_client import _get_http_client, _RETRY_DELAYS, _is_retryable
 
+        # Sub-Agenten nutzen tool_temperature (deterministischer) für zuverlässiges Tool-Calling
+        temperature = settings.llm.tool_temperature if settings.llm.tool_temperature >= 0 else 0.0
+
         payload = {
             "model": self._model,
             "messages": messages,
-            "temperature": settings.llm.temperature,
+            "temperature": temperature,
             "max_tokens": min(settings.llm.max_tokens, 2048),  # Sub-Agenten brauchen weniger
             "stream": False,
             "tools": tool_schemas,
