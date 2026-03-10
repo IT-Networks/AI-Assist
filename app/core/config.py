@@ -525,6 +525,69 @@ class ApiToolsConfig(BaseModel):
 
 
 # ══════════════════════════════════════════════════════════════════════════════
+# Compile Tool - Validierung und Kompilierung
+# ══════════════════════════════════════════════════════════════════════════════
+
+class CompilePythonConfig(BaseModel):
+    """Python-Validator Konfiguration."""
+    enabled: bool = True
+    linter: str = "ruff"               # ruff | flake8 | none
+    type_checker: str = "none"         # mypy | none
+    auto_fix_tool: str = "ruff"        # ruff | autopep8
+    ignore_rules: List[str] = []       # z.B. ["E501", "W503"]
+
+
+class CompileJavaConfig(BaseModel):
+    """Java-Validator Konfiguration."""
+    enabled: bool = True
+    mode: str = "quick"                # quick | maven | gradle
+    java_home: str = ""                # JAVA_HOME (leer = System)
+    javac_options: str = "-Xlint:all"
+
+
+class CompileSQLConfig(BaseModel):
+    """SQL-Validator Konfiguration."""
+    enabled: bool = True
+    dialect: str = "db2"               # db2 | postgres | mysql | ansi
+    check_best_practices: bool = True
+
+
+class CompileSQLJConfig(BaseModel):
+    """SQLJ-Validator Konfiguration."""
+    enabled: bool = True
+    sqlj_path: str = ""                # Pfad zum SQLJ Translator
+
+
+class CompileXMLConfig(BaseModel):
+    """XML-Validator Konfiguration."""
+    enabled: bool = True
+    validate_schemas: bool = True
+
+
+class CompileConfigConfig(BaseModel):
+    """Config-Validator Konfiguration."""
+    enabled: bool = True
+    formats: List[str] = ["yaml", "json", "properties", "toml"]
+
+
+class CompileToolConfig(BaseModel):
+    """Compile/Validate Tool Konfiguration."""
+    enabled: bool = True
+    default_changed_only: bool = True   # Nur geänderte Dateien
+    default_fix: bool = False           # Auto-Fix deaktiviert
+    default_strict: bool = False        # Warnings nicht als Errors
+    timeout_per_file_seconds: int = 30
+    total_timeout_seconds: int = 300
+    # Validator-spezifische Konfiguration
+    python: CompilePythonConfig = Field(default_factory=CompilePythonConfig)
+    java: CompileJavaConfig = Field(default_factory=CompileJavaConfig)
+    sql: CompileSQLConfig = Field(default_factory=CompileSQLConfig)
+    sqlj: CompileSQLJConfig = Field(default_factory=CompileSQLJConfig)
+    xml: CompileXMLConfig = Field(default_factory=CompileXMLConfig)
+    config: CompileConfigConfig = Field(default_factory=CompileConfigConfig)
+
+
+# ══════════════════════════════════════════════════════════════════════════════
 # Internal Fetch (Intranet-URLs abrufen)
 # ══════════════════════════════════════════════════════════════════════════════
 
@@ -711,6 +774,7 @@ class Settings(BaseModel):
     docker_sandbox: DockerSandboxConfig = Field(default_factory=DockerSandboxConfig)
     mcp: MCPConfig = Field(default_factory=MCPConfig)
     api_tools: ApiToolsConfig = Field(default_factory=ApiToolsConfig)
+    compile_tool: CompileToolConfig = Field(default_factory=CompileToolConfig)
 
     def apply_env_overrides(self) -> "Settings":
         if os.getenv("LLM_BASE_URL"):

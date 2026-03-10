@@ -363,6 +363,47 @@ api_tools:
     verify_ssl: false                     # SSL-Zertifikate prüfen (false für interne Server)
 
 # ═══════════════════════════════════════════════════════════════════
+# Compile Tool - Validierung und Kompilierung
+# ═══════════════════════════════════════════════════════════════════
+compile_tool:
+  enabled: true
+  default_changed_only: true              # Nur Git-geänderte Dateien prüfen
+  default_fix: false                      # Auto-Fix deaktiviert
+  default_strict: false                   # Warnings nicht als Errors
+  timeout_per_file_seconds: 30
+  total_timeout_seconds: 300
+
+  python:
+    enabled: true
+    linter: "ruff"                        # ruff | flake8 | none
+    type_checker: "none"                  # mypy | none
+    auto_fix_tool: "ruff"                 # ruff | autopep8
+    ignore_rules: []                      # z.B. ["E501", "W503"]
+
+  java:
+    enabled: true
+    mode: "quick"                         # quick | maven | gradle
+    java_home: ""                         # JAVA_HOME (leer = System)
+    javac_options: "-Xlint:all"
+
+  sql:
+    enabled: true
+    dialect: "db2"                        # db2 | postgres | mysql | ansi
+    check_best_practices: true
+
+  sqlj:
+    enabled: true
+    sqlj_path: ""                         # Pfad zum SQLJ Translator
+
+  xml:
+    enabled: true
+    validate_schemas: true
+
+  config:
+    enabled: true
+    formats: ["yaml", "json", "properties", "toml"]
+
+# ═══════════════════════════════════════════════════════════════════
 # Internal Fetch - Intranet-URLs und Webseiten abrufen
 # ═══════════════════════════════════════════════════════════════════
 internal_fetch:

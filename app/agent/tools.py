@@ -2091,6 +2091,10 @@ def create_default_registry() -> ToolRegistry:
     from app.agent.api_tools import register_api_tools
     register_api_tools(registry)
 
+    # Compile/Validate Tools
+    from app.agent.compile_tools import register_compile_tools
+    register_compile_tools(registry)
+
     return registry
 
 
