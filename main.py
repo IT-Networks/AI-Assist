@@ -471,9 +471,17 @@ if __name__ == "__main__":
     import uvicorn
     from app.core.config import settings
 
-    uvicorn.run(
-        "main:app",
-        host=settings.server.host,
-        port=settings.server.port,
-        reload=settings.server.reload,
-    )
+    # Windows: Explizit ProactorEventLoop für uvicorn erzwingen
+    # Nötig für asyncio.create_subprocess_exec() (WLP, Maven, etc.)
+    uvicorn_config = {
+        "app": "main:app",
+        "host": settings.server.host,
+        "port": settings.server.port,
+        "reload": settings.server.reload,
+    }
+
+    if sys.platform == "win32":
+        # loop="asyncio" nutzt die gesetzte Policy (ProactorEventLoop)
+        uvicorn_config["loop"] = "asyncio"
+
+    uvicorn.run(**uvicorn_config)
