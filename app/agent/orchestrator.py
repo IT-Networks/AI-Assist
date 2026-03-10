@@ -117,7 +117,7 @@ class AgentState:
     # Compaction Stats
     compaction_count: int = 0
     last_compaction_savings: int = 0
-    last_compaction_at_message: int = 0  # Nachrichtenzahl bei letzter Komprimierung
+    compaction_attempted_while_full: bool = False  # Verhindert Spam wenn Komprimierung nicht hilft
     # Loop-Prävention: Zählt wie oft eine Datei pro Request gelesen wurde (max 2x erlaubt)
     read_files_this_request: Dict[str, int] = field(default_factory=dict)
     # Abbruch-Flag für laufende Anfragen
@@ -616,42 +616,49 @@ class AgentOrchestrator:
             state.title = user_message[:60] + ("…" if len(user_message) > 60 else "")
 
         # === COMPACTION CHECK ===
-        # Wenn Budget zu voll, Konversation zusammenfassen
-        # Cooldown: Mindestens 4 neue Nachrichten seit letzter Komprimierung
-        current_msg_count = len(state.messages_history)
-        compaction_cooldown = current_msg_count - state.last_compaction_at_message >= 4
+        # Wenn Budget zu voll (>80%), Konversation zusammenfassen.
+        # Logik: Nur versuchen wenn noch nicht bei diesem Füllstand versucht wurde.
+        # Nach erfolgreicher Komprimierung sinkt Budget unter 80% → Flag wird zurückgesetzt.
+        if budget.needs_compaction():
+            # Nur versuchen wenn nicht bereits bei vollem Budget versucht
+            if not state.compaction_attempted_while_full:
+                state.compaction_attempted_while_full = True
+                try:
+                    savings_estimate = self.summarizer.estimate_savings(messages)
+                    if savings_estimate.get("would_summarize"):
+                        old_tokens = estimate_messages_tokens(messages)
+                        messages = await self.summarizer.summarize_if_needed(
+                            messages,
+                            target_tokens=budget.available_total
+                        )
+                        new_tokens = estimate_messages_tokens(messages)
+                        savings = old_tokens - new_tokens
 
-        if budget.needs_compaction() and compaction_cooldown:
-            try:
-                savings_estimate = self.summarizer.estimate_savings(messages)
-                if savings_estimate.get("would_summarize"):
-                    old_tokens = estimate_messages_tokens(messages)
-                    messages = await self.summarizer.summarize_if_needed(
-                        messages,
-                        target_tokens=budget.available_total
-                    )
-                    new_tokens = estimate_messages_tokens(messages)
-                    savings = old_tokens - new_tokens
+                        state.compaction_count += 1
+                        state.last_compaction_savings = savings
 
-                    state.compaction_count += 1
-                    state.last_compaction_savings = savings
-                    state.last_compaction_at_message = current_msg_count
+                        # Budget aktualisieren
+                        budget.set("conversation", estimate_messages_tokens([
+                            m for m in messages if m.get("role") not in ("system",)
+                        ]))
 
-                    # Nur Event emittieren wenn tatsächlich Tokens gespart wurden
-                    if savings > 100:
-                        yield AgentEvent(AgentEventType.COMPACTION, {
-                            "savings": savings,
-                            "old_tokens": old_tokens,
-                            "new_tokens": new_tokens,
-                            "compaction_count": state.compaction_count
-                        })
+                        # Nur Event emittieren wenn tatsächlich Tokens gespart wurden
+                        if savings > 100:
+                            yield AgentEvent(AgentEventType.COMPACTION, {
+                                "savings": savings,
+                                "old_tokens": old_tokens,
+                                "new_tokens": new_tokens,
+                                "compaction_count": state.compaction_count
+                            })
 
-                    # Budget aktualisieren
-                    budget.set("conversation", estimate_messages_tokens([
-                        m for m in messages if m.get("role") not in ("system",)
-                    ]))
-            except Exception as e:
-                print(f"[agent] Compaction failed: {e}")
+                        # Wenn Budget jetzt unter Threshold, Flag zurücksetzen
+                        if not budget.needs_compaction():
+                            state.compaction_attempted_while_full = False
+                except Exception as e:
+                    print(f"[agent] Compaction failed: {e}")
+        else:
+            # Budget unter 80% → bereit für nächste Komprimierung wenn nötig
+            state.compaction_attempted_while_full = False
 
         # === SUB-AGENT PHASE ===
         # Spezialisierte Sub-Agenten erkunden Datenquellen parallel,
