@@ -2,6 +2,7 @@
 MCP Tool Bridge - Integration von MCP-Tools in das Agent-System.
 
 Verbindet MCP-Tools mit dem bestehenden Tool-System des Agents.
+Integriert auch die Capability-Registry für Brainstorm/Design/Implement/Analyze.
 """
 
 import json
@@ -16,6 +17,7 @@ from app.mcp.sequential_thinking import (
     ThinkingSession,
     ThinkingType
 )
+from app.mcp.registry import get_capability_registry, register_default_capabilities
 
 logger = logging.getLogger(__name__)
 
@@ -33,11 +35,16 @@ class MCPToolBridge:
     def __init__(self, llm_callback: Optional[Callable] = None):
         """
         Args:
-            llm_callback: Callback für LLM-Aufrufe (für Sequential Thinking)
+            llm_callback: Callback für LLM-Aufrufe (für Sequential Thinking und Capabilities)
         """
+        self.llm_callback = llm_callback
         self.mcp_manager = get_mcp_manager()
         self.sequential_thinking = get_sequential_thinking(llm_callback)
+        self.capability_registry = get_capability_registry(llm_callback)
         self._tool_handlers: Dict[str, Callable] = {}
+
+        # Registriere default Capabilities
+        register_default_capabilities(self.capability_registry)
 
         # Registriere built-in Tools
         self._register_builtin_tools()
@@ -51,6 +58,15 @@ class MCPToolBridge:
         # Session Management
         self._tool_handlers["thinking_session_get"] = self._handle_get_session
         self._tool_handlers["thinking_session_add_step"] = self._handle_add_step
+
+        # Capabilities
+        self._tool_handlers["brainstorm"] = self._handle_capability
+        self._tool_handlers["design"] = self._handle_capability
+        self._tool_handlers["implement"] = self._handle_capability
+        self._tool_handlers["analyze"] = self._handle_capability
+
+        # Capability Handoff
+        self._tool_handlers["capability_handoff"] = self._handle_capability_handoff
 
     def get_tool_definitions(self) -> List[Dict]:
         """
@@ -94,6 +110,41 @@ class MCPToolBridge:
                 }
             })
 
+        # Capability Tools hinzufügen
+        capability_tools = self.capability_registry.get_all_tool_definitions()
+        tools.extend(capability_tools)
+
+        # Handoff Tool
+        tools.append({
+            "type": "function",
+            "function": {
+                "name": "capability_handoff",
+                "description": (
+                    "Übergibt die Ergebnisse einer Capability an eine andere. "
+                    "Z.B. von Brainstorm zu Design, oder Design zu Implement."
+                ),
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "source_session_id": {
+                            "type": "string",
+                            "description": "ID der Quell-Session"
+                        },
+                        "target_capability": {
+                            "type": "string",
+                            "enum": ["brainstorm", "design", "implement", "analyze"],
+                            "description": "Ziel-Capability"
+                        },
+                        "additional_context": {
+                            "type": "string",
+                            "description": "Optional: Zusätzlicher Kontext für das Handoff"
+                        }
+                    },
+                    "required": ["source_session_id", "target_capability"]
+                }
+            }
+        })
+
         # MCP-Server Tools hinzufügen
         if settings.mcp.enabled:
             mcp_tools = self.mcp_manager.get_tool_definitions()
@@ -112,6 +163,10 @@ class MCPToolBridge:
         Returns:
             Tool-Ergebnis als Dict
         """
+        # Capability Tool? (brainstorm, design, implement, analyze)
+        if tool_name in ["brainstorm", "design", "implement", "analyze"]:
+            return await self._handle_capability(arguments, tool_name=tool_name)
+
         # Built-in Tool?
         if tool_name in self._tool_handlers:
             handler = self._tool_handlers[tool_name]
@@ -232,6 +287,85 @@ class MCPToolBridge:
                 "error_code": response.error_code
             }
 
+    async def _handle_capability(self, arguments: Dict[str, Any], tool_name: str = None) -> Dict[str, Any]:
+        """Handler für Capability-Tools (brainstorm, design, implement, analyze)."""
+        # Ermittle Capability-Name aus Tool-Name oder Arguments
+        capability_name = tool_name
+        if not capability_name:
+            # Versuche aus dem Call-Context zu ermitteln
+            capability_name = arguments.get("_capability_name", "")
+
+        query = arguments.get("query", "")
+        context = arguments.get("context")
+
+        if not query:
+            return {
+                "success": False,
+                "error": "Query is required"
+            }
+
+        try:
+            # Führe Capability aus
+            session = await self.capability_registry.execute(
+                capability_name=capability_name,
+                query=query,
+                context=context,
+                **{k: v for k, v in arguments.items() if k not in ["query", "context", "_capability_name"]}
+            )
+
+            return {
+                "success": True,
+                "session_id": session.session_id,
+                "capability": capability_name,
+                "status": session.status.value,
+                "artifacts_count": len(session.artifacts),
+                "formatted_output": session.format_for_context(),
+                "artifacts": [a.to_dict() for a in session.artifacts],
+                "next_capability": self.capability_registry.suggest_next_capability(session.session_id)
+            }
+
+        except Exception as e:
+            logger.error(f"[MCPBridge] Capability {capability_name} error: {e}")
+            return {
+                "success": False,
+                "error": str(e)
+            }
+
+    async def _handle_capability_handoff(self, arguments: Dict[str, Any]) -> Dict[str, Any]:
+        """Handler für Capability Handoffs."""
+        source_session_id = arguments.get("source_session_id", "")
+        target_capability = arguments.get("target_capability", "")
+        additional_context = arguments.get("additional_context")
+
+        if not source_session_id or not target_capability:
+            return {
+                "success": False,
+                "error": "source_session_id and target_capability are required"
+            }
+
+        try:
+            new_session = await self.capability_registry.handoff(
+                source_session_id=source_session_id,
+                target_capability=target_capability,
+                additional_context=additional_context
+            )
+
+            return {
+                "success": True,
+                "new_session_id": new_session.session_id,
+                "capability": target_capability,
+                "status": new_session.status.value,
+                "formatted_output": new_session.format_for_context(),
+                "handoff_chain": self.capability_registry.get_handoff_chain()
+            }
+
+        except Exception as e:
+            logger.error(f"[MCPBridge] Handoff error: {e}")
+            return {
+                "success": False,
+                "error": str(e)
+            }
+
     def should_use_sequential_thinking(
         self,
         query: str,
@@ -270,6 +404,13 @@ def get_tool_bridge(llm_callback: Optional[Callable] = None) -> MCPToolBridge:
     global _tool_bridge
     if _tool_bridge is None:
         _tool_bridge = MCPToolBridge(llm_callback)
-    elif llm_callback and _tool_bridge.sequential_thinking.llm_callback is None:
-        _tool_bridge.sequential_thinking.llm_callback = llm_callback
+    elif llm_callback:
+        # Update callbacks if provided
+        if _tool_bridge.sequential_thinking.llm_callback is None:
+            _tool_bridge.sequential_thinking.llm_callback = llm_callback
+        if _tool_bridge.capability_registry.llm_callback is None:
+            _tool_bridge.capability_registry.llm_callback = llm_callback
+            # Re-register capabilities with the new callback
+            register_default_capabilities(_tool_bridge.capability_registry)
+        _tool_bridge.llm_callback = llm_callback
     return _tool_bridge
