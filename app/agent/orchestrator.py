@@ -117,6 +117,7 @@ class AgentState:
     # Compaction Stats
     compaction_count: int = 0
     last_compaction_savings: int = 0
+    last_compaction_at_message: int = 0  # Nachrichtenzahl bei letzter Komprimierung
     # Loop-Prävention: Zählt wie oft eine Datei pro Request gelesen wurde (max 2x erlaubt)
     read_files_this_request: Dict[str, int] = field(default_factory=dict)
     # Abbruch-Flag für laufende Anfragen
@@ -616,7 +617,11 @@ class AgentOrchestrator:
 
         # === COMPACTION CHECK ===
         # Wenn Budget zu voll, Konversation zusammenfassen
-        if budget.needs_compaction():
+        # Cooldown: Mindestens 4 neue Nachrichten seit letzter Komprimierung
+        current_msg_count = len(state.messages_history)
+        compaction_cooldown = current_msg_count - state.last_compaction_at_message >= 4
+
+        if budget.needs_compaction() and compaction_cooldown:
             try:
                 savings_estimate = self.summarizer.estimate_savings(messages)
                 if savings_estimate.get("would_summarize"):
@@ -630,13 +635,16 @@ class AgentOrchestrator:
 
                     state.compaction_count += 1
                     state.last_compaction_savings = savings
+                    state.last_compaction_at_message = current_msg_count
 
-                    yield AgentEvent(AgentEventType.COMPACTION, {
-                        "savings": savings,
-                        "old_tokens": old_tokens,
-                        "new_tokens": new_tokens,
-                        "compaction_count": state.compaction_count
-                    })
+                    # Nur Event emittieren wenn tatsächlich Tokens gespart wurden
+                    if savings > 100:
+                        yield AgentEvent(AgentEventType.COMPACTION, {
+                            "savings": savings,
+                            "old_tokens": old_tokens,
+                            "new_tokens": new_tokens,
+                            "compaction_count": state.compaction_count
+                        })
 
                     # Budget aktualisieren
                     budget.set("conversation", estimate_messages_tokens([
