@@ -2,9 +2,16 @@
 Agent-Tools für WLP-Server-Verwaltung.
 """
 
+import asyncio
 from typing import Any
 
 from app.agent.tools import Tool, ToolCategory, ToolParameter, ToolResult, ToolRegistry
+
+
+def _read_lines_sync(path: str) -> list:
+    """Synchrones Datei-Lesen für run_in_executor."""
+    with open(path, "r", errors="replace") as f:
+        return f.readlines()
 
 
 def register_wlp_tools(registry: ToolRegistry) -> int:
@@ -103,8 +110,9 @@ def register_wlp_tools(registry: ToolRegistry) -> int:
             return ToolResult(success=False, error=f"messages.log nicht gefunden: {log_path}")
 
         try:
-            with open(log_path, "r", errors="replace") as f:
-                all_lines = f.readlines()
+            # Async File I/O: Blocking read in Thread-Pool auslagern
+            loop = asyncio.get_event_loop()
+            all_lines = await loop.run_in_executor(None, _read_lines_sync, str(log_path))
         except Exception as e:
             logger.warning(f"WLP Log-Datei lesen fehlgeschlagen: {e}")
             return ToolResult(success=False, error=f"Log-Datei lesen fehlgeschlagen: {e}")

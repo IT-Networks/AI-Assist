@@ -3,9 +3,16 @@ Agent-Tools für Log-Server-Zugriff (sequentiell + Zeitfenster).
 Wird beim Startup registriert wenn log_servers aktiviert ist.
 """
 
+import asyncio
 from typing import Any
 
 from app.agent.tools import Tool, ToolCategory, ToolParameter, ToolResult, ToolRegistry
+
+
+def _read_file_sync(path: str) -> str:
+    """Synchrones Datei-Lesen für run_in_executor."""
+    with open(path, "r", errors="replace") as f:
+        return f.read()
 
 
 def register_log_tools(registry: ToolRegistry) -> int:
@@ -272,10 +279,11 @@ def register_log_tools(registry: ToolRegistry) -> int:
             return ToolResult(success=True, data={"found": False, "message": "Keine FFDC-Dateien gefunden"})
 
         results = []
+        loop = asyncio.get_event_loop()
         for fpath in ffdc_files[:max_files]:
             try:
-                with open(fpath, "r", errors="replace") as f:
-                    content = f.read()
+                # Async File I/O: Blocking read in Thread-Pool auslagern
+                content = await loop.run_in_executor(None, _read_file_sync, str(fpath))
                 results.append({
                     "file": fpath.name,
                     "path": str(fpath),
