@@ -1,16 +1,52 @@
 # AI Code Assistant
 
-Ein lokaler AI-Assistent für Entwickler mit Claude-Code-ähnlicher Architektur. Features: Agent mit Tool-Calling, Skill-System, Handbuch-Integration und Datei-Operationen.
+Ein lokaler AI-Assistent für Entwickler mit Claude-Code-ähnlicher Architektur. Features: Agent mit Tool-Calling, MCP Hybrid Orchestration, Skill-System, Handbuch-Integration und Datei-Operationen.
 
 ## Features
 
 ### Agent-System
 - **Tool-Calling** – Agent kann automatisch Tools aufrufen um Informationen zu sammeln
 - **3 Modi** – `read_only`, `write_with_confirm`, `autonomous`
-- **8+ Tools** – Code-Suche, Handbuch, Skills, Datei-Operationen, Datenquellen
+- **10+ Tools** – Code-Suche, Handbuch, Skills, Datei-Operationen, Datenquellen
 - **Bestätigungs-Workflow** – Diff-Preview vor Schreib-Operationen
 - **Token-Budget** – Verhindert unkontrolliertes Kontextwachstum
 - **Kontext-Kompression** – Automatische Zusammenfassung langer Konversationen
+
+### MCP Hybrid Orchestration (NEU)
+
+Das System nutzt eine mehrstufige Orchestration für intelligente Antworten:
+
+```
+User Query
+    ↓
+[MEMORY PHASE] ─────── 3-Tier Memory (Global → Project → Session)
+    ↓
+[THINKING PHASE] ───── Strukturiertes Denken bei komplexen Anfragen
+    ↓
+[RESEARCH PHASE] ───── Parallele Quellensuche (Web, Code, Docs)
+    ↓
+[SUB-AGENT PHASE] ──── Spezialisierte Sub-Agenten
+    ↓
+[MAIN AGENT LOOP] ──── Finale Antwortgenerierung
+```
+
+#### ThinkingEngine
+- **4 Modi** – QUICK (3 Schritte), NORMAL (5), DEEP (7), ULTRA (10+)
+- **Auto-Aktivierung** – Bei Fehleranalysen, komplexen Fragen, Architektur-Entscheidungen
+- **Echtzeit-UI** – Thinking Panel zeigt Denkschritte live im Frontend
+- **Komplexitäts-Erkennung** – Automatische Modus-Wahl basierend auf Query
+
+#### ResearchCapability
+- **7 Quellen** – Web, Java-Code, Python-Code, Handbuch, Confluence, Memory, PDF
+- **Parallele Ausführung** – Alle relevanten Quellen gleichzeitig durchsuchen
+- **Auto-Erkennung** – Keywords bestimmen welche Quellen aktiviert werden
+- **Timeout-Handling** – Konfigurierbare Timeouts pro Quelle
+
+#### Memory System (3-Tier)
+- **Global** – Projektübergreifende Erkenntnisse
+- **Project** – Projektspezifisches Wissen
+- **Session** – Aktuelle Konversation
+- **Auto-Learner** – Lernt automatisch aus erfolgreichen Interaktionen
 
 ### Skill-System
 - **YAML-basierte Skills** – Prompts + Wissensquellen kombinieren
@@ -18,6 +54,13 @@ Ein lokaler AI-Assistent für Entwickler mit Claude-Code-ähnlicher Architektur.
 - **Aktivierung pro Session** – Skills on-demand aktivieren
 - **Volltextsuche** – SQLite FTS5 für Skill-Inhalte
 - **Automatische Aktivierung** – Trigger-Wörter für auto-Aktivierung
+
+### MCP Capabilities
+- **Brainstorm** – Ideen-Exploration mit strukturiertem Output
+- **Design** – Architektur- und API-Design
+- **Implement** – Code-Generierung mit Best Practices
+- **Analyze** – Code-Analyse und Review
+- **Research** – Multi-Source Recherche
 
 ### Handbuch-Integration
 - **HTML-Parsing** – Services, Tabs, Felder aus HTML-Handbuch
@@ -65,6 +108,24 @@ llm:
   default_model: "mistral-678b"       # Haupt-Modell für Antworten
   tool_model: "gptoss120b"            # Schnelles Modell für Tool-Calls
   analysis_model: ""                  # Großes Modell für finale Analyse (leer = default_model)
+
+# MCP Orchestration
+mcp:
+  thinking_enabled: true              # ThinkingEngine aktivieren
+  default_thinking_mode: "normal"     # quick | normal | deep | ultra
+  research_enabled: true              # ResearchCapability aktivieren
+  auto_research_on_question: true     # Bei Fragen automatisch recherchieren
+  auto_research_keywords:             # Keywords die Research triggern
+    - "wie funktioniert"
+    - "was ist"
+    - "best practice"
+  research_timeout_seconds: 30
+  research_sources:                   # Aktive Quellen
+    - memory
+    - code_java
+    - code_python
+    - handbook
+    - web
 
 # Code-Repositories (optional)
 java:
@@ -245,11 +306,13 @@ Interaktive API-Dokumentation: **http://localhost:8000/docs**
 | `search_code` | Suche | Java/Python Code durchsuchen |
 | `search_handbook` | Wissen | Handbuch durchsuchen |
 | `search_skills` | Wissen | Skill-Wissensbasen durchsuchen |
+| `search_web` | Suche | Web-Recherche (via Proxy) |
 | `read_file` | Datei | Datei lesen |
 | `list_files` | Datei | Verzeichnis auflisten |
 | `write_file` | Datei* | Datei schreiben |
 | `edit_file` | Datei* | Datei bearbeiten |
 | `get_service_info` | Wissen | Service-Details aus Handbuch |
+| `docker_*` | Docker | Container- und Image-Management |
 
 *Benötigt `file_operations.enabled: true` und entsprechenden Modus
 
@@ -297,19 +360,35 @@ AI-Assist/
 ├── requirements.txt
 ├── app/
 │   ├── agent/                   # Agent-System
-│   │   ├── orchestrator.py      # Agent-Loop mit Tool-Calling
+│   │   ├── orchestrator.py      # Hybrid Orchestration (Memory→Thinking→Research→Sub-Agents)
 │   │   ├── tools.py             # Tool-Definitionen
+│   │   ├── sub_agents.py        # Sub-Agent Dispatcher
 │   │   ├── datasource_tools.py  # Datenquellen-Tools
-│   │   └── entity_tracker.py   # Entity-Tracking
+│   │   ├── docker_tools.py      # Docker-Integration
+│   │   └── entity_tracker.py    # Entity-Tracking
 │   ├── api/routes/
 │   │   ├── agent.py             # Agent-Endpunkte (SSE)
 │   │   ├── skills.py            # Skill-Endpunkte
 │   │   ├── handbook.py          # Handbuch-Endpunkte
 │   │   ├── settings.py          # Settings-UI
+│   │   ├── search.py            # Web-Suche
 │   │   ├── chat.py              # LLM Chat (Legacy)
 │   │   ├── java.py              # Java-Repo
 │   │   ├── python_routes.py     # Python-Repo
 │   │   └── ...
+│   ├── mcp/                     # MCP Orchestration (NEU)
+│   │   ├── thinking_engine.py   # ThinkingEngine (4 Modi)
+│   │   ├── sequential_thinking.py # Schritt-für-Schritt Reasoning
+│   │   ├── tool_bridge.py       # MCP-Tool Integration
+│   │   ├── registry.py          # Capability Registry
+│   │   ├── manager.py           # MCP Server Manager
+│   │   └── capabilities/        # MCP Capabilities
+│   │       ├── base.py          # BaseCapability
+│   │       ├── brainstorm.py    # Ideen-Exploration
+│   │       ├── design.py        # Architektur-Design
+│   │       ├── implement.py     # Code-Generierung
+│   │       ├── analyze.py       # Code-Analyse
+│   │       └── research.py      # Multi-Source Recherche
 │   ├── models/
 │   │   └── skill.py             # Skill-Datenmodelle
 │   ├── services/
@@ -317,6 +396,8 @@ AI-Assist/
 │   │   ├── handbook_indexer.py  # Handbuch-Index
 │   │   ├── file_manager.py      # Datei-Operationen
 │   │   ├── llm_client.py        # LLM-Kommunikation
+│   │   ├── memory_store.py      # 3-Tier Memory System
+│   │   ├── auto_learner.py      # Automatisches Lernen
 │   │   └── ...
 │   ├── core/
 │   │   ├── config.py            # Pydantic-Konfigurationsmodelle
@@ -331,13 +412,29 @@ AI-Assist/
 │   ├── junit-generator.yaml
 │   └── fehler-analyse.yaml
 ├── static/
-│   ├── index.html               # IDE-ähnliches Frontend
+│   ├── index.html               # IDE-ähnliches Frontend mit Thinking Panel
 │   ├── style.css
 │   └── app.js
+├── tests/                       # Unit Tests (pytest)
+│   ├── test_api_tools.py
+│   ├── test_change_detector.py
+│   ├── test_junit_tools.py
+│   ├── test_path_validator.py
+│   └── test_validators.py
 └── docs/
     ├── ARCHITECTURE.md
     ├── REQUIREMENTS.md
     └── SCHEMA.md
+```
+
+## Tests
+
+```bash
+# Alle Tests ausführen
+python -m pytest tests/ -v
+
+# Mit Coverage
+python -m pytest tests/ --cov=app --cov-report=html
 ```
 
 ## Lizenz
