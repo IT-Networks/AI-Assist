@@ -134,13 +134,17 @@ async def _fetch_url(
 
     proxy_config = _get_proxy_config(config)
 
+    # Defensive Type-Coercion: Sicherstellen dass Typen korrekt sind
+    timeout_val = int(config.timeout_seconds) if config.timeout_seconds else 30
+    verify_val = bool(config.verify_ssl) if config.verify_ssl is not None else True
+
     try:
         # Shared Client nutzen wenn kein Proxy, sonst neuen Client erstellen
         if proxy_config:
             # Mit Proxy: neuer Client pro Request (Proxy-Einstellungen können variieren)
             async with httpx.AsyncClient(
-                timeout=config.timeout_seconds,
-                verify=config.verify_ssl,
+                timeout=timeout_val,
+                verify=verify_val,
                 follow_redirects=True,
                 **proxy_config,
             ) as client:
@@ -152,7 +156,7 @@ async def _fetch_url(
                 )
         else:
             # Ohne Proxy: Shared Client für Connection-Pooling
-            client = get_internal_client(verify_ssl=config.verify_ssl, timeout=config.timeout_seconds)
+            client = get_internal_client(verify_ssl=verify_val, timeout=timeout_val)
             response = await client.request(
                 method=method.upper(),
                 url=url,

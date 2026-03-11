@@ -63,10 +63,14 @@ class HttpClientPool:
             Konfigurierter httpx.AsyncClient
         """
         if name not in cls._clients:
-            logger.debug(f"HTTP-Client erstellt: {name} (ssl={verify_ssl}, timeout={timeout}s)")
+            # Defensive type coercion
+            verify_val = bool(verify_ssl) if verify_ssl is not None else True
+            timeout_val = int(timeout) if timeout else cls.DEFAULT_TIMEOUT
+
+            logger.debug(f"HTTP-Client erstellt: {name} (ssl={verify_val}, timeout={timeout_val}s)")
             cls._clients[name] = httpx.AsyncClient(
-                verify=verify_ssl,
-                timeout=timeout,
+                verify=verify_val,
+                timeout=timeout_val,
                 limits=httpx.Limits(
                     max_connections=max_connections,
                     max_keepalive_connections=max_keepalive,

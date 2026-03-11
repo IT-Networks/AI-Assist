@@ -214,10 +214,13 @@ def register_api_tools(registry: ToolRegistry) -> int:
             builder = SOAPEnvelopeBuilder(service)
             http_headers = builder.get_soap_headers(operation)
 
-            # Request ausführen
+            # Request ausführen (defensive type coercion)
+            verify_val = bool(soap_cfg.verify_ssl) if soap_cfg.verify_ssl is not None else True
+            timeout_val = int(timeout) if timeout else 30
+
             async with httpx.AsyncClient(
-                timeout=timeout,
-                verify=soap_cfg.verify_ssl,
+                timeout=timeout_val,
+                verify=verify_val,
                 follow_redirects=True,
             ) as client:
                 response = await client.post(
@@ -433,10 +436,13 @@ def register_api_tools(registry: ToolRegistry) -> int:
                 else:
                     body = body_str
 
-            # Request ausführen
+            # Request ausführen (defensive type coercion)
+            verify_val = bool(rest_cfg.verify_ssl) if hasattr(rest_cfg, 'verify_ssl') and rest_cfg.verify_ssl is not None else True
+            timeout_val = int(timeout) if timeout else 30
+
             async with httpx.AsyncClient(
-                timeout=timeout,
-                verify=rest_cfg.verify_ssl if hasattr(rest_cfg, 'verify_ssl') else True,
+                timeout=timeout_val,
+                verify=verify_val,
                 follow_redirects=True,
             ) as client:
                 if isinstance(body, (dict, list)):
