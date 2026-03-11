@@ -12,7 +12,7 @@ from pathlib import Path
 if sys.platform == 'win32':
     asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())
 
-from app.api.routes import chat, java, logs, pdf, confluence, models, python_routes, handbook, skills, agent, settings, database, datasources, mq, testtool, log_servers, wlp, maven, search, jenkins, github, internal_fetch, docker_sandbox
+from app.api.routes import chat, java, logs, pdf, confluence, models, python_routes, handbook, skills, agent, settings, database, datasources, mq, testtool, log_servers, wlp, maven, search, jenkins, github, internal_fetch, docker_sandbox, access_logs
 
 
 @asynccontextmanager
@@ -191,6 +191,17 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         print(f"[startup] Agent-Initialisierung fehlgeschlagen: {e}")
 
+    # External Access Logging initialisieren
+    try:
+        if settings.access_logging.enabled:
+            from app.services.external_access_logger import get_access_logger
+            from app.core.http_client import HttpClientPool
+            access_logger = get_access_logger()
+            HttpClientPool.enable_logging(access_logger)
+            print("[startup] External Access Logging aktiviert")
+    except Exception as e:
+        print(f"[startup] Access-Logging-Initialisierung fehlgeschlagen: {e}")
+
     yield
 
     # ═══════════════════════════════════════════════════════════════════════════
@@ -308,6 +319,7 @@ app.include_router(jenkins.router)
 app.include_router(github.router)
 app.include_router(internal_fetch.router)
 app.include_router(docker_sandbox.router)
+app.include_router(access_logs.router)
 
 
 # ══════════════════════════════════════════════════════════════════════════════

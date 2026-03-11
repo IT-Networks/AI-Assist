@@ -900,6 +900,16 @@ class GitHubConfig(BaseModel):
         return ""
 
 
+class AccessLoggingConfig(BaseModel):
+    """Konfiguration für das External Access Logging."""
+    enabled: bool = True               # Access-Logging aktiviert
+    log_directory: str = ""            # Verzeichnis für Logs (default: index/access_logs)
+    max_age_days: int = 90             # Auto-Cleanup nach X Tagen
+    log_request_body: bool = False     # Request-Body loggen (Privacy!)
+    log_response_body: bool = False    # Response-Body loggen (Performance!)
+    exclude_hosts: List[str] = []      # Hosts die nicht geloggt werden
+
+
 class Settings(BaseModel):
     llm: LLMConfig = LLMConfig()
     models: List[ModelEntry] = []
@@ -933,6 +943,7 @@ class Settings(BaseModel):
     compile_tool: CompileToolConfig = Field(default_factory=CompileToolConfig)
     junit_tool: JUnitToolConfig = Field(default_factory=JUnitToolConfig)
     prompt_templates: PromptTemplatesConfig = Field(default_factory=PromptTemplatesConfig)
+    access_logging: AccessLoggingConfig = Field(default_factory=AccessLoggingConfig)
 
     def apply_env_overrides(self) -> "Settings":
         if os.getenv("LLM_BASE_URL"):

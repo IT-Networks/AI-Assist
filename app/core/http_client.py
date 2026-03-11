@@ -8,14 +8,223 @@ Performance-Vorteile:
 - Vermeidet TCP/TLS-Handshake bei jedem Request (~200ms Ersparnis)
 - Ermöglicht Keep-Alive-Verbindungen
 - Zentrale Konfiguration von Timeouts und Limits
+
+Features:
+- Automatisches Access-Logging für Audit und Debugging
+- Privacy-bewusst: Passwörter und Tokens werden geschwärzt
 """
 
 import logging
-from typing import Dict, Optional
+import re
+import time
+from typing import Any, Dict, Optional, TYPE_CHECKING
+from urllib.parse import urlparse, urlunparse, parse_qs, urlencode
 
 import httpx
 
+if TYPE_CHECKING:
+    from app.services.external_access_logger import ExternalAccessLogger
+
 logger = logging.getLogger(__name__)
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# URL Sanitization (Privacy)
+# ══════════════════════════════════════════════════════════════════════════════
+
+# Patterns für sensible Daten in URLs
+SENSITIVE_PATTERNS = [
+    r'password[=:][^&\s]*',
+    r'passwd[=:][^&\s]*',
+    r'pwd[=:][^&\s]*',
+    r'token[=:][^&\s]*',
+    r'api[_-]?key[=:][^&\s]*',
+    r'apikey[=:][^&\s]*',
+    r'secret[=:][^&\s]*',
+    r'auth[=:][^&\s]*',
+    r'bearer[=:][^&\s]*',
+    r'credential[s]?[=:][^&\s]*',
+    r'access[_-]?token[=:][^&\s]*',
+]
+
+SENSITIVE_REGEX = re.compile(
+    '|'.join(SENSITIVE_PATTERNS),
+    re.IGNORECASE
+)
+
+
+def sanitize_url(url: str) -> str:
+    """
+    Entfernt sensible Daten aus URL für Logging.
+
+    - Entfernt Query-Parameter komplett (können API-Keys enthalten)
+    - Maskiert Passwörter in Basic-Auth URLs (user:pass@host)
+    """
+    try:
+        parsed = urlparse(url)
+
+        # Maskiere Passwort in Basic-Auth URL (user:pass@host)
+        netloc = parsed.netloc
+        if '@' in netloc and ':' in netloc.split('@')[0]:
+            # Format: user:password@host
+            auth_part, host_part = netloc.rsplit('@', 1)
+            if ':' in auth_part:
+                user, _ = auth_part.split(':', 1)
+                netloc = f"{user}:****@{host_part}"
+
+        # Nur Schema, Host und Pfad behalten (keine Query-Parameter)
+        return f"{parsed.scheme}://{netloc}{parsed.path}"
+
+    except Exception:
+        # Fallback: Sensitive Patterns maskieren
+        return SENSITIVE_REGEX.sub('****', url)
+
+
+def extract_host(url: str) -> str:
+    """Extrahiert Hostname aus URL."""
+    try:
+        parsed = urlparse(url)
+        # Entferne Port und Auth
+        host = parsed.netloc
+        if '@' in host:
+            host = host.split('@')[-1]
+        if ':' in host:
+            host = host.split(':')[0]
+        return host
+    except Exception:
+        return ""
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Logging HTTP Client Wrapper
+# ══════════════════════════════════════════════════════════════════════════════
+
+class LoggingAsyncClient:
+    """
+    Wrapper um httpx.AsyncClient mit automatischem Access-Logging.
+
+    Alle HTTP-Requests werden transparent geloggt mit:
+    - Timestamp, URL (sanitized), Method
+    - Status Code, Response Size, Duration
+    - Fehler-Messages bei Problemen
+
+    Privacy:
+    - Keine Auth-Header geloggt
+    - Keine Request/Response-Bodies
+    - Passwörter und Tokens in URLs maskiert
+    """
+
+    def __init__(
+        self,
+        client: httpx.AsyncClient,
+        client_type: str,
+        access_logger: "ExternalAccessLogger",
+        session_id: Optional[str] = None,
+        tool_name: Optional[str] = None,
+    ):
+        self._client = client
+        self._client_type = client_type
+        self._access_logger = access_logger
+        self._session_id = session_id or "unknown"
+        self._tool_name = tool_name or client_type
+
+    def set_session_id(self, session_id: str) -> None:
+        """Setzt die aktuelle Session-ID."""
+        self._session_id = session_id
+
+    def set_tool_name(self, tool_name: str) -> None:
+        """Setzt den aktuellen Tool-Namen für präziseres Logging."""
+        self._tool_name = tool_name
+
+    async def request(
+        self,
+        method: str,
+        url: str,
+        **kwargs
+    ) -> httpx.Response:
+        """Führt Request aus und loggt Zugriff."""
+        start = time.monotonic()
+
+        try:
+            response = await self._client.request(method, url, **kwargs)
+            duration = int((time.monotonic() - start) * 1000)
+
+            # Async logging
+            entry = self._access_logger.create_entry(
+                session_id=self._session_id,
+                tool_name=self._tool_name,
+                client_type=self._client_type,
+                method=method,
+                url=url,
+                status_code=response.status_code,
+                success=response.is_success,
+                response_size=len(response.content) if response.content else 0,
+                duration_ms=duration,
+                content_type=response.headers.get("content-type"),
+                error_message=None,
+            )
+            await self._access_logger.log_access(entry)
+
+            return response
+
+        except httpx.RequestError as e:
+            duration = int((time.monotonic() - start) * 1000)
+
+            # Log auch fehlgeschlagene Requests
+            entry = self._access_logger.create_entry(
+                session_id=self._session_id,
+                tool_name=self._tool_name,
+                client_type=self._client_type,
+                method=method,
+                url=url,
+                status_code=0,
+                success=False,
+                response_size=0,
+                duration_ms=duration,
+                content_type=None,
+                error_message=str(e)[:200],  # Truncate für Logging
+            )
+            await self._access_logger.log_access(entry)
+
+            raise
+
+    # Delegate alle anderen Methoden an den wrapped Client
+    async def get(self, url: str, **kwargs) -> httpx.Response:
+        return await self.request("GET", url, **kwargs)
+
+    async def post(self, url: str, **kwargs) -> httpx.Response:
+        return await self.request("POST", url, **kwargs)
+
+    async def put(self, url: str, **kwargs) -> httpx.Response:
+        return await self.request("PUT", url, **kwargs)
+
+    async def delete(self, url: str, **kwargs) -> httpx.Response:
+        return await self.request("DELETE", url, **kwargs)
+
+    async def patch(self, url: str, **kwargs) -> httpx.Response:
+        return await self.request("PATCH", url, **kwargs)
+
+    async def head(self, url: str, **kwargs) -> httpx.Response:
+        return await self.request("HEAD", url, **kwargs)
+
+    async def options(self, url: str, **kwargs) -> httpx.Response:
+        return await self.request("OPTIONS", url, **kwargs)
+
+    # Properties für Kompatibilität
+    @property
+    def headers(self):
+        return self._client.headers
+
+    @property
+    def cookies(self):
+        return self._client.cookies
+
+    @property
+    def timeout(self):
+        return self._client.timeout
+
+    async def aclose(self):
+        await self._client.aclose()
 
 
 class HttpClientPool:
@@ -26,17 +235,60 @@ class HttpClientPool:
         client = HttpClientPool.get("github", verify_ssl=False, timeout=30)
         response = await client.get(url)
 
+    Mit Access-Logging:
+        HttpClientPool.enable_logging(access_logger, session_id)
+        client = HttpClientPool.get("github")  # Automatisch geloggt
+
     Bei Application-Shutdown:
         await HttpClientPool.close_all()
     """
 
     _clients: Dict[str, httpx.AsyncClient] = {}
+    _logging_clients: Dict[str, LoggingAsyncClient] = {}
+
+    # Logging-Konfiguration
+    _access_logger: Optional["ExternalAccessLogger"] = None
+    _current_session_id: Optional[str] = None
+    _logging_enabled: bool = False
 
     # Standard-Limits für alle Clients
     DEFAULT_MAX_CONNECTIONS = 10
     DEFAULT_KEEPALIVE_CONNECTIONS = 5
     DEFAULT_KEEPALIVE_EXPIRY = 30.0
     DEFAULT_TIMEOUT = 30
+
+    @classmethod
+    def enable_logging(
+        cls,
+        access_logger: "ExternalAccessLogger",
+        session_id: Optional[str] = None
+    ) -> None:
+        """
+        Aktiviert Access-Logging für alle HTTP-Clients.
+
+        Args:
+            access_logger: ExternalAccessLogger Instanz
+            session_id: Aktuelle Session-ID
+        """
+        cls._access_logger = access_logger
+        cls._current_session_id = session_id
+        cls._logging_enabled = True
+        logger.info("HTTP Access-Logging aktiviert")
+
+    @classmethod
+    def disable_logging(cls) -> None:
+        """Deaktiviert Access-Logging."""
+        cls._logging_enabled = False
+        cls._logging_clients.clear()
+        logger.info("HTTP Access-Logging deaktiviert")
+
+    @classmethod
+    def set_session_id(cls, session_id: str) -> None:
+        """Aktualisiert die Session-ID für Logging."""
+        cls._current_session_id = session_id
+        # Update alle bestehenden Logging-Clients
+        for client in cls._logging_clients.values():
+            client.set_session_id(session_id)
 
     @classmethod
     def get(
@@ -77,6 +329,18 @@ class HttpClientPool:
                     keepalive_expiry=keepalive_expiry,
                 ),
             )
+
+        # Wenn Logging aktiviert, Wrapper zurückgeben
+        if cls._logging_enabled and cls._access_logger:
+            if name not in cls._logging_clients:
+                cls._logging_clients[name] = LoggingAsyncClient(
+                    client=cls._clients[name],
+                    client_type=name,
+                    access_logger=cls._access_logger,
+                    session_id=cls._current_session_id,
+                )
+            return cls._logging_clients[name]
+
         return cls._clients[name]
 
     @classmethod
@@ -109,6 +373,10 @@ class HttpClientPool:
         for name in list(cls._clients.keys()):
             await cls._clients[name].aclose()
             del cls._clients[name]
+
+        # Logging-Clients auch leeren
+        cls._logging_clients.clear()
+
         if count > 0:
             logger.info(f"{count} HTTP-Client(s) geschlossen")
         return count
