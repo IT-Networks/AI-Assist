@@ -24,6 +24,27 @@ import httpx
 from app.agent.entity_tracker import EntityTracker
 
 logger = logging.getLogger(__name__)
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Pre-compiled Regex Patterns (Performance: avoid re-compilation on each call)
+# ══════════════════════════════════════════════════════════════════════════════
+_RE_MISTRAL_COMPACT = re.compile(r'\[TOOL_CALLS\](\w+)(\{.*?\}|\[.*?\])', re.DOTALL)
+_RE_MISTRAL_STANDARD = re.compile(r'\[TOOL_CALLS\]\s*(\[.*?\])', re.DOTALL)
+_RE_XML_TOOL_CALL = re.compile(r'<tool_call>(.*?)</tool_call>', re.DOTALL)
+_RE_XML_FUNCTIONCALL = re.compile(r'<functioncall>(.*?)</functioncall>', re.DOTALL)
+_RE_XML_FUNCTION_CALLS = re.compile(r'<function_calls>(.*?)</function_calls>', re.DOTALL)
+_RE_XML_INVOKE = re.compile(r'<invoke>(.*?)</invoke>', re.DOTALL)
+_RE_JSON_BLOCK = re.compile(r'```(?:json)?\s*\n(.*?)\n```', re.DOTALL)
+_RE_INLINE_NAME = re.compile(r'\{[^{}]*"name"\s*:\s*"([^"]+)"[^{}]*\}')
+_RE_MCP_FORCE = re.compile(r'^\[MCP:(\w+)\]\s*(.+)$', re.DOTALL)
+_RE_PLAN_BLOCK = re.compile(r'\[PLAN\](.*?)\[/PLAN\]', re.DOTALL)
+# Debug hint patterns
+_RE_HINT_TOOL = re.compile(r'\[TOOL', re.IGNORECASE)
+_RE_HINT_XML_TOOL = re.compile(r'<tool', re.IGNORECASE)
+_RE_HINT_XML_FUNC = re.compile(r'<function', re.IGNORECASE)
+_RE_HINT_NAME = re.compile(r'"name"\s*:')
+_RE_HINT_TOOL_KEY = re.compile(r'"tool"\s*:')
+
 from app.agent.tools import ToolRegistry, ToolResult, get_tool_registry
 from app.core.config import settings
 from app.mcp.tool_bridge import get_tool_bridge, MCPToolBridge
@@ -290,11 +311,7 @@ def _parse_text_tool_calls(content: str, available_tools: List[Dict]) -> List[Di
 
     # Format 1a: Mistral 678B Compact Format
     # [TOOL_CALLS]funcname{"arg": "val"}  (kein Leerzeichen, kein JSON-Array)
-    mistral_compact_matches = re.findall(
-        r'\[TOOL_CALLS\](\w+)(\{.*?\}|\[.*?\])',
-        content,
-        re.DOTALL
-    )
+    mistral_compact_matches = _RE_MISTRAL_COMPACT.findall(content)
     if mistral_compact_matches:
         for name, args_str in mistral_compact_matches:
             if not tool_names or name in tool_names:
@@ -320,11 +337,7 @@ def _parse_text_tool_calls(content: str, available_tools: List[Dict]) -> List[Di
 
     # Format 1b: Mistral Standard Format
     # [TOOL_CALLS] [{"name": "...", "arguments": {...}}]
-    mistral_match = re.search(
-        r'\[TOOL_CALLS\]\s*(\[.*?\])',
-        content,
-        re.DOTALL
-    )
+    mistral_match = _RE_MISTRAL_STANDARD.search(content)
     if mistral_match:
         try:
             calls = json.loads(mistral_match.group(1))
@@ -349,13 +362,13 @@ def _parse_text_tool_calls(content: str, available_tools: List[Dict]) -> List[Di
 
     # Format 2: XML <tool_call> oder <functioncall>
     xml_patterns = [
-        r'<tool_call>(.*?)</tool_call>',
-        r'<functioncall>(.*?)</functioncall>',
-        r'<function_calls>(.*?)</function_calls>',
-        r'<invoke>(.*?)</invoke>',
+        _RE_XML_TOOL_CALL,
+        _RE_XML_FUNCTIONCALL,
+        _RE_XML_FUNCTION_CALLS,
+        _RE_XML_INVOKE,
     ]
     for pattern in xml_patterns:
-        matches = re.findall(pattern, content, re.DOTALL)
+        matches = pattern.findall(content)
         for match in matches:
             try:
                 call = json.loads(match.strip())
@@ -377,7 +390,7 @@ def _parse_text_tool_calls(content: str, available_tools: List[Dict]) -> List[Di
         return parsed_calls
 
     # Format 3: JSON-Codeblock mit Tool-Call Struktur
-    json_blocks = re.findall(r'```(?:json)?\s*\n(.*?)\n```', content, re.DOTALL)
+    json_blocks = _RE_JSON_BLOCK.findall(content)
     for block in json_blocks:
         try:
             data = json.loads(block.strip())
@@ -409,7 +422,7 @@ def _parse_text_tool_calls(content: str, available_tools: List[Dict]) -> List[Di
     # Format 4: Inline JSON mit bekanntem Tool-Namen
     # Suche nach {"name": "known_tool", ...} direkt im Text
     if tool_names:
-        inline_matches = re.findall(r'\{[^{}]*"name"\s*:\s*"([^"]+)"[^{}]*\}', content)
+        inline_matches = _RE_INLINE_NAME.findall(content)
         for match_name in inline_matches:
             if match_name in tool_names:
                 # Versuche den vollständigen JSON-Block zu extrahieren
@@ -437,15 +450,15 @@ def _parse_text_tool_calls(content: str, available_tools: List[Dict]) -> List[Di
     if content and len(content) > 20:
         # Prüfe auf mögliche Tool-Call-Patterns die nicht gematcht wurden
         potential_patterns = [
-            (r'\[TOOL', '[TOOL...'),
-            (r'<tool', '<tool...'),
-            (r'<function', '<function...'),
-            (r'"name"\s*:', '"name":'),
-            (r'"tool"\s*:', '"tool":'),
+            (_RE_HINT_TOOL, '[TOOL...'),
+            (_RE_HINT_XML_TOOL, '<tool...'),
+            (_RE_HINT_XML_FUNC, '<function...'),
+            (_RE_HINT_NAME, '"name":'),
+            (_RE_HINT_TOOL_KEY, '"tool":'),
         ]
         found_hints = []
         for pattern, hint in potential_patterns:
-            if re.search(pattern, content, re.IGNORECASE):
+            if pattern.search(content):
                 found_hints.append(hint)
         if found_hints:
             logger.debug("[agent] Text-Parser: Keine Tool-Calls erkannt, aber Hinweise gefunden: {found_hints}")
@@ -670,7 +683,7 @@ class AgentOrchestrator:
         # ── MCP Force-Capability Detection ────────────────────────────────────
         # Format: [MCP:capability_name] actual query
         forced_capability = None
-        mcp_match = re.match(r'^\[MCP:(\w+)\]\s*(.+)$', user_message, re.DOTALL)
+        mcp_match = _RE_MCP_FORCE.match(user_message)
         if mcp_match:
             forced_capability = mcp_match.group(1)
             user_message = mcp_match.group(2).strip()
@@ -1136,7 +1149,7 @@ class AgentOrchestrator:
                             "compaction_count": state.compaction_count,
                         }
 
-                        plan_match = re.search(r'\[PLAN\](.*?)\[/PLAN\]', plan_response, re.DOTALL)
+                        plan_match = _RE_PLAN_BLOCK.search(plan_response)
                         if plan_match:
                             plan_text = plan_match.group(1).strip()
                             state.pending_plan = plan_text

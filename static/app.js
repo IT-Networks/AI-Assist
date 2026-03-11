@@ -69,7 +69,10 @@ const chatManager = {
     const chat = this.getActive();
     if (!chat) return;
     chat.toolHistory = [...state.toolHistory];
-    chat.context = JSON.parse(JSON.stringify(state.context));
+    // structuredClone is faster than JSON.parse/stringify for deep cloning
+    chat.context = typeof structuredClone === 'function'
+      ? structuredClone(state.context)
+      : JSON.parse(JSON.stringify(state.context));
     chat.pendingConfirmation = state.pendingConfirmation;
     chat.mode = state.mode;  // Mode speichern
   },
@@ -238,7 +241,10 @@ async function switchToChat(chatId) {
   state.sessionId = incomingChat.sessionId;
   state.toolHistory = [...incomingChat.toolHistory];
   state.pendingConfirmation = incomingChat.pendingConfirmation;
-  state.context = JSON.parse(JSON.stringify(incomingChat.context));
+  // structuredClone is faster than JSON.parse/stringify for deep cloning
+  state.context = typeof structuredClone === 'function'
+    ? structuredClone(incomingChat.context)
+    : JSON.parse(JSON.stringify(incomingChat.context));
 
   // Nachrichten-Historie und Mode vom Server laden wenn Chat vom Disk wiederhergestellt wird
   if (incomingChat.needsRestore) {

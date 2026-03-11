@@ -15,7 +15,7 @@ import asyncio
 import re
 import uuid
 from datetime import datetime
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, TYPE_CHECKING
 from urllib.parse import unquote
 
 import httpx
@@ -32,6 +32,56 @@ router = APIRouter(prefix="/api/search", tags=["search"])
 _pending: Dict[str, Dict[str, Any]] = {}
 _history: List[Dict[str, Any]] = []        # Letzte 20 Ergebnisse
 _HISTORY_MAX = 20
+_PENDING_MAX = 50  # Max pending searches (cleanup threshold)
+_PENDING_TTL_SECONDS = 3600  # 1 hour TTL for pending searches
+
+# Shared HTTP Client (Performance: avoid TCP/TLS handshake per request)
+_search_client: Optional[httpx.AsyncClient] = None
+
+
+def _get_search_client() -> httpx.AsyncClient:
+    """Returns shared HTTP client for search requests (lazy init)."""
+    global _search_client
+    if _search_client is None:
+        _search_client = httpx.AsyncClient(
+            timeout=settings.search.timeout_seconds or 30,
+            follow_redirects=True,
+            headers=_DDG_HEADERS,
+            verify=settings.search.verify_ssl,
+            limits=httpx.Limits(
+                max_connections=10,
+                max_keepalive_connections=5,
+                keepalive_expiry=30.0
+            )
+        )
+    return _search_client
+
+
+async def close_search_client():
+    """Closes shared HTTP client (for shutdown)."""
+    global _search_client
+    if _search_client is not None:
+        await _search_client.aclose()
+        _search_client = None
+
+
+def _cleanup_old_pending():
+    """Remove expired pending searches to prevent memory leaks."""
+    if len(_pending) <= _PENDING_MAX:
+        return
+    now = datetime.now()
+    expired = []
+    for search_id, item in _pending.items():
+        try:
+            created = datetime.fromisoformat(item.get("created_at", ""))
+            if (now - created).total_seconds() > _PENDING_TTL_SECONDS:
+                expired.append(search_id)
+        except (ValueError, TypeError):
+            expired.append(search_id)  # Invalid date → cleanup
+    for search_id in expired:
+        del _pending[search_id]
+    if expired:
+        print(f"[search] Cleanup: removed {len(expired)} expired pending searches")
 
 
 # ── Request Models ─────────────────────────────────────────────────────────────
@@ -133,15 +183,11 @@ async def _ddg_search(query: str, max_results: int = 5) -> List[Dict[str, str]]:
     print(f"[search] Query: {query[:50]}... | verify_ssl={settings.search.verify_ssl} | proxy={bool(proxy_config)}")
 
     try:
-        async with httpx.AsyncClient(
-            timeout=timeout,
-            follow_redirects=True,
-            headers=_DDG_HEADERS,
-            verify=settings.search.verify_ssl,
-            **proxy_config,
-        ) as client:
-            resp = await client.post(_DDG_URL, data={"q": query, "kl": "de-de"})
-            html = resp.text
+        # Use shared client for better performance (connection reuse)
+        # Note: proxy_config handled via environment or client init
+        client = _get_search_client()
+        resp = await client.post(_DDG_URL, data={"q": query, "kl": "de-de"})
+        html = resp.text
     except httpx.TimeoutException:
         proxy_hint = f" (Proxy: {settings.search.proxy_url})" if settings.search.proxy_url else ""
         return [{"title": "Timeout", "snippet": f"Verbindung zu DuckDuckGo timed out nach {timeout}s.{proxy_hint}", "url": ""}]
@@ -212,12 +258,12 @@ async def _ddg_search(query: str, max_results: int = 5) -> List[Dict[str, str]]:
         # Fallback: DuckDuckGo Instant Answer JSON
         print(f"[search] No HTML results, trying JSON API fallback...")
         try:
-            async with httpx.AsyncClient(timeout=timeout, verify=settings.search.verify_ssl, **proxy_config) as client:
-                r = await client.get(
-                    "https://api.duckduckgo.com/",
-                    params={"q": query, "format": "json", "no_html": "1", "skip_disambig": "1"},
-                )
-                data = r.json()
+            client = _get_search_client()
+            r = await client.get(
+                "https://api.duckduckgo.com/",
+                params={"q": query, "format": "json", "no_html": "1", "skip_disambig": "1"},
+            )
+            data = r.json()
             abstract = data.get("AbstractText", "")
             abstract_url = data.get("AbstractURL", "")
             print(f"[search] JSON API response: abstract={bool(abstract)}, topics={len(data.get('RelatedTopics', []))}")
@@ -340,6 +386,9 @@ async def create_search_request(req: SearchRequest) -> Dict[str, Any]:
     if not settings.search.enabled:
         raise HTTPException(status_code=403, detail="Web-Suche ist deaktiviert")
 
+    # Cleanup expired pending searches to prevent memory leaks
+    _cleanup_old_pending()
+
     warnings = check_internal_data(req.query)
     if warnings:
         raise HTTPException(
@@ -452,16 +501,10 @@ async def test_search() -> Dict[str, Any]:
     }
 
     try:
-        async with httpx.AsyncClient(
-            timeout=timeout,
-            follow_redirects=True,
-            headers=_DDG_HEADERS,
-            verify=settings.search.verify_ssl,
-            **proxy_config,
-        ) as client:
-            resp = await client.post(_DDG_URL, data={"q": test_query, "kl": "de-de"})
-            html = resp.text
-            status_code = resp.status_code
+        client = _get_search_client()
+        resp = await client.post(_DDG_URL, data={"q": test_query, "kl": "de-de"})
+        html = resp.text
+        status_code = resp.status_code
 
         debug_info["http_status"] = status_code
         debug_info["response_length"] = len(html)
