@@ -1353,6 +1353,14 @@ async function processAgentEvent(event, bubble, msgDiv, chat) {
       displayTokenUsage(data, chat);
       break;
 
+    case 'context_status':
+      updateContextIndicator(data);
+      break;
+
+    case 'compaction':
+      showCompactionNotification(data);
+      break;
+
     case 'done':
       if (data.usage) displayTokenUsage(data.usage, chat);
       hideSuggestions();  // Rückfrage-Buttons ausblenden wenn Antwort fertig
@@ -1362,6 +1370,90 @@ async function processAgentEvent(event, bubble, msgDiv, chat) {
       showSuggestions(data.question, data.options || []);
       break;
   }
+}
+
+// Kontext-Anzeige aktualisieren
+function updateContextIndicator(data) {
+  let indicator = document.getElementById('context-indicator');
+  if (!indicator) {
+    // Indicator erstellen falls nicht vorhanden
+    const header = document.querySelector('.chat-header') || document.querySelector('.header');
+    if (!header) return;
+    indicator = document.createElement('div');
+    indicator.id = 'context-indicator';
+    indicator.className = 'context-indicator';
+    header.appendChild(indicator);
+  }
+
+  const percent = data.percent || 0;
+  const current = (data.current_tokens || 0).toLocaleString();
+  const limit = (data.limit_tokens || 0).toLocaleString();
+
+  // Farbe basierend auf Auslastung
+  let color = 'var(--text-secondary)';
+  let icon = '📊';
+  if (percent > 95) {
+    color = 'var(--danger)';
+    icon = '🔴';
+  } else if (percent > 80) {
+    color = 'var(--warning)';
+    icon = '🟡';
+  } else if (percent > 60) {
+    color = 'var(--text-primary)';
+    icon = '🟢';
+  }
+
+  indicator.innerHTML = `
+    <span style="color: ${color}; font-size: 0.85em;">
+      ${icon} ${current} / ${limit} (${percent}%)
+    </span>
+  `;
+
+  // Iteration anzeigen wenn vorhanden
+  if (data.iteration && data.max_iterations) {
+    indicator.innerHTML += ` <span style="color: var(--text-muted); font-size: 0.75em;">Step ${data.iteration}/${data.max_iterations}</span>`;
+  }
+}
+
+// Komprimierungs-Benachrichtigung
+function showCompactionNotification(data) {
+  const saved = (data.saved_tokens || 0).toLocaleString();
+  const count = data.compaction_count || 1;
+
+  // Toast-artige Benachrichtigung
+  const toast = document.createElement('div');
+  toast.className = 'compaction-toast';
+  toast.innerHTML = `
+    <span>🗜️ Kontext komprimiert: ${saved} Tokens eingespart</span>
+    <small>(Komprimierung #${count})</small>
+  `;
+  toast.style.cssText = `
+    position: fixed;
+    bottom: 80px;
+    right: 20px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 10px 16px;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+    z-index: 1000;
+    animation: slideIn 0.3s ease-out;
+  `;
+
+  document.body.appendChild(toast);
+
+  // Nach 3 Sekunden ausblenden
+  setTimeout(() => {
+    toast.style.animation = 'slideOut 0.3s ease-in';
+    setTimeout(() => toast.remove(), 300);
+  }, 3000);
+
+  // Context Indicator aktualisieren
+  updateContextIndicator({
+    current_tokens: data.new_tokens,
+    limit_tokens: data.limit_tokens || 32000,
+    percent: Math.round((data.new_tokens / (data.limit_tokens || 32000)) * 100)
+  });
 }
 
 function displayTokenUsage(usage, chat) {

@@ -3608,3 +3608,68 @@ a:visited {
   font-size: 0.75em;
   opacity: 0.7;
 }
+
+/* ══════════════════════════════════════════════════════════════════════════════
+   Context Indicator - Zeigt Kontext-Auslastung an
+   ══════════════════════════════════════════════════════════════════════════════ */
+
+.context-indicator {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 12px;
+  background: var(--surface);
+  border-radius: 4px;
+  font-family: var(--font-mono);
+  font-size: 0.85rem;
+  margin-left: auto;
+}
+
+.context-indicator.warning {
+  background: rgba(255, 193, 7, 0.1);
+  border: 1px solid var(--warning);
+}
+
+.context-indicator.critical {
+  background: rgba(220, 53, 69, 0.1);
+  border: 1px solid var(--danger);
+  animation: pulse 1s ease-in-out infinite;
+}
+
+/* Compaction Toast */
+.compaction-toast {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.compaction-toast small {
+  color: var(--text-muted);
+}
+
+@keyframes slideIn {
+  from {
+    transform: translateX(100%);
+    opacity: 0;
+  }
+  to {
+    transform: translateX(0);
+    opacity: 1;
+  }
+}
+
+@keyframes slideOut {
+  from {
+    transform: translateX(0);
+    opacity: 1;
+  }
+  to {
+    transform: translateX(100%);
+    opacity: 0;
+  }
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.6; }
+}

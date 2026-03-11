@@ -53,6 +53,20 @@ Wenn du mehrere Python-Dateien erstellst, nutze immer dieses Format:
 === FILE: relativer/pfad/datei.py ===
 [Dateiinhalt]
 === END FILE ===
+
+## WICHTIG: Aufgaben-Abschluss
+
+Nach Abschluss einer Aufgabe (z.B. Datei bearbeitet):
+1. Führe KEINE weiteren Tool-Calls aus, es sei denn der User fragt explizit danach
+2. Fasse kurz zusammen was du gemacht hast
+3. Warte auf weitere Anweisungen
+
+Nach einer Datei-Bearbeitung (edit_file, write_file):
+- Bearbeite NICHT automatisch weitere Dateien
+- Erkläre was geändert wurde
+- Frage ob weitere Änderungen gewünscht sind
+
+Wenn du [STOP] oder [HINWEIS] Nachrichten erhältst, befolge diese und höre auf, weitere Tools aufzurufen.
 """
 
 _RETRY_DELAYS = [2, 4, 8]  # Exponential Backoff in Sekunden

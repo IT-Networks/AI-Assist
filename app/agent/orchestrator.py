@@ -124,6 +124,7 @@ class AgentEventType(str, Enum):
     ERROR = "error"                    # Fehler
     USAGE = "usage"                    # Token-Nutzung
     COMPACTION = "compaction"          # Context wurde komprimiert
+    CONTEXT_STATUS = "context_status"  # Kontext-Auslastung für UI
     DONE = "done"                      # Fertig
     # Sub-Agent Events
     SUBAGENT_START = "subagent_start"      # Sub-Agent-Phase beginnt (Routing läuft)
@@ -202,8 +203,10 @@ class AgentState:
     compaction_count: int = 0
     last_compaction_savings: int = 0
     compaction_attempted_while_full: bool = False  # Verhindert Spam wenn Komprimierung nicht hilft
-    # Loop-Prävention: Zählt wie oft eine Datei pro Request gelesen wurde (max 2x erlaubt)
+    # Loop-Prävention: Zählt wie oft eine Datei pro Request bearbeitet wurde
     read_files_this_request: Dict[str, int] = field(default_factory=dict)
+    edit_files_this_request: Dict[str, int] = field(default_factory=dict)
+    write_files_this_request: Dict[str, int] = field(default_factory=dict)
     # Abbruch-Flag für laufende Anfragen
     cancelled: bool = False
     # Entity Tracker: Verfolgt gefundene Entitäten und ihre Quellen (Java ↔ Handbuch ↔ PDF)
@@ -946,6 +949,52 @@ class AgentOrchestrator:
                     yield AgentEvent(AgentEventType.CANCELLED, {"message": "Anfrage wurde abgebrochen"})
                     return
 
+                # === Kontext-Status prüfen und Summarizer aktivieren ===
+                current_model = model or settings.llm.default_model
+                model_limit = settings.llm.llm_context_limits.get(
+                    current_model,
+                    settings.llm.default_context_limit
+                )
+                context_tokens = estimate_messages_tokens(messages)
+                context_percent = round(context_tokens / model_limit * 100, 1) if model_limit > 0 else 0
+
+                # Kontext-Status an Frontend senden
+                yield AgentEvent(AgentEventType.CONTEXT_STATUS, {
+                    "current_tokens": context_tokens,
+                    "limit_tokens": model_limit,
+                    "percent": context_percent,
+                    "iteration": iteration + 1,
+                    "max_iterations": self.max_iterations,
+                    "warning": context_percent > 80,
+                    "critical": context_percent > 95
+                })
+
+                # Summarizer bei >75% Auslastung aktivieren
+                if context_percent > 75 and len(messages) > 8:
+                    old_tokens = context_tokens
+                    try:
+                        summarized = await self.summarizer.summarize_if_needed(
+                            messages,
+                            target_tokens=int(model_limit * 0.6)
+                        )
+                        if summarized and len(summarized) < len(messages):
+                            messages = summarized
+                            new_tokens = estimate_messages_tokens(messages)
+                            state.compaction_count += 1
+                            state.last_compaction_savings = old_tokens - new_tokens
+
+                            # COMPACTION Event für UI
+                            yield AgentEvent(AgentEventType.COMPACTION, {
+                                "old_tokens": old_tokens,
+                                "new_tokens": new_tokens,
+                                "saved_tokens": old_tokens - new_tokens,
+                                "compaction_count": state.compaction_count,
+                                "model": current_model
+                            })
+                            logger.info(f"[agent] Summarizer: {old_tokens} -> {new_tokens} tokens (-{old_tokens - new_tokens})")
+                    except Exception as e:
+                        logger.warning(f"[agent] Summarizer Fehler: {e}")
+
                 # LLM aufrufen (nicht-streamend für Tool-Calls)
                 logger.debug("[agent] Iteration {iteration + 1}: Calling LLM with {len(tool_schemas)} tools")
                 response = await self._call_llm_with_tools(
@@ -1196,6 +1245,40 @@ class AgentOrchestrator:
                             current_tool_calls_for_messages.append(tc)
                             continue
                         state.read_files_this_request[file_path] = read_count + 1
+
+                    # Loop-Prävention: edit_file max 2x pro Datei erlauben
+                    if tool_call.name == "edit_file":
+                        file_path = tool_call.arguments.get("path", "")
+                        edit_count = state.edit_files_this_request.get(file_path, 0)
+                        if edit_count >= 2:
+                            logger.debug(f"[agent] Loop-Prävention: {file_path} wurde bereits {edit_count}x bearbeitet")
+                            messages.append({
+                                "role": "tool",
+                                "tool_call_id": tool_call.id,
+                                "content": f"[STOP] Die Datei '{file_path}' wurde bereits {edit_count}x bearbeitet. "
+                                           "Die Aufgabe scheint abgeschlossen zu sein. "
+                                           "Bitte fasse zusammen was du geändert hast und warte auf weitere Anweisungen vom User."
+                            })
+                            current_tool_calls_for_messages.append(tc)
+                            continue
+                        state.edit_files_this_request[file_path] = edit_count + 1
+
+                    # Loop-Prävention: write_file max 1x pro Datei (außer mit Bestätigung)
+                    if tool_call.name == "write_file":
+                        file_path = tool_call.arguments.get("path", "")
+                        write_count = state.write_files_this_request.get(file_path, 0)
+                        if write_count >= 1:
+                            logger.debug(f"[agent] Loop-Prävention: {file_path} wurde bereits geschrieben")
+                            messages.append({
+                                "role": "tool",
+                                "tool_call_id": tool_call.id,
+                                "content": f"[STOP] Die Datei '{file_path}' wurde bereits geschrieben. "
+                                           "Weitere Schreibvorgänge sind nicht erlaubt ohne explizite User-Anweisung. "
+                                           "Bitte fasse zusammen was du gemacht hast."
+                            })
+                            current_tool_calls_for_messages.append(tc)
+                            continue
+                        state.write_files_this_request[file_path] = write_count + 1
 
                     # Pro-Tool Modell ermitteln (Priorität: pro-Tool > tool_model > default)
                     tool_specific_model = settings.llm.tool_models.get(tool_call.name, "")
