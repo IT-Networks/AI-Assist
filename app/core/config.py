@@ -604,6 +604,146 @@ class JUnitToolConfig(BaseModel):
 
 
 # ══════════════════════════════════════════════════════════════════════════════
+# Prompt Templates (User-definierte Vorlagen)
+# ══════════════════════════════════════════════════════════════════════════════
+
+class PromptTemplate(BaseModel):
+    """Eine Prompt-Vorlage für häufige Anwendungsfälle."""
+    id: str = ""                        # Eindeutige ID
+    name: str = ""                      # Anzeigename
+    description: str = ""               # Kurzbeschreibung für Tooltip
+    icon: str = ""                      # Icon-Name (z.B. "search", "database", "book")
+    category: str = "general"           # Kategorie: general, search, debug, analysis
+    prompt: str = ""                    # Der eigentliche Prompt mit {{placeholders}}
+    placeholders: List[str] = []        # Liste der Platzhalter (z.B. ["suchbegriff", "dateifilter"])
+    is_builtin: bool = False            # True = System-Template, nicht löschbar
+    sort_order: int = 0                 # Sortierung in der UI
+
+
+class PromptTemplatesConfig(BaseModel):
+    """Konfiguration für Prompt-Templates."""
+    enabled: bool = True
+    show_in_chat_header: bool = True    # Templates über dem Chat anzeigen
+    max_recent: int = 5                 # Max. kürzlich verwendete Templates
+    templates: List[PromptTemplate] = Field(default_factory=lambda: [
+        # === Code Search Templates ===
+        PromptTemplate(
+            id="code_search_class",
+            name="Klasse finden",
+            description="Suche nach einer Java/Python-Klasse im Code",
+            icon="search",
+            category="search",
+            prompt="Suche im Code nach der Klasse oder dem Service '{{klassenname}}'. Zeige mir:\n1. Wo die Klasse definiert ist\n2. Die wichtigsten Methoden\n3. Abhängigkeiten und Verwendungen",
+            placeholders=["klassenname"],
+            is_builtin=True,
+            sort_order=1
+        ),
+        PromptTemplate(
+            id="code_search_function",
+            name="Funktion/Methode finden",
+            description="Suche nach einer bestimmten Funktion oder Methode",
+            icon="search",
+            category="search",
+            prompt="Finde die Methode oder Funktion '{{methodenname}}' im Code. Zeige:\n1. Die vollständige Implementierung\n2. Wo sie aufgerufen wird\n3. Parameter und Rückgabewerte",
+            placeholders=["methodenname"],
+            is_builtin=True,
+            sort_order=2
+        ),
+        PromptTemplate(
+            id="code_search_pattern",
+            name="Code-Muster suchen",
+            description="Suche nach einem bestimmten Code-Pattern",
+            icon="search",
+            category="search",
+            prompt="Suche im Code nach dem Muster '{{suchmuster}}'. Filter: {{dateifilter}}.\nZeige alle Fundstellen mit Kontext.",
+            placeholders=["suchmuster", "dateifilter"],
+            is_builtin=True,
+            sort_order=3
+        ),
+        # === Confluence Templates ===
+        PromptTemplate(
+            id="confluence_search",
+            name="Confluence durchsuchen",
+            description="Suche in der Confluence-Dokumentation",
+            icon="book",
+            category="search",
+            prompt="Durchsuche die Confluence-Dokumentation nach '{{suchbegriff}}'. Fasse die wichtigsten Ergebnisse zusammen und gib Links zu den relevanten Seiten.",
+            placeholders=["suchbegriff"],
+            is_builtin=True,
+            sort_order=10
+        ),
+        PromptTemplate(
+            id="confluence_service_doc",
+            name="Service-Doku finden",
+            description="Finde die Dokumentation zu einem Service",
+            icon="book",
+            category="search",
+            prompt="Finde die Confluence-Dokumentation zum Service '{{servicename}}'. Zeige:\n1. Übersicht und Zweck\n2. API/Schnittstellen\n3. Konfiguration\n4. Bekannte Probleme",
+            placeholders=["servicename"],
+            is_builtin=True,
+            sort_order=11
+        ),
+        # === Database Debugging Templates ===
+        PromptTemplate(
+            id="db_debug_table",
+            name="Tabelle analysieren",
+            description="Analysiere eine Datenbanktabelle",
+            icon="database",
+            category="debug",
+            prompt="Analysiere die Datenbanktabelle '{{tabellenname}}':\n1. Zeige die Struktur (Spalten, Typen, Keys)\n2. Führe aus: SELECT * FROM {{tabellenname}} WHERE {{bedingung}} FETCH FIRST 20 ROWS ONLY\n3. Erkläre die Daten",
+            placeholders=["tabellenname", "bedingung"],
+            is_builtin=True,
+            sort_order=20
+        ),
+        PromptTemplate(
+            id="db_debug_query",
+            name="Query ausführen & erklären",
+            description="Führe eine SQL-Query aus und erkläre das Ergebnis",
+            icon="database",
+            category="debug",
+            prompt="Führe folgende SQL-Query aus und erkläre das Ergebnis:\n\n```sql\n{{query}}\n```\n\nZeige:\n1. Das Ergebnis formatiert als Tabelle\n2. Auffälligkeiten in den Daten\n3. Mögliche Probleme",
+            placeholders=["query"],
+            is_builtin=True,
+            sort_order=21
+        ),
+        PromptTemplate(
+            id="db_debug_trace",
+            name="Datensatz verfolgen",
+            description="Verfolge einen Datensatz durch mehrere Tabellen",
+            icon="database",
+            category="debug",
+            prompt="Verfolge den Datensatz mit {{schluesselfeld}} = '{{wert}}' durch die relevanten Tabellen.\n1. Zeige alle zugehörigen Einträge\n2. Erkläre die Beziehungen\n3. Finde eventuelle Inkonsistenzen",
+            placeholders=["schluesselfeld", "wert"],
+            is_builtin=True,
+            sort_order=22
+        ),
+        # === Analysis Templates ===
+        PromptTemplate(
+            id="analyze_error",
+            name="Fehler analysieren",
+            description="Analysiere einen Fehler oder eine Exception",
+            icon="bug",
+            category="debug",
+            prompt="Analysiere diesen Fehler:\n\n```\n{{fehlermeldung}}\n```\n\n1. Was ist die Ursache?\n2. Wo im Code tritt er auf?\n3. Wie kann er behoben werden?",
+            placeholders=["fehlermeldung"],
+            is_builtin=True,
+            sort_order=30
+        ),
+        PromptTemplate(
+            id="analyze_log",
+            name="Log analysieren",
+            description="Analysiere Log-Einträge nach Problemen",
+            icon="file-text",
+            category="debug",
+            prompt="Analysiere diese Log-Einträge:\n\n```\n{{loginhalt}}\n```\n\n1. Finde Fehler und Warnungen\n2. Erkläre den Ablauf\n3. Identifiziere mögliche Probleme",
+            placeholders=["loginhalt"],
+            is_builtin=True,
+            sort_order=31
+        ),
+    ])
+
+
+# ══════════════════════════════════════════════════════════════════════════════
 # Internal Fetch (Intranet-URLs abrufen)
 # ══════════════════════════════════════════════════════════════════════════════
 
@@ -792,6 +932,7 @@ class Settings(BaseModel):
     api_tools: ApiToolsConfig = Field(default_factory=ApiToolsConfig)
     compile_tool: CompileToolConfig = Field(default_factory=CompileToolConfig)
     junit_tool: JUnitToolConfig = Field(default_factory=JUnitToolConfig)
+    prompt_templates: PromptTemplatesConfig = Field(default_factory=PromptTemplatesConfig)
 
     def apply_env_overrides(self) -> "Settings":
         if os.getenv("LLM_BASE_URL"):

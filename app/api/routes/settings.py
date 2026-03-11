@@ -616,3 +616,185 @@ async def delete_repo(lang: str, name: str) -> Dict[str, Any]:
         "active": config.active_repo,
         "message": "Repository entfernt. POST /save zum Persistieren."
     }
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Prompt Templates
+# ══════════════════════════════════════════════════════════════════════════════
+
+class TemplateRequest(BaseModel):
+    """Request für Template-CRUD."""
+    id: str = Field(default="", max_length=50)
+    name: str = Field(..., max_length=100)
+    description: str = Field(default="", max_length=300)
+    icon: str = Field(default="message-square", max_length=50)
+    category: str = Field(default="general", max_length=50)
+    prompt: str = Field(..., min_length=10)
+    placeholders: List[str] = Field(default_factory=list)
+    sort_order: int = Field(default=100)
+
+
+@router.get("/templates")
+async def get_templates() -> Dict[str, Any]:
+    """
+    Gibt alle Prompt-Templates zurück.
+
+    Returns:
+        Liste aller Templates, gruppiert nach Kategorie
+    """
+    templates = settings.prompt_templates.templates
+    by_category = {}
+
+    for t in templates:
+        cat = t.category or "general"
+        if cat not in by_category:
+            by_category[cat] = []
+        by_category[cat].append(t.model_dump())
+
+    # Sortieren
+    for cat in by_category:
+        by_category[cat].sort(key=lambda x: x.get("sort_order", 100))
+
+    return {
+        "enabled": settings.prompt_templates.enabled,
+        "show_in_chat_header": settings.prompt_templates.show_in_chat_header,
+        "templates": [t.model_dump() for t in templates],
+        "by_category": by_category,
+        "categories": list(by_category.keys())
+    }
+
+
+@router.get("/templates/{template_id}")
+async def get_template(template_id: str) -> Dict[str, Any]:
+    """Gibt ein einzelnes Template zurück."""
+    for t in settings.prompt_templates.templates:
+        if t.id == template_id:
+            return {"template": t.model_dump()}
+
+    raise HTTPException(status_code=404, detail=f"Template '{template_id}' nicht gefunden")
+
+
+@router.post("/templates")
+async def create_template(request: TemplateRequest) -> Dict[str, Any]:
+    """
+    Erstellt ein neues Prompt-Template.
+
+    Args:
+        request: Template-Daten
+
+    Returns:
+        Erstelltes Template
+    """
+    from app.core.config import PromptTemplate
+    import uuid
+
+    # ID generieren wenn nicht angegeben
+    template_id = request.id or f"custom_{uuid.uuid4().hex[:8]}"
+
+    # Prüfen ob ID bereits existiert
+    existing_ids = [t.id for t in settings.prompt_templates.templates]
+    if template_id in existing_ids:
+        raise HTTPException(status_code=400, detail=f"Template-ID '{template_id}' existiert bereits")
+
+    # Placeholders aus Prompt extrahieren wenn nicht angegeben
+    placeholders = request.placeholders
+    if not placeholders:
+        import re
+        placeholders = list(set(re.findall(r'\{\{(\w+)\}\}', request.prompt)))
+
+    new_template = PromptTemplate(
+        id=template_id,
+        name=request.name,
+        description=request.description,
+        icon=request.icon,
+        category=request.category,
+        prompt=request.prompt,
+        placeholders=placeholders,
+        is_builtin=False,
+        sort_order=request.sort_order
+    )
+
+    settings.prompt_templates.templates.append(new_template)
+
+    return {
+        "created": new_template.model_dump(),
+        "total": len(settings.prompt_templates.templates),
+        "message": "Template erstellt. POST /save zum Persistieren."
+    }
+
+
+@router.put("/templates/{template_id}")
+async def update_template(template_id: str, request: TemplateRequest) -> Dict[str, Any]:
+    """
+    Aktualisiert ein Prompt-Template.
+
+    Args:
+        template_id: ID des Templates
+        request: Neue Template-Daten
+
+    Returns:
+        Aktualisiertes Template
+    """
+    for i, t in enumerate(settings.prompt_templates.templates):
+        if t.id == template_id:
+            if t.is_builtin:
+                raise HTTPException(
+                    status_code=400,
+                    detail="Builtin-Templates können nicht geändert werden. Erstelle eine Kopie."
+                )
+
+            # Placeholders aus Prompt extrahieren wenn nicht angegeben
+            placeholders = request.placeholders
+            if not placeholders:
+                import re
+                placeholders = list(set(re.findall(r'\{\{(\w+)\}\}', request.prompt)))
+
+            # Update
+            t.name = request.name
+            t.description = request.description
+            t.icon = request.icon
+            t.category = request.category
+            t.prompt = request.prompt
+            t.placeholders = placeholders
+            t.sort_order = request.sort_order
+
+            return {
+                "updated": t.model_dump(),
+                "message": "Template aktualisiert. POST /save zum Persistieren."
+            }
+
+    raise HTTPException(status_code=404, detail=f"Template '{template_id}' nicht gefunden")
+
+
+@router.delete("/templates/{template_id}")
+async def delete_template(template_id: str) -> Dict[str, Any]:
+    """
+    Löscht ein Prompt-Template.
+
+    Args:
+        template_id: ID des Templates
+
+    Returns:
+        Status
+    """
+    for t in settings.prompt_templates.templates:
+        if t.id == template_id:
+            if t.is_builtin:
+                raise HTTPException(
+                    status_code=400,
+                    detail="Builtin-Templates können nicht gelöscht werden."
+                )
+            break
+    else:
+        raise HTTPException(status_code=404, detail=f"Template '{template_id}' nicht gefunden")
+
+    original_count = len(settings.prompt_templates.templates)
+    settings.prompt_templates.templates = [
+        t for t in settings.prompt_templates.templates if t.id != template_id
+    ]
+
+    return {
+        "deleted": template_id,
+        "remaining": len(settings.prompt_templates.templates),
+        "message": "Template gelöscht. POST /save zum Persistieren."
+    }
