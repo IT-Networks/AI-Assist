@@ -152,7 +152,7 @@ async def _fetch_url(
                 )
         else:
             # Ohne Proxy: Shared Client für Connection-Pooling
-            client = get_internal_client(config.timeout_seconds, config.verify_ssl)
+            client = get_internal_client(verify_ssl=config.verify_ssl, timeout=config.timeout_seconds)
             response = await client.request(
                 method=method.upper(),
                 url=url,
