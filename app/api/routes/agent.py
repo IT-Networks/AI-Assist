@@ -441,6 +441,17 @@ async def set_mode(
     orchestrator = get_agent_orchestrator()
     orchestrator.set_mode(session_id, mode)
 
+    # Mode-Änderung persistieren
+    from app.services.chat_store import load_chat, save_chat
+    existing = load_chat(session_id)
+    if existing:
+        save_chat(
+            session_id,
+            existing.get("title", "Chat"),
+            existing.get("messages_history", []),
+            mode.value
+        )
+
     return AgentModeResponse(
         session_id=session_id,
         mode=mode.value,
