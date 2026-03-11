@@ -633,18 +633,42 @@ class SOAPResponseParser:
         fault_message = None
         fault_detail = None
 
-        # SOAP 1.1 Fault
-        code_elem = fault.find(".//{*}faultcode") or fault.find(".//{*}Code/{*}Value")
-        if code_elem is not None and code_elem.text:
-            fault_code = code_elem.text
+        # Iteriere durch direkte Kinder des Fault-Elements
+        # Dies funktioniert sowohl mit als auch ohne Namespace-Prefix
+        for child in fault:
+            # Extrahiere lokalen Tag-Namen (ohne Namespace)
+            tag = child.tag.split("}")[-1] if "}" in child.tag else child.tag
+            tag_lower = tag.lower()
 
-        msg_elem = fault.find(".//{*}faultstring") or fault.find(".//{*}Reason/{*}Text")
-        if msg_elem is not None and msg_elem.text:
-            fault_message = msg_elem.text
-
-        detail_elem = fault.find(".//{*}detail") or fault.find(".//{*}Detail")
-        if detail_elem is not None:
-            fault_detail = etree.tostring(detail_elem, encoding="unicode", pretty_print=True)
+            # SOAP 1.1: faultcode, faultstring, detail
+            # SOAP 1.2: Code/Value, Reason/Text, Detail
+            if tag_lower == "faultcode":
+                fault_code = child.text
+            elif tag_lower == "code":
+                # SOAP 1.2: Code hat Value als Kind
+                value_elem = child.find(".//{*}Value")
+                if value_elem is None:
+                    # Fallback: direkt im Code-Element suchen
+                    for subchild in child:
+                        subtag = subchild.tag.split("}")[-1] if "}" in subchild.tag else subchild.tag
+                        if subtag.lower() == "value":
+                            value_elem = subchild
+                            break
+                fault_code = value_elem.text if value_elem is not None else child.text
+            elif tag_lower == "faultstring":
+                fault_message = child.text
+            elif tag_lower == "reason":
+                # SOAP 1.2: Reason hat Text als Kind
+                text_elem = child.find(".//{*}Text")
+                if text_elem is None:
+                    for subchild in child:
+                        subtag = subchild.tag.split("}")[-1] if "}" in subchild.tag else subchild.tag
+                        if subtag.lower() == "text":
+                            text_elem = subchild
+                            break
+                fault_message = text_elem.text if text_elem is not None else child.text
+            elif tag_lower in ("detail", "faultdetail"):
+                fault_detail = etree.tostring(child, encoding="unicode", pretty_print=True)
 
         return SOAPResponse(
             success=False,
