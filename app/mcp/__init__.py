@@ -9,13 +9,14 @@ Features:
 - MCPManager: Verwaltung mehrerer MCP-Server
 - SequentialThinking: Lokale Implementation für strukturiertes Denken
 - ToolBridge: Integration von MCP-Tools in das Agent-System
-- Capabilities: Strukturierte Capabilities (Brainstorm, Design, Implement, Analyze)
+- Capabilities: Strukturierte Capabilities (Brainstorm, Design, Implement, Analyze, Research)
 - CapabilityRegistry: Zentrale Verwaltung aller Capabilities
 """
 
 from app.mcp.client import MCPClient
 from app.mcp.manager import MCPManager, get_mcp_manager
 from app.mcp.sequential_thinking import SequentialThinking, ThinkingStep
+from app.mcp.thinking_engine import ThinkingEngine, ThinkingMode, ThinkingResult, get_thinking_engine
 from app.mcp.tool_bridge import MCPToolBridge
 from app.mcp.registry import (
     CapabilityRegistry,
@@ -30,7 +31,9 @@ from app.mcp.capabilities import (
     BrainstormCapability,
     DesignCapability,
     ImplementCapability,
-    AnalyzeCapability
+    AnalyzeCapability,
+    ResearchCapability,
+    get_research_capability
 )
 
 __all__ = [
@@ -41,6 +44,11 @@ __all__ = [
     # Sequential Thinking
     "SequentialThinking",
     "ThinkingStep",
+    # Thinking Engine
+    "ThinkingEngine",
+    "ThinkingMode",
+    "ThinkingResult",
+    "get_thinking_engine",
     # Tool Bridge
     "MCPToolBridge",
     # Registry
@@ -57,4 +65,6 @@ __all__ = [
     "DesignCapability",
     "ImplementCapability",
     "AnalyzeCapability",
+    "ResearchCapability",
+    "get_research_capability",
 ]

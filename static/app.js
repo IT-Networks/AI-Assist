@@ -127,6 +127,26 @@ function setupSidebarTabs() {
   });
 }
 
+/**
+ * Programmtisch zu einem Panel in der rechten Sidebar wechseln.
+ * @param {string} panelId - Die ID des Panels (z.B. 'thinking-panel', 'tools-panel')
+ */
+function switchRightPanel(panelId) {
+  const sidebar = document.getElementById('sidebar-right');
+  if (!sidebar) return;
+
+  // Alle Tabs und Panels deaktivieren
+  sidebar.querySelectorAll('.sidebar-tab').forEach(t => t.classList.remove('active'));
+  sidebar.querySelectorAll('.sidebar-panel').forEach(p => p.classList.remove('active'));
+
+  // Ziel-Tab und Panel aktivieren
+  const tab = sidebar.querySelector(`.sidebar-tab[data-panel="${panelId}"]`);
+  const panel = document.getElementById(panelId);
+
+  if (tab) tab.classList.add('active');
+  if (panel) panel.classList.add('active');
+}
+
 function setupModeSwitch() {
   document.querySelectorAll('input[name="agent-mode"]').forEach(radio => {
     radio.addEventListener('change', async (e) => {
@@ -1467,6 +1487,28 @@ async function processAgentEvent(event, bubble, msgDiv, chat) {
     case 'question':
       showSuggestions(data.question, data.options || []);
       break;
+
+    // ── MCP Thinking Events ──
+    case 'mcp_start': {
+      showThinkingPanel(data, chat);
+      break;
+    }
+    case 'mcp_step': {
+      addThinkingStep(data, chat);
+      break;
+    }
+    case 'mcp_progress': {
+      updateThinkingProgress(data, chat);
+      break;
+    }
+    case 'mcp_complete': {
+      completeThinking(data, chat);
+      break;
+    }
+    case 'mcp_error': {
+      showThinkingError(data, chat);
+      break;
+    }
   }
 }
 
@@ -5835,6 +5877,14 @@ async function _streamWLPServer(id, action, outputEl) {
             span.className = 'log-error';
             span.textContent = '❌ ' + ev.message;
             outputEl.appendChild(span);
+            // Traceback anzeigen wenn vorhanden
+            if (ev.traceback) {
+              const tbDiv = document.createElement('pre');
+              tbDiv.className = 'log-traceback';
+              tbDiv.style.cssText = 'font-size:11px;color:#ff6b6b;margin:4px 0;white-space:pre-wrap;';
+              tbDiv.textContent = ev.traceback;
+              outputEl.appendChild(tbDiv);
+            }
           } else if (ev.type === 'done') {
             const span = document.createElement('div');
             span.className = ev.exit_code === 0 ? 'log-ready' : 'log-error';
@@ -5971,6 +6021,14 @@ async function _streamMavenBuild(buildId, outputEl) {
             div.className = 'log-error';
             div.textContent = '❌ ' + ev.message;
             outputEl.appendChild(div);
+            // Traceback anzeigen wenn vorhanden
+            if (ev.traceback) {
+              const tbDiv = document.createElement('pre');
+              tbDiv.className = 'log-traceback';
+              tbDiv.style.cssText = 'font-size:11px;color:#ff6b6b;margin:4px 0;white-space:pre-wrap;';
+              tbDiv.textContent = ev.traceback;
+              outputEl.appendChild(tbDiv);
+            }
           }
         } catch (parseErr) {
           console.warn('[Maven] Parse error:', parseErr, line);
@@ -7505,3 +7563,307 @@ document.addEventListener('keydown', (e) => {
     }
   }
 });
+
+// ══════════════════════════════════════════════════════════════════════════════
+//   MCP Thinking Panel
+// ══════════════════════════════════════════════════════════════════════════════
+
+/**
+ * Zeigt das Thinking-Panel an und initialisiert es.
+ * @param {Object} data - MCP_START Event-Daten
+ * @param {Object} chat - Chat-Objekt
+ */
+function showThinkingPanel(data, chat) {
+  const panel = document.getElementById('thinking-panel');
+  const isActive = chat.id === chatManager.activeId;
+
+  // Thinking-State im Chat speichern
+  chat.thinkingState = {
+    active: true,
+    mode: data.mode || 'normal',
+    maxSteps: data.max_steps || 5,
+    currentStep: 0,
+    steps: [],
+    complexity: data.complexity_score || 0,
+    startTime: Date.now()
+  };
+
+  if (isActive && panel) {
+    // Panel aktivieren
+    switchRightPanel('thinking-panel');
+
+    // Header aktualisieren
+    const modeLabel = document.getElementById('thinking-mode-label');
+    const progressBar = document.getElementById('thinking-progress-bar');
+    const stepsContainer = document.getElementById('thinking-steps');
+    const complexityEl = document.getElementById('thinking-complexity');
+
+    if (modeLabel) {
+      const modeIcons = { quick: '⚡', normal: '🧠', deep: '🔬', ultra: '🎯' };
+      const modeNames = { quick: 'Quick', normal: 'Normal', deep: 'Deep', ultra: 'Ultra' };
+      modeLabel.innerHTML = `${modeIcons[data.mode] || '🧠'} ${modeNames[data.mode] || 'Thinking'} Mode`;
+    }
+
+    if (progressBar) {
+      progressBar.style.width = '0%';
+      progressBar.classList.add('active');
+    }
+
+    if (stepsContainer) {
+      stepsContainer.innerHTML = '';
+    }
+
+    if (complexityEl) {
+      const percent = Math.round((data.complexity_score || 0) * 100);
+      complexityEl.textContent = `Komplexität: ${percent}%`;
+      complexityEl.className = 'thinking-complexity';
+      if (percent >= 80) complexityEl.classList.add('high');
+      else if (percent >= 50) complexityEl.classList.add('medium');
+      else complexityEl.classList.add('low');
+    }
+
+    // Query anzeigen
+    const queryEl = document.getElementById('thinking-query');
+    if (queryEl && data.query) {
+      queryEl.textContent = data.query;
+    }
+
+    panel.classList.add('active');
+  }
+
+  // Badge aktualisieren
+  updateThinkingBadge(true);
+}
+
+/**
+ * Fügt einen Thinking-Schritt hinzu.
+ * @param {Object} data - MCP_STEP Event-Daten
+ * @param {Object} chat - Chat-Objekt
+ */
+function addThinkingStep(data, chat) {
+  if (!chat.thinkingState) return;
+
+  const step = {
+    number: data.step_number || (chat.thinkingState.steps.length + 1),
+    type: data.step_type || 'analysis',
+    title: data.title || `Schritt ${data.step_number}`,
+    content: data.content || '',
+    confidence: data.confidence || 0,
+    timestamp: Date.now()
+  };
+
+  chat.thinkingState.steps.push(step);
+  chat.thinkingState.currentStep = step.number;
+
+  const isActive = chat.id === chatManager.activeId;
+  if (!isActive) return;
+
+  const stepsContainer = document.getElementById('thinking-steps');
+  if (!stepsContainer) return;
+
+  // Step-Element erstellen
+  const stepEl = document.createElement('div');
+  stepEl.className = 'thinking-step';
+  stepEl.dataset.stepNumber = step.number;
+
+  const typeIcons = {
+    analysis: '🔍',
+    hypothesis: '💡',
+    verification: '✓',
+    conclusion: '🎯',
+    refinement: '🔄',
+    exploration: '🗺️',
+    evaluation: '⚖️',
+    synthesis: '🧩'
+  };
+
+  stepEl.innerHTML = `
+    <div class="thinking-step-header">
+      <span class="step-icon">${typeIcons[step.type] || '📝'}</span>
+      <span class="step-number">#${step.number}</span>
+      <span class="step-title">${escapeHtml(step.title)}</span>
+      <span class="step-confidence" title="Konfidenz">${Math.round(step.confidence * 100)}%</span>
+    </div>
+    <div class="thinking-step-content">
+      ${marked.parse(step.content)}
+    </div>
+  `;
+
+  stepsContainer.appendChild(stepEl);
+
+  // Smooth scroll zum neuen Step
+  stepEl.scrollIntoView({ behavior: 'smooth', block: 'end' });
+
+  // Progress aktualisieren
+  updateThinkingProgress({
+    current_step: step.number,
+    total_steps: chat.thinkingState.maxSteps
+  }, chat);
+}
+
+/**
+ * Aktualisiert den Fortschritt des Thinking-Prozesses.
+ * @param {Object} data - MCP_PROGRESS Event-Daten
+ * @param {Object} chat - Chat-Objekt
+ */
+function updateThinkingProgress(data, chat) {
+  const isActive = chat.id === chatManager.activeId;
+  if (!isActive) return;
+
+  const progressBar = document.getElementById('thinking-progress-bar');
+  const progressText = document.getElementById('thinking-progress-text');
+
+  if (progressBar && data.current_step && data.total_steps) {
+    const percent = Math.min(100, Math.round((data.current_step / data.total_steps) * 100));
+    progressBar.style.width = `${percent}%`;
+  }
+
+  if (progressText) {
+    progressText.textContent = `${data.current_step || 0}/${data.total_steps || '?'} Schritte`;
+  }
+}
+
+/**
+ * Markiert den Thinking-Prozess als abgeschlossen.
+ * @param {Object} data - MCP_COMPLETE Event-Daten
+ * @param {Object} chat - Chat-Objekt
+ */
+function completeThinking(data, chat) {
+  if (!chat.thinkingState) return;
+
+  chat.thinkingState.active = false;
+  chat.thinkingState.endTime = Date.now();
+  chat.thinkingState.conclusion = data.conclusion || '';
+
+  const isActive = chat.id === chatManager.activeId;
+  if (!isActive) {
+    updateThinkingBadge(false);
+    return;
+  }
+
+  const progressBar = document.getElementById('thinking-progress-bar');
+  const stepsContainer = document.getElementById('thinking-steps');
+  const statusEl = document.getElementById('thinking-status');
+
+  if (progressBar) {
+    progressBar.style.width = '100%';
+    progressBar.classList.remove('active');
+    progressBar.classList.add('complete');
+  }
+
+  if (statusEl) {
+    const duration = chat.thinkingState.endTime - chat.thinkingState.startTime;
+    statusEl.innerHTML = `
+      <span class="status-icon">✓</span>
+      <span>Abgeschlossen in ${formatDuration(duration)}</span>
+    `;
+    statusEl.classList.add('complete');
+  }
+
+  // Conclusion anzeigen wenn vorhanden
+  if (data.conclusion && stepsContainer) {
+    const conclusionEl = document.createElement('div');
+    conclusionEl.className = 'thinking-conclusion';
+    conclusionEl.innerHTML = `
+      <div class="conclusion-header">
+        <span class="conclusion-icon">🎯</span>
+        <span>Fazit</span>
+      </div>
+      <div class="conclusion-content">
+        ${marked.parse(data.conclusion)}
+      </div>
+    `;
+    stepsContainer.appendChild(conclusionEl);
+    conclusionEl.scrollIntoView({ behavior: 'smooth', block: 'end' });
+  }
+
+  updateThinkingBadge(false);
+}
+
+/**
+ * Zeigt einen Fehler im Thinking-Panel an.
+ * @param {Object} data - MCP_ERROR Event-Daten
+ * @param {Object} chat - Chat-Objekt
+ */
+function showThinkingError(data, chat) {
+  if (chat.thinkingState) {
+    chat.thinkingState.active = false;
+    chat.thinkingState.error = data.error;
+  }
+
+  const isActive = chat.id === chatManager.activeId;
+  if (!isActive) {
+    updateThinkingBadge(false);
+    return;
+  }
+
+  const progressBar = document.getElementById('thinking-progress-bar');
+  const statusEl = document.getElementById('thinking-status');
+  const stepsContainer = document.getElementById('thinking-steps');
+
+  if (progressBar) {
+    progressBar.classList.remove('active');
+    progressBar.classList.add('error');
+  }
+
+  if (statusEl) {
+    statusEl.innerHTML = `
+      <span class="status-icon error">✗</span>
+      <span>Fehler aufgetreten</span>
+    `;
+    statusEl.classList.add('error');
+  }
+
+  if (stepsContainer && data.error) {
+    const errorEl = document.createElement('div');
+    errorEl.className = 'thinking-error';
+    errorEl.innerHTML = `
+      <span class="error-icon">⚠️</span>
+      <span class="error-message">${escapeHtml(data.error)}</span>
+    `;
+    stepsContainer.appendChild(errorEl);
+  }
+
+  updateThinkingBadge(false);
+}
+
+/**
+ * Aktualisiert das Thinking-Badge im Tab.
+ * @param {boolean} active - Ob Thinking aktiv ist
+ */
+function updateThinkingBadge(active) {
+  const badge = document.getElementById('thinking-badge');
+  if (badge) {
+    badge.style.display = active ? 'inline-block' : 'none';
+    if (active) {
+      badge.classList.add('pulse');
+    } else {
+      badge.classList.remove('pulse');
+    }
+  }
+}
+
+/**
+ * Formatiert eine Dauer in ms zu lesbarem Format.
+ * @param {number} ms - Dauer in Millisekunden
+ * @returns {string} Formatierte Dauer
+ */
+function formatDuration(ms) {
+  if (ms < 1000) return `${ms}ms`;
+  if (ms < 60000) return `${(ms / 1000).toFixed(1)}s`;
+  const mins = Math.floor(ms / 60000);
+  const secs = Math.round((ms % 60000) / 1000);
+  return `${mins}:${secs.toString().padStart(2, '0')}min`;
+}
+
+/**
+ * Escapes HTML characters to prevent XSS.
+ * @param {string} str - Input string
+ * @returns {string} Escaped string
+ */
+function escapeHtml(str) {
+  if (!str) return '';
+  const div = document.createElement('div');
+  div.textContent = str;
+  return div.innerHTML;
+}

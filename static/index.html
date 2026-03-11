@@ -362,6 +362,9 @@
   <!-- Right Sidebar - Context & Confirmation -->
   <aside id="sidebar-right" class="sidebar">
     <div class="sidebar-tabs sidebar-tabs-compact">
+      <button class="sidebar-tab" data-panel="thinking-panel" title="AI Thinking">
+        &#129504; <span class="badge badge-thinking pulse" id="thinking-badge" style="display:none"></span>
+      </button>
       <button class="sidebar-tab active" data-panel="tools-panel" title="Tool-Aktivität">&#128295;</button>
       <button class="sidebar-tab" data-panel="confirm-panel" title="Ausstehende Bestätigungen">
         &#9888; <span class="badge" id="pending-count" style="display:none">1</span>
@@ -373,6 +376,34 @@
       <button class="sidebar-tab" data-panel="testtool-panel" title="Test-Tool">&#128296;</button>
       <button class="sidebar-tab" data-panel="wlp-panel" title="WLP Server">&#9881;</button>
       <button class="sidebar-tab" data-panel="maven-panel" title="Maven Build">&#128736;</button>
+    </div>
+
+    <!-- Thinking Panel -->
+    <div class="sidebar-panel" id="thinking-panel">
+      <div class="panel-header thinking-header">
+        <div class="thinking-title">
+          <span id="thinking-mode-label">&#129504; Thinking</span>
+          <span class="thinking-complexity" id="thinking-complexity"></span>
+        </div>
+        <div class="thinking-status" id="thinking-status">
+          <span class="status-icon pulse">&#9679;</span>
+          <span id="thinking-progress-text">Bereit</span>
+        </div>
+      </div>
+      <div class="thinking-progress">
+        <div class="thinking-progress-bar" id="thinking-progress-bar"></div>
+      </div>
+      <div class="thinking-query-container">
+        <span class="query-label">Analysiere:</span>
+        <span class="query-text" id="thinking-query">-</span>
+      </div>
+      <div class="thinking-steps" id="thinking-steps">
+        <div class="empty-state">
+          <span>&#129504;</span>
+          <p>Thinking Panel</p>
+          <small>Hier werden die Denkschritte der KI angezeigt.</small>
+        </div>
+      </div>
     </div>
 
     <!-- Tools Panel -->

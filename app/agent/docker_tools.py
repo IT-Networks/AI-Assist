@@ -1,7 +1,7 @@
 """
 Container Sandbox Tools - Sichere Python-Code-Ausführung in isolierten Containern.
 
-Unterstützt Docker und Podman mit automatischer Erkennung.
+Verwendet Podman Desktop (daemonless, portable, kein Admin nötig).
 
 Features:
 - Stateless Execution: Einmalige Code-Ausführung ohne Session
@@ -9,6 +9,7 @@ Features:
 - Datei-Upload: Dateien zur Verarbeitung in Container laden
 - Netzwerkzugriff: HTTP-Requests möglich (lesend)
 - Ressourcen-Limits: CPU, Memory, Timeout
+- Image Building: Container-Images aus Dockerfile erstellen
 
 Sicherheit:
 - Isolierter Container
@@ -17,9 +18,8 @@ Sicherheit:
 - Keine Privilegien-Eskalation
 
 Container Runtime:
-- Automatische Erkennung von Docker oder Podman
-- Podman ist portable (kein Daemon, kein Admin nötig)
-- Konfigurierbar via backend: "auto" | "docker" | "podman"
+- Podman Desktop (daemonless, portable)
+- Kein Docker erforderlich
 """
 
 import asyncio
@@ -42,7 +42,7 @@ logger = logging.getLogger(__name__)
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# Container Runtime Detection (Docker / Podman)
+# Container Runtime Detection (Podman)
 # ══════════════════════════════════════════════════════════════════════════════
 
 _container_runtime: Optional[str] = None  # Cache für erkannte Runtime
@@ -51,16 +51,14 @@ _runtime_version: Optional[str] = None
 
 def _detect_container_runtime() -> Optional[str]:
     """
-    Erkennt die verfügbare Container-Runtime.
+    Erkennt die Podman-Installation.
 
-    Reihenfolge bei "auto":
-    1. Podman (bevorzugt - portable, daemonless)
-    2. Docker
-
-    Bei konfigurierten Pfaden werden diese verwendet.
+    Prüft in dieser Reihenfolge:
+    1. Konfigurierter Pfad (podman_path in config)
+    2. System PATH
 
     Returns:
-        Vollständiger Pfad zur Runtime oder None wenn keine gefunden
+        Vollständiger Pfad zu Podman oder None wenn nicht gefunden
     """
     global _container_runtime, _runtime_version
 
@@ -70,55 +68,22 @@ def _detect_container_runtime() -> Optional[str]:
 
     cfg = settings.docker_sandbox
 
-    # Explizite Konfiguration mit Pfad
-    if cfg.backend == "docker" and cfg.docker_path:
-        if os.path.isfile(cfg.docker_path):
-            _container_runtime = cfg.docker_path
-            _runtime_version = _get_runtime_version(cfg.docker_path)
-            logger.info("Sandbox: Using configured Docker: %s %s", cfg.docker_path, _runtime_version or "")
-            return _container_runtime
+    # 1. Konfigurierter Pfad prüfen
+    if cfg.podman_path and os.path.isfile(cfg.podman_path):
+        _container_runtime = cfg.podman_path
+        _runtime_version = _get_runtime_version(cfg.podman_path)
+        logger.info("Sandbox: Using configured Podman: %s %s", cfg.podman_path, _runtime_version or "")
+        return _container_runtime
 
-    if cfg.backend == "podman" and cfg.podman_path:
-        if os.path.isfile(cfg.podman_path):
-            _container_runtime = cfg.podman_path
-            _runtime_version = _get_runtime_version(cfg.podman_path)
-            logger.info("Sandbox: Using configured Podman: %s %s", cfg.podman_path, _runtime_version or "")
-            return _container_runtime
+    # 2. System PATH prüfen
+    podman_path = shutil.which("podman")
+    if podman_path:
+        _container_runtime = podman_path
+        _runtime_version = _get_runtime_version(podman_path)
+        logger.info("Sandbox: Found Podman in PATH: %s %s", podman_path, _runtime_version or "")
+        return _container_runtime
 
-    # Explizite Konfiguration ohne Pfad (aus PATH suchen)
-    if cfg.backend in ("docker", "podman"):
-        # Zuerst konfigurierten Pfad prüfen, dann PATH
-        custom_path = cfg.podman_path if cfg.backend == "podman" else cfg.docker_path
-        runtime_path = custom_path if custom_path and os.path.isfile(custom_path) else shutil.which(cfg.backend)
-        if runtime_path:
-            _container_runtime = runtime_path
-            _runtime_version = _get_runtime_version(runtime_path)
-            logger.info("Sandbox: Using configured runtime: %s %s", runtime_path, _runtime_version or "")
-            return _container_runtime
-        else:
-            logger.warning("Sandbox: Configured runtime '%s' not found!", cfg.backend)
-            _container_runtime = ""  # Markiere als "nicht gefunden"
-            return None
-
-    # Auto-Detection: Podman bevorzugt (portable, daemonless)
-    # Erst konfigurierte Pfade, dann PATH
-    checks = [
-        (cfg.podman_path, "podman"),
-        (cfg.docker_path, "docker"),
-        (shutil.which("podman"), "podman"),
-        (shutil.which("docker"), "docker"),
-    ]
-
-    for path, name in checks:
-        if path and (os.path.isfile(path) if not shutil.which(name) == path else True):
-            actual_path = path if os.path.isfile(path) else shutil.which(name)
-            if actual_path:
-                _container_runtime = actual_path
-                _runtime_version = _get_runtime_version(actual_path)
-                logger.info("Sandbox: Auto-detected runtime: %s at %s %s", name, actual_path, _runtime_version or "")
-                return _container_runtime
-
-    logger.warning("Sandbox: No container runtime (docker/podman) found!")
+    logger.warning("Sandbox: Podman nicht gefunden! Bitte Podman Desktop installieren.")
     _container_runtime = ""  # Markiere als "nicht gefunden"
     return None
 
@@ -143,30 +108,29 @@ def _get_runtime_version(runtime: str) -> Optional[str]:
 
 def get_container_runtime() -> str:
     """
-    Gibt die zu verwendende Container-Runtime zurück.
+    Gibt den Pfad zu Podman zurück.
 
     Raises:
-        RuntimeError wenn keine Runtime verfügbar
+        RuntimeError wenn Podman nicht verfügbar
     """
     runtime = _detect_container_runtime()
     if not runtime:
         raise RuntimeError(
-            "Keine Container-Runtime gefunden. "
-            "Bitte Docker oder Podman installieren.\n"
-            "Podman (empfohlen): https://podman.io/getting-started/installation\n"
-            "Docker: https://docs.docker.com/get-docker/"
+            "Podman nicht gefunden.\n"
+            "Bitte Podman Desktop installieren: https://podman-desktop.io/\n"
+            "Download: https://podman.io/getting-started/installation"
         )
     return runtime
 
 
 def get_runtime_info() -> Dict[str, Any]:
-    """Gibt Informationen zur Container-Runtime zurück."""
+    """Gibt Informationen zur Podman-Installation zurück."""
     runtime = _detect_container_runtime()
     return {
-        "runtime": runtime or "none",
+        "runtime": "podman",
+        "path": runtime or "none",
         "version": _runtime_version,
-        "available": runtime is not None and runtime != "",
-        "configured_backend": settings.docker_sandbox.backend
+        "available": runtime is not None and runtime != ""
     }
 
 
@@ -460,6 +424,278 @@ async def _test_container_basic() -> Dict[str, Any]:
         "success": exit_code == 0,
         "command": command_str  # Für Debug im Frontend
     }
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Image Building
+# ══════════════════════════════════════════════════════════════════════════════
+
+async def podman_build_image(
+    context_path: str,
+    image_name: str,
+    dockerfile: str = "Dockerfile",
+    build_args: Optional[Dict[str, str]] = None,
+    no_cache: bool = False,
+    timeout: int = 600
+) -> ToolResult:
+    """
+    Baut ein Container-Image aus einem Dockerfile.
+
+    Args:
+        context_path: Pfad zum Build-Kontext (Verzeichnis mit Dockerfile)
+        image_name: Name für das Image (z.B. "myapp:latest")
+        dockerfile: Name des Dockerfiles (default: "Dockerfile")
+        build_args: Build-Argumente (z.B. {"VERSION": "1.0"})
+        no_cache: Wenn True, wird der Cache ignoriert
+        timeout: Timeout in Sekunden (default: 600 = 10 Minuten)
+
+    Returns:
+        ToolResult mit Build-Output und Image-ID
+
+    Beispiel:
+        podman_build_image(
+            context_path="/path/to/project",
+            image_name="myapp:v1.0",
+            build_args={"ENV": "production"}
+        )
+    """
+    cfg = settings.docker_sandbox
+    if not cfg.enabled:
+        return ToolResult(success=False, error="Container Sandbox ist nicht aktiviert")
+
+    # Pfad validieren
+    context_path_obj = Path(context_path)
+    if not context_path_obj.exists():
+        return ToolResult(success=False, error=f"Build-Kontext nicht gefunden: {context_path}")
+
+    if not context_path_obj.is_dir():
+        return ToolResult(success=False, error=f"Build-Kontext muss ein Verzeichnis sein: {context_path}")
+
+    # Dockerfile prüfen
+    dockerfile_path = context_path_obj / dockerfile
+    if not dockerfile_path.exists():
+        return ToolResult(
+            success=False,
+            error=f"Dockerfile nicht gefunden: {dockerfile_path}\n"
+                  f"Vorhandene Dateien: {', '.join(f.name for f in context_path_obj.iterdir() if f.is_file())[:200]}"
+        )
+
+    start_time = time.time()
+
+    try:
+        runtime = get_container_runtime()
+    except RuntimeError as e:
+        return ToolResult(success=False, error=str(e))
+
+    # Build-Befehl zusammenbauen
+    args = [runtime, "build"]
+
+    # Image-Name
+    args.extend(["-t", image_name])
+
+    # Dockerfile (wenn nicht Standard)
+    if dockerfile != "Dockerfile":
+        args.extend(["-f", str(dockerfile_path)])
+
+    # Build-Argumente
+    if build_args:
+        for key, value in build_args.items():
+            args.extend(["--build-arg", f"{key}={value}"])
+
+    # Cache
+    if no_cache:
+        args.append("--no-cache")
+
+    # Kontext-Pfad
+    args.append(str(context_path_obj))
+
+    # Debug: Befehl loggen
+    command_str = " ".join(args)
+    logger.info(f"[sandbox] Build command: {command_str}")
+
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            *args,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.STDOUT,  # Stderr in stdout umleiten für vollständiges Build-Log
+            cwd=str(context_path_obj)
+        )
+
+        stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=timeout)
+        build_output = stdout.decode("utf-8", errors="replace")
+
+        execution_time = time.time() - start_time
+
+        if proc.returncode == 0:
+            # Image-ID ermitteln
+            image_id = None
+            inspect_proc = await asyncio.create_subprocess_exec(
+                runtime, "image", "inspect", image_name, "--format", "{{.Id}}",
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.DEVNULL
+            )
+            inspect_stdout, _ = await inspect_proc.communicate()
+            if inspect_proc.returncode == 0:
+                image_id = inspect_stdout.decode().strip()[:12]
+
+            # Build-Output auf relevante Zeilen reduzieren (letzte 50 Zeilen)
+            output_lines = build_output.strip().split("\n")
+            if len(output_lines) > 50:
+                summary = f"[... {len(output_lines) - 50} Zeilen ausgelassen ...]\n"
+                summary += "\n".join(output_lines[-50:])
+            else:
+                summary = build_output.strip()
+
+            return ToolResult(
+                success=True,
+                data=f"Image '{image_name}' erfolgreich gebaut!\n\nImage-ID: {image_id or 'unbekannt'}\n\n```\n{summary}\n```",
+                metadata={
+                    "image_name": image_name,
+                    "image_id": image_id,
+                    "execution_time_seconds": round(execution_time, 2),
+                    "context_path": str(context_path_obj),
+                    "dockerfile": dockerfile
+                }
+            )
+        else:
+            # Build fehlgeschlagen - zeige vollständigen Output
+            return ToolResult(
+                success=False,
+                error=f"Build fehlgeschlagen (Exit Code {proc.returncode})",
+                data=f"```\n{build_output.strip()[-5000:]}\n```",  # Letzte 5000 Zeichen
+                metadata={
+                    "exit_code": proc.returncode,
+                    "execution_time_seconds": round(execution_time, 2),
+                    "command": command_str
+                }
+            )
+
+    except asyncio.TimeoutError:
+        return ToolResult(
+            success=False,
+            error=f"Build-Timeout nach {timeout} Sekunden",
+            metadata={"timeout_seconds": timeout}
+        )
+    except Exception as e:
+        return ToolResult(
+            success=False,
+            error=f"Build-Fehler: {str(e)}",
+            metadata={"exception": type(e).__name__}
+        )
+
+
+async def podman_list_images(
+    filter_name: Optional[str] = None
+) -> ToolResult:
+    """
+    Listet alle lokalen Container-Images auf.
+
+    Args:
+        filter_name: Optional Filter für Image-Namen (z.B. "myapp")
+
+    Returns:
+        ToolResult mit Image-Liste
+    """
+    cfg = settings.docker_sandbox
+    if not cfg.enabled:
+        return ToolResult(success=False, error="Container Sandbox ist nicht aktiviert")
+
+    try:
+        runtime = get_container_runtime()
+    except RuntimeError as e:
+        return ToolResult(success=False, error=str(e))
+
+    args = [runtime, "images", "--format", "{{.Repository}}:{{.Tag}}\t{{.ID}}\t{{.Size}}\t{{.Created}}"]
+
+    if filter_name:
+        args.extend(["--filter", f"reference=*{filter_name}*"])
+
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            *args,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE
+        )
+        stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=30)
+
+        if proc.returncode != 0:
+            return ToolResult(success=False, error=f"Fehler: {stderr.decode()}")
+
+        output = stdout.decode().strip()
+        if not output:
+            return ToolResult(success=True, data="Keine Images gefunden.")
+
+        # Formatierte Ausgabe
+        lines = output.split("\n")
+        formatted = "| Image | ID | Größe | Erstellt |\n|-------|----|----- |----------|\n"
+        for line in lines:
+            parts = line.split("\t")
+            if len(parts) >= 4:
+                formatted += f"| {parts[0]} | {parts[1][:12]} | {parts[2]} | {parts[3]} |\n"
+
+        return ToolResult(
+            success=True,
+            data=f"**{len(lines)} Image(s) gefunden:**\n\n{formatted}",
+            metadata={"count": len(lines)}
+        )
+
+    except asyncio.TimeoutError:
+        return ToolResult(success=False, error="Timeout beim Auflisten der Images")
+    except Exception as e:
+        return ToolResult(success=False, error=f"Fehler: {str(e)}")
+
+
+async def podman_remove_image(
+    image_name: str,
+    force: bool = False
+) -> ToolResult:
+    """
+    Entfernt ein Container-Image.
+
+    Args:
+        image_name: Name oder ID des Images
+        force: Erzwingt das Löschen (auch wenn Container existieren)
+
+    Returns:
+        ToolResult mit Status
+    """
+    cfg = settings.docker_sandbox
+    if not cfg.enabled:
+        return ToolResult(success=False, error="Container Sandbox ist nicht aktiviert")
+
+    try:
+        runtime = get_container_runtime()
+    except RuntimeError as e:
+        return ToolResult(success=False, error=str(e))
+
+    args = [runtime, "rmi"]
+    if force:
+        args.append("-f")
+    args.append(image_name)
+
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            *args,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE
+        )
+        stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=60)
+
+        if proc.returncode == 0:
+            return ToolResult(
+                success=True,
+                data=f"Image '{image_name}' erfolgreich entfernt."
+            )
+        else:
+            return ToolResult(
+                success=False,
+                error=f"Fehler beim Entfernen: {stderr.decode().strip()}"
+            )
+
+    except asyncio.TimeoutError:
+        return ToolResult(success=False, error="Timeout beim Entfernen des Images")
+    except Exception as e:
+        return ToolResult(success=False, error=f"Fehler: {str(e)}")
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -1127,6 +1363,98 @@ Beispiel: Nach Upload kann die Datei im Code mit open('/workspace/file.csv') gel
             parameters={},
             handler=docker_list_packages,
             is_write_operation=False
+        ),
+        # Image Building Tools
+        ToolDefinition(
+            name="podman_build_image",
+            description="""Baut ein Container-Image aus einem Dockerfile.
+
+WANN VERWENDEN:
+- Benutzer möchte ein eigenes Container-Image erstellen
+- Dockerfile liegt im Projekt vor
+- Custom Image für Sandbox-Ausführung benötigt
+
+BEISPIEL:
+podman_build_image(
+    context_path="/path/to/project",
+    image_name="myapp:v1.0",
+    build_args={"ENV": "production"}
+)
+
+Nach dem Build kann das Image mit docker_execute_python über custom_image verwendet werden.""",
+            parameters={
+                "context_path": {
+                    "type": "string",
+                    "description": "Pfad zum Build-Kontext (Verzeichnis mit Dockerfile)",
+                    "required": True
+                },
+                "image_name": {
+                    "type": "string",
+                    "description": "Name für das Image (z.B. 'myapp:latest')",
+                    "required": True
+                },
+                "dockerfile": {
+                    "type": "string",
+                    "description": "Name des Dockerfiles (default: 'Dockerfile')",
+                    "required": False
+                },
+                "build_args": {
+                    "type": "object",
+                    "description": "Build-Argumente als Key-Value-Paare",
+                    "required": False
+                },
+                "no_cache": {
+                    "type": "boolean",
+                    "description": "Wenn True, wird der Build-Cache ignoriert",
+                    "required": False
+                },
+                "timeout": {
+                    "type": "integer",
+                    "description": "Timeout in Sekunden (default: 600)",
+                    "required": False
+                }
+            },
+            handler=podman_build_image,
+            is_write_operation=True
+        ),
+        ToolDefinition(
+            name="podman_list_images",
+            description="""Listet alle lokalen Container-Images auf.
+
+Zeigt Name, ID, Größe und Erstellungsdatum.
+Optional kann nach Namen gefiltert werden.""",
+            parameters={
+                "filter_name": {
+                    "type": "string",
+                    "description": "Optional: Filter für Image-Namen",
+                    "required": False
+                }
+            },
+            handler=podman_list_images,
+            is_write_operation=False
+        ),
+        ToolDefinition(
+            name="podman_remove_image",
+            description="""Entfernt ein Container-Image.
+
+WANN VERWENDEN:
+- Nicht mehr benötigte Images aufräumen
+- Speicherplatz freigeben
+- Alte Versionen entfernen""",
+            parameters={
+                "image_name": {
+                    "type": "string",
+                    "description": "Name oder ID des zu löschenden Images",
+                    "required": True
+                },
+                "force": {
+                    "type": "boolean",
+                    "description": "Erzwingt das Löschen (auch bei laufenden Containern)",
+                    "required": False
+                }
+            },
+            handler=podman_remove_image,
+            is_write_operation=True
         ),
     ]
 

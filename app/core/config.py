@@ -835,20 +835,32 @@ class MCPConfig(BaseModel):
     auto_activate_on_error: bool = True     # Bei komplexen Fehlern
     auto_activate_on_planning: bool = True  # Bei Planungsaufgaben
     min_complexity_score: float = 0.7       # Komplexitätsschwelle (0.0-1.0)
+    # Research Phase (Hybrid Orchestration)
+    research_enabled: bool = True
+    auto_research_on_question: bool = True  # Bei Fragen automatisch recherchieren
+    auto_research_keywords: List[str] = [
+        "wie funktioniert", "was ist", "best practice", "dokumentation",
+        "how to", "tutorial", "example", "erkläre", "explain"
+    ]
+    research_timeout_seconds: int = 30
+    max_research_results: int = 10
+    research_sources: List[str] = ["memory", "code_java", "code_python", "handbook"]
     # Debug
     debug_logging: bool = False
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# Docker Sandbox (Sichere Code-Ausführung)
+# Container Sandbox (Sichere Code-Ausführung mit Podman)
 # ══════════════════════════════════════════════════════════════════════════════
 
 class DockerSandboxConfig(BaseModel):
-    """Docker/Podman Sandbox für sichere Python-Code-Ausführung."""
+    """Podman Sandbox für sichere Python-Code-Ausführung.
+
+    Verwendet Podman Desktop (daemonless, portable, kein Admin nötig).
+    Docker wird nicht mehr unterstützt.
+    """
     enabled: bool = False
-    backend: str = "auto"                  # "auto" | "docker" | "podman"
-    # Pfade zu den Container-Runtimes (leer = aus PATH)
-    docker_path: str = ""                  # z.B. "C:/Program Files/Docker/docker.exe"
+    # Pfad zu Podman (leer = aus PATH suchen)
     podman_path: str = ""                  # z.B. "C:/podman/bin/podman.exe" (portable)
     image: str = "python:3.11-slim"       # Base-Image (oder custom mit Paketen)
     custom_image: str = ""                 # Custom Image mit vorinstallierten Paketen

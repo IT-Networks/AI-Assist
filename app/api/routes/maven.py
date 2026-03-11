@@ -17,6 +17,13 @@ Routes:
 """
 
 import asyncio
+import sys
+import traceback
+
+# Windows: ProactorEventLoop für asyncio.create_subprocess_exec()
+# Muss gesetzt werden BEVOR Subprozesse erstellt werden (auch bei uvicorn reload)
+if sys.platform == 'win32':
+    asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())
 import json
 import os
 import uuid
@@ -340,7 +347,9 @@ async def run_build(build_id: str, req: RunBuildRequest = RunBuildRequest()) -> 
 
         except Exception as e:
             _running_builds.pop(build_id, None)
-            yield f"data: {json.dumps({'type': 'error', 'message': str(e)})}\n\n"
+            error_msg = f"{type(e).__name__}: {e}"
+            tb_str = traceback.format_exc()
+            yield f"data: {json.dumps({'type': 'error', 'message': error_msg, 'traceback': tb_str})}\n\n"
 
     return StreamingResponse(stream_build(), media_type="text/event-stream")
 

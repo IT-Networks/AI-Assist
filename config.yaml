@@ -116,7 +116,7 @@ uploads:
 server:
   host: 0.0.0.0
   port: 8000
-  reload: true  # Auto-Reload bei Code-Änderungen (Development)
+  reload: false  # Deaktiviert für stabile Subprozesse (Maven/WLP) auf Windows
   reload_excludes:  # Diese Pfade lösen keinen Reload aus
     - "chats/*"
     - "output/*"
@@ -418,15 +418,34 @@ docker_sandbox:
   drop_capabilities: true
 
 mcp:
-  enabled: false
+  enabled: true
   servers: []
   sequential_thinking_enabled: true
   max_thinking_steps: 15
   thinking_timeout_seconds: 180
   auto_activate_on_error: true
   auto_activate_on_planning: true
-  min_complexity_score: 0.7
-  debug_logging: false
+  min_complexity_score: 0.5  # Reduziert für häufigere Aktivierung
+  debug_logging: true  # Für Entwicklung
+  # Research Phase Settings
+  research_enabled: true
+  auto_research_on_question: true  # Bei Fragen automatisch recherchieren
+  auto_research_keywords:
+    - "wie funktioniert"
+    - "was ist"
+    - "best practice"
+    - "dokumentation"
+    - "how to"
+    - "tutorial"
+    - "example"
+  research_timeout_seconds: 30
+  max_research_results: 10
+  research_sources:  # Aktive Quellen für Auto-Research
+    - memory
+    - code_java
+    - code_python
+    - handbook
+    - web
 
 api_tools:
   enabled: true

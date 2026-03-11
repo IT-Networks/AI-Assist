@@ -18,6 +18,13 @@ Routes:
 """
 
 import asyncio
+import sys
+import traceback as tb
+
+# Windows: ProactorEventLoop für asyncio.create_subprocess_exec()
+# Muss gesetzt werden BEVOR Subprozesse erstellt werden (auch bei uvicorn reload)
+if sys.platform == 'win32':
+    asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())
 import json
 import re
 import uuid
@@ -308,7 +315,9 @@ async def start_server(server_id: str) -> StreamingResponse:
             yield f"data: {json.dumps({'type': 'error', 'message': f'Keine Ausführungsrechte: {e}'})}\n\n"
         except Exception as e:
             _running_processes.pop(server_id, None)
-            yield f"data: {json.dumps({'type': 'error', 'message': f'{type(e).__name__}: {str(e)}'})}\n\n"
+            error_msg = f"{type(e).__name__}: {e}"
+            tb_str = tb.format_exc()
+            yield f"data: {json.dumps({'type': 'error', 'message': error_msg, 'traceback': tb_str})}\n\n"
 
     return StreamingResponse(stream_start(), media_type="text/event-stream")
 

@@ -40,14 +40,26 @@ _search_client: Optional[httpx.AsyncClient] = None
 
 
 def _get_search_client() -> httpx.AsyncClient:
-    """Returns shared HTTP client for search requests (lazy init)."""
+    """Returns shared HTTP client for search requests (lazy init).
+
+    Uses proxy settings from config.search if configured.
+    Client is recreated when config changes via reset_search_client().
+    """
     global _search_client
     if _search_client is None:
+        # Proxy-URL aus Konfiguration
+        proxy_url = settings.search.get_proxy_url()
+        if proxy_url:
+            print(f"[search] Creating HTTP client with proxy: {settings.search.proxy_url}")
+        else:
+            print(f"[search] Creating HTTP client without proxy")
+
         _search_client = httpx.AsyncClient(
             timeout=settings.search.timeout_seconds or 30,
             follow_redirects=True,
             headers=_DDG_HEADERS,
             verify=settings.search.verify_ssl,
+            proxy=proxy_url,  # Proxy aus Konfiguration
             limits=httpx.Limits(
                 max_connections=10,
                 max_keepalive_connections=5,
@@ -55,6 +67,24 @@ def _get_search_client() -> httpx.AsyncClient:
             )
         )
     return _search_client
+
+
+def reset_search_client():
+    """Resets the shared HTTP client (forces recreation with new settings)."""
+    global _search_client
+    if _search_client is not None:
+        # Schedule async close in background (non-blocking)
+        asyncio.create_task(_close_client_async(_search_client))
+        _search_client = None
+        print("[search] HTTP client reset (will recreate with new settings)")
+
+
+async def _close_client_async(client: httpx.AsyncClient):
+    """Helper to close client asynchronously."""
+    try:
+        await client.aclose()
+    except Exception as e:
+        print(f"[search] Warning: Error closing old client: {e}")
 
 
 async def close_search_client():
@@ -364,9 +394,12 @@ async def update_search_config(req: SearchConfigRequest) -> Dict[str, Any]:
     settings.search.timeout_seconds = max(5, min(req.timeout_seconds, 120))  # 5-120s
     settings.search.verify_ssl = req.verify_ssl
 
+    # HTTP-Client neu erstellen damit neue Proxy-Einstellungen wirksam werden
+    reset_search_client()
+
     return {
         "success": True,
-        "message": "Proxy-Konfiguration aktualisiert. POST /api/settings/save zum Persistieren.",
+        "message": "Proxy-Konfiguration aktualisiert. HTTP-Client wird neu erstellt. POST /api/settings/save zum Persistieren.",
         "config": {
             "proxy_url": settings.search.proxy_url,
             "proxy_username": settings.search.proxy_username,

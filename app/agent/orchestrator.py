@@ -48,6 +48,8 @@ _RE_HINT_TOOL_KEY = re.compile(r'"tool"\s*:')
 from app.agent.tools import ToolRegistry, ToolResult, get_tool_registry
 from app.core.config import settings
 from app.mcp.tool_bridge import get_tool_bridge, MCPToolBridge
+from app.mcp.thinking_engine import get_thinking_engine, ThinkingEngine, ThinkingMode
+from app.mcp.capabilities.research import get_research_capability, ResearchCapability
 from app.core.token_budget import TokenBudget, create_budget_from_config
 from app.core.conversation_summarizer import get_summarizer
 from app.services.llm_client import SYSTEM_PROMPT, _get_http_client, _RETRY_DELAYS, _is_retryable
@@ -492,6 +494,12 @@ class AgentOrchestrator:
         self.auto_learner = get_auto_learner()
         # MCP Tool Bridge (für Sequential Thinking und externe MCP-Server)
         self._mcp_bridge: Optional[MCPToolBridge] = None
+        # Thinking Engine für strukturiertes Denken mit UI-Integration
+        self._thinking_engine: Optional[ThinkingEngine] = None
+        # Research Capability für parallele Quellensuche
+        self._research_capability: Optional[ResearchCapability] = None
+        # Event Queue für asynchrone MCP-Events (Thinking-Steps etc.)
+        self._mcp_event_queue: asyncio.Queue = asyncio.Queue()
 
     def _get_state(self, session_id: str) -> AgentState:
         """Holt oder erstellt den State für eine Session. Stellt bei Bedarf vom Disk wieder her."""
@@ -544,6 +552,161 @@ class AgentOrchestrator:
         # Transcript-Logger mit Projekt konfigurieren
         if project_id:
             self.transcript_logger.project_id = project_id
+
+    def _get_thinking_engine(self) -> ThinkingEngine:
+        """Initialisiert und gibt die ThinkingEngine zurück."""
+        if self._thinking_engine is None:
+            self._thinking_engine = get_thinking_engine(
+                event_emitter=self._emit_mcp_event
+            )
+        return self._thinking_engine
+
+    async def _emit_mcp_event(self, event_type: str, data: Dict[str, Any]) -> None:
+        """
+        Callback für MCP/Thinking Events.
+        Legt Events in die Queue für den Generator.
+        """
+        try:
+            # Event-Typ zu AgentEventType mappen
+            type_mapping = {
+                "MCP_START": AgentEventType.MCP_START,
+                "MCP_STEP": AgentEventType.MCP_STEP,
+                "MCP_PROGRESS": AgentEventType.MCP_PROGRESS,
+                "MCP_COMPLETE": AgentEventType.MCP_COMPLETE,
+                "MCP_ERROR": AgentEventType.MCP_ERROR,
+            }
+            event_type_enum = type_mapping.get(event_type, AgentEventType.MCP_STEP)
+            await self._mcp_event_queue.put(AgentEvent(event_type_enum, data))
+        except Exception as e:
+            logger.warning(f"[agent] Error queuing MCP event: {e}")
+
+    async def _drain_mcp_events(self) -> AsyncGenerator[AgentEvent, None]:
+        """Liefert alle wartenden MCP Events aus der Queue."""
+        while not self._mcp_event_queue.empty():
+            try:
+                event = self._mcp_event_queue.get_nowait()
+                yield event
+            except asyncio.QueueEmpty:
+                break
+
+    def _get_research_capability(self) -> Optional["ResearchCapability"]:
+        """Initialisiert und gibt die ResearchCapability zurück."""
+        if self._research_capability is None:
+            try:
+                self._research_capability = get_research_capability()
+            except Exception as e:
+                logger.debug(f"[agent] ResearchCapability not available: {e}")
+        return self._research_capability
+
+    def _should_auto_research(self, query: str) -> bool:
+        """
+        Prüft ob automatische Research-Phase aktiviert werden soll.
+
+        Basiert auf:
+        - Config-Setting research_enabled
+        - auto_research_on_question
+        - Keyword-Matching aus auto_research_keywords
+        """
+        if not settings.mcp.research_enabled:
+            return False
+        if not settings.mcp.auto_research_on_question:
+            return False
+
+        query_lower = query.lower()
+
+        # Prüfe ob Query ein Keyword enthält
+        for keyword in settings.mcp.auto_research_keywords:
+            if keyword.lower() in query_lower:
+                return True
+
+        # Prüfe ob Query eine Frage ist (? oder Fragewörter)
+        question_indicators = ["?", "wie ", "was ", "warum ", "wann ", "wo ", "wer ",
+                               "how ", "what ", "why ", "when ", "where ", "who "]
+        for indicator in question_indicators:
+            if indicator in query_lower:
+                return True
+
+        return False
+
+    async def _run_research_phase(
+        self,
+        query: str,
+        messages: List[Dict],
+        budget,
+    ) -> AsyncGenerator[AgentEvent, None]:
+        """
+        Führt die Research-Phase mit parallelen Quellen aus.
+
+        Nutzt ResearchCapability um parallel in verschiedenen
+        Quellen zu suchen (Memory, Code, Web, Docs).
+
+        Yieldet RESEARCH_START / RESEARCH_PROGRESS / RESEARCH_DONE Events.
+        """
+        from app.utils.token_counter import estimate_tokens
+
+        research = self._get_research_capability()
+        if research is None:
+            return
+
+        try:
+            # RESEARCH_START Event
+            yield AgentEvent(AgentEventType.MCP_START, {
+                "mode": "research",
+                "query": query[:100],
+                "message": "Research-Phase gestartet..."
+            })
+
+            # Research ausführen mit Timeout
+            timeout = settings.mcp.research_timeout_seconds
+            session = await asyncio.wait_for(
+                research.execute(
+                    query=query,
+                    context=None,
+                    max_results=settings.mcp.max_research_results
+                ),
+                timeout=timeout
+            )
+
+            # Progress-Event mit Ergebnissen
+            if session.is_complete:
+                result_count = len(session.artifacts) if session.artifacts else 0
+                yield AgentEvent(AgentEventType.MCP_PROGRESS, {
+                    "mode": "research",
+                    "progress": 100,
+                    "message": f"{result_count} Ergebnisse gefunden"
+                })
+
+                # Research-Ergebnis als Kontext injizieren
+                if session.final_conclusion:
+                    research_context = f"""## Research-Ergebnisse (automatisch)
+
+{session.final_conclusion}
+"""
+                    research_tokens = estimate_tokens(research_context)
+                    if budget.can_add("context", research_tokens):
+                        messages.append({"role": "system", "content": research_context})
+                        budget.add("context", research_tokens)
+                        logger.debug(f"[agent] Research context injected: {research_tokens} tokens")
+
+            # RESEARCH_DONE Event
+            yield AgentEvent(AgentEventType.MCP_COMPLETE, {
+                "mode": "research",
+                "success": session.is_complete,
+                "message": "Research-Phase abgeschlossen"
+            })
+
+        except asyncio.TimeoutError:
+            logger.warning(f"[agent] Research phase timed out after {timeout}s")
+            yield AgentEvent(AgentEventType.MCP_ERROR, {
+                "mode": "research",
+                "error": f"Timeout nach {timeout}s"
+            })
+        except Exception as e:
+            logger.warning(f"[agent] Research phase failed: {e}")
+            yield AgentEvent(AgentEventType.MCP_ERROR, {
+                "mode": "research",
+                "error": str(e)
+            })
 
     async def _run_sub_agents_phase(
         self,
@@ -918,6 +1081,66 @@ class AgentOrchestrator:
         else:
             # Budget unter 80% → bereit für nächste Komprimierung wenn nötig
             state.compaction_attempted_while_full = False
+
+        # === THINKING PHASE (Strukturiertes Denken für komplexe Anfragen) ===
+        # Aktiviert automatisch bei hoher Komplexität oder Fehleranalysen
+        thinking_engine = self._get_thinking_engine()
+        is_error_query = any(kw in user_message.lower() for kw in [
+            "fehler", "error", "exception", "problem", "nicht funktioniert",
+            "bug", "crash", "failed", "schlägt fehl", "kaputt"
+        ])
+
+        if (
+            thinking_engine.is_enabled
+            and not forced_capability
+            and thinking_engine.should_auto_activate(user_message, is_error=is_error_query)
+        ):
+            try:
+                logger.debug("[agent] Activating thinking phase...")
+
+                # Thinking durchführen (Events werden via Queue emittiert)
+                thinking_result = await thinking_engine.think(
+                    query=user_message,
+                    context=None,  # Kann später Memory-Kontext sein
+                    force=False
+                )
+
+                # MCP Events aus Queue yielden
+                async for event in self._drain_mcp_events():
+                    yield event
+
+                # Thinking-Ergebnis als Kontext injizieren wenn erfolgreich
+                if thinking_result.session.is_complete and thinking_result.session.final_conclusion:
+                    thinking_context = f"""## Strukturierte Analyse (automatisch)
+
+{thinking_engine.format_for_context(thinking_result)}
+"""
+                    # Als System-Message injizieren (nach User-Message)
+                    thinking_tokens = estimate_tokens(thinking_context)
+                    if budget.can_add("context", thinking_tokens):
+                        messages.append({"role": "system", "content": thinking_context})
+                        budget.add("context", thinking_tokens)
+                        logger.debug(f"[agent] Thinking context injected: {thinking_tokens} tokens")
+
+            except Exception as e:
+                logger.warning(f"[agent] Thinking phase failed: {e}")
+                # Nicht kritisch - weiter mit normalem Flow
+
+        # === RESEARCH PHASE (Parallele Quellensuche) ===
+        # Aktiviert bei Fragen oder Keywords - sucht parallel in Memory, Code, Web, Docs
+        if (
+            not forced_capability
+            and self._should_auto_research(user_message)
+        ):
+            try:
+                logger.debug("[agent] Activating research phase...")
+                async for event in self._run_research_phase(
+                    user_message, messages, budget
+                ):
+                    yield event
+            except Exception as e:
+                logger.warning(f"[agent] Research phase failed: {e}")
+                # Nicht kritisch - weiter mit normalem Flow
 
         # === SUB-AGENT PHASE ===
         # Spezialisierte Sub-Agenten erkunden Datenquellen parallel,

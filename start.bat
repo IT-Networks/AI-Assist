@@ -40,12 +40,12 @@ if errorlevel 1 (
     exit /b 1
 )
 
-REM Server starten
+REM Server starten (ohne --reload für stabile Subprozesse auf Windows)
 echo [INFO] Starte Server auf http://localhost:8000 ...
 echo [INFO] Zum Beenden: Strg+C druecken
 echo.
 
-uvicorn main:app --host 0.0.0.0 --port 8000 --reload
+uvicorn main:app --host 0.0.0.0 --port 8000
 
 REM Falls Server beendet
 echo.

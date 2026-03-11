@@ -234,6 +234,46 @@ class ToolRegistry:
 # Tool Implementations
 # ══════════════════════════════════════════════════════════════════════════════
 
+async def get_active_repositories() -> ToolResult:
+    """
+    Zeigt die aktuell konfigurierten Repository-Pfade und Suchverzeichnisse.
+    Hilft der AI zu verstehen, wo lokale Dateien gesucht werden.
+    """
+    from app.core.config import settings
+    from pathlib import Path
+
+    output = "=== Aktive Repositories und Suchpfade ===\n\n"
+
+    # Java Repository
+    java_path = settings.java.get_active_path() if hasattr(settings.java, 'get_active_path') else None
+    if java_path:
+        exists = "✓" if Path(java_path).exists() else "✗ (nicht erreichbar)"
+        output += f"📁 Java-Repository: {java_path} {exists}\n"
+    else:
+        output += "📁 Java-Repository: nicht konfiguriert\n"
+
+    # Python Repository
+    python_path = settings.python.get_active_path() if hasattr(settings.python, 'get_active_path') else None
+    if python_path:
+        exists = "✓" if Path(python_path).exists() else "✗ (nicht erreichbar)"
+        output += f"📁 Python-Repository: {python_path} {exists}\n"
+    else:
+        output += "📁 Python-Repository: nicht konfiguriert\n"
+
+    output += "\n--- Pfad-Auflösung ---\n"
+    output += "Relative Pfade werden in folgender Reihenfolge gesucht:\n"
+    output += "1. Java-Repository (falls konfiguriert)\n"
+    output += "2. Python-Repository (falls konfiguriert)\n"
+    output += "3. Aktuelles Arbeitsverzeichnis\n"
+
+    output += "\n--- Tipps ---\n"
+    output += "• Pfade aus search_code Ergebnissen direkt mit read_file verwenden\n"
+    output += "• Bei Stacktraces: Datei-Pfad aus Stacktrace direkt übernehmen\n"
+    output += "• Für spezifische Suche: Absoluten Pfad oder Unterverzeichnis angeben\n"
+
+    return ToolResult(success=True, data=output)
+
+
 async def search_code(
     query: str,
     language: str = "all",
@@ -336,11 +376,13 @@ async def search_code(
             data="Keine relevanten Code-Dateien gefunden."
         )
 
-    # Formatieren
+    # Formatieren mit klaren Pfad-Hinweisen
     output = f"Gefundene Code-Dateien für '{query}':\n\n"
 
     for r in results[:top_k]:
         output += f"[{r['language'].upper()}] {r['file_path']}\n"
+        # Klarer Hinweis wie der Pfad zu verwenden ist
+        output += f"  → read_file(path=\"{r['file_path']}\")\n"
 
         # Datei lesen wenn gewünscht
         if read_files:
@@ -445,6 +487,7 @@ async def read_file(
         show_line_numbers: Zeilennummern im Output anzeigen
     """
     import os
+    import re
     from app.core.config import settings
     from pathlib import Path
 
@@ -452,6 +495,17 @@ async def read_file(
     path = path.strip()
     if not path:
         return ToolResult(success=False, error="Kein Pfad angegeben")
+
+    # Stacktrace-Zeilennummer extrahieren (z.B. "MyClass.java:42" → Zeile 42)
+    stacktrace_line = None
+    stacktrace_match = re.match(r'^(.+?):(\d+)$', path)
+    if stacktrace_match:
+        path = stacktrace_match.group(1)
+        stacktrace_line = int(stacktrace_match.group(2))
+        # Wenn keine explizite offset/limit angegeben, zeige Kontext um die Stacktrace-Zeile
+        if offset == 0 and limit == 0:
+            offset = max(1, stacktrace_line - 10)  # 10 Zeilen vor der Fehlerzeile
+            limit = 25  # 25 Zeilen Kontext
 
     # Versuche den Pfad aufzulösen
     resolved_path = None
@@ -487,6 +541,28 @@ async def read_file(
                 resolved_path = str(full_path.resolve())
                 break
 
+        # 3. Falls nicht gefunden: Suche nach Dateiname in Repos (für Stacktrace-Pfade wie com/example/MyClass.java)
+        if not resolved_path:
+            filename = p.name  # Nur der Dateiname
+            for base in search_bases:
+                if not base.exists():
+                    continue
+                # Suche rekursiv nach dem Dateinamen
+                matches = list(base.rglob(filename))
+                if matches:
+                    # Bei mehreren Treffern: bevorzuge den mit passendem Pfad-Suffix
+                    path_parts = str(path).replace("\\", "/").split("/")
+                    for match in matches:
+                        match_str = str(match).replace("\\", "/")
+                        # Prüfe ob der Pfad-Suffix passt (z.B. com/example/MyClass.java)
+                        if match_str.endswith("/".join(path_parts[-3:])) or match_str.endswith("/".join(path_parts[-2:])):
+                            resolved_path = str(match.resolve())
+                            break
+                    # Fallback: ersten Treffer nehmen
+                    if not resolved_path and matches:
+                        resolved_path = str(matches[0].resolve())
+                        break
+
         # Wenn nicht gefunden, auch ohne Basis probieren (für lokale Dateien)
         if not resolved_path and p.exists():
             resolved_path = str(p.resolve())
@@ -494,9 +570,12 @@ async def read_file(
         if not resolved_path:
             # Zeige Hinweis wo gesucht wurde
             searched = ", ".join(str(b) for b in search_bases[:3])
+            hint = ""
+            if "/" in path or "\\" in path:
+                hint = "\nTIPP: Bei Stacktrace-Pfaden (z.B. 'com/example/MyClass.java') wird rekursiv im Repository gesucht."
             return ToolResult(
                 success=False,
-                error=f"Datei nicht gefunden: {path}\nGesucht in: {searched}\nHinweis: Bitte absoluten Pfad verwenden oder Datei relativ zu einem konfigurierten Repository angeben."
+                error=f"Datei nicht gefunden: {path}\nGesucht in: {searched}{hint}"
             )
 
     try:
@@ -525,13 +604,19 @@ async def read_file(
             formatted_lines = []
             for i, line in enumerate(selected_lines):
                 line_num = start_line + i + 1  # 1-basiert
-                formatted_lines.append(f"{line_num:>{num_width}}→{line}")
+                # Stacktrace-Zeile hervorheben
+                if stacktrace_line and line_num == stacktrace_line:
+                    formatted_lines.append(f"{line_num:>{num_width}}→{line}  ◀━━ FEHLER")
+                else:
+                    formatted_lines.append(f"{line_num:>{num_width}}→{line}")
             output_content = "\n".join(formatted_lines)
         else:
             output_content = "\n".join(selected_lines)
 
         # Header mit Range-Info
-        if offset > 0 or (limit > 0 and end_line < total_lines):
+        if stacktrace_line:
+            header = f"=== Datei: {path} (Zeilen {start_line + 1}-{end_line} von {total_lines}) [Stacktrace-Kontext um Zeile {stacktrace_line}] ==="
+        elif offset > 0 or (limit > 0 and end_line < total_lines):
             header = f"=== Datei: {path} (Zeilen {start_line + 1}-{end_line} von {total_lines}) ==="
         else:
             header = f"=== Datei: {path} ({total_lines} Zeilen) ==="
@@ -591,12 +676,29 @@ async def glob_files(
 
     # Basis-Pfad auflösen
     base_path = path
+    resolved_from = None  # Track woher der Pfad aufgelöst wurde
+
     if not PyPath(path).is_absolute():
-        # Versuche in Repos
-        if settings.java.get_active_path() and PyPath(settings.java.get_active_path()).exists():
-            base_path = settings.java.get_active_path()
-        elif settings.python.get_active_path() and PyPath(settings.python.get_active_path()).exists():
-            base_path = settings.python.get_active_path()
+        # Versuche relativen Pfad in Repos zu finden
+        java_path = settings.java.get_active_path()
+        python_path = settings.python.get_active_path()
+
+        # Wenn path != ".", prüfe ob Unterverzeichnis in einem Repo existiert
+        if path != ".":
+            if java_path and (PyPath(java_path) / path).exists():
+                base_path = str(PyPath(java_path) / path)
+                resolved_from = f"Java-Repo: {java_path}"
+            elif python_path and (PyPath(python_path) / path).exists():
+                base_path = str(PyPath(python_path) / path)
+                resolved_from = f"Python-Repo: {python_path}"
+        else:
+            # Standard: Erstes verfügbares Repo
+            if java_path and PyPath(java_path).exists():
+                base_path = java_path
+                resolved_from = f"Java-Repo: {java_path}"
+            elif python_path and PyPath(python_path).exists():
+                base_path = python_path
+                resolved_from = f"Python-Repo: {python_path}"
 
     try:
         from app.services.file_manager import get_file_manager
@@ -604,7 +706,8 @@ async def glob_files(
         results = await manager.glob_files(pattern, base_path, sort_by, max_results)
 
         if not results:
-            return ToolResult(success=True, data=f"Keine Dateien gefunden für Pattern '{pattern}'")
+            hint = f" (gesucht in: {resolved_from})" if resolved_from else ""
+            return ToolResult(success=True, data=f"Keine Dateien gefunden für Pattern '{pattern}'{hint}")
 
         # Formatieren (wie Claude Code)
         output = f"Gefunden: {len(results)} Dateien für '{pattern}'\n\n"
@@ -634,11 +737,27 @@ async def grep_content(
 
     # Basis-Pfad auflösen
     base_path = path
+    resolved_from = None
+
     if not PyPath(path).is_absolute():
-        if settings.java.get_active_path() and PyPath(settings.java.get_active_path()).exists():
-            base_path = settings.java.get_active_path()
-        elif settings.python.get_active_path() and PyPath(settings.python.get_active_path()).exists():
-            base_path = settings.python.get_active_path()
+        java_path = settings.java.get_active_path()
+        python_path = settings.python.get_active_path()
+
+        # Wenn path != ".", prüfe ob Unterverzeichnis in einem Repo existiert
+        if path != ".":
+            if java_path and (PyPath(java_path) / path).exists():
+                base_path = str(PyPath(java_path) / path)
+                resolved_from = f"Java-Repo/{path}"
+            elif python_path and (PyPath(python_path) / path).exists():
+                base_path = str(PyPath(python_path) / path)
+                resolved_from = f"Python-Repo/{path}"
+        else:
+            if java_path and PyPath(java_path).exists():
+                base_path = java_path
+                resolved_from = "Java-Repo"
+            elif python_path and PyPath(python_path).exists():
+                base_path = python_path
+                resolved_from = "Python-Repo"
 
     try:
         from app.services.file_manager import get_file_manager
@@ -648,10 +767,12 @@ async def grep_content(
         )
 
         if not results:
-            return ToolResult(success=True, data=f"Keine Treffer für '{pattern}'")
+            hint = f" (gesucht in: {resolved_from})" if resolved_from else ""
+            return ToolResult(success=True, data=f"Keine Treffer für '{pattern}'{hint}")
 
         # Formatieren (wie Claude Code Grep Output)
-        output = f"Gefunden: {len(results)} Treffer für '{pattern}'\n\n"
+        repo_hint = f" in {resolved_from}" if resolved_from else ""
+        output = f"Gefunden: {len(results)} Treffer für '{pattern}'{repo_hint}\n\n"
 
         current_file = None
         for match in results:
@@ -659,6 +780,8 @@ async def grep_content(
             if match.file_path != current_file:
                 current_file = match.file_path
                 output += f"{match.file_path}\n"
+                # Zeige wie man die Datei lesen kann
+                output += f"  → read_file(path=\"{match.file_path}\")\n"
 
             # Zeilen mit Kontext
             line_num_width = len(str(match.line_number + context_lines))
@@ -1551,7 +1674,8 @@ SEARCH_CODE_TOOL = Tool(
     description=(
         "Durchsucht das LOKALE Repository nach Java/Python/SQL-Dateien per Volltextsuche. "
         "WICHTIG: Nur für LOKALE Dateien! Für GitHub-PRs/Branches verwende github_pr_diff oder github_get_file. "
-        "Nutze für: Klassennamen, Methodennamen, SQL-Patterns im lokalen Code."
+        "Nutze für: Klassennamen, Methodennamen, SQL-Patterns im lokalen Code. "
+        "ERGEBNIS enthält relative Pfade die direkt mit read_file verwendet werden können."
     ),
     category=ToolCategory.SEARCH,
     parameters=[
@@ -1595,13 +1719,21 @@ READ_FILE_TOOL = Tool(
     name="read_file",
     description=(
         "Liest eine LOKALE Datei mit Zeilennummern. Für große Dateien: nutze offset/limit. "
-        "Output zeigt Zeilennummern für präzise Referenzierung (wie Claude Code). "
-        "Bei Dateien >500 Zeilen: erst mit limit=100 lesen, dann gezielt mit offset nachlesen. "
+        "PFAD-AUFLÖSUNG: "
+        "1) Absoluter Pfad → direkt verwenden. "
+        "2) Relativer Pfad → wird in Java-Repo, Python-Repo, dann CWD gesucht. "
+        "3) Stacktrace-Pfad → Pfade aus Stacktraces (z.B. 'com/example/Service.java:42') direkt verwenden. "
+        "EMPFEHLUNG: Pfade aus search_code oder Stacktraces unverändert übernehmen. "
         "WICHTIG: Für GitHub-Dateien verwende github_get_file."
     ),
     category=ToolCategory.FILE,
     parameters=[
-        ToolParameter("path", "string", "Pfad zur Datei"),
+        ToolParameter("path", "string",
+            "Pfad zur Datei. Akzeptiert: "
+            "1) Absoluter Pfad (z.B. 'C:/repo/src/File.java'), "
+            "2) Relativer Pfad aus search_code (z.B. 'src/main/java/Service.java'), "
+            "3) Pfad aus Stacktrace (z.B. 'com/example/Service.java')"
+        ),
         ToolParameter("encoding", "string", "Encoding der Datei", required=False, default="utf-8"),
         ToolParameter("offset", "integer", "Startzeile, 1-basiert (0=Anfang)", required=False, default=0),
         ToolParameter("limit", "integer", "Max Zeilen (0=alle, empfohlen: 500)", required=False, default=0),
@@ -1614,11 +1746,15 @@ LIST_FILES_TOOL = Tool(
     name="list_files",
     description=(
         "Listet Dateien in einem LOKALEN Verzeichnis auf. Für Pattern-Suche nutze glob_files. "
+        "PFAD: Absolut oder relativ. Bei '.' wird im aktiven Java/Python-Repo gesucht. "
         "WICHTIG: Für GitHub-Repos verwende github_list_repos."
     ),
     category=ToolCategory.FILE,
     parameters=[
-        ToolParameter("path", "string", "Verzeichnispfad"),
+        ToolParameter("path", "string",
+            "Verzeichnispfad. Absolut (z.B. 'C:/repo/src') oder relativ zum aktiven Repository. "
+            "Nutze get_active_repositories um konfigurierte Pfade zu sehen."
+        ),
         ToolParameter("pattern", "string", "Glob-Pattern (z.B. '*.java')", required=False, default="*"),
         ToolParameter("recursive", "boolean", "Auch Unterverzeichnisse durchsuchen", required=False, default=False),
     ],
@@ -1630,12 +1766,17 @@ GLOB_FILES_TOOL = Tool(
     description=(
         "Sucht Dateien nach Glob-Pattern (wie Claude Code). Schneller als list_files für Pattern-Suche. "
         "Patterns: '**/*.py' (rekursiv), 'src/**/*.java', '*.md'. "
+        "PFAD: Bei '.' (default) wird im aktiven Java/Python-Repo gesucht. "
         "Sortiert standardmäßig nach Änderungsdatum (neueste zuerst)."
     ),
     category=ToolCategory.FILE,
     parameters=[
         ToolParameter("pattern", "string", "Glob-Pattern (z.B. '**/*.py', 'src/**/*.java')"),
-        ToolParameter("path", "string", "Basisverzeichnis", required=False, default="."),
+        ToolParameter("path", "string",
+            "Basisverzeichnis. '.' = aktives Repository (Java oder Python). "
+            "Für spezifisches Repo: Absoluten Pfad oder Pfad aus get_active_repositories verwenden.",
+            required=False, default="."
+        ),
         ToolParameter("sort_by", "string", "Sortierung: mtime|name|size", required=False, default="mtime"),
         ToolParameter("max_results", "integer", "Max Ergebnisse", required=False, default=100),
     ],
@@ -1647,18 +1788,36 @@ GREP_CONTENT_TOOL = Tool(
     description=(
         "Durchsucht Dateiinhalte nach Text/Regex (wie Claude Code Grep). Funktioniert OHNE Index! "
         "Nutze für: Funktionen finden ('def process_'), Klassen ('class.*Handler'), Imports, Fehlermeldungen. "
-        "Zeigt Kontext-Zeilen vor/nach dem Treffer. Schneller als search_code für gezielte Suchen."
+        "PFAD: Bei '.' wird im aktiven Java/Python-Repo gesucht. "
+        "STACKTRACE-TIPP: Extrahiere Klassennamen aus Stacktraces und suche mit pattern='class ClassName'. "
+        "Zeigt Kontext-Zeilen vor/nach dem Treffer."
     ),
     category=ToolCategory.SEARCH,
     parameters=[
-        ToolParameter("pattern", "string", "Suchtext oder Regex (z.B. 'def process_', 'class.*Handler')"),
-        ToolParameter("path", "string", "Verzeichnis oder Datei", required=False, default="."),
+        ToolParameter("pattern", "string", "Suchtext oder Regex (z.B. 'def process_', 'class.*Handler', Fehlermeldung aus Stacktrace)"),
+        ToolParameter("path", "string",
+            "Verzeichnis oder Datei. '.' = aktives Repository. "
+            "Bei Stacktrace: Verwende Verzeichnis aus Stacktrace-Pfad (z.B. 'src/main/java/com/example').",
+            required=False, default="."
+        ),
         ToolParameter("file_pattern", "string", "Datei-Filter (z.B. '*.py', '*.java')", required=False, default="*"),
         ToolParameter("context_lines", "integer", "Zeilen vor/nach Match", required=False, default=2),
         ToolParameter("max_results", "integer", "Max Treffer", required=False, default=50),
         ToolParameter("case_sensitive", "boolean", "Groß-/Kleinschreibung beachten", required=False, default=False),
     ],
     handler=grep_content
+)
+
+GET_ACTIVE_REPOSITORIES_TOOL = Tool(
+    name="get_active_repositories",
+    description=(
+        "Zeigt die aktuell konfigurierten Repository-Pfade und erklärt die Pfad-Auflösung. "
+        "NUTZE DIESES TOOL wenn du unsicher bist, wo lokale Dateien gesucht werden oder welche Pfade gültig sind. "
+        "Hilft bei Stacktrace-Analyse und gezielter Dateisuche."
+    ),
+    category=ToolCategory.KNOWLEDGE,
+    parameters=[],
+    handler=get_active_repositories
 )
 
 WRITE_FILE_TOOL = Tool(
@@ -2105,6 +2264,7 @@ def create_default_registry() -> ToolRegistry:
     registry.register(GET_SERVICE_INFO_TOOL)
     registry.register(GET_PDF_INFO_TOOL)
     registry.register(READ_PDF_PAGES_TOOL)
+    registry.register(GET_ACTIVE_REPOSITORIES_TOOL)
 
     # Analysis Tools
     registry.register(TRACE_JAVA_REFERENCES_TOOL)

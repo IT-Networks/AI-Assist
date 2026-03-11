@@ -274,10 +274,12 @@ def register_default_capabilities(registry: CapabilityRegistry) -> None:
     from app.mcp.capabilities.design import DesignCapability
     from app.mcp.capabilities.implement import ImplementCapability
     from app.mcp.capabilities.analyze import AnalyzeCapability
+    from app.mcp.capabilities.research import ResearchCapability
 
     registry.register_class(BrainstormCapability)
     registry.register_class(DesignCapability)
     registry.register_class(ImplementCapability)
     registry.register_class(AnalyzeCapability)
+    registry.register_class(ResearchCapability)
 
     logger.info("[Registry] Default capabilities registered")
