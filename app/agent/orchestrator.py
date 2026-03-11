@@ -19,6 +19,8 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, AsyncGenerator, Dict, List, Optional, Set
 
+import httpx
+
 from app.agent.entity_tracker import EntityTracker
 
 logger = logging.getLogger(__name__)
@@ -1606,9 +1608,14 @@ class AgentOrchestrator:
 
         last_exc = None
         data = None
+
+        # Kontextgröße schätzen für bessere Fehlermeldungen
+        estimated_tokens = estimate_messages_tokens(messages)
+        logger.debug(f"[agent] LLM Request: ~{estimated_tokens} tokens, model={selected_model}")
+
         for attempt, delay in enumerate([0] + _RETRY_DELAYS):
             if delay:
-                logger.debug("[agent] LLM Retry {attempt} nach {delay}s (Modell: {selected_model})")
+                logger.warning(f"[agent] LLM Retry {attempt} nach {delay}s (Modell: {selected_model}, ~{estimated_tokens} tokens)")
                 await asyncio.sleep(delay)
             try:
                 client = _get_http_client()
@@ -1620,12 +1627,53 @@ class AgentOrchestrator:
                 response.raise_for_status()
                 data = response.json()
                 break  # Erfolg
+            except httpx.HTTPStatusError as e:
+                last_exc = e
+                status_code = e.response.status_code
+                error_body = ""
+                try:
+                    error_body = e.response.text[:500]
+                except Exception:
+                    pass
+
+                if status_code >= 500:
+                    logger.warning(f"[agent] LLM Server Error {status_code} (Versuch {attempt + 1}, ~{estimated_tokens} tokens): {error_body}")
+                    if attempt < len(_RETRY_DELAYS):
+                        continue
+                    # Nach allen Retries: Benutzerfreundliche Fehlermeldung
+                    raise RuntimeError(
+                        f"LLM-Server Fehler {status_code} nach {attempt + 1} Versuchen. "
+                        f"Kontext: ~{estimated_tokens} Token. "
+                        f"Mögliche Ursachen: Server überlastet, Kontext zu groß, oder Timeout. "
+                        f"Details: {error_body[:200]}"
+                    ) from e
+                else:
+                    # 4xx Fehler - kein Retry
+                    raise RuntimeError(f"LLM API Fehler {status_code}: {error_body}") from e
+
+            except httpx.TimeoutException as e:
+                last_exc = e
+                logger.warning(f"[agent] LLM Timeout (Versuch {attempt + 1}, ~{estimated_tokens} tokens)")
+                if attempt < len(_RETRY_DELAYS):
+                    continue
+                raise RuntimeError(
+                    f"LLM-Anfrage Timeout nach {attempt + 1} Versuchen. "
+                    f"Kontext: ~{estimated_tokens} Token. "
+                    f"Erhöhe timeout_seconds in config.yaml oder reduziere den Kontext."
+                ) from e
+
+            except httpx.RequestError as e:
+                last_exc = e
+                logger.warning(f"[agent] LLM Verbindungsfehler (Versuch {attempt + 1}): {e}")
+                if attempt < len(_RETRY_DELAYS):
+                    continue
+                raise RuntimeError(f"LLM Verbindungsfehler: {e}") from e
+
             except Exception as e:
                 last_exc = e
                 if _is_retryable(e) and attempt < len(_RETRY_DELAYS):
-                    logger.debug("[agent] LLM Fehler (Retry {attempt + 1}): {e}")
+                    logger.debug(f"[agent] LLM Fehler (Retry {attempt + 1}): {e}")
                     continue
-                # Nicht wiederholbarer Fehler
                 raise
 
         if data is None:
