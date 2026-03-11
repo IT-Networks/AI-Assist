@@ -327,6 +327,28 @@ async def save_settings(request: SettingsSaveRequest = None) -> Dict[str, Any]:
     }
 
 
+def _save_config() -> bool:
+    """
+    Speichert die aktuellen Settings in config.yaml (ohne Backup).
+
+    Diese Funktion wird von anderen Modulen aufgerufen (z.B. docker_sandbox).
+
+    Returns:
+        True bei Erfolg
+    """
+    config_path = Path("config.yaml")
+    settings_dict = settings.model_dump()
+    yaml_content = _generate_yaml_with_comments(settings_dict)
+
+    try:
+        with open(config_path, "w", encoding="utf-8") as f:
+            f.write(yaml_content)
+        return True
+    except Exception as e:
+        print(f"[settings] Fehler beim Speichern: {e}")
+        return False
+
+
 def _generate_yaml_with_comments(data: Dict[str, Any]) -> str:
     """Generiert YAML mit Kommentaren für bessere Lesbarkeit."""
 
