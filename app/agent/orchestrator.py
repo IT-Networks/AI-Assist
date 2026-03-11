@@ -29,6 +29,9 @@ from app.core.token_budget import TokenBudget, create_budget_from_config
 from app.core.conversation_summarizer import get_summarizer
 from app.services.llm_client import SYSTEM_PROMPT, _get_http_client, _RETRY_DELAYS, _is_retryable
 from app.services.memory_store import get_memory_store
+from app.services.context_manager import get_context_manager, ContextManager
+from app.services.transcript_logger import get_transcript_logger, TranscriptLogger, TranscriptEntry
+from app.services.auto_learner import get_auto_learner, AutoLearner
 from app.utils.token_counter import estimate_tokens, estimate_messages_tokens
 
 
@@ -104,6 +107,8 @@ class ToolCall:
 class AgentState:
     """Zustand einer Agent-Session."""
     session_id: str
+    project_id: Optional[str] = None  # Projekt-ID für Context-System
+    project_path: Optional[str] = None  # Projekt-Pfad für Context-Dateien
     mode: AgentMode = AgentMode.READ_ONLY
     active_skill_ids: Set[str] = field(default_factory=set)
     pending_confirmation: Optional[ToolCall] = None
@@ -340,6 +345,11 @@ class AgentOrchestrator:
         # Token Management Components
         self.memory_store = get_memory_store()
         self.summarizer = get_summarizer()
+        # Context System (3-Schichten: Global → Project → Session)
+        self.context_manager = get_context_manager()
+        self.transcript_logger = get_transcript_logger()
+        # Auto-Learning (erkennt "Merke dir...", Problemlösungen, etc.)
+        self.auto_learner = get_auto_learner()
         # MCP Tool Bridge (für Sequential Thinking und externe MCP-Server)
         self._mcp_bridge: Optional[MCPToolBridge] = None
 
@@ -372,6 +382,28 @@ class AgentOrchestrator:
         """Setzt die aktiven Skills für eine Session."""
         state = self._get_state(session_id)
         state.active_skill_ids = set(skill_ids)
+
+    def set_project(
+        self,
+        session_id: str,
+        project_id: Optional[str] = None,
+        project_path: Optional[str] = None
+    ) -> None:
+        """
+        Setzt Projekt-Informationen für eine Session.
+
+        Args:
+            session_id: Session-ID
+            project_id: Projekt-Identifier für Memory-Scoping
+            project_path: Dateisystem-Pfad für PROJECT_CONTEXT.md
+        """
+        state = self._get_state(session_id)
+        state.project_id = project_id
+        state.project_path = project_path
+
+        # Transcript-Logger mit Projekt konfigurieren
+        if project_id:
+            self.transcript_logger.project_id = project_id
 
     async def _run_sub_agents_phase(
         self,
@@ -594,16 +626,33 @@ class AgentOrchestrator:
         ]
         budget.set("system", estimate_tokens(system_prompt))
 
-        # Memory Context laden (relevante Fakten aus vorherigen Sessions)
+        # === PROJECT CONTEXT (statisch, aus PROJECT_CONTEXT.md) ===
+        try:
+            project_context = await self.context_manager.build_full_context(
+                project_path=state.project_path,
+                project_id=state.project_id,
+                max_tokens=min(500, budget.memory_limit // 3)
+            )
+            if project_context:
+                messages.append({"role": "system", "content": project_context})
+                budget.set("memory", estimate_tokens(project_context))
+        except Exception as e:
+            logger.debug(f"[agent] Project context loading failed: {e}")
+
+        # === MEMORY CONTEXT (dynamisch, multi-scope) ===
         try:
             memory_context = await self.memory_store.get_context_injection(
-                session_id, user_message, max_tokens=budget.memory_limit
+                current_message=user_message,
+                project_id=state.project_id,
+                session_id=session_id,
+                scopes=["global", "project", "session"],
+                max_tokens=budget.memory_limit - budget.used_memory
             )
             if memory_context:
                 messages.append({"role": "system", "content": memory_context})
-                budget.set("memory", estimate_tokens(memory_context))
+                budget.set("memory", budget.used_memory + estimate_tokens(memory_context))
         except Exception as e:
-            logger.debug("[agent] Memory loading failed: {e}")
+            logger.debug(f"[agent] Memory loading failed: {e}")
 
         # Entity-Kontext: Bekannte Entitäten aus dieser Session (Java ↔ Handbuch ↔ PDF)
         entity_hint = state.entity_tracker.get_context_hint()
@@ -651,6 +700,35 @@ class AgentOrchestrator:
 
         # User-Nachricht in Historie speichern
         state.messages_history.append({"role": "user", "content": user_message})
+
+        # === TRANSCRIPT LOGGING ===
+        try:
+            await self.transcript_logger.log_user_message(
+                session_id=session_id,
+                content=user_message,
+                project_id=state.project_id
+            )
+        except Exception as e:
+            logger.debug(f"[agent] Transcript logging failed: {e}")
+
+        # === AUTO-LEARNING (User-Message) ===
+        try:
+            user_candidates = await self.auto_learner.analyze_user_message(
+                message=user_message,
+                project_id=state.project_id,
+                session_id=session_id
+            )
+            if user_candidates:
+                saved = await self.auto_learner.save_candidates(
+                    candidates=user_candidates,
+                    project_id=state.project_id,
+                    session_id=session_id,
+                    project_path=state.project_path
+                )
+                if saved:
+                    logger.debug(f"[agent] Auto-learned {len(saved)} items from user message")
+        except Exception as e:
+            logger.debug(f"[agent] Auto-learning failed: {e}")
 
         # Auto-Titel aus erster User-Nachricht ableiten
         if not state.title:
