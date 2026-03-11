@@ -76,7 +76,15 @@ const chatManager = {
 
 // ── Initialization ──
 document.addEventListener('DOMContentLoaded', async () => {
-  marked.setOptions({ breaks: true, gfm: true });
+  // Marked.js konfigurieren - Links öffnen in neuem Tab
+  const renderer = new marked.Renderer();
+  const originalLinkRenderer = renderer.link.bind(renderer);
+  renderer.link = (href, title, text) => {
+    const html = originalLinkRenderer(href, title, text);
+    // Füge target="_blank" und rel="noopener noreferrer" hinzu
+    return html.replace(/^<a /, '<a target="_blank" rel="noopener noreferrer" ');
+  };
+  marked.setOptions({ breaks: true, gfm: true, renderer: renderer });
 
   // Initialize UI
   setupSidebarTabs();

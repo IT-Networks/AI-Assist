@@ -3567,3 +3567,44 @@ body {
   letter-spacing: 0.5px;
   margin-bottom: 6px;
 }
+
+/* ══════════════════════════════════════════════════════════════════════════════
+   Links - Bessere Lesbarkeit auf dunklem Hintergrund
+   ══════════════════════════════════════════════════════════════════════════════ */
+
+a {
+  color: var(--accent);
+  text-decoration: none;
+  transition: color 0.15s;
+}
+
+a:hover {
+  color: var(--accent-hover);
+  text-decoration: underline;
+}
+
+a:visited {
+  color: var(--info);
+}
+
+/* Links in Chat-Messages */
+.message-bubble a {
+  color: #79c0ff;
+  font-weight: 500;
+}
+
+.message-bubble a:hover {
+  color: #a5d6ff;
+  text-decoration: underline;
+}
+
+.message-bubble a:visited {
+  color: #bc8cff;
+}
+
+/* External Link Indicator */
+.message-bubble a[target="_blank"]::after {
+  content: " ↗";
+  font-size: 0.75em;
+  opacity: 0.7;
+}
