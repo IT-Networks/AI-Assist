@@ -5628,13 +5628,13 @@ document.addEventListener('DOMContentLoaded', () => {
   // Panel-Tab-Klick-Handler für operative Panels
   document.querySelectorAll('[data-panel]').forEach(tab => {
     const panel = tab.getAttribute('data-panel');
-    if (['mq-panel','testtool-panel','wlp-panel','maven-panel','search-panel'].includes(panel)) {
+    if (['mq-panel','testtool-panel','wlp-panel','maven-panel','websearch-panel'].includes(panel)) {
       tab.addEventListener('click', () => {
         if (panel === 'mq-panel') loadMQPanel();
         else if (panel === 'testtool-panel') loadTestToolPanel();
         else if (panel === 'wlp-panel') loadWLPPanel();
         else if (panel === 'maven-panel') loadMavenPanel();
-        else if (panel === 'search-panel') loadSearchPanel();
+        else if (panel === 'websearch-panel') loadSearchPanel();
       });
     }
   });
