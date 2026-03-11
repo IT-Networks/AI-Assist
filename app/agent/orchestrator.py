@@ -1662,6 +1662,18 @@ class AgentOrchestrator:
             selected_model,
             settings.llm.default_context_limit
         )
+
+        # Bei langen Chats: Summarizer aufrufen (fasst ältere Messages zusammen)
+        current_tokens = estimate_messages_tokens(messages)
+        if current_tokens > model_limit * 0.8:  # Ab 80% des Limits
+            summarizer = get_summarizer()
+            messages = await summarizer.summarize_if_needed(
+                messages,
+                target_tokens=int(model_limit * 0.7)  # Ziel: 70% des Limits
+            )
+            logger.info(f"[agent] Summarizer aktiv: {current_tokens} -> {estimate_messages_tokens(messages)} tokens")
+
+        # Falls immer noch zu groß: Trim anwenden
         trimmed_messages = _trim_messages_to_limit(messages, model_limit)
 
         payload = {
