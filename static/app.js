@@ -71,6 +71,7 @@ const chatManager = {
     chat.toolHistory = [...state.toolHistory];
     chat.context = JSON.parse(JSON.stringify(state.context));
     chat.pendingConfirmation = state.pendingConfirmation;
+    chat.mode = state.mode;  // Mode speichern
   },
 };
 
@@ -239,23 +240,49 @@ async function switchToChat(chatId) {
   state.pendingConfirmation = incomingChat.pendingConfirmation;
   state.context = JSON.parse(JSON.stringify(incomingChat.context));
 
-  // Nachrichten-Historie vom Server laden wenn Chat vom Disk wiederhergestellt wird
+  // Nachrichten-Historie und Mode vom Server laden wenn Chat vom Disk wiederhergestellt wird
   if (incomingChat.needsRestore) {
     incomingChat.needsRestore = false;
     incomingChat.pane.innerHTML = '';
     try {
       const res = await fetch(`/api/agent/session/${incomingChat.sessionId}/history`);
       if (res.ok) {
-        const { messages } = await res.json();
+        const data = await res.json();
+        const { messages, mode } = data;
         for (const msg of messages) {
           if (msg.role === 'user' || msg.role === 'assistant') {
             appendMessageToPane(incomingChat.pane, msg.role, msg.content);
           }
         }
+        // Mode vom Server synchronisieren
+        if (mode) {
+          state.mode = mode;
+          incomingChat.mode = mode;  // Im Chat-Objekt speichern
+          syncModeRadioButtons(mode);
+        }
       }
     } catch (e) {
       incomingChat.pane.innerHTML = welcomeHTML();
       console.error('Failed to restore chat history:', e);
+    }
+  } else {
+    // Bestehender Chat - Mode aus Chat-Objekt oder Server laden
+    if (incomingChat.mode) {
+      state.mode = incomingChat.mode;
+      syncModeRadioButtons(incomingChat.mode);
+    } else {
+      // Fallback: Mode vom Server laden
+      try {
+        const res = await fetch(`/api/agent/mode/${incomingChat.sessionId}`);
+        if (res.ok) {
+          const { mode } = await res.json();
+          state.mode = mode;
+          incomingChat.mode = mode;
+          syncModeRadioButtons(mode);
+        }
+      } catch (e) {
+        console.debug('Could not fetch mode:', e);
+      }
     }
   }
 
@@ -439,15 +466,30 @@ async function setAgentMode(mode) {
       const err = await res.json();
       appendMessage('error', `Modus-Wechsel fehlgeschlagen: ${err.detail}`);
       // Reset radio to current mode
-      document.querySelector(`input[name="agent-mode"][value="${state.mode}"]`).checked = true;
+      syncModeRadioButtons(state.mode);
       return;
     }
 
     const data = await res.json();
     state.mode = data.mode;
+
+    // Mode im aktiven Chat-Objekt speichern
+    const chat = chatManager.getActive();
+    if (chat) {
+      chat.mode = data.mode;
+    }
+
     updateModeIndicator();
   } catch (e) {
     appendMessage('error', 'Modus-Wechsel fehlgeschlagen: ' + e.message);
+  }
+}
+
+// Radio-Buttons mit dem aktuellen Mode synchronisieren
+function syncModeRadioButtons(mode) {
+  const radio = document.querySelector(`input[name="agent-mode"][value="${mode}"]`);
+  if (radio) {
+    radio.checked = true;
   }
 }
 

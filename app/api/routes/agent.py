@@ -592,6 +592,7 @@ async def get_session_history(session_id: str) -> Dict[str, Any]:
         "session_id": session_id,
         "messages": state.messages_history,
         "title": state.title,
+        "mode": state.mode.value,  # Mode für UI-Synchronisation
     }
 
 
