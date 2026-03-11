@@ -387,9 +387,9 @@ internal_fetch:
 # Container Sandbox (Docker/Podman) - Sichere Code-Ausführung
 docker_sandbox:
   enabled: true
-  backend: podman
-  docker_path: ''
-  podman_path: C:/Program Files/RedHat/Podman/podman.exe
+  backend: docker
+  docker_path: 'C:/Program Files/Docker/Docker/resources/bin/docker.exe'
+  podman_path: ''
   image: python:3.11-slim
   custom_image: ''
   memory_limit: 512m
