@@ -23,7 +23,7 @@ Beispiel: "AI-Assist" wird zu "IT-Networks/AI-Assist" aufgelöst.
 
 import logging
 import re
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 import httpx
 

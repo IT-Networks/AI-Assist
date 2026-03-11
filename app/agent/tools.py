@@ -2095,6 +2095,10 @@ def create_default_registry() -> ToolRegistry:
     from app.agent.compile_tools import register_compile_tools
     register_compile_tools(registry)
 
+    # JUnit Test Generator Tools
+    from app.agent.junit_tools import register_junit_tools
+    register_junit_tools(registry)
+
     return registry
 
 

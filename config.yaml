@@ -404,6 +404,19 @@ compile_tool:
     formats: ["yaml", "json", "properties", "toml"]
 
 # ═══════════════════════════════════════════════════════════════════
+# JUnit Test Generator - Automatische Test-Generierung
+# ═══════════════════════════════════════════════════════════════════
+junit_tool:
+  enabled: true
+  default_version: "5"                    # JUnit 4 oder 5 (auto-detect aus pom.xml)
+  default_style: "auto"                   # auto | basic | mockito | spring
+  test_suffix: "Test"                     # Suffix für Test-Klassen
+  generate_negative_tests: true           # Negative Tests (null, edge cases)
+  generate_edge_cases: true               # Edge-Case Tests (leere Strings, etc.)
+  use_given_when_then: true               # Given-When-Then Kommentare
+  add_todo_comments: true                 # TODO-Marker für manuelle Ergänzungen
+
+# ═══════════════════════════════════════════════════════════════════
 # Internal Fetch - Intranet-URLs und Webseiten abrufen
 # ═══════════════════════════════════════════════════════════════════
 internal_fetch:

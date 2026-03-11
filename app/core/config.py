@@ -588,6 +588,22 @@ class CompileToolConfig(BaseModel):
 
 
 # ══════════════════════════════════════════════════════════════════════════════
+# JUnit Test Generator
+# ══════════════════════════════════════════════════════════════════════════════
+
+class JUnitToolConfig(BaseModel):
+    """JUnit Test Generator Konfiguration."""
+    enabled: bool = True
+    default_version: str = "5"          # JUnit 4 oder 5
+    default_style: str = "auto"         # auto, basic, mockito, spring
+    test_suffix: str = "Test"           # Suffix für Test-Klassen
+    generate_negative_tests: bool = True
+    generate_edge_cases: bool = True
+    use_given_when_then: bool = True    # Given-When-Then Kommentare
+    add_todo_comments: bool = True      # TODO-Marker für manuelle Ergänzungen
+
+
+# ══════════════════════════════════════════════════════════════════════════════
 # Internal Fetch (Intranet-URLs abrufen)
 # ══════════════════════════════════════════════════════════════════════════════
 
@@ -775,6 +791,7 @@ class Settings(BaseModel):
     mcp: MCPConfig = Field(default_factory=MCPConfig)
     api_tools: ApiToolsConfig = Field(default_factory=ApiToolsConfig)
     compile_tool: CompileToolConfig = Field(default_factory=CompileToolConfig)
+    junit_tool: JUnitToolConfig = Field(default_factory=JUnitToolConfig)
 
     def apply_env_overrides(self) -> "Settings":
         if os.getenv("LLM_BASE_URL"):
