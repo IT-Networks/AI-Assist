@@ -35,7 +35,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from app.agent.tool_registry import ToolDefinition, ToolRegistry
+from app.agent.tools import ToolDefinition, ToolRegistry
 from app.core.config import settings
 
 logger = logging.getLogger(__name__)

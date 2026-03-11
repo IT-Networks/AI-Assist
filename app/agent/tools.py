@@ -99,6 +99,56 @@ class Tool:
 
 
 # ══════════════════════════════════════════════════════════════════════════════
+# ToolDefinition - Kompatibilitäts-Wrapper für dict-basierte Parameter
+# ══════════════════════════════════════════════════════════════════════════════
+
+@dataclass
+class ToolDefinition:
+    """
+    Kompatibilitäts-Wrapper für Tools mit dict-basierten Parametern.
+
+    Verwendung für Tools die Parameter als Dict definieren:
+        ToolDefinition(
+            name="my_tool",
+            description="...",
+            parameters={
+                "param1": {"type": "string", "description": "...", "required": True}
+            },
+            handler=my_handler
+        )
+
+    Wird intern zu einem Tool mit ToolParameter-Liste konvertiert.
+    """
+    name: str
+    description: str
+    parameters: Dict[str, Dict[str, Any]] = field(default_factory=dict)
+    handler: Optional[Callable[..., Awaitable[ToolResult]]] = None
+    is_write_operation: bool = False
+    category: ToolCategory = ToolCategory.DEVOPS
+
+    def to_tool(self) -> Tool:
+        """Konvertiert zu einem Standard-Tool."""
+        params = []
+        for param_name, param_def in self.parameters.items():
+            params.append(ToolParameter(
+                name=param_name,
+                type=param_def.get("type", "string"),
+                description=param_def.get("description", ""),
+                required=param_def.get("required", False),
+                default=param_def.get("default"),
+                enum=param_def.get("enum"),
+            ))
+        return Tool(
+            name=self.name,
+            description=self.description,
+            category=self.category,
+            parameters=params,
+            is_write_operation=self.is_write_operation,
+            handler=self.handler,
+        )
+
+
+# ══════════════════════════════════════════════════════════════════════════════
 # Tool Registry
 # ══════════════════════════════════════════════════════════════════════════════
 
@@ -116,8 +166,10 @@ class ToolRegistry:
         """Gibt alle registrierten Tools zurück."""
         return self._tools
 
-    def register(self, tool: Tool) -> None:
-        """Registriert ein Tool."""
+    def register(self, tool: "Tool | ToolDefinition") -> None:
+        """Registriert ein Tool. Akzeptiert Tool oder ToolDefinition."""
+        if isinstance(tool, ToolDefinition):
+            tool = tool.to_tool()
         self._tools[tool.name] = tool
 
     def get(self, name: str) -> Optional[Tool]:
