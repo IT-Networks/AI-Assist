@@ -6065,10 +6065,11 @@ async function _pollPendingSearches() {
     const confirmPanel = document.getElementById('confirm-panel');
     if (confirmPanel && !confirmPanel.classList.contains('active')) {
       // Zum Confirm-Panel wechseln um Buttons anzuzeigen
-      document.querySelectorAll('.sidebar-panel').forEach(p => p.classList.remove('active'));
-      document.querySelectorAll('.sidebar-tabs-compact button').forEach(b => b.classList.remove('active'));
+      // FIX: Nur rechte Sidebar betreffen, nicht die linke (Chat-Liste)
+      document.querySelectorAll('#sidebar-right .sidebar-panel').forEach(p => p.classList.remove('active'));
+      document.querySelectorAll('#sidebar-right .sidebar-tabs-compact button').forEach(b => b.classList.remove('active'));
       confirmPanel.classList.add('active');
-      const confirmTab = document.querySelector('[data-panel="confirm-panel"]');
+      const confirmTab = document.querySelector('#sidebar-right [data-panel="confirm-panel"]');
       if (confirmTab) confirmTab.classList.add('active');
     }
     searchesList.innerHTML = pending.map(item => {
