@@ -37,6 +37,55 @@ from app.services.auto_learner import get_auto_learner, AutoLearner
 from app.utils.token_counter import estimate_tokens, estimate_messages_tokens, truncate_text_to_tokens
 
 
+def _get_model_context_limit(model_id: str) -> int:
+    """
+    Ermittelt das Kontext-Limit für ein Model.
+
+    Unterstützt:
+    - Exakte Matches: "mistral-678b" -> llm_context_limits["mistral-678b"]
+    - Pfad-basierte IDs: "mistral/mistral_large" -> sucht nach "mistral" in keys
+    - Fallback auf default_context_limit
+    """
+    limits = settings.llm.llm_context_limits or {}
+    default = settings.llm.default_context_limit or 32000
+
+    if not model_id:
+        return default
+
+    # 1. Exakter Match
+    if model_id in limits:
+        return limits[model_id]
+
+    # 2. Normalisierter Match (lowercase)
+    model_lower = model_id.lower()
+    for key, value in limits.items():
+        if key.lower() == model_lower:
+            return value
+
+    # 3. Partial Match - Model-ID enthält einen bekannten Key oder umgekehrt
+    # z.B. "mistral/mistral_large" enthält "mistral"
+    for key, value in limits.items():
+        key_lower = key.lower()
+        # Extrahiere Basis-Namen (ohne Pfad und Größenangaben)
+        model_base = model_lower.replace("/", "-").replace("_", "-")
+        key_base = key_lower.replace("/", "-").replace("_", "-")
+
+        # Prüfe ob key im model vorkommt oder umgekehrt
+        if key_base in model_base or model_base in key_base:
+            logger.debug(f"[context] Partial match: {model_id} -> {key} ({value} tokens)")
+            return value
+
+        # Prüfe einzelne Teile (z.B. "mistral" in "mistral/mistral_large")
+        model_parts = set(model_base.split("-"))
+        key_parts = set(key_base.split("-"))
+        if model_parts & key_parts:  # Intersection
+            logger.debug(f"[context] Partial match via parts: {model_id} -> {key} ({value} tokens)")
+            return value
+
+    logger.debug(f"[context] No match for {model_id}, using default: {default}")
+    return default
+
+
 def _trim_messages_to_limit(messages: List[Dict], max_tokens: int) -> List[Dict]:
     """
     Trimmt Message-Inhalte um Kontext-Limit einzuhalten.
@@ -951,13 +1000,11 @@ class AgentOrchestrator:
 
                 # === Kontext-Status prüfen und Summarizer aktivieren ===
                 current_model = model or settings.llm.default_model
-                model_limit = settings.llm.llm_context_limits.get(
-                    current_model,
-                    settings.llm.default_context_limit
-                )
+                model_limit = _get_model_context_limit(current_model)
                 # Sicherheitsprüfung: mindestens 1000 Token Limit
                 if not model_limit or model_limit < 1000:
                     model_limit = settings.llm.default_context_limit or 32000
+                    logger.warning(f"[agent] Invalid context limit for {current_model}, using {model_limit}")
 
                 try:
                     context_tokens = estimate_messages_tokens(messages)
@@ -1757,13 +1804,11 @@ class AgentOrchestrator:
             effective_temperature = cfg_analysis_temp if cfg_analysis_temp >= 0 else settings.llm.temperature
 
         # Modell-spezifisches Kontext-Limit anwenden
-        model_limit = settings.llm.llm_context_limits.get(
-            selected_model,
-            settings.llm.default_context_limit
-        )
+        model_limit = _get_model_context_limit(selected_model)
         # Sicherheitsprüfung: mindestens 1000 Token Limit
         if not model_limit or model_limit < 1000:
             model_limit = settings.llm.default_context_limit or 32000
+            logger.warning(f"[agent] Invalid context limit for {selected_model}, using {model_limit}")
 
         # Bei langen Chats: Summarizer aufrufen (fasst ältere Messages zusammen)
         if messages:  # Sicherheitsprüfung

@@ -35,7 +35,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from app.agent.tools import ToolDefinition, ToolRegistry
+from app.agent.tools import ToolDefinition, ToolRegistry, ToolResult
 from app.core.config import settings
 
 logger = logging.getLogger(__name__)
@@ -470,7 +470,7 @@ async def docker_execute_python(
     code: str,
     packages: Optional[List[str]] = None,
     timeout: Optional[int] = None
-) -> Dict[str, Any]:
+) -> ToolResult:
     """
     Führt Python-Code in einem isolierten Docker-Container aus (stateless).
 
@@ -483,7 +483,7 @@ async def docker_execute_python(
         timeout: Timeout in Sekunden (optional, Default aus Config)
 
     Returns:
-        Dict mit stdout, stderr, exit_code, execution_time
+        ToolResult mit stdout, stderr, exit_code, execution_time
 
     Beispiel:
         docker_execute_python(code="import base64; print(base64.b64encode(b'Hello').decode())")
@@ -491,7 +491,7 @@ async def docker_execute_python(
     """
     cfg = settings.docker_sandbox
     if not cfg.enabled:
-        return {"error": "Docker Sandbox ist nicht aktiviert", "exit_code": -1}
+        return ToolResult(success=False, error="Docker Sandbox ist nicht aktiviert")
 
     start_time = time.time()
 
@@ -499,11 +499,7 @@ async def docker_execute_python(
     image = _get_container_image()
     image_ok, image_msg = await _ensure_image_available(image)
     if not image_ok:
-        return {
-            "error": f"Image nicht verfügbar: {image_msg}",
-            "exit_code": -1,
-            "success": False
-        }
+        return ToolResult(success=False, error=f"Image nicht verfügbar: {image_msg}")
 
     # Docker-Befehl aufbauen
     args = _build_container_run_args(network=cfg.network_enabled)
@@ -540,19 +536,35 @@ subprocess.run([sys.executable, "-m", "pip", "install", "-q"] + packages,
 
     execution_time = time.time() - start_time
 
-    return {
-        "stdout": stdout.strip(),
-        "stderr": stderr.strip(),
-        "exit_code": exit_code,
-        "execution_time_seconds": round(execution_time, 2),
-        "success": exit_code == 0
-    }
+    output = stdout.strip()
+    error_output = stderr.strip()
+
+    if exit_code == 0:
+        return ToolResult(
+            success=True,
+            data=f"```\n{output}\n```" if output else "(Keine Ausgabe)",
+            metadata={
+                "exit_code": exit_code,
+                "execution_time_seconds": round(execution_time, 2),
+                "stderr": error_output if error_output else None
+            }
+        )
+    else:
+        return ToolResult(
+            success=False,
+            error=f"Exit Code {exit_code}: {error_output or output}",
+            data=output if output else None,
+            metadata={
+                "exit_code": exit_code,
+                "execution_time_seconds": round(execution_time, 2)
+            }
+        )
 
 
 async def docker_session_create(
     session_name: Optional[str] = None,
     packages: Optional[List[str]] = None
-) -> Dict[str, Any]:
+) -> ToolResult:
     """
     Erstellt eine neue Docker-Sandbox-Session.
 
@@ -564,7 +576,7 @@ async def docker_session_create(
         packages: Zusätzliche Pakete zum Vorinstallieren
 
     Returns:
-        Dict mit session_id, container_id, status
+        ToolResult mit session_id, container_id, status
 
     Beispiel:
         docker_session_create(session_name="meine-tests")
@@ -572,10 +584,10 @@ async def docker_session_create(
     """
     cfg = settings.docker_sandbox
     if not cfg.enabled:
-        return {"error": "Docker Sandbox ist nicht aktiviert"}
+        return ToolResult(success=False, error="Docker Sandbox ist nicht aktiviert")
 
     if not cfg.session_enabled:
-        return {"error": "Sessions sind nicht aktiviert"}
+        return ToolResult(success=False, error="Sessions sind nicht aktiviert")
 
     # Cleanup abgelaufener Sessions
     await _cleanup_expired_sessions()
@@ -583,9 +595,10 @@ async def docker_session_create(
     # Max Sessions prüfen
     async with _session_lock:
         if len(_sessions) >= cfg.max_sessions:
-            return {
-                "error": f"Max. {cfg.max_sessions} Sessions erlaubt. Schließe alte Sessions mit docker_session_close."
-            }
+            return ToolResult(
+                success=False,
+                error=f"Max. {cfg.max_sessions} Sessions erlaubt. Schließe alte Sessions mit docker_session_close."
+            )
 
     # Session-ID generieren
     session_id = session_name or f"sandbox-{uuid.uuid4().hex[:8]}"
@@ -606,10 +619,7 @@ async def docker_session_create(
     exit_code, stdout, stderr = await _run_container_command(args, timeout=30)
 
     if exit_code != 0:
-        return {
-            "error": f"Container-Start fehlgeschlagen: {stderr}",
-            "exit_code": exit_code
-        }
+        return ToolResult(success=False, error=f"Container-Start fehlgeschlagen: {stderr}")
 
     container_id = stdout.strip()[:12]  # Erste 12 Zeichen der Container-ID
 
@@ -619,30 +629,33 @@ async def docker_session_create(
         all_packages.extend(packages)
 
     if all_packages:
-        success = await _ensure_packages_installed(container_name, all_packages)
-        if not success:
+        pkg_success = await _ensure_packages_installed(container_name, all_packages)
+        if not pkg_success:
             await _stop_container(container_name)
-            return {"error": "Paket-Installation fehlgeschlagen"}
+            return ToolResult(success=False, error="Paket-Installation fehlgeschlagen")
 
     # Session speichern
     session = SandboxSession(session_id, container_name)
     async with _session_lock:
         _sessions[session_id] = session
 
-    return {
-        "session_id": session_id,
-        "container_id": container_id,
-        "status": "created",
-        "packages_installed": all_packages,
-        "timeout_minutes": cfg.session_timeout_minutes
-    }
+    return ToolResult(
+        success=True,
+        data=f"Session '{session_id}' erstellt. Container-ID: {container_id}",
+        metadata={
+            "session_id": session_id,
+            "container_id": container_id,
+            "packages_installed": all_packages,
+            "timeout_minutes": cfg.session_timeout_minutes
+        }
+    )
 
 
 async def docker_session_execute(
     session_id: str,
     code: str,
     timeout: Optional[int] = None
-) -> Dict[str, Any]:
+) -> ToolResult:
     """
     Führt Python-Code in einer bestehenden Session aus.
 
@@ -654,7 +667,7 @@ async def docker_session_execute(
         timeout: Timeout in Sekunden (optional)
 
     Returns:
-        Dict mit stdout, stderr, exit_code, execution_count
+        ToolResult mit stdout, stderr, exit_code, execution_count
 
     Beispiel:
         # Erster Aufruf:
@@ -665,17 +678,17 @@ async def docker_session_execute(
     """
     cfg = settings.docker_sandbox
     if not cfg.enabled:
-        return {"error": "Docker Sandbox ist nicht aktiviert"}
+        return ToolResult(success=False, error="Docker Sandbox ist nicht aktiviert")
 
     async with _session_lock:
         session = _sessions.get(session_id)
         if not session:
-            return {"error": f"Session '{session_id}' nicht gefunden"}
+            return ToolResult(success=False, error=f"Session '{session_id}' nicht gefunden")
 
         if session.is_expired(cfg.session_timeout_minutes):
             _sessions.pop(session_id, None)
             await _stop_container(session.container_id)
-            return {"error": f"Session '{session_id}' ist abgelaufen"}
+            return ToolResult(success=False, error=f"Session '{session_id}' ist abgelaufen")
 
         session.touch()
         session.execution_count += 1
@@ -732,18 +745,36 @@ except Exception:
 
     execution_time = time.time() - start_time
 
-    return {
-        "stdout": stdout.strip(),
-        "stderr": stderr.strip(),
-        "exit_code": exit_code,
-        "execution_time_seconds": round(execution_time, 2),
-        "execution_count": exec_count,
-        "session_id": session_id,
-        "success": exit_code == 0
-    }
+    output = stdout.strip()
+    error_output = stderr.strip()
+
+    if exit_code == 0:
+        return ToolResult(
+            success=True,
+            data=f"```\n{output}\n```" if output else "(Keine Ausgabe)",
+            metadata={
+                "exit_code": exit_code,
+                "execution_time_seconds": round(execution_time, 2),
+                "execution_count": exec_count,
+                "session_id": session_id,
+                "stderr": error_output if error_output else None
+            }
+        )
+    else:
+        return ToolResult(
+            success=False,
+            error=f"Exit Code {exit_code}: {error_output or output}",
+            data=output if output else None,
+            metadata={
+                "exit_code": exit_code,
+                "execution_time_seconds": round(execution_time, 2),
+                "execution_count": exec_count,
+                "session_id": session_id
+            }
+        )
 
 
-async def docker_session_list() -> Dict[str, Any]:
+async def docker_session_list() -> ToolResult:
     """
     Listet alle aktiven Sandbox-Sessions auf.
 
@@ -752,7 +783,7 @@ async def docker_session_list() -> Dict[str, Any]:
     """
     cfg = settings.docker_sandbox
     if not cfg.enabled:
-        return {"error": "Docker Sandbox ist nicht aktiviert"}
+        return ToolResult(success=False, error="Docker Sandbox ist nicht aktiviert")
 
     # Cleanup abgelaufener Sessions
     await _cleanup_expired_sessions()
@@ -771,14 +802,14 @@ async def docker_session_list() -> Dict[str, Any]:
                 ))
             })
 
-    return {
-        "sessions": sessions_info,
-        "count": len(sessions_info),
-        "max_sessions": cfg.max_sessions
-    }
+    if sessions_info:
+        info_text = "\n".join([f"- {s['session_id']}: {s['execution_count']} Ausführungen" for s in sessions_info])
+        return ToolResult(success=True, data=f"Aktive Sessions ({len(sessions_info)}/{cfg.max_sessions}):\n{info_text}")
+    else:
+        return ToolResult(success=True, data="Keine aktiven Sessions")
 
 
-async def docker_session_close(session_id: str) -> Dict[str, Any]:
+async def docker_session_close(session_id: str) -> ToolResult:
     """
     Schließt eine Sandbox-Session und entfernt den Container.
 
@@ -786,25 +817,24 @@ async def docker_session_close(session_id: str) -> Dict[str, Any]:
         session_id: ID der zu schließenden Session
 
     Returns:
-        Dict mit Status
+        ToolResult mit Status
     """
     cfg = settings.docker_sandbox
     if not cfg.enabled:
-        return {"error": "Docker Sandbox ist nicht aktiviert"}
+        return ToolResult(success=False, error="Docker Sandbox ist nicht aktiviert")
 
     async with _session_lock:
         session = _sessions.pop(session_id, None)
 
     if not session:
-        return {"error": f"Session '{session_id}' nicht gefunden"}
+        return ToolResult(success=False, error=f"Session '{session_id}' nicht gefunden")
 
     await _stop_container(session.container_id)
 
-    return {
-        "session_id": session_id,
-        "status": "closed",
-        "execution_count": session.execution_count
-    }
+    return ToolResult(
+        success=True,
+        data=f"Session '{session_id}' geschlossen. {session.execution_count} Ausführungen waren aktiv."
+    )
 
 
 async def docker_upload_file(
@@ -812,7 +842,7 @@ async def docker_upload_file(
     filename: str,
     content_base64: str,
     target_path: str = "/workspace"
-) -> Dict[str, Any]:
+) -> ToolResult:
     """
     Lädt eine Datei in eine Sandbox-Session hoch.
 
@@ -823,7 +853,7 @@ async def docker_upload_file(
         target_path: Ziel-Verzeichnis im Container (default: /workspace)
 
     Returns:
-        Dict mit Status und Pfad
+        ToolResult mit Status und Pfad
 
     Beispiel:
         # CSV-Datei hochladen
@@ -836,15 +866,15 @@ async def docker_upload_file(
     """
     cfg = settings.docker_sandbox
     if not cfg.enabled:
-        return {"error": "Docker Sandbox ist nicht aktiviert"}
+        return ToolResult(success=False, error="Docker Sandbox ist nicht aktiviert")
 
     if not cfg.file_upload_enabled:
-        return {"error": "Datei-Upload ist nicht aktiviert"}
+        return ToolResult(success=False, error="Datei-Upload ist nicht aktiviert")
 
     async with _session_lock:
         session = _sessions.get(session_id)
         if not session:
-            return {"error": f"Session '{session_id}' nicht gefunden"}
+            return ToolResult(success=False, error=f"Session '{session_id}' nicht gefunden")
         session.touch()
         container_id = session.container_id
 
@@ -852,12 +882,12 @@ async def docker_upload_file(
     try:
         content = base64.b64decode(content_base64)
     except Exception as e:
-        return {"error": f"Base64-Dekodierung fehlgeschlagen: {e}"}
+        return ToolResult(success=False, error=f"Base64-Dekodierung fehlgeschlagen: {e}")
 
     # Größe prüfen
     max_bytes = cfg.max_upload_size_mb * 1024 * 1024
     if len(content) > max_bytes:
-        return {"error": f"Datei zu groß (max. {cfg.max_upload_size_mb} MB)"}
+        return ToolResult(success=False, error=f"Datei zu groß (max. {cfg.max_upload_size_mb} MB)")
 
     # Temporäre Datei erstellen und in Container kopieren
     with tempfile.NamedTemporaryFile(delete=False, suffix=f"_{filename}") as tmp:
@@ -877,37 +907,34 @@ async def docker_upload_file(
         _, stderr = await proc.communicate()
 
         if proc.returncode != 0:
-            return {"error": f"Kopieren fehlgeschlagen: {stderr.decode()}"}
+            return ToolResult(success=False, error=f"Kopieren fehlgeschlagen: {stderr.decode()}")
 
         # Session aktualisieren
         async with _session_lock:
             if session_id in _sessions:
                 _sessions[session_id].uploaded_files.append(target_file)
 
-        return {
-            "status": "uploaded",
-            "filename": filename,
-            "path": target_file,
-            "size_bytes": len(content),
-            "session_id": session_id
-        }
+        return ToolResult(
+            success=True,
+            data=f"Datei '{filename}' hochgeladen nach {target_file} ({len(content)} Bytes)"
+        )
 
     finally:
         os.unlink(tmp_path)
 
 
-async def docker_list_packages() -> Dict[str, Any]:
+async def docker_list_packages() -> ToolResult:
     """
     Listet die vorinstallierten Python-Pakete auf.
 
     Zeigt sowohl die konfigurierten als auch die Standard-Bibliothek-Module.
 
     Returns:
-        Dict mit Paket-Listen
+        ToolResult mit Paket-Listen
     """
     cfg = settings.docker_sandbox
     if not cfg.enabled:
-        return {"error": "Docker Sandbox ist nicht aktiviert"}
+        return ToolResult(success=False, error="Docker Sandbox ist nicht aktiviert")
 
     # Konfigurierte Pakete
     preinstalled = cfg.preinstalled_packages
@@ -924,12 +951,15 @@ async def docker_list_packages() -> Dict[str, Any]:
         "uuid", "secrets", "hmac", "copy", "pprint", "enum"
     ]
 
-    return {
-        "preinstalled_packages": preinstalled,
-        "stdlib_modules": stdlib_modules,
-        "image": _get_container_image(),
-        "note": "Zusätzliche Pakete können bei docker_execute_python mit 'packages' Parameter installiert werden"
-    }
+    info = f"""**Image:** {_get_container_image()}
+
+**Vorinstallierte Pakete:** {', '.join(preinstalled) if preinstalled else 'Keine'}
+
+**Standard-Bibliothek:** {', '.join(stdlib_modules[:10])}... (und mehr)
+
+_Zusätzliche Pakete können mit dem 'packages' Parameter bei docker_execute_python installiert werden._"""
+
+    return ToolResult(success=True, data=info)
 
 
 # ══════════════════════════════════════════════════════════════════════════════

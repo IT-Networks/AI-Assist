@@ -1448,13 +1448,16 @@ async function processAgentEvent(event, bubble, msgDiv, chat) {
 function updateContextIndicator(data) {
   let indicator = document.getElementById('context-indicator');
   if (!indicator) {
-    // Indicator erstellen falls nicht vorhanden
-    const header = document.querySelector('.chat-header') || document.querySelector('.header');
-    if (!header) return;
+    // Indicator erstellen falls nicht vorhanden - im Header-Center platzieren
+    const headerCenter = document.querySelector('.header-center') || document.getElementById('header');
+    if (!headerCenter) {
+      console.warn('[Context] No header element found for context indicator');
+      return;
+    }
     indicator = document.createElement('div');
     indicator.id = 'context-indicator';
     indicator.className = 'context-indicator';
-    header.appendChild(indicator);
+    headerCenter.appendChild(indicator);
   }
 
   const percent = data.percent || 0;
