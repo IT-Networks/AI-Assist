@@ -131,6 +131,11 @@ class LLMConfig(BaseModel):
     # Phase-spezifische Temperature: Tool-Phase deterministisch (0.0), Analyse-Phase präzise (0.1)
     tool_temperature: float = 0.0       # Temperature für Tool-Call-Phase (deterministisch)
     analysis_temperature: float = 0.1   # Temperature für Analyse-Phase (niedrig für präzise Faktenextraktion)
+    # LLM-spezifische Kontext-Limits in Tokens (für automatisches Trimmen)
+    # z.B. {"mistral-678b": 32000, "qwen-7b": 8000, "gptoss120b": 64000}
+    llm_context_limits: Dict[str, int] = {}
+    # Standard-Kontext-Limit falls kein LLM-spezifisches definiert ist
+    default_context_limit: int = 32000
 
 
 class RepoEntry(BaseModel):

@@ -21,6 +21,13 @@ llm:
     github_commit_diff: mistral-678b
   tool_temperature: 0.0
   analysis_temperature: 0.2
+  # LLM-spezifische Kontext-Limits (Token) - für automatisches Trimmen
+  llm_context_limits:
+    mistral-678b: 24000    # Mistral konservativ, oft Probleme bei großen Kontexten
+    qwen-7b: 6000          # Kleines Modell - kleiner Kontext
+    qwen-428b: 32000       # Größeres Qwen
+    gptoss120b: 48000      # GPT OSS - größerer Kontext
+  default_context_limit: 24000  # Fallback wenn Modell nicht definiert
 
 # Verfügbare Modelle
 models:

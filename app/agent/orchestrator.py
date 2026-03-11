@@ -34,7 +34,70 @@ from app.services.memory_store import get_memory_store
 from app.services.context_manager import get_context_manager, ContextManager
 from app.services.transcript_logger import get_transcript_logger, TranscriptLogger, TranscriptEntry
 from app.services.auto_learner import get_auto_learner, AutoLearner
-from app.utils.token_counter import estimate_tokens, estimate_messages_tokens
+from app.utils.token_counter import estimate_tokens, estimate_messages_tokens, truncate_text_to_tokens
+
+
+def _trim_messages_to_limit(messages: List[Dict], max_tokens: int) -> List[Dict]:
+    """
+    Trimmt Message-Inhalte um Kontext-Limit einzuhalten.
+
+    Priorität:
+    1. System-Prompt bleibt unverändert
+    2. Letzte User-Nachricht bleibt unverändert
+    3. Tool-Ergebnisse werden gekürzt (älteste zuerst, größte zuerst)
+    4. Ältere Nachrichten werden gekürzt
+    """
+    current_tokens = estimate_messages_tokens(messages)
+    if current_tokens <= max_tokens:
+        return messages
+
+    logger.warning(f"[agent] Kontext zu groß ({current_tokens} > {max_tokens} tokens), trimme...")
+
+    # Kopie erstellen
+    trimmed = [dict(m) for m in messages]
+    tokens_to_remove = current_tokens - max_tokens + 1000  # Puffer
+
+    # Finde große Tool-Ergebnisse und kürze sie
+    tool_results = []
+    for i, msg in enumerate(trimmed):
+        if msg.get("role") == "tool":
+            content = msg.get("content", "")
+            content_tokens = estimate_tokens(content)
+            if content_tokens > 500:  # Nur große Ergebnisse betrachten
+                tool_results.append((i, content_tokens, content))
+
+    # Sortiere nach Größe (größte zuerst) und trimme
+    tool_results.sort(key=lambda x: x[1], reverse=True)
+
+    for idx, orig_tokens, content in tool_results:
+        if tokens_to_remove <= 0:
+            break
+
+        # Berechne wie viel vom Inhalt übrig bleiben soll
+        target_tokens = max(200, orig_tokens - tokens_to_remove)
+        truncated = truncate_text_to_tokens(content, target_tokens)
+        trimmed[idx]["content"] = truncated
+
+        removed = orig_tokens - estimate_tokens(truncated)
+        tokens_to_remove -= removed
+        logger.debug(f"[agent] Tool-Ergebnis {idx} gekürzt: -{removed} tokens")
+
+    # Wenn immer noch zu groß: Ältere Assistant-Nachrichten kürzen
+    if tokens_to_remove > 0:
+        for i, msg in enumerate(trimmed):
+            if msg.get("role") == "assistant" and i < len(trimmed) - 2:
+                content = msg.get("content", "")
+                if content and len(content) > 500:
+                    truncated = content[:300] + "\n[... gekürzt ...]"
+                    removed = estimate_tokens(content) - estimate_tokens(truncated)
+                    trimmed[i]["content"] = truncated
+                    tokens_to_remove -= removed
+                    if tokens_to_remove <= 0:
+                        break
+
+    final_tokens = estimate_messages_tokens(trimmed)
+    logger.info(f"[agent] Kontext getrimmt: {current_tokens} -> {final_tokens} tokens")
+    return trimmed
 
 
 class AgentMode(str, Enum):
@@ -1594,9 +1657,16 @@ class AgentOrchestrator:
             cfg_analysis_temp = settings.llm.analysis_temperature
             effective_temperature = cfg_analysis_temp if cfg_analysis_temp >= 0 else settings.llm.temperature
 
+        # Modell-spezifisches Kontext-Limit anwenden
+        model_limit = settings.llm.llm_context_limits.get(
+            selected_model,
+            settings.llm.default_context_limit
+        )
+        trimmed_messages = _trim_messages_to_limit(messages, model_limit)
+
         payload = {
             "model": selected_model,
-            "messages": messages,
+            "messages": trimmed_messages,
             "temperature": effective_temperature,
             "max_tokens": settings.llm.max_tokens,
         }
@@ -1609,9 +1679,9 @@ class AgentOrchestrator:
         last_exc = None
         data = None
 
-        # Kontextgröße schätzen für bessere Fehlermeldungen
-        estimated_tokens = estimate_messages_tokens(messages)
-        logger.debug(f"[agent] LLM Request: ~{estimated_tokens} tokens, model={selected_model}")
+        # Kontextgröße schätzen für bessere Fehlermeldungen (nach Trimming)
+        estimated_tokens = estimate_messages_tokens(trimmed_messages)
+        logger.debug(f"[agent] LLM Request: ~{estimated_tokens} tokens, model={selected_model}, limit={model_limit}")
 
         for attempt, delay in enumerate([0] + _RETRY_DELAYS):
             if delay:
