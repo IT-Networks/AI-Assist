@@ -34,7 +34,8 @@ const chatManager = {
     // bleiben dadurch immer gültig, auch wenn der Chat im Hintergrund läuft.
     const pane = document.createElement('div');
     pane.className = 'messages-pane';
-    pane.innerHTML = welcomeHTML();
+    // Context bar + welcome content - context bar is sticky at top of pane
+    pane.innerHTML = _contextBarHTML() + welcomeHTML();
     const chat = {
       id,
       sessionId,
@@ -46,6 +47,7 @@ const chatManager = {
       toolHistory: [],
       context: { javaFiles: [], pythonFiles: [], pdfIds: [], handbookServices: [] },
       pendingConfirmation: null,
+      contextStatus: null,  // Per-chat context/token status
       createdAt: Date.now(),
     };
     this.chats.push(chat);
@@ -249,7 +251,8 @@ async function switchToChat(chatId) {
   // Nachrichten-Historie und Mode vom Server laden wenn Chat vom Disk wiederhergestellt wird
   if (incomingChat.needsRestore) {
     incomingChat.needsRestore = false;
-    incomingChat.pane.innerHTML = '';
+    // Context bar first, then messages
+    incomingChat.pane.innerHTML = _contextBarHTML();
     try {
       const res = await fetch(`/api/agent/session/${incomingChat.sessionId}/history`);
       if (res.ok) {
@@ -267,7 +270,7 @@ async function switchToChat(chatId) {
         }
       }
     } catch (e) {
-      incomingChat.pane.innerHTML = welcomeHTML();
+      incomingChat.pane.innerHTML = _contextBarHTML() + welcomeHTML();
       console.error('Failed to restore chat history:', e);
     }
   } else {
@@ -292,6 +295,11 @@ async function switchToChat(chatId) {
 
   // Pane des eingehenden Chats in den DOM hängen (inklusive aller laufenden DOM-Updates)
   messagesContainer.appendChild(incomingChat.pane);
+
+  // Context status des eingehenden Chats wiederherstellen
+  if (incomingChat.contextStatus) {
+    updateContextIndicator(incomingChat.contextStatus, incomingChat);
+  }
 
   // Cancel-Button: aktiv wenn eingehender Chat gerade streamt
   if (incomingChat.streamingState) {
@@ -446,6 +454,18 @@ function updateActiveChatTitle(firstUserMessage) {
 
 function escapeHtml(str) {
   return str.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+// Context bar HTML für jeden Chat-Pane
+function _contextBarHTML() {
+  return `
+    <div class="chat-context-bar">
+      <span class="context-status">
+        <span class="context-icon">📊</span>
+        <span class="context-text">– / –</span>
+      </span>
+    </div>
+  `;
 }
 
 function welcomeHTML() {
@@ -1432,7 +1452,7 @@ async function processAgentEvent(event, bubble, msgDiv, chat) {
       break;
 
     case 'context_status':
-      updateContextIndicator(data);
+      updateContextIndicator(data, chat);
       break;
 
     case 'compaction':
@@ -1450,49 +1470,69 @@ async function processAgentEvent(event, bubble, msgDiv, chat) {
   }
 }
 
-// Kontext-Anzeige aktualisieren
-function updateContextIndicator(data) {
-  let indicator = document.getElementById('context-indicator');
-  if (!indicator) {
-    // Indicator erstellen falls nicht vorhanden - im Header-Center platzieren
-    const headerCenter = document.querySelector('.header-center') || document.getElementById('header');
-    if (!headerCenter) {
-      console.warn('[Context] No header element found for context indicator');
-      return;
-    }
-    indicator = document.createElement('div');
-    indicator.id = 'context-indicator';
-    indicator.className = 'context-indicator';
-    headerCenter.appendChild(indicator);
+// Kontext-Anzeige aktualisieren (per-chat)
+function updateContextIndicator(data, chat) {
+  // Store in chat object for persistence across switches
+  if (chat) {
+    chat.contextStatus = data;
+  }
+
+  // Find context bar in chat's pane
+  const pane = chat?.pane || chatManager.getActive()?.pane;
+  if (!pane) {
+    console.debug('[Context] No pane found for context indicator');
+    return;
+  }
+
+  const bar = pane.querySelector('.chat-context-bar');
+  if (!bar) {
+    console.debug('[Context] No context bar found in pane');
+    return;
   }
 
   const percent = data.percent || 0;
   const current = (data.current_tokens || 0).toLocaleString();
   const limit = (data.limit_tokens || 0).toLocaleString();
 
-  // Farbe basierend auf Auslastung
-  let color = 'var(--text-secondary)';
+  // Icon basierend auf Auslastung
   let icon = '📊';
+  let colorClass = '';
   if (percent > 95) {
-    color = 'var(--danger)';
     icon = '🔴';
+    colorClass = 'context-critical';
   } else if (percent > 80) {
-    color = 'var(--warning)';
     icon = '🟡';
+    colorClass = 'context-warning';
   } else if (percent > 60) {
-    color = 'var(--text-primary)';
     icon = '🟢';
+    colorClass = 'context-ok';
   }
 
-  indicator.innerHTML = `
-    <span style="color: ${color}; font-size: 0.85em;">
-      ${icon} ${current} / ${limit} (${percent}%)
-    </span>
-  `;
+  // Update icon and text
+  const iconSpan = bar.querySelector('.context-icon');
+  const textSpan = bar.querySelector('.context-text');
+  if (iconSpan) iconSpan.textContent = icon;
+  if (textSpan) textSpan.textContent = `${current} / ${limit} (${percent}%)`;
+
+  // Update color class on status span
+  const statusSpan = bar.querySelector('.context-status');
+  if (statusSpan) {
+    statusSpan.classList.remove('context-critical', 'context-warning', 'context-ok');
+    if (colorClass) statusSpan.classList.add(colorClass);
+  }
 
   // Iteration anzeigen wenn vorhanden
+  let iterSpan = bar.querySelector('.context-iteration');
   if (data.iteration && data.max_iterations) {
-    indicator.innerHTML += ` <span style="color: var(--text-muted); font-size: 0.75em;">Step ${data.iteration}/${data.max_iterations}</span>`;
+    if (!iterSpan) {
+      iterSpan = document.createElement('span');
+      iterSpan.className = 'context-iteration';
+      bar.appendChild(iterSpan);
+    }
+    iterSpan.textContent = `Step ${data.iteration}/${data.max_iterations}`;
+    iterSpan.style.display = '';
+  } else if (iterSpan) {
+    iterSpan.style.display = 'none';
   }
 }
 
