@@ -2135,6 +2135,10 @@ def create_default_registry() -> ToolRegistry:
     from app.agent.docker_tools import register_docker_tools
     register_docker_tools(registry)
 
+    # Shell Execution Tools (Container-First Shell-Befehle)
+    from app.agent.shell_tools import register_shell_tools
+    register_shell_tools(registry)
+
     # Git Tools (lokale Git-Operationen)
     from app.agent.git_tools import register_git_tools
     register_git_tools(registry)

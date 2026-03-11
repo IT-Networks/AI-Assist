@@ -179,6 +179,15 @@ async def lifespan(app: FastAPI):
                 print(f"[startup] Docker-Sandbox-Tools registriert: {docker_count}")
         except Exception as e:
             print(f"[startup] Docker-Sandbox-Tools-Registrierung fehlgeschlagen: {e}")
+
+        # Shell-Tools registrieren (Container-First Shell-Ausführung)
+        try:
+            from app.agent.shell_tools import register_shell_tools
+            shell_count = register_shell_tools(registry)
+            if shell_count:
+                print(f"[startup] Shell-Tools registriert: {shell_count}")
+        except Exception as e:
+            print(f"[startup] Shell-Tools-Registrierung fehlgeschlagen: {e}")
     except Exception as e:
         print(f"[startup] Agent-Initialisierung fehlgeschlagen: {e}")
 
