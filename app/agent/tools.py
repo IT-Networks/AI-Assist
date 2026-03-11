@@ -438,30 +438,66 @@ async def read_file(
     Liest den Inhalt einer Datei (wie Claude Code Read Tool).
 
     Args:
-        path: Pfad zur Datei
+        path: Pfad zur Datei (absolut oder relativ)
         encoding: Encoding (default: utf-8)
         offset: Startzeile, 1-basiert (0 = Anfang)
         limit: Max Zeilen (0 = unbegrenzt, empfohlen: 500 für große Dateien)
         show_line_numbers: Zeilennummern im Output anzeigen
     """
+    import os
     from app.core.config import settings
     from pathlib import Path
 
-    # Versuche den Pfad aufzulösen
-    resolved_path = path
+    # Normalisiere Pfad (entferne doppelte Slashes, etc.)
+    path = path.strip()
+    if not path:
+        return ToolResult(success=False, error="Kein Pfad angegeben")
 
-    # Wenn relativer Pfad, versuche in Repos zu finden
-    if not Path(path).is_absolute():
+    # Versuche den Pfad aufzulösen
+    resolved_path = None
+
+    # 1. Wenn absoluter Pfad, direkt verwenden
+    p = Path(path)
+    if p.is_absolute():
+        if p.exists():
+            resolved_path = str(p)
+        else:
+            return ToolResult(success=False, error=f"Datei nicht gefunden: {path}")
+    else:
+        # 2. Relativer Pfad - versuche verschiedene Basis-Verzeichnisse
+        search_bases = []
+
         # Java Repo
-        if settings.java.get_active_path():
-            java_full = Path(settings.java.get_active_path()) / path
-            if java_full.exists():
-                resolved_path = str(java_full)
+        java_path = settings.java.get_active_path() if hasattr(settings.java, 'get_active_path') else None
+        if java_path:
+            search_bases.append(Path(java_path))
+
         # Python Repo
-        if not Path(resolved_path).exists() and settings.python.get_active_path():
-            python_full = Path(settings.python.get_active_path()) / path
-            if python_full.exists():
-                resolved_path = str(python_full)
+        python_path = settings.python.get_active_path() if hasattr(settings.python, 'get_active_path') else None
+        if python_path:
+            search_bases.append(Path(python_path))
+
+        # Aktuelles Arbeitsverzeichnis als Fallback
+        search_bases.append(Path(os.getcwd()))
+
+        # Durch alle Basis-Verzeichnisse suchen
+        for base in search_bases:
+            full_path = base / path
+            if full_path.exists():
+                resolved_path = str(full_path.resolve())
+                break
+
+        # Wenn nicht gefunden, auch ohne Basis probieren (für lokale Dateien)
+        if not resolved_path and p.exists():
+            resolved_path = str(p.resolve())
+
+        if not resolved_path:
+            # Zeige Hinweis wo gesucht wurde
+            searched = ", ".join(str(b) for b in search_bases[:3])
+            return ToolResult(
+                success=False,
+                error=f"Datei nicht gefunden: {path}\nGesucht in: {searched}\nHinweis: Bitte absoluten Pfad verwenden oder Datei relativ zu einem konfigurierten Repository angeben."
+            )
 
     try:
         file_path = Path(resolved_path)

@@ -2839,6 +2839,9 @@ function renderSettingsFields(section, values) {
       `;
     } else if (Array.isArray(value)) {
       html += renderArrayField(fieldId, section, key, value);
+    } else if (value !== null && typeof value === 'object') {
+      // Dict/Object Felder als Key-Value-Paare darstellen
+      html += renderDictField(fieldId, section, key, value);
     } else if (typeof value === 'number') {
       html += `
         <input type="number" id="${fieldId}" data-section="${section}" data-key="${key}"
@@ -2904,6 +2907,79 @@ function renderArrayField(fieldId, section, key, values) {
   </div>`;
 
   return html;
+}
+
+function renderDictField(fieldId, section, key, dictValue) {
+  // Dict/Object als Key-Value-Paare bearbeitbar machen
+  let html = `<div class="settings-dict" id="${fieldId}-container">`;
+
+  const entries = Object.entries(dictValue || {});
+
+  if (entries.length === 0) {
+    html += `<div class="settings-dict-empty" style="color: var(--text-secondary); font-size: 0.9em; padding: 8px 0;">Keine Einträge</div>`;
+  }
+
+  entries.forEach(([k, v], idx) => {
+    const displayValue = typeof v === 'number' ? v : escapeHtml(String(v));
+    const inputType = typeof v === 'number' ? 'number' : 'text';
+    html += `
+      <div class="settings-dict-item" style="display: flex; gap: 8px; margin-bottom: 6px;">
+        <input type="text" value="${escapeHtml(k)}" placeholder="Schlüssel"
+          data-section="${section}" data-key="${key}" data-dict-key="${idx}"
+          onchange="markSettingsModified()" style="flex: 1; font-family: var(--font-mono);">
+        <input type="${inputType}" value="${displayValue}" placeholder="Wert"
+          data-section="${section}" data-key="${key}" data-dict-value="${idx}"
+          onchange="markSettingsModified()" style="flex: 1;">
+        <button onclick="removeDictItem('${fieldId}', '${escapeHtml(k)}')" style="padding: 4px 8px;">✕</button>
+      </div>
+    `;
+  });
+
+  html += `
+    <button class="settings-array-add" onclick="addDictItem('${fieldId}', '${section}', '${key}')" style="margin-top: 4px;">
+      + Eintrag hinzufügen
+    </button>
+  </div>`;
+
+  return html;
+}
+
+function addDictItem(fieldId, section, key) {
+  const container = document.getElementById(fieldId + '-container');
+  // Entferne "Keine Einträge" Hinweis falls vorhanden
+  const emptyHint = container.querySelector('.settings-dict-empty');
+  if (emptyHint) emptyHint.remove();
+
+  const idx = container.querySelectorAll('.settings-dict-item').length;
+
+  const newItem = document.createElement('div');
+  newItem.className = 'settings-dict-item';
+  newItem.style.cssText = 'display: flex; gap: 8px; margin-bottom: 6px;';
+  newItem.innerHTML = `
+    <input type="text" value="" placeholder="Schlüssel"
+      data-section="${section}" data-key="${key}" data-dict-key="${idx}"
+      onchange="markSettingsModified()" style="flex: 1; font-family: var(--font-mono);">
+    <input type="text" value="" placeholder="Wert"
+      data-section="${section}" data-key="${key}" data-dict-value="${idx}"
+      onchange="markSettingsModified()" style="flex: 1;">
+    <button onclick="this.parentElement.remove(); markSettingsModified();" style="padding: 4px 8px;">✕</button>
+  `;
+
+  container.insertBefore(newItem, container.querySelector('.settings-array-add'));
+  markSettingsModified();
+}
+
+function removeDictItem(fieldId, keyToRemove) {
+  const container = document.getElementById(fieldId + '-container');
+  const items = container.querySelectorAll('.settings-dict-item');
+  for (const item of items) {
+    const keyInput = item.querySelector('[data-dict-key]');
+    if (keyInput && keyInput.value === keyToRemove) {
+      item.remove();
+      markSettingsModified();
+      break;
+    }
+  }
 }
 
 function addArrayItem(fieldId, section, key) {
@@ -2989,6 +3065,11 @@ async function renderAgentToolsSection() {
           Pro Tool kann ein eigenes LLM-Modell zugewiesen werden.<br>
           <small>Standard-Modell: <strong>${escapeHtml(globalToolModel || defaultModel)}</strong></small>
         </p>
+        <div style="margin-top: 12px;">
+          <input type="text" id="agent-tools-search" placeholder="Tools durchsuchen..."
+            oninput="filterAgentTools(this.value)"
+            style="width: 100%; padding: 8px; border: 1px solid var(--border); border-radius: 4px;">
+        </div>
       </div>
     `;
 
@@ -3066,6 +3147,34 @@ async function saveAgentToolModels() {
   }
 
   return toolModels;
+}
+
+function filterAgentTools(query) {
+  const q = query.toLowerCase().trim();
+  document.querySelectorAll('#settings-form .settings-field').forEach(field => {
+    // Finde tool name im label
+    const label = field.querySelector('label');
+    if (!label) return;
+    const toolName = label.textContent.toLowerCase();
+    const desc = field.querySelector('[style*="text-secondary"]')?.textContent?.toLowerCase() || '';
+    const matches = !q || toolName.includes(q) || desc.includes(q);
+    field.style.display = matches ? '' : 'none';
+  });
+  // Kategorie-Header verstecken wenn alle Tools darin versteckt
+  document.querySelectorAll('#settings-form .settings-section h4').forEach(h4 => {
+    const section = h4.closest('.settings-section');
+    if (!section) return;
+    let next = section.nextElementSibling;
+    let anyVisible = false;
+    while (next && !next.querySelector('h4')) {
+      if (next.classList.contains('settings-field') && next.style.display !== 'none') {
+        anyVisible = true;
+        break;
+      }
+      next = next.nextElementSibling;
+    }
+    section.style.display = anyVisible || !q ? '' : 'none';
+  });
 }
 
 function renderModelsSection() {
@@ -3418,9 +3527,47 @@ function collectSectionValues(section) {
   const values = {};
   const fields = document.querySelectorAll(`[data-section="${section}"]`);
 
+  // Zuerst Dict-Felder sammeln (haben data-dict-key oder data-dict-value)
+  const dictFields = {};
+  fields.forEach(field => {
+    const key = field.dataset.key;
+    const dictKeyIdx = field.dataset.dictKey;
+    const dictValIdx = field.dataset.dictValue;
+
+    if (dictKeyIdx !== undefined) {
+      // Dict key input
+      if (!dictFields[key]) dictFields[key] = {};
+      if (!dictFields[key][dictKeyIdx]) dictFields[key][dictKeyIdx] = {};
+      dictFields[key][dictKeyIdx].key = field.value.trim();
+    } else if (dictValIdx !== undefined) {
+      // Dict value input
+      if (!dictFields[key]) dictFields[key] = {};
+      if (!dictFields[key][dictValIdx]) dictFields[key][dictValIdx] = {};
+      const rawVal = field.value.trim();
+      // Parse number if field type is number
+      dictFields[key][dictValIdx].value = field.type === 'number' ? (parseFloat(rawVal) || 0) : rawVal;
+    }
+  });
+
+  // Dict-Felder in values umwandeln
+  for (const [key, entries] of Object.entries(dictFields)) {
+    values[key] = {};
+    for (const entry of Object.values(entries)) {
+      if (entry.key) {
+        values[key][entry.key] = entry.value;
+      }
+    }
+  }
+
+  // Normale Felder verarbeiten (ohne Dict-Felder)
   fields.forEach(field => {
     const key = field.dataset.key;
     const idx = field.dataset.index;
+
+    // Skip Dict fields (already processed)
+    if (field.dataset.dictKey !== undefined || field.dataset.dictValue !== undefined) {
+      return;
+    }
 
     if (idx !== undefined) {
       // Array field
