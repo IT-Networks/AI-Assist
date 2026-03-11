@@ -200,21 +200,24 @@ async def execute_code(request: ExecuteRequest) -> Dict[str, Any]:
 async def test_connection() -> Dict[str, Any]:
     """
     Testet die Docker-Verbindung mit einem einfachen Python-Befehl.
+
+    WICHTIG: Der Test überspringt die Paket-Installation um schneller zu sein.
+    Für einen vollständigen Test mit Paketen nutze /execute mit packages=["requests"].
     """
     if not settings.docker_sandbox.enabled:
         raise HTTPException(status_code=400, detail="Docker Sandbox ist nicht aktiviert")
 
-    from app.agent.docker_tools import docker_execute_python
-    result = await docker_execute_python(
-        code="import sys; print(f'Python {sys.version}')",
-        timeout=30
-    )
+    from app.agent.docker_tools import _test_container_basic
+
+    # Einfacher Test ohne Paket-Installation
+    result = await _test_container_basic()
 
     return {
         "status": "ok" if result.get("success") else "error",
-        "python_version": result.get("stdout", "").strip(),
+        "python_version": result.get("stdout", "").strip() if result.get("success") else None,
         "execution_time": result.get("execution_time_seconds"),
-        "error": result.get("stderr") if not result.get("success") else None
+        "error": result.get("stderr") or result.get("error") if not result.get("success") else None,
+        "command": result.get("command")  # Debug: Zeigt den ausgeführten Befehl
     }
 
 

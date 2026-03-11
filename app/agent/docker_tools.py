@@ -337,6 +337,56 @@ async def _ensure_packages_installed(container_id: str, packages: List[str]) -> 
     return code == 0
 
 
+async def _test_container_basic() -> Dict[str, Any]:
+    """
+    Einfacher Container-Test OHNE Paket-Installation.
+
+    Prüft nur ob die Container-Runtime funktioniert und das Image verfügbar ist.
+    Viel schneller als docker_execute_python da keine Pakete installiert werden.
+
+    Returns:
+        Dict mit success, stdout, stderr, command (für Debug)
+    """
+    cfg = settings.docker_sandbox
+    if not cfg.enabled:
+        return {"error": "Docker Sandbox ist nicht aktiviert", "success": False}
+
+    start_time = time.time()
+
+    try:
+        runtime = get_container_runtime()
+    except RuntimeError as e:
+        return {"error": str(e), "success": False}
+
+    # Minimale Container-Argumente (ohne Paket-Installation)
+    image = _get_container_image()
+    args = [
+        runtime, "run", "--rm",
+        "-m", cfg.memory_limit,
+        "--cpus", str(cfg.cpu_limit),
+        "--no-new-privileges",
+        image,
+        "python", "-c", "import sys; print(f'Python {sys.version}')"
+    ]
+
+    # Debug: Befehl loggen
+    command_str = " ".join(args)
+    logger.info(f"[sandbox] Test command: {command_str}")
+
+    exit_code, stdout, stderr = await _run_container_command(args, timeout=30)
+
+    execution_time = time.time() - start_time
+
+    return {
+        "stdout": stdout.strip(),
+        "stderr": stderr.strip(),
+        "exit_code": exit_code,
+        "execution_time_seconds": round(execution_time, 2),
+        "success": exit_code == 0,
+        "command": command_str  # Für Debug im Frontend
+    }
+
+
 # ══════════════════════════════════════════════════════════════════════════════
 # Tool Implementations
 # ══════════════════════════════════════════════════════════════════════════════
