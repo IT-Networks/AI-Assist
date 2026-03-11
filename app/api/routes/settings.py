@@ -464,6 +464,115 @@ async def update_tool_models(tool_models: Dict[str, str]) -> Dict[str, Any]:
 
 
 # ══════════════════════════════════════════════════════════════════════════════
+# LLM Context Limits Management
+# ══════════════════════════════════════════════════════════════════════════════
+
+@router.get("/context-limits")
+async def get_context_limits() -> Dict[str, Any]:
+    """
+    Gibt die LLM-spezifischen Kontext-Limits zurück.
+
+    Diese Limits verhindern 500-Fehler bei Modellen mit kleinerem Kontext-Fenster.
+    Wenn der Kontext das Limit überschreitet, werden ältere Tool-Ergebnisse gekürzt.
+    """
+    return {
+        "llm_context_limits": settings.llm.llm_context_limits,
+        "default_context_limit": settings.llm.default_context_limit,
+        "available_models": [m.model_dump() for m in settings.models],
+        "description": "Kontext-Limits in Tokens pro Modell. Größere Werte = mehr Kontext, aber Risiko von 500-Fehlern."
+    }
+
+
+@router.put("/context-limits")
+async def update_context_limits(
+    llm_context_limits: Dict[str, int],
+    default_context_limit: Optional[int] = None
+) -> Dict[str, Any]:
+    """
+    Aktualisiert die LLM-spezifischen Kontext-Limits.
+
+    Args:
+        llm_context_limits: Dict von Modell-ID zu Token-Limit (z.B. {"mistral-678b": 24000})
+        default_context_limit: Optional - Standard-Limit für nicht aufgeführte Modelle
+
+    Returns:
+        Aktualisierte Limits
+    """
+    # Validierung: Alle Werte müssen positive Integers sein
+    for model_id, limit in llm_context_limits.items():
+        if not isinstance(limit, int) or limit < 1000:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Ungültiges Limit für '{model_id}': {limit}. Minimum ist 1000 Tokens."
+            )
+
+    settings.llm.llm_context_limits = llm_context_limits
+
+    if default_context_limit is not None:
+        if default_context_limit < 1000:
+            raise HTTPException(
+                status_code=400,
+                detail=f"default_context_limit muss mindestens 1000 sein"
+            )
+        settings.llm.default_context_limit = default_context_limit
+
+    return {
+        "llm_context_limits": settings.llm.llm_context_limits,
+        "default_context_limit": settings.llm.default_context_limit,
+        "message": "Kontext-Limits aktualisiert. POST /save zum Persistieren."
+    }
+
+
+@router.put("/context-limits/{model_id}")
+async def update_single_context_limit(model_id: str, limit: int) -> Dict[str, Any]:
+    """
+    Aktualisiert das Kontext-Limit für ein einzelnes Modell.
+
+    Args:
+        model_id: ID des Modells (z.B. "mistral-678b")
+        limit: Token-Limit (mindestens 1000)
+    """
+    if limit < 1000:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Limit muss mindestens 1000 sein, nicht {limit}"
+        )
+
+    settings.llm.llm_context_limits[model_id] = limit
+
+    return {
+        "model_id": model_id,
+        "limit": limit,
+        "all_limits": settings.llm.llm_context_limits,
+        "message": f"Kontext-Limit für '{model_id}' auf {limit} gesetzt. POST /save zum Persistieren."
+    }
+
+
+@router.delete("/context-limits/{model_id}")
+async def delete_context_limit(model_id: str) -> Dict[str, Any]:
+    """
+    Entfernt das Kontext-Limit für ein Modell (nutzt dann default_context_limit).
+
+    Args:
+        model_id: ID des Modells
+    """
+    if model_id not in settings.llm.llm_context_limits:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Kein spezifisches Limit für '{model_id}' konfiguriert"
+        )
+
+    del settings.llm.llm_context_limits[model_id]
+
+    return {
+        "deleted": model_id,
+        "remaining_limits": settings.llm.llm_context_limits,
+        "will_use_default": settings.llm.default_context_limit,
+        "message": f"Limit für '{model_id}' entfernt. Nutzt jetzt Default ({settings.llm.default_context_limit}). POST /save zum Persistieren."
+    }
+
+
+# ══════════════════════════════════════════════════════════════════════════════
 # Models Management
 # ══════════════════════════════════════════════════════════════════════════════
 
