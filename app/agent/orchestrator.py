@@ -67,6 +67,12 @@ class AgentEventType(str, Enum):
     PLAN_REJECTED = "plan_rejected"        # Plan abgelehnt
     # Debug-Modus Events
     QUESTION = "question"                  # Agent stellt Rückfrage mit Vorschlägen
+    # MCP Progress Events
+    MCP_START = "mcp_start"                # MCP-Tool startet (z.B. Sequential Thinking)
+    MCP_STEP = "mcp_step"                  # Einzelner Denkschritt mit Details
+    MCP_PROGRESS = "mcp_progress"          # Fortschritts-Update (Prozent)
+    MCP_COMPLETE = "mcp_complete"          # MCP-Tool fertig mit Zusammenfassung
+    MCP_ERROR = "mcp_error"                # Fehler während MCP-Verarbeitung
 
 
 @dataclass

@@ -5,7 +5,8 @@ Generates production-ready code based on designs or direct requirements.
 """
 
 import logging
-from typing import Any, Dict, List, Optional
+from pathlib import Path
+from typing import Any, Dict, List, Optional, Set
 
 from app.mcp.capabilities.base import (
     BaseCapability,
@@ -16,6 +17,62 @@ from app.mcp.capabilities.base import (
 logger = logging.getLogger(__name__)
 
 
+class FileWorkflowTracker:
+    """
+    Trackt erstellte Verzeichnisse und Dateien um redundante Operationen zu vermeiden.
+    """
+
+    def __init__(self):
+        self.created_directories: Set[str] = set()
+        self.created_files: Set[str] = set()
+        self.pending_files: Dict[str, str] = {}  # path -> content
+
+    def needs_directory(self, dir_path: str) -> bool:
+        """Prüft ob ein Verzeichnis noch erstellt werden muss."""
+        normalized = str(Path(dir_path).resolve())
+        if normalized in self.created_directories:
+            return False
+        # Auch Parent-Verzeichnisse als erstellt markieren
+        return True
+
+    def mark_directory_created(self, dir_path: str) -> None:
+        """Markiert ein Verzeichnis als erstellt."""
+        path = Path(dir_path).resolve()
+        # Markiere auch alle Parent-Verzeichnisse
+        for parent in [path] + list(path.parents):
+            self.created_directories.add(str(parent))
+
+    def add_pending_file(self, file_path: str, content: str) -> None:
+        """Fügt eine Datei zur Warteschlange hinzu."""
+        self.pending_files[file_path] = content
+
+    def mark_file_created(self, file_path: str) -> None:
+        """Markiert eine Datei als erstellt."""
+        normalized = str(Path(file_path).resolve())
+        self.created_files.add(normalized)
+        # Auch das Verzeichnis als erstellt markieren
+        self.mark_directory_created(str(Path(file_path).parent))
+
+    def get_files_to_create(self) -> Dict[str, str]:
+        """Gibt alle noch zu erstellenden Dateien zurück."""
+        return {
+            path: content
+            for path, content in self.pending_files.items()
+            if str(Path(path).resolve()) not in self.created_files
+        }
+
+    def get_directories_to_create(self) -> List[str]:
+        """Gibt alle noch zu erstellenden Verzeichnisse zurück (sortiert nach Tiefe)."""
+        dirs_needed = set()
+        for file_path in self.pending_files.keys():
+            parent = Path(file_path).parent
+            if self.needs_directory(str(parent)):
+                dirs_needed.add(str(parent))
+
+        # Sortieren nach Tiefe (kürzeste zuerst = Parent-Verzeichnisse zuerst)
+        return sorted(dirs_needed, key=lambda p: len(Path(p).parts))
+
+
 class ImplementCapability(BaseCapability):
     """
     Code implementation capability.
@@ -24,9 +81,20 @@ class ImplementCapability(BaseCapability):
     1. Understand implementation requirements
     2. Analyze existing codebase and patterns
     3. Generate implementation plan
-    4. Create code artifacts
+    4. Create code artifacts (mit Workflow-Tracking)
     5. Validate and document
     """
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        # Workflow-Tracker für Multi-File-Operationen
+        self._workflow_trackers: Dict[str, FileWorkflowTracker] = {}
+
+    def _get_tracker(self, session_id: str) -> FileWorkflowTracker:
+        """Gibt den Workflow-Tracker für eine Session zurück."""
+        if session_id not in self._workflow_trackers:
+            self._workflow_trackers[session_id] = FileWorkflowTracker()
+        return self._workflow_trackers[session_id]
 
     @property
     def name(self) -> str:
@@ -198,6 +266,9 @@ Erstelle einen Plan mit:
         framework = session.metadata.get("framework", "")
         with_tests = session.metadata.get("with_tests", True)
 
+        # Workflow-Tracker für diese Session
+        tracker = self._get_tracker(session.session_id)
+
         # Get implementation plan
         plan_step = next(
             (s for s in session.steps if s.phase == CapabilityPhase.ANALYZE),
@@ -245,7 +316,22 @@ Für jede Datei einen eigenen Block.
 
         # Parse and create artifacts for each file
         files = self._parse_code_blocks(implementation)
+
+        # Dateien zum Tracker hinzufügen (für Batch-Verarbeitung)
         for filename, code in files.items():
+            tracker.add_pending_file(filename, code)
+
+        # Verzeichnisse die erstellt werden müssen (ohne Duplikate)
+        dirs_to_create = tracker.get_directories_to_create()
+        if dirs_to_create:
+            session.metadata["directories_to_create"] = dirs_to_create
+            logger.debug(f"[Implement] Verzeichnisse zu erstellen: {dirs_to_create}")
+
+        # Dateien die erstellt werden müssen
+        files_to_create = tracker.get_files_to_create()
+        session.metadata["files_to_create"] = list(files_to_create.keys())
+
+        for filename, code in files_to_create.items():
             session.add_artifact(
                 artifact_type="code",
                 title=filename,
@@ -268,18 +354,42 @@ Für jede Datei einen eigenen Block.
     async def _phase_validate(self, session: CapabilitySession) -> None:
         """Validate the implementation."""
         code_artifacts = session.get_artifacts_by_type("code")
+        tracker = self._get_tracker(session.session_id)
 
         validation_items = []
+
+        # Workflow-Info hinzufügen
+        dirs_to_create = session.metadata.get("directories_to_create", [])
+        files_to_create = session.metadata.get("files_to_create", [])
+
+        if dirs_to_create:
+            validation_items.append(f"**Verzeichnisse zu erstellen:** {len(dirs_to_create)}")
+            for d in dirs_to_create:
+                validation_items.append(f"  📁 {d}")
+
+        if files_to_create:
+            validation_items.append(f"\n**Dateien zu erstellen:** {len(files_to_create)}")
+
         for artifact in code_artifacts:
             # Basic validation checks
             checks = self._validate_code(artifact.content, artifact.metadata.get("language", "python"))
-            validation_items.append(f"**{artifact.title}**: {', '.join(checks)}")
+            validation_items.append(f"  📄 **{artifact.title}**: {', '.join(checks)}")
+
+        # Cleanup: Tracker für diese Session entfernen
+        if session.session_id in self._workflow_trackers:
+            del self._workflow_trackers[session.session_id]
+
+        insights = []
+        if code_artifacts:
+            insights.append(f"{len(code_artifacts)} Dateien validiert")
+        if dirs_to_create:
+            insights.append(f"{len(dirs_to_create)} Verzeichnisse geplant")
 
         session.add_step(
             phase=CapabilityPhase.VALIDATE,
             title="Implementation Validation",
             content="\n".join(validation_items) if validation_items else "No code artifacts to validate",
-            insights=["All files validated"] if validation_items else []
+            insights=insights
         )
 
     def _detect_impl_type(self, query: str, analysis: str) -> str:
@@ -354,13 +464,23 @@ Für jede Datei einen eigenen Block.
         """Create implementation summary."""
         file_list = "\n".join([f"- {f}" for f in files.keys()])
 
+        # Verzeichnisse aus Metadaten
+        dirs_to_create = session.metadata.get("directories_to_create", [])
+        dirs_section = ""
+        if dirs_to_create:
+            dirs_list = "\n".join([f"- 📁 {d}" for d in dirs_to_create])
+            dirs_section = f"""
+## Directories to Create
+{dirs_list}
+"""
+
         return f"""
 # Implementation Summary
 
 ## Query
 {session.query}
-
-## Files Created/Modified
+{dirs_section}
+## Files to Create/Modify
 {file_list}
 
 ## Implementation Type
@@ -371,8 +491,9 @@ Für jede Datei einen eigenen Block.
 
 ## Next Steps
 1. Review generated code
-2. Run tests with /analyze
-3. Integrate into project
+2. Create directories (if needed)
+3. Write files
+4. Run tests with /analyze
 """
 
     def _generate_default_exploration(self, query: str, impl_type: str, language: str) -> str:

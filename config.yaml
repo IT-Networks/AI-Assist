@@ -1,465 +1,674 @@
+# LLM-Verbindung (OpenAI-kompatibler Endpunkt)
 llm:
-  base_url: "http://internal-llm-gateway/v1"
-  api_key: "none"
-  default_model: "gptoss120b"
+  base_url: http://internal-llm-gateway/v1
+  api_key: none
+  default_model: gptoss120b
   timeout_seconds: 120
   max_tokens: 4096
   temperature: 0.2
-  verify_ssl: false  # false für selbstsignierte Zertifikate (interne Server)
-  streaming: true    # true für Token-Streaming bei Antworten
-
-  # ═══════════════════════════════════════════════════════════════════
-  # Modell-Strategie für große Codebases
-  # ═══════════════════════════════════════════════════════════════════
-
-  # Phase-spezifische Modelle
-  tool_model: "qwen-7b"          # Schnell für Suche/Navigation/Tool-Calls
-  analysis_model: "mistral-678b" # Groß für finale Analyse & Code-Generierung
-
-  # Pro-Tool Modell-Zuweisung (überschreibt tool_model für spezifische Tools)
+  verify_ssl: false
+  streaming: true
+  tool_model: qwen-7b
+  analysis_model: mistral-678b
   tool_models:
-    # Lese-Operationen: Schnelles Modell reicht
-    search_code: "qwen-7b"
-    list_files: "qwen-7b"
-    read_file: "qwen-7b"
-    search_handbook: "qwen-7b"
+    search_code: qwen-7b
+    list_files: qwen-7b
+    read_file: qwen-7b
+    search_handbook: qwen-7b
+    write_file: mistral-678b
+    edit_file: mistral-678b
+    github_pr_diff: mistral-678b
+    github_commit_diff: mistral-678b
+  tool_temperature: 0.0
+  analysis_temperature: 0.2
 
-    # Schreib-Operationen: Qualität wichtig
-    write_file: "mistral-678b"
-    edit_file: "mistral-678b"
-
-    # Code-Review: Qualität wichtig
-    github_pr_diff: "mistral-678b"
-    github_commit_diff: "mistral-678b"
-
-  # Phase-spezifische Temperature
-  tool_temperature: 0.0        # Tool-Calls: deterministisch (gleiche Suche = gleiche Ergebnisse)
-  analysis_temperature: 0.2    # Analyse: etwas Kreativität für Code-Lösungen
-
+# Verfügbare Modelle
 models:
-  - id: "gptoss120b"
-    display_name: "GPT OSS 120B"
-  - id: "mistral-678b"
-    display_name: "Mistral 678B"
-  - id: "qwen-7b"
-    display_name: "Qwen 7B (Schnell)"
-  - id: "qwen-428b"
-    display_name: "Qwen 428B"
+- id: gptoss120b
+  display_name: GPT OSS 120B
+- id: mistral-678b
+  display_name: Mistral 678B
+- id: qwen-7b
+  display_name: Qwen 7B (Schnell)
+- id: qwen-428b
+  display_name: Qwen 428B
 
+# Java-Repository
 java:
-  # Mehrere Repos möglich - nur eines aktiv
+  repo_path: /home/user/projects/my-java-app
   repos:
-    - name: "Beispiel-Projekt"
-      path: "/home/user/projects/my-java-app"
-  active_repo: "Beispiel-Projekt"  # Name des aktiven Repos
-  repo_path: "/home/user/projects/my-java-app"  # Legacy-Kompatibilität
+  - name: Beispiel-Projekt
+    path: /home/user/projects/my-java-app
+  active_repo: Beispiel-Projekt
   exclude_dirs:
-    # Build-Output
-    - "target"
-    - "build"
-    - "out"
-    - "bin"
-    - "classes"
-    # Version Control
-    - ".git"
-    - ".svn"
-    # IDE-spezifisch (IntelliJ, Eclipse, VS Code)
-    - ".idea"
-    - ".settings"
-    - ".project"
-    - ".classpath"
-    - ".vscode"
-    # Maven/Gradle
-    - ".mvn"
-    - ".gradle"
-    - "gradle"
-    # Sonstige
-    - "node_modules"
-    - "logs"
-    - "tmp"
+  - target
+  - build
+  - out
+  - bin
+  - classes
+  - .git
+  - .svn
+  - .idea
+  - .settings
+  - .project
+  - .classpath
+  - .vscode
+  - .mvn
+  - .gradle
+  - gradle
+  - node_modules
+  - logs
+  - tmp
   max_file_size_kb: 500
 
+# Python-Repository
+python:
+  repo_path: ''
+  repos: []
+  active_repo: ''
+  exclude_dirs:
+  - __pycache__
+  - .venv
+  - .git
+  - node_modules
+  - .mypy_cache
+  - .pytest_cache
+  - dist
+  - build
+  max_file_size_kb: 500
+
+# Tool-Pfade (Linux/Docker)
+tools:
+  flake8: /root/.local/bin/flake8
+  ruff: /root/.local/bin/ruff
+  mypy: /root/.local/bin/mypy
+  pytest: /root/.local/bin/pytest
+
+# Confluence-Verbindung
 confluence:
-  base_url: "https://confluence.example.com"
-  username: ""
-  api_token: ""       # Atlassian Cloud: API-Token hier eintragen
-  password: ""        # Atlassian Server/DC: Passwort hier (statt api_token)
-  default_space: ""
-  verify_ssl: false   # false für selbstsignierte Zertifikate (interne Server)
+  base_url: https://confluence.example.com
+  username: ''
+  api_token: ''
+  password: ''
+  default_space: ''
+  verify_ssl: false
+  api_path: ''
 
-jira:
-  enabled: false
-  base_url: "https://jira.example.com"
-  username: ""
-  api_token: ""       # Atlassian Cloud: API-Token hier eintragen
-  password: ""        # Atlassian Server/DC: Passwort hier (statt api_token)
-  default_project: ""
-  verify_ssl: false   # false für selbstsignierte Zertifikate (interne Server)
-
+# Kontext-Limits
 context:
-  max_tokens: 64000            # Erhöht für große Codebases
-  max_file_context_kb: 200     # Größere Dateien erlauben
+  max_tokens: 64000
+  max_file_context_kb: 200
 
+# Upload-Einstellungen
 uploads:
-  directory: "./uploads"
+  directory: ./uploads
   max_file_size_mb: 50
   cleanup_after_hours: 24
 
-index:
-  directory: "./index"          # Speicherort für SQLite FTS5-Indexe
-  auto_build_on_start: false    # Java-Index beim App-Start automatisch aufbauen
-  max_search_results: 5         # Anzahl relevanter Treffer pro Suche
-
-python:
-  repo_path: ""                 # PYTHON_REPO_PATH env var möglich
-  exclude_dirs:
-    - "__pycache__"
-    - ".venv"
-    - ".git"
-    - "node_modules"
-    - ".mypy_cache"
-    - ".pytest_cache"
-    - "dist"
-    - "build"
-  max_file_size_kb: 500
-
-tools:
-  flake8: "/root/.local/bin/flake8"
-  ruff: "/root/.local/bin/ruff"
-  mypy: "/root/.local/bin/mypy"
-  pytest: "/root/.local/bin/pytest"
-
+# Server-Konfiguration
 server:
-  host: "0.0.0.0"
+  host: 0.0.0.0
   port: 8000
   reload: false
+  chats_directory: ./chats
+
+# Such-Index (SQLite FTS5)
+index:
+  directory: ./index
+  auto_build_on_start: false
+  max_search_results: 5
+
 
 # ═══════════════════════════════════════════════════════════════════
-# NEUE FEATURES: AI-Assist Evolution
-# ═══════════════════════════════════════════════════════════════════
-
 # Handbuch-Integration (HTML auf Netzlaufwerk)
 handbook:
-  enabled: false                           # true um Handbuch zu aktivieren
-  path: ""                                 # z.B. "//server/share/handbuch" oder "Z:/handbuch"
-  index_on_start: false                    # Automatisch beim Start indexieren
+  enabled: false
+  path: ''
+  index_on_start: false
   exclude_patterns:
-    - "**/archiv/**"
-    - "**/backup/**"
-    - "**/.git/**"
-  functions_subdir: "funktionen"           # Subordner für Service-Funktionen
-  fields_subdir: "felder"                  # Subordner für Feld-Definitionen
+  - '**/archiv/**'
+  - '**/backup/**'
+  - '**/.git/**'
+  functions_subdir: funktionen
+  fields_subdir: felder
+
+# DB2-Datenbankverbindung
+database:
+  enabled: false
+  driver: ibm_db
+  host: ''
+  port: 50000
+  database: ''
+  db_schema: ''
+  username: ''
+  password: ''
+  require_confirmation: true
+  max_rows: 1000
+  timeout_seconds: 30
+  readonly: true
+  jdbc_driver_path: ''
+  jdbc_driver_class: com.ibm.db2.jcc.DB2Driver
+
+jira:
+  enabled: false
+  base_url: https://jira.example.com
+  username: ''
+  api_token: ''
+  password: ''
+  default_project: ''
+  verify_ssl: false
 
 # Skill-System
 skills:
   enabled: true
-  directory: "./skills"                    # Ordner für Skill-Definitionen (YAML)
-  auto_activation: false                   # Automatische Aktivierung basierend auf Keywords
-  max_active_skills: 5                     # Max. gleichzeitig aktive Skills
+  directory: ./skills
+  auto_activation: false
+  max_active_skills: 5
 
 # Datei-Operationen (Read/Write/Edit wie Claude Code)
 file_operations:
-  enabled: false                           # true um Schreibzugriff zu erlauben
-  default_mode: "read_only"                # read_only | write_with_confirm
-  allowed_paths: []                        # Pfade in denen geschrieben werden darf
+  enabled: false
+  default_mode: read_only
+  allowed_paths: []
   allowed_extensions:
-    # Java-Dateien
-    - ".java"
-    - ".sqlj"
-    - ".jspx"
-    - ".jsp"
-    # Konfiguration
-    - ".xml"
-    - ".yaml"
-    - ".yml"
-    - ".json"
-    - ".properties"
-    - ".cfg"
-    - ".conf"
-    # Build-Dateien
-    - ".gradle"
-    - ".kts"             # Kotlin DSL für Gradle
-    # Web
-    - ".html"
-    - ".htm"
-    - ".css"
-    - ".js"
-    - ".ts"
-    # Datenbank
-    - ".sql"
-    - ".ddl"
-    # Dokumentation
-    - ".md"
-    - ".txt"
-    - ".adoc"            # AsciiDoc
-    # Python
-    - ".py"
-    # Sonstige
-    - ".sh"
-    - ".bat"
-    - ".cmd"
+  - .java
+  - .sqlj
+  - .jspx
+  - .jsp
+  - .xml
+  - .yaml
+  - .yml
+  - .json
+  - .properties
+  - .cfg
+  - .conf
+  - .gradle
+  - .kts
+  - .html
+  - .htm
+  - .css
+  - .js
+  - .ts
+  - .sql
+  - .ddl
+  - .md
+  - .txt
+  - .adoc
+  - .py
+  - .sh
+  - .bat
+  - .cmd
   denied_patterns:
-    # Dependencies & Build-Output
-    - "**/node_modules/**"
-    - "**/target/**"
-    - "**/build/**"
-    - "**/out/**"
-    - "**/bin/**"
-    - "**/__pycache__/**"
-    - "**/.gradle/**"
-    # Version Control
-    - "**/.git/**"
-    - "**/.svn/**"
-    # IDE-Metadaten
-    - "**/.idea/**"
-    - "**/.settings/**"
-    - "**/.vscode/**"
-    # Logs & Temporär
-    - "**/logs/**"
-    - "**/tmp/**"
-    - "**/*.log"
-    # Sensible Dateien
-    - "**/*.key"
-    - "**/*.pem"
-    - "**/*.jks"
-    - "**/secrets/**"
+  - '**/node_modules/**'
+  - '**/target/**'
+  - '**/build/**'
+  - '**/out/**'
+  - '**/bin/**'
+  - '**/__pycache__/**'
+  - '**/.gradle/**'
+  - '**/.git/**'
+  - '**/.svn/**'
+  - '**/.idea/**'
+  - '**/.settings/**'
+  - '**/.vscode/**'
+  - '**/logs/**'
+  - '**/tmp/**'
+  - '**/*.log'
+  - '**/*.key'
+  - '**/*.pem'
+  - '**/*.jks'
+  - '**/secrets/**'
   backup_enabled: true
-  backup_directory: "./backups"
+  backup_directory: ./backups
 
-# DB2-Datenbankverbindung
-database:
-  enabled: false                           # true um DB-Abfragen zu aktivieren
-  driver: "ibm_db"                         # ibm_db (native) oder jaydebeapi (JDBC)
-  host: ""                                 # Hostname des DB2-Servers
-  port: 50000                              # Standard DB2-Port
-  database: ""                             # Datenbankname
-  db_schema: ""                            # Standard-Schema (z.B. CREATOR bei z/OS)
-  username: ""
-  password: ""
-  # Sicherheit
-  require_confirmation: true               # Bestätigung vor jeder Query
-  max_rows: 1000                           # Max. Zeilen pro Abfrage
-  timeout_seconds: 30
-  readonly: true                           # Nur SELECT erlaubt
-  # Für JDBC (jaydebeapi)
-  jdbc_driver_path: ""                     # Pfad zur db2jcc4.jar
-  jdbc_driver_class: "com.ibm.db2.jcc.DB2Driver"
+data_sources:
+  sources: []
 
-# Sub-Agenten für parallele Codebase-Exploration
 sub_agents:
   enabled: true
-  timeout_seconds: 120           # 2 Min für komplexe Suchen (große Codebases)
-  max_iterations: 15             # Mehr Tool-Calls pro Sub-Agent
-  min_query_length: 10           # Kürzere Queries auch verarbeiten
-  routing_model: "qwen-7b"       # Schnelles Modell für Intent-Routing
+  timeout_seconds: 120
+  max_iterations: 15
+  min_query_length: 10
+  routing_model: qwen-7b
   agents:
-    - "code_explorer"            # Java/Python Code-Suche
-    - "wiki_agent"               # Confluence-Suche
-    - "knowledge_agent"          # Handbuch/Skills-Suche
-    - "datasource_agent"         # Interne HTTP-APIs
+  - code_explorer
+  - wiki_agent
+  - knowledge_agent
+  - datasource_agent
 
-# ═══════════════════════════════════════════════════════════════════
-# WLP (WebSphere Liberty Profile) - Lokaler App-Server
-# ═══════════════════════════════════════════════════════════════════
+mq:
+  enabled: false
+  queues: []
+
+test_tool:
+  enabled: false
+  stages: []
+  services: []
+  active_stage: ''
+  default_timeout_seconds: 60
+  local_wlp_url: ''
+
+log_servers:
+  enabled: false
+  stages: []
+  default_tail_lines: 500
+
 wlp:
   enabled: false
-  java_home: ""                            # JAVA_HOME für WLP (leer = System-Default)
-  # Mehrere Server möglich
   servers:
-    - id: "local-dev"
-      name: "Lokaler Entwicklungsserver"
-      description: "WLP für lokale Entwicklung und Tests"
-      wlp_path: ""                         # z.B. "C:/wlp" oder "/opt/wlp"
-      server_name: "defaultServer"         # Name des Liberty-Servers
-      start_timeout_seconds: 300           # Max. Zeit für Server-Start
-      extra_jvm_args: ""                   # z.B. "-Xmx1024m -Xms512m"
-    # Beispiel für weiteren Server:
-    # - id: "integration"
-    #   name: "Integration Server"
-    #   wlp_path: "C:/wlp-integration"
-    #   server_name: "integrationServer"
-  repo_path: ""                            # Java-Repo für Artefakt-Prüfung (leer = java.get_active_path())
+  - id: local-dev
+    name: Lokaler Entwicklungsserver
+    description: WLP für lokale Entwicklung und Tests
+    wlp_path: ''
+    server_name: defaultServer
+    start_timeout_seconds: 300
+    extra_jvm_args: ''
+  repo_path: ''
+  java_home: ''
 
-# ═══════════════════════════════════════════════════════════════════
-# Maven Build - Build-Automatisierung
-# ═══════════════════════════════════════════════════════════════════
 maven:
   enabled: false
-  mvn_executable: "mvn"                    # Pfad zum Maven-Binary (z.B. "C:/maven/bin/mvn.cmd")
-  java_home: ""                            # JAVA_HOME für Maven (leer = System-Default)
-  settings_file: ""                        # User Settings (leer = ~/.m2/settings.xml)
-  local_repo: ""                           # Lokales Repository (leer = ~/.m2/repository)
-  default_timeout_minutes: 15              # Build-Timeout
-  # Vordefinierte Builds (für schnellen Zugriff)
+  mvn_executable: mvn
+  java_home: ''
+  settings_file: ''
+  local_repo: ''
   builds:
-    - id: "full-build"
-      name: "Vollständiger Build"
-      description: "Clean + Install mit allen Tests"
-      pom_path: ""                         # Relativ zum aktiven Java-Repo oder absolut
-      goals: "clean install"
-      profiles: []                         # z.B. ["dev", "local"]
-      skip_tests: false
-      jvm_args: "-Xmx1024m"
-      extra_args: ""                       # z.B. "-DskipITs" für Integration-Tests überspringen
-    - id: "quick-build"
-      name: "Schneller Build"
-      description: "Compile ohne Tests (für schnelle Iterationen)"
-      pom_path: ""
-      goals: "clean compile"
-      profiles: []
-      skip_tests: true
-      jvm_args: "-Xmx512m"
-      extra_args: ""
-    - id: "package-only"
-      name: "Nur Paketieren"
-      description: "Package ohne Clean (für Deployment)"
-      pom_path: ""
-      goals: "package"
-      profiles: []
-      skip_tests: true
-      jvm_args: "-Xmx1024m"
-      extra_args: "-Dmaven.test.skip=true"
+  - id: full-build
+    name: Vollständiger Build
+    description: Clean + Install mit allen Tests
+    pom_path: ''
+    goals: clean install
+    profiles: []
+    skip_tests: false
+    jvm_args: -Xmx1024m
+    extra_args: ''
+  - id: quick-build
+    name: Schneller Build
+    description: Compile ohne Tests (für schnelle Iterationen)
+    pom_path: ''
+    goals: clean compile
+    profiles: []
+    skip_tests: true
+    jvm_args: -Xmx512m
+    extra_args: ''
+  - id: package-only
+    name: Nur Paketieren
+    description: Package ohne Clean (für Deployment)
+    pom_path: ''
+    goals: package
+    profiles: []
+    skip_tests: true
+    jvm_args: -Xmx1024m
+    extra_args: -Dmaven.test.skip=true
+  default_timeout_minutes: 15
+
+search:
+  enabled: false
+  proxy_url: ''
+  proxy_username: ''
+  proxy_password: ''
+  no_proxy: ''
+  verify_ssl: true
+  timeout_seconds: 30
+
 
 # ═══════════════════════════════════════════════════════════════════
-# MCP (Model Context Protocol) - Lokale Implementation
-# ═══════════════════════════════════════════════════════════════════
+# Jenkins CI/CD (intern gehostet)
+jenkins:
+  enabled: false
+  base_url: ''
+  username: ''
+  api_token: ''
+  verify_ssl: false
+  job_paths: []
+  default_job_path: ''
+  job_filter: ''
+  timeout_seconds: 30
+  require_build_confirmation: true
+
+# GitHub Enterprise Server (intern gehostet)
+github:
+  enabled: false
+  base_url: ''
+  token: ''
+  verify_ssl: false
+  default_org: ''
+  default_repo: ''
+  timeout_seconds: 30
+  max_items: 50
+  pr_state_filter: open
+  issue_state_filter: open
+
+# Internal Fetch (Intranet-URLs abrufen)
+internal_fetch:
+  enabled: false
+  base_urls: []
+  verify_ssl: true
+  timeout_seconds: 30
+  auth_type: none
+  auth_username: ''
+  auth_password: ''
+  auth_token: ''
+  proxy_url: ''
+  proxy_username: ''
+  proxy_password: ''
+  html_processing:
+    enabled: true
+    default_extract_mode: text
+    max_output_length: 30000
+    chunk_size: 8000
+    chunk_overlap: 200
+    remove_navigation: true
+    remove_selectors:
+    - script
+    - style
+    - nav
+    - footer
+    - .sidebar
+    - .advertisement
+    - .ad
+    - '#cookie-banner'
+    - '#cookie-consent'
+    preserve_selectors: []
+
+# Container Sandbox (Docker/Podman) - Sichere Code-Ausführung
+docker_sandbox:
+  enabled: true
+  backend: podman
+  docker_path: ''
+  podman_path: C:/Program Files/RedHat/Podman/podman.exe
+  image: python:3.11-slim
+  custom_image: ''
+  memory_limit: 512m
+  cpu_limit: 1.0
+  timeout_seconds: 60
+  max_output_bytes: 131072
+  network_enabled: true
+  session_enabled: true
+  session_timeout_minutes: 30
+  max_sessions: 5
+  file_upload_enabled: true
+  max_upload_size_mb: 10
+  upload_directory: ./sandbox_uploads
+  preinstalled_packages:
+  - requests
+  - pandas
+  - numpy
+  - cryptography
+  - beautifulsoup4
+  - lxml
+  - pillow
+  - pyyaml
+  - python-dateutil
+  - chardet
+  read_only_filesystem: false
+  drop_capabilities: true
+
 mcp:
-  enabled: false                           # true um MCP zu aktivieren
-  servers: []                              # Lokale MCP-Server (stdio-basiert)
-    # Beispiel:
-    # - id: "seq-thinking"
-    #   name: "Sequential Thinking"
-    #   description: "Strukturiertes Denken für komplexe Aufgaben"
-    #   command: "python"
-    #   args: ["-m", "mcp_server_seq"]
-    #   timeout_seconds: 60
-    #   auto_start: true
-  # Sequential Thinking (lokale Implementation ohne externen Server)
-  sequential_thinking_enabled: true        # Lokale Seq-Thinking Implementation
-  max_thinking_steps: 15                   # Max. Denkschritte pro Anfrage (erhöht für Planung)
-  thinking_timeout_seconds: 180            # 3 Min für komplexe Planungsaufgaben
-  # Automatische Aktivierung
-  auto_activate_on_error: true             # Bei komplexen Fehlern
-  auto_activate_on_planning: true          # Bei Planungsaufgaben
-  min_complexity_score: 0.7                # Schwelle für Auto-Aktivierung (0.0-1.0)
+  enabled: false
+  servers: []
+  sequential_thinking_enabled: true
+  max_thinking_steps: 15
+  thinking_timeout_seconds: 180
+  auto_activate_on_error: true
+  auto_activate_on_planning: true
+  min_complexity_score: 0.7
   debug_logging: false
 
-# ═══════════════════════════════════════════════════════════════════
-# API Tools - SOAP und REST
-# ═══════════════════════════════════════════════════════════════════
 api_tools:
-  enabled: true                           # API Tools aktivieren
-
+  enabled: true
   soap:
-    default_timeout: 30                   # Timeout für SOAP-Requests (Sekunden)
-    cache_wsdl: true                      # WSDL-Definitionen cachen
-    cache_ttl_minutes: 60                 # Cache-Gültigkeitsdauer
-    verify_ssl: false                     # SSL-Zertifikate prüfen (false für interne Server)
-
+    default_timeout: 30
+    cache_wsdl: true
+    cache_ttl_minutes: 60
+    verify_ssl: false
   rest:
-    default_timeout: 30                   # Timeout für REST-Requests
-    auto_format_response: true            # JSON/XML automatisch formatieren
-    max_response_size_kb: 500             # Max. Response-Größe
-    verify_ssl: false                     # SSL-Zertifikate prüfen (false für interne Server)
+    default_timeout: 30
+    auto_format_response: true
+    max_response_size_kb: 500
+    verify_ssl: false
 
-# ═══════════════════════════════════════════════════════════════════
-# Compile Tool - Validierung und Kompilierung
-# ═══════════════════════════════════════════════════════════════════
 compile_tool:
   enabled: true
-  default_changed_only: true              # Nur Git-geänderte Dateien prüfen
-  default_fix: false                      # Auto-Fix deaktiviert
-  default_strict: false                   # Warnings nicht als Errors
+  default_changed_only: true
+  default_fix: false
+  default_strict: false
   timeout_per_file_seconds: 30
   total_timeout_seconds: 300
-
   python:
     enabled: true
-    linter: "ruff"                        # ruff | flake8 | none
-    type_checker: "none"                  # mypy | none
-    auto_fix_tool: "ruff"                 # ruff | autopep8
-    ignore_rules: []                      # z.B. ["E501", "W503"]
-
+    linter: ruff
+    type_checker: none
+    auto_fix_tool: ruff
+    ignore_rules: []
   java:
     enabled: true
-    mode: "quick"                         # quick | maven | gradle
-    java_home: ""                         # JAVA_HOME (leer = System)
-    javac_options: "-Xlint:all"
-
+    mode: quick
+    java_home: ''
+    javac_options: -Xlint:all
   sql:
     enabled: true
-    dialect: "db2"                        # db2 | postgres | mysql | ansi
+    dialect: db2
     check_best_practices: true
-
   sqlj:
     enabled: true
-    sqlj_path: ""                         # Pfad zum SQLJ Translator
-
+    sqlj_path: ''
   xml:
     enabled: true
     validate_schemas: true
-
   config:
     enabled: true
-    formats: ["yaml", "json", "properties", "toml"]
+    formats:
+    - yaml
+    - json
+    - properties
+    - toml
 
-# ═══════════════════════════════════════════════════════════════════
-# JUnit Test Generator - Automatische Test-Generierung
-# ═══════════════════════════════════════════════════════════════════
 junit_tool:
   enabled: true
-  default_version: "5"                    # JUnit 4 oder 5 (auto-detect aus pom.xml)
-  default_style: "auto"                   # auto | basic | mockito | spring
-  test_suffix: "Test"                     # Suffix für Test-Klassen
-  generate_negative_tests: true           # Negative Tests (null, edge cases)
-  generate_edge_cases: true               # Edge-Case Tests (leere Strings, etc.)
-  use_given_when_then: true               # Given-When-Then Kommentare
-  add_todo_comments: true                 # TODO-Marker für manuelle Ergänzungen
+  default_version: '5'
+  default_style: auto
+  test_suffix: Test
+  generate_negative_tests: true
+  generate_edge_cases: true
+  use_given_when_then: true
+  add_todo_comments: true
 
-# ═══════════════════════════════════════════════════════════════════
-# Internal Fetch - Intranet-URLs und Webseiten abrufen
-# ═══════════════════════════════════════════════════════════════════
-internal_fetch:
-  enabled: false                             # true um Internal Fetch zu aktivieren
-  base_urls: []                              # Erlaubte URL-Prefixe (leer = alle erlaubt)
-    # Beispiel:
-    # - "https://wiki.intern.example.com"
-    # - "https://docs.intern.example.com"
-  verify_ssl: true                           # SSL-Zertifikate prüfen
-  timeout_seconds: 30                        # Request-Timeout
-  # Authentifizierung
-  auth_type: "none"                          # none | basic | bearer
-  auth_username: ""                          # Benutzername für Basic Auth
-  auth_password: ""                          # Passwort für Basic Auth
-  auth_token: ""                             # Bearer Token
-  # Proxy (optional)
-  proxy_url: ""                              # z.B. "http://proxy.intern:8080"
-  proxy_username: ""
-  proxy_password: ""
+prompt_templates:
+  enabled: true
+  show_in_chat_header: true
+  max_recent: 5
+  templates:
+  - id: code_search_class
+    name: Klasse finden
+    description: Suche nach einer Java/Python-Klasse im Code
+    icon: search
+    category: search
+    prompt: 'Suche im Code nach der Klasse oder dem Service ''{{klassenname}}''. Zeige
+      mir:
 
-  # ─── HTML Processing ─────────────────────────────────────────────
-  html_processing:
-    enabled: true                            # HTML automatisch parsen
-    default_extract_mode: "text"             # text | structured | full
-    max_output_length: 30000                 # Max. Zeichen im Output
-    chunk_size: 8000                         # Chunk-Größe für große Seiten
-    chunk_overlap: 200                       # Überlappung zwischen Chunks
-    remove_navigation: true                  # Nav/Header/Footer entfernen
-    # Elemente die entfernt werden (CSS-Selektoren)
-    remove_selectors:
-      - "script"
-      - "style"
-      - "nav"
-      - "footer"
-      - ".sidebar"
-      - ".advertisement"
-      - ".ad"
-      - "#cookie-banner"
-      - "#cookie-consent"
-    # Elemente die erhalten bleiben (Whitelist, leer = alles)
-    preserve_selectors: []
-      # Beispiel für spezifische Seiten:
-      # - "article"
-      # - "main"
-      # - ".content"
-      # - "#main-content"
+      1. Wo die Klasse definiert ist
+
+      2. Die wichtigsten Methoden
+
+      3. Abhängigkeiten und Verwendungen'
+    placeholders:
+    - klassenname
+    is_builtin: true
+    sort_order: 1
+  - id: code_search_function
+    name: Funktion/Methode finden
+    description: Suche nach einer bestimmten Funktion oder Methode
+    icon: search
+    category: search
+    prompt: 'Finde die Methode oder Funktion ''{{methodenname}}'' im Code. Zeige:
+
+      1. Die vollständige Implementierung
+
+      2. Wo sie aufgerufen wird
+
+      3. Parameter und Rückgabewerte'
+    placeholders:
+    - methodenname
+    is_builtin: true
+    sort_order: 2
+  - id: code_search_pattern
+    name: Code-Muster suchen
+    description: Suche nach einem bestimmten Code-Pattern
+    icon: search
+    category: search
+    prompt: 'Suche im Code nach dem Muster ''{{suchmuster}}''. Filter: {{dateifilter}}.
+
+      Zeige alle Fundstellen mit Kontext.'
+    placeholders:
+    - suchmuster
+    - dateifilter
+    is_builtin: true
+    sort_order: 3
+  - id: confluence_search
+    name: Confluence durchsuchen
+    description: Suche in der Confluence-Dokumentation
+    icon: book
+    category: search
+    prompt: Durchsuche die Confluence-Dokumentation nach '{{suchbegriff}}'. Fasse
+      die wichtigsten Ergebnisse zusammen und gib Links zu den relevanten Seiten.
+    placeholders:
+    - suchbegriff
+    is_builtin: true
+    sort_order: 10
+  - id: confluence_service_doc
+    name: Service-Doku finden
+    description: Finde die Dokumentation zu einem Service
+    icon: book
+    category: search
+    prompt: 'Finde die Confluence-Dokumentation zum Service ''{{servicename}}''. Zeige:
+
+      1. Übersicht und Zweck
+
+      2. API/Schnittstellen
+
+      3. Konfiguration
+
+      4. Bekannte Probleme'
+    placeholders:
+    - servicename
+    is_builtin: true
+    sort_order: 11
+  - id: db_debug_table
+    name: Tabelle analysieren
+    description: Analysiere eine Datenbanktabelle
+    icon: database
+    category: debug
+    prompt: 'Analysiere die Datenbanktabelle ''{{tabellenname}}'':
+
+      1. Zeige die Struktur (Spalten, Typen, Keys)
+
+      2. Führe aus: SELECT * FROM {{tabellenname}} WHERE {{bedingung}} FETCH FIRST
+      20 ROWS ONLY
+
+      3. Erkläre die Daten'
+    placeholders:
+    - tabellenname
+    - bedingung
+    is_builtin: true
+    sort_order: 20
+  - id: db_debug_query
+    name: Query ausführen & erklären
+    description: Führe eine SQL-Query aus und erkläre das Ergebnis
+    icon: database
+    category: debug
+    prompt: 'Führe folgende SQL-Query aus und erkläre das Ergebnis:
+
+
+      ```sql
+
+      {{query}}
+
+      ```
+
+
+      Zeige:
+
+      1. Das Ergebnis formatiert als Tabelle
+
+      2. Auffälligkeiten in den Daten
+
+      3. Mögliche Probleme'
+    placeholders:
+    - query
+    is_builtin: true
+    sort_order: 21
+  - id: db_debug_trace
+    name: Datensatz verfolgen
+    description: Verfolge einen Datensatz durch mehrere Tabellen
+    icon: database
+    category: debug
+    prompt: 'Verfolge den Datensatz mit {{schluesselfeld}} = ''{{wert}}'' durch die
+      relevanten Tabellen.
+
+      1. Zeige alle zugehörigen Einträge
+
+      2. Erkläre die Beziehungen
+
+      3. Finde eventuelle Inkonsistenzen'
+    placeholders:
+    - schluesselfeld
+    - wert
+    is_builtin: true
+    sort_order: 22
+  - id: analyze_error
+    name: Fehler analysieren
+    description: Analysiere einen Fehler oder eine Exception
+    icon: bug
+    category: debug
+    prompt: 'Analysiere diesen Fehler:
+
+
+      ```
+
+      {{fehlermeldung}}
+
+      ```
+
+
+      1. Was ist die Ursache?
+
+      2. Wo im Code tritt er auf?
+
+      3. Wie kann er behoben werden?'
+    placeholders:
+    - fehlermeldung
+    is_builtin: true
+    sort_order: 30
+  - id: analyze_log
+    name: Log analysieren
+    description: Analysiere Log-Einträge nach Problemen
+    icon: file-text
+    category: debug
+    prompt: 'Analysiere diese Log-Einträge:
+
+
+      ```
+
+      {{loginhalt}}
+
+      ```
+
+
+      1. Finde Fehler und Warnungen
+
+      2. Erkläre den Ablauf
+
+      3. Identifiziere mögliche Probleme'
+    placeholders:
+    - loginhalt
+    is_builtin: true
+    sort_order: 31
+
+access_logging:
+  enabled: true
+  log_directory: ''
+  max_age_days: 90
+  log_request_body: false
+  log_response_body: false
+  exclude_hosts: []
