@@ -6687,6 +6687,13 @@ async function renderSearchSettingsSection() {
             Deaktivieren für selbstsignierte Zertifikate (z.B. interne Proxys)
           </span>
         </div>
+        <div class="settings-actions-section" style="margin-top:16px;padding-top:12px;border-top:1px solid var(--border)">
+          <button class="btn btn-secondary" onclick="testSearchConnection()">
+            🔍 Suche testen
+          </button>
+          <span id="search-test-result" class="test-result"></span>
+        </div>
+        <div id="search-test-details" style="display:none;margin-top:12px;padding:12px;background:var(--surface);border-radius:6px;font-size:12px;font-family:var(--font-mono)"></div>
       </div>
 
       <div class="settings-subsection" style="margin-top:16px">
@@ -6729,6 +6736,78 @@ async function renderSearchSettingsSection() {
     `).join('');
   } catch (e) {
     form.innerHTML = `<p class="error-hint">Fehler: ${e.message}</p>`;
+  }
+}
+
+async function testSearchConnection() {
+  const resultEl = document.getElementById('search-test-result');
+  const detailsEl = document.getElementById('search-test-details');
+
+  resultEl.textContent = '⏳ Teste Suche...';
+  resultEl.className = 'test-result testing';
+  detailsEl.style.display = 'none';
+
+  // Erst aktuelle Config speichern
+  await saveSearchProxyConfig();
+
+  try {
+    const res = await fetch('/api/search/test', { method: 'POST' });
+    const data = await res.json();
+
+    if (data.success && data.debug?.search_results?.length > 0) {
+      const results = data.debug.search_results;
+      const hasRealResults = results.some(r => r.url && !r.title.includes('Fehler') && !r.title.includes('Keine'));
+
+      if (hasRealResults) {
+        resultEl.textContent = `✓ ${results.length} Ergebnisse gefunden`;
+        resultEl.className = 'test-result success';
+      } else {
+        resultEl.textContent = '⚠ Verbindung OK, aber keine Suchergebnisse';
+        resultEl.className = 'test-result warning';
+      }
+    } else if (data.success) {
+      resultEl.textContent = '⚠ Verbindung OK, aber Parsing fehlgeschlagen';
+      resultEl.className = 'test-result warning';
+    } else {
+      resultEl.textContent = `✗ ${data.error || 'Unbekannter Fehler'}`;
+      resultEl.className = 'test-result error';
+    }
+
+    // Debug-Details anzeigen
+    if (data.debug) {
+      const d = data.debug;
+      let html = `<strong>Debug-Info:</strong><br>`;
+      html += `Proxy: ${d.proxy_url}<br>`;
+      html += `SSL-Verify: ${d.verify_ssl}<br>`;
+      html += `HTTP-Status: ${d.http_status || 'N/A'}<br>`;
+      html += `Response-Länge: ${d.response_length || 0} Zeichen<br>`;
+
+      if (d.regex_matches) {
+        html += `<br><strong>Regex-Matches:</strong><br>`;
+        html += `Titel gefunden: ${d.regex_matches.titles_found}<br>`;
+        html += `Snippets gefunden: ${d.regex_matches.snippets_found}<br>`;
+        html += `URLs gefunden: ${d.regex_matches.urls_found}<br>`;
+        if (d.regex_matches.first_title) {
+          html += `Erster Titel: ${escapeHtml(d.regex_matches.first_title)}<br>`;
+        }
+      }
+
+      if (d.bot_block_indicators?.possible_block) {
+        html += `<br><strong style="color:var(--warning)">⚠ Mögliche Bot-Blockierung erkannt!</strong><br>`;
+        html += `Robot: ${d.bot_block_indicators.robot}, Captcha: ${d.bot_block_indicators.captcha}<br>`;
+      }
+
+      if (d.response_preview) {
+        html += `<br><strong>Response-Vorschau:</strong><br>`;
+        html += `<pre style="max-height:200px;overflow:auto;white-space:pre-wrap;font-size:10px;background:var(--bg);padding:8px;border-radius:4px">${escapeHtml(d.response_preview)}</pre>`;
+      }
+
+      detailsEl.innerHTML = html;
+      detailsEl.style.display = 'block';
+    }
+  } catch (e) {
+    resultEl.textContent = `✗ Fehler: ${e.message}`;
+    resultEl.className = 'test-result error';
   }
 }
 
@@ -6816,6 +6895,244 @@ document.addEventListener('keydown', (e) => {
     const modal = document.getElementById('settings-modal');
     if (modal.style.display === 'flex') {
       closeSettings();
+    }
+  }
+});
+
+// ══════════════════════════════════════════════════════════════════════════════
+// Template System - Prompt Templates für schnellen Zugriff
+// ══════════════════════════════════════════════════════════════════════════════
+
+let _templates = [];
+let _currentTemplate = null;
+let _templateExpanded = false;
+
+/**
+ * Lädt Templates vom Backend und rendert die Template-Bar
+ */
+async function loadTemplates() {
+  try {
+    const res = await fetch('/api/settings/templates');
+    if (!res.ok) {
+      console.warn('[Templates] Failed to load:', res.status);
+      return;
+    }
+    const data = await res.json();
+
+    // Prüfen ob Templates aktiviert sind und im Header angezeigt werden sollen
+    if (!data.enabled || !data.show_in_chat_header) {
+      document.getElementById('template-bar').style.display = 'none';
+      return;
+    }
+
+    // Templates aus der Response extrahieren
+    _templates = data.templates || [];
+    console.log('[Templates] Loaded', _templates.length, 'templates');
+    renderTemplateBar();
+  } catch (e) {
+    console.error('[Templates] Load error:', e);
+  }
+}
+
+/**
+ * Rendert die Template-Chips in der Template-Bar
+ */
+// Icon-Mapping für Templates
+const TEMPLATE_ICONS = {
+  search: '🔍',
+  book: '📖',
+  database: '🗃️',
+  code: '💻',
+  bug: '🐛',
+  analyze: '📊',
+  document: '📄',
+  api: '🔌',
+  test: '🧪',
+  config: '⚙️',
+  default: '📋'
+};
+
+function getTemplateIcon(iconName) {
+  return TEMPLATE_ICONS[iconName] || TEMPLATE_ICONS.default;
+}
+
+function renderTemplateBar() {
+  const container = document.getElementById('template-chips');
+  if (!container) return;
+
+  if (!_templates || _templates.length === 0) {
+    container.innerHTML = '<span style="font-size:0.75rem;color:var(--text-muted)">Keine Templates konfiguriert</span>';
+    return;
+  }
+
+  container.innerHTML = _templates.map(t => `
+    <button class="template-chip"
+            data-category="${t.category || 'general'}"
+            data-id="${t.id}"
+            onclick="selectTemplate('${t.id}')"
+            title="${escapeHtml(t.description || t.name)}">
+      <span class="template-chip-icon">${getTemplateIcon(t.icon)}</span>
+      <span class="template-chip-name">${escapeHtml(t.name)}</span>
+    </button>
+  `).join('');
+}
+
+/**
+ * Template auswählen und ggf. Placeholder-Modal öffnen
+ */
+function selectTemplate(templateId) {
+  const template = _templates.find(t => t.id === templateId);
+  if (!template) {
+    console.warn('[Templates] Template not found:', templateId);
+    return;
+  }
+
+  _currentTemplate = template;
+
+  // Wenn Placeholders vorhanden, Modal öffnen
+  if (template.placeholders && template.placeholders.length > 0) {
+    openTemplateModal(template);
+  } else {
+    // Direkt in Input einfügen
+    applyTemplateToInput(template.prompt);
+  }
+}
+
+/**
+ * Öffnet das Modal für Placeholder-Eingabe
+ */
+function openTemplateModal(template) {
+  const modal = document.getElementById('template-modal');
+  const title = document.getElementById('template-modal-title');
+  const form = document.getElementById('template-placeholder-form');
+  const preview = document.getElementById('template-preview');
+
+  title.textContent = template.name;
+
+  // Placeholder-Felder generieren
+  form.innerHTML = template.placeholders.map(ph => `
+    <div class="template-placeholder-field">
+      <label class="template-placeholder-label">${ph}</label>
+      <input type="text" 
+             class="template-placeholder-input" 
+             data-placeholder="${ph}"
+             placeholder="Wert für ${ph} eingeben..."
+             oninput="updateTemplatePreview()">
+    </div>
+  `).join('');
+
+  // Initial-Vorschau
+  preview.textContent = template.prompt;
+
+  modal.classList.add('active');
+
+  // Ersten Input fokussieren
+  const firstInput = form.querySelector('input');
+  if (firstInput) firstInput.focus();
+}
+
+/**
+ * Schließt das Template-Modal
+ */
+function closeTemplateModal() {
+  const modal = document.getElementById('template-modal');
+  modal.classList.remove('active');
+  _currentTemplate = null;
+}
+
+/**
+ * Aktualisiert die Vorschau im Modal mit eingegebenen Werten
+ */
+function updateTemplatePreview() {
+  if (!_currentTemplate) return;
+
+  const preview = document.getElementById('template-preview');
+  const inputs = document.querySelectorAll('#template-placeholder-form input');
+
+  let prompt = _currentTemplate.prompt;
+  inputs.forEach(input => {
+    const ph = input.dataset.placeholder;
+    const value = input.value || `{{${ph}}}`;
+    prompt = prompt.replace(new RegExp(`\{\{${ph}\}\}`, 'g'), value);
+  });
+
+  preview.textContent = prompt;
+}
+
+/**
+ * Wendet das Template mit Placeholder-Werten an
+ */
+function applyTemplate() {
+  if (!_currentTemplate) return;
+
+  const inputs = document.querySelectorAll('#template-placeholder-form input');
+
+  let prompt = _currentTemplate.prompt;
+  inputs.forEach(input => {
+    const ph = input.dataset.placeholder;
+    const value = input.value || '';
+    prompt = prompt.replace(new RegExp(`\{\{${ph}\}\}`, 'g'), value);
+  });
+
+  applyTemplateToInput(prompt);
+  closeTemplateModal();
+}
+
+/**
+ * Fügt den Prompt in das Chat-Input-Feld ein
+ */
+function applyTemplateToInput(prompt) {
+  const input = document.getElementById('message-input');
+  if (!input) return;
+
+  // Bestehenden Text ersetzen oder anhängen
+  if (input.value.trim() === '') {
+    input.value = prompt;
+  } else {
+    input.value = prompt + '\n\n' + input.value;
+  }
+
+  input.focus();
+  // Cursor ans Ende
+  input.selectionStart = input.selectionEnd = input.value.length;
+
+  // Auto-resize wenn vorhanden
+  if (typeof autoResizeTextarea === 'function') {
+    autoResizeTextarea(input);
+  }
+}
+
+/**
+ * Togglet die erweiterte Ansicht der Template-Bar
+ */
+function toggleTemplateExpand() {
+  const bar = document.getElementById('template-bar');
+  const icon = document.getElementById('template-toggle-icon');
+
+  _templateExpanded = !_templateExpanded;
+
+  if (_templateExpanded) {
+    bar.classList.add('expanded');
+    bar.classList.remove('collapsed');
+    icon.textContent = '▲';
+  } else {
+    bar.classList.remove('expanded');
+    bar.classList.add('collapsed');
+    icon.textContent = '▼';
+  }
+}
+
+// Templates beim Start laden
+document.addEventListener('DOMContentLoaded', () => {
+  loadTemplates();
+});
+
+// Template-Modal mit Escape schließen
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape') {
+    const modal = document.getElementById('template-modal');
+    if (modal && modal.classList.contains('active')) {
+      closeTemplateModal();
     }
   }
 });

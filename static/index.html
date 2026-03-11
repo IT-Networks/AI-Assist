@@ -103,6 +103,7 @@
               <button class="settings-nav-item" data-section="agent_tools">Agent Tools</button>
               <button class="settings-nav-item" data-section="skills">Skills</button>
               <button class="settings-nav-item" data-section="file_operations">Datei-Ops</button>
+              <button class="settings-nav-item" data-section="prompt_templates">Templates</button>
             </div>
           </div>
 
@@ -328,6 +329,18 @@
     </div>
 
     <div id="input-area">
+      <!-- Template-Bar: Schnellauswahl für Prompt-Templates -->
+      <div id="template-bar">
+        <div class="template-bar-header">
+          <span class="template-icon">&#128203;</span>
+          <span class="template-label">Templates</span>
+          <button class="template-toggle" onclick="toggleTemplateExpand()" title="Alle anzeigen">
+            <span id="template-toggle-icon">&#9662;</span>
+          </button>
+        </div>
+        <div id="template-chips" class="template-chips"></div>
+      </div>
+
       <div id="active-context-bar">
         <span class="context-label">Kontext:</span>
         <div id="context-chips"></div>
@@ -534,6 +547,26 @@
 
   </aside>
 
+</div>
+
+<!-- Template Placeholder Modal -->
+<div id="template-modal">
+  <div class="template-modal-overlay" onclick="closeTemplateModal()"></div>
+  <div class="template-modal-content">
+    <div class="template-modal-header">
+      <span class="template-modal-title" id="template-modal-title">Template</span>
+      <button class="template-modal-close" onclick="closeTemplateModal()">&times;</button>
+    </div>
+    <div id="template-placeholder-form" class="template-placeholder-form">
+      <!-- Placeholder inputs werden dynamisch generiert -->
+    </div>
+    <div class="template-preview-label">Vorschau:</div>
+    <div id="template-preview" class="template-preview"></div>
+    <div class="template-modal-actions">
+      <button class="btn btn-secondary" onclick="closeTemplateModal()">Abbrechen</button>
+      <button class="btn btn-primary" onclick="applyTemplate()">Anwenden</button>
+    </div>
+  </div>
 </div>
 
 <!-- Scripts -->

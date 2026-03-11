@@ -418,3 +418,97 @@ async def poll_search(search_id: str) -> Dict[str, Any]:
 @router.get("/history")
 async def get_history() -> Dict[str, Any]:
     return {"history": list(reversed(_history)), "count": len(_history)}
+
+
+# ── Test-Endpoint ────────────────────────────────────────────────────────────
+
+@router.post("/test")
+async def test_search() -> Dict[str, Any]:
+    """
+    Führt eine Test-Suche durch und gibt Debug-Informationen zurück.
+    Nützlich um Proxy- und Parsing-Probleme zu diagnostizieren.
+    """
+    test_query = "python programming"
+    timeout = settings.search.timeout_seconds or 30
+    proxy_config = _get_proxy_config(_DDG_URL)
+
+    debug_info = {
+        "query": test_query,
+        "proxy_url": settings.search.proxy_url or "(kein Proxy)",
+        "proxy_configured": bool(proxy_config),
+        "verify_ssl": settings.search.verify_ssl,
+        "timeout": timeout,
+    }
+
+    try:
+        async with httpx.AsyncClient(
+            timeout=timeout,
+            follow_redirects=True,
+            headers=_DDG_HEADERS,
+            verify=settings.search.verify_ssl,
+            **proxy_config,
+        ) as client:
+            resp = await client.post(_DDG_URL, data={"q": test_query, "kl": "de-de"})
+            html = resp.text
+            status_code = resp.status_code
+
+        debug_info["http_status"] = status_code
+        debug_info["response_length"] = len(html)
+        debug_info["response_preview"] = html[:1000] if len(html) < 5000 else html[:500] + "\n...[truncated]...\n" + html[-500:]
+
+        # Regex-Matching testen
+        title_blocks = re.findall(r'class="result__a"[^>]*>(.*?)</a>', html, re.DOTALL)
+        snippet_blocks = re.findall(r'class="result__snippet[^"]*"[^>]*>(.*?)</span>', html, re.DOTALL)
+        url_blocks = re.findall(r'uddg=([^&"]+)', html)
+
+        debug_info["regex_matches"] = {
+            "titles_found": len(title_blocks),
+            "snippets_found": len(snippet_blocks),
+            "urls_found": len(url_blocks),
+            "first_title": _clean(title_blocks[0])[:100] if title_blocks else None,
+        }
+
+        # Alternative: Prüfe ob es eine Bot-Block-Seite ist
+        bot_indicators = [
+            "robot" in html.lower(),
+            "captcha" in html.lower(),
+            "blocked" in html.lower(),
+            "unusual traffic" in html.lower(),
+            "js-challenge" in html.lower(),
+        ]
+        debug_info["bot_block_indicators"] = {
+            "robot": "robot" in html.lower(),
+            "captcha": "captcha" in html.lower(),
+            "blocked": "blocked" in html.lower(),
+            "unusual_traffic": "unusual traffic" in html.lower(),
+            "possible_block": any(bot_indicators),
+        }
+
+        # Vollständige Suche ausführen
+        results = await _ddg_search(test_query, 3)
+        debug_info["search_results"] = results
+
+        return {
+            "success": True,
+            "debug": debug_info,
+        }
+
+    except httpx.TimeoutException as e:
+        return {
+            "success": False,
+            "error": f"Timeout nach {timeout}s",
+            "debug": debug_info,
+        }
+    except httpx.ProxyError as e:
+        return {
+            "success": False,
+            "error": f"Proxy-Fehler: {e}",
+            "debug": debug_info,
+        }
+    except Exception as e:
+        return {
+            "success": False,
+            "error": str(e),
+            "error_type": type(e).__name__,
+            "debug": debug_info,
+        }
