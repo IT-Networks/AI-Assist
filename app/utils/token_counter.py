@@ -14,7 +14,21 @@ def estimate_messages_tokens(messages: List[dict]) -> int:
         return 0
     total = 0
     for msg in messages:
-        content = msg.get("content") or ""  # Handles None explicitly
+        content = msg.get("content")
+        # Handle various content types
+        if content is None:
+            content = ""
+        elif isinstance(content, list):
+            # Multi-modal messages (e.g., images + text)
+            text_parts = []
+            for part in content:
+                if isinstance(part, dict) and part.get("type") == "text":
+                    text_parts.append(part.get("text", ""))
+                elif isinstance(part, str):
+                    text_parts.append(part)
+            content = " ".join(text_parts)
+        elif not isinstance(content, str):
+            content = str(content)
         total += estimate_tokens(content)
         total += 4  # overhead per message (role, formatting)
     return total

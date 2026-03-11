@@ -955,19 +955,31 @@ class AgentOrchestrator:
                     current_model,
                     settings.llm.default_context_limit
                 )
-                context_tokens = estimate_messages_tokens(messages)
+                # Sicherheitsprüfung: mindestens 1000 Token Limit
+                if not model_limit or model_limit < 1000:
+                    model_limit = settings.llm.default_context_limit or 32000
+
+                try:
+                    context_tokens = estimate_messages_tokens(messages)
+                except Exception as e:
+                    logger.warning(f"[agent] Token estimation failed: {e}")
+                    context_tokens = 0
+
                 context_percent = round(context_tokens / model_limit * 100, 1) if model_limit > 0 else 0
 
-                # Kontext-Status an Frontend senden
-                yield AgentEvent(AgentEventType.CONTEXT_STATUS, {
-                    "current_tokens": context_tokens,
-                    "limit_tokens": model_limit,
-                    "percent": context_percent,
-                    "iteration": iteration + 1,
-                    "max_iterations": self.max_iterations,
-                    "warning": context_percent > 80,
-                    "critical": context_percent > 95
-                })
+                # Kontext-Status an Frontend senden (non-blocking)
+                try:
+                    yield AgentEvent(AgentEventType.CONTEXT_STATUS, {
+                        "current_tokens": context_tokens,
+                        "limit_tokens": model_limit,
+                        "percent": context_percent,
+                        "iteration": iteration + 1,
+                        "max_iterations": self.max_iterations,
+                        "warning": context_percent > 80,
+                        "critical": context_percent > 95
+                    })
+                except Exception as e:
+                    logger.debug(f"[agent] Context status event failed: {e}")
 
                 # Summarizer bei >75% Auslastung aktivieren
                 if context_percent > 75 and len(messages) > 8:
@@ -1749,20 +1761,26 @@ class AgentOrchestrator:
             selected_model,
             settings.llm.default_context_limit
         )
+        # Sicherheitsprüfung: mindestens 1000 Token Limit
+        if not model_limit or model_limit < 1000:
+            model_limit = settings.llm.default_context_limit or 32000
 
         # Bei langen Chats: Summarizer aufrufen (fasst ältere Messages zusammen)
         if messages:  # Sicherheitsprüfung
-            current_tokens = estimate_messages_tokens(messages)
-            if current_tokens > model_limit * 0.8:  # Ab 80% des Limits
-                summarizer = get_summarizer()
-                summarized = await summarizer.summarize_if_needed(
-                    messages,
-                    target_tokens=int(model_limit * 0.7)  # Ziel: 70% des Limits
-                )
-                # Nur verwenden wenn Summarizer etwas zurückgibt
-                if summarized:
-                    messages = summarized
-                    logger.info(f"[agent] Summarizer aktiv: {current_tokens} -> {estimate_messages_tokens(messages)} tokens")
+            try:
+                current_tokens = estimate_messages_tokens(messages)
+                if current_tokens > model_limit * 0.8:  # Ab 80% des Limits
+                    summarizer = get_summarizer()
+                    summarized = await summarizer.summarize_if_needed(
+                        messages,
+                        target_tokens=int(model_limit * 0.7)  # Ziel: 70% des Limits
+                    )
+                    # Nur verwenden wenn Summarizer etwas zurückgibt
+                    if summarized:
+                        messages = summarized
+                        logger.info(f"[agent] Summarizer aktiv: {current_tokens} -> {estimate_messages_tokens(messages)} tokens")
+            except Exception as e:
+                logger.warning(f"[agent] Summarizer/Token estimation failed: {e}")
 
         # Falls immer noch zu groß: Trim anwenden
         trimmed_messages = _trim_messages_to_limit(messages, model_limit)
