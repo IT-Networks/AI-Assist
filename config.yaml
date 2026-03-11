@@ -316,12 +316,12 @@ maven:
   default_timeout_minutes: 15
 
 search:
-  enabled: false
+  enabled: true  # Web-Suche aktivieren
   proxy_url: ''
   proxy_username: ''
   proxy_password: ''
   no_proxy: ''
-  verify_ssl: true
+  verify_ssl: false  # Für Firmennetzwerk mit Proxy oft nötig
   timeout_seconds: 30
 
 

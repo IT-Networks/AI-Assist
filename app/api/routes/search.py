@@ -176,8 +176,12 @@ async def _ddg_search(query: str, max_results: int = 5) -> List[Dict[str, str]]:
 
     # Debug: HTML-Länge und erste Zeichen loggen
     print(f"[search] HTML response length: {len(html)} chars")
+    # Immer ersten Teil der Antwort loggen für Debugging
+    html_preview = html[:800].replace('\n', ' ').replace('\r', '')
+    print(f"[search] HTML preview: {html_preview[:400]}...")
     if len(html) < 1000:
-        print(f"[search] Short response (possible block/error): {html[:500]}")
+        print(f"[search] WARNING: Short response (possible block/error)")
+        print(f"[search] Full short response: {html}")
 
     # Titel: class="result__a"
     title_blocks = re.findall(
@@ -193,11 +197,16 @@ async def _ddg_search(query: str, max_results: int = 5) -> List[Dict[str, str]]:
     print(f"[search] Found: {len(title_blocks)} titles, {len(snippet_blocks)} snippets, {len(url_blocks)} urls")
 
     for i in range(min(max_results, len(title_blocks))):
+        title = _clean(title_blocks[i])
+        snippet = _clean(snippet_blocks[i]) if i < len(snippet_blocks) else ""
+        url = unquote(url_blocks[i]) if i < len(url_blocks) else ""
         results.append({
-            "title": _clean(title_blocks[i]),
-            "snippet": _clean(snippet_blocks[i]) if i < len(snippet_blocks) else "",
-            "url": unquote(url_blocks[i]) if i < len(url_blocks) else "",
+            "title": title,
+            "snippet": snippet,
+            "url": url,
         })
+        # Log jeden einzelnen Treffer
+        print(f"[search] Result {i+1}: {title[:60]}... | {snippet[:80]}... | {url[:50]}...")
 
     if not results:
         # Fallback: DuckDuckGo Instant Answer JSON
@@ -378,7 +387,9 @@ async def confirm_search(search_id: str) -> Dict[str, Any]:
         item["results"] = results
         item["status"] = "done"
         item["executed_at"] = datetime.now().isoformat()
-        print(f"[search] Search {search_id} completed with {len(results)} results")
+        print(f"[search] Search {search_id} completed with {len(results)} results:")
+        for idx, r in enumerate(results[:5]):  # Erste 5 Results loggen
+            print(f"[search]   [{idx+1}] {r.get('title', '')[:50]} | {r.get('snippet', '')[:80]}...")
         # In History ablegen
         _history.append({**item})
         if len(_history) > _HISTORY_MAX:
