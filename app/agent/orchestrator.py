@@ -12,6 +12,7 @@ Der Orchestrator:
 
 import asyncio
 import json
+import logging
 import re
 import uuid
 from dataclasses import dataclass, field
@@ -19,6 +20,8 @@ from enum import Enum
 from typing import Any, AsyncGenerator, Dict, List, Optional, Set
 
 from app.agent.entity_tracker import EntityTracker
+
+logger = logging.getLogger(__name__)
 from app.agent.tools import ToolRegistry, ToolResult, get_tool_registry
 from app.core.config import settings
 from app.mcp.tool_bridge import get_tool_bridge, MCPToolBridge
@@ -180,7 +183,7 @@ def _parse_text_tool_calls(content: str, available_tools: List[Dict]) -> List[Di
                         "function": {"name": name, "arguments": args_str}
                     })
         if parsed_calls:
-            print(f"[agent] Mistral 678B Compact Format erkannt: {len(parsed_calls)} calls")
+            logger.debug("Mistral 678B Compact Format erkannt: %d calls", len(parsed_calls))
             return parsed_calls
 
     # Format 1b: Mistral Standard Format
@@ -207,7 +210,7 @@ def _parse_text_tool_calls(content: str, available_tools: List[Dict]) -> List[Di
                             }
                         })
             if parsed_calls:
-                print(f"[agent] Mistral Standard Format erkannt: {len(parsed_calls)} calls")
+                logger.debug("[agent] Mistral Standard Format erkannt: {len(parsed_calls)} calls")
                 return parsed_calls
         except (json.JSONDecodeError, KeyError):
             pass
@@ -238,7 +241,7 @@ def _parse_text_tool_calls(content: str, available_tools: List[Dict]) -> List[Di
             except (json.JSONDecodeError, KeyError):
                 continue
     if parsed_calls:
-        print(f"[agent] XML Tool-Call Format erkannt: {len(parsed_calls)} calls")
+        logger.debug("[agent] XML Tool-Call Format erkannt: {len(parsed_calls)} calls")
         return parsed_calls
 
     # Format 3: JSON-Codeblock mit Tool-Call Struktur
@@ -268,7 +271,7 @@ def _parse_text_tool_calls(content: str, available_tools: List[Dict]) -> List[Di
         except (json.JSONDecodeError, KeyError):
             continue
     if parsed_calls:
-        print(f"[agent] JSON-Block Tool-Call Format erkannt: {len(parsed_calls)} calls")
+        logger.debug("[agent] JSON-Block Tool-Call Format erkannt: {len(parsed_calls)} calls")
         return parsed_calls
 
     # Format 4: Inline JSON mit bekanntem Tool-Namen
@@ -295,7 +298,7 @@ def _parse_text_tool_calls(content: str, available_tools: List[Dict]) -> List[Di
                     except (json.JSONDecodeError, KeyError):
                         continue
         if parsed_calls:
-            print(f"[agent] Inline JSON Tool-Call Format erkannt: {len(parsed_calls)} calls")
+            logger.debug("[agent] Inline JSON Tool-Call Format erkannt: {len(parsed_calls)} calls")
             return parsed_calls
 
     # Debug: Wenn kein Tool-Call erkannt wurde, hilfreiche Info loggen
@@ -313,8 +316,8 @@ def _parse_text_tool_calls(content: str, available_tools: List[Dict]) -> List[Di
             if re.search(pattern, content, re.IGNORECASE):
                 found_hints.append(hint)
         if found_hints:
-            print(f"[agent] Text-Parser: Keine Tool-Calls erkannt, aber Hinweise gefunden: {found_hints}")
-            print(f"[agent] Content-Anfang (100 chars): {content[:100]!r}")
+            logger.debug("[agent] Text-Parser: Keine Tool-Calls erkannt, aber Hinweise gefunden: {found_hints}")
+            logger.debug("[agent] Content-Anfang (100 chars): {content[:100]!r}")
 
     return []
 
@@ -395,7 +398,7 @@ class AgentOrchestrator:
         try:
             dispatcher = get_sub_agent_dispatcher()
         except Exception as e:
-            print(f"[sub_agents] Dispatcher nicht verfügbar: {e}")
+            logger.debug("[sub_agents] Dispatcher nicht verfügbar: {e}")
             return
 
         routing_model = (
@@ -414,7 +417,7 @@ class AgentOrchestrator:
         try:
             selected_agents = await dispatcher.classify_intent(user_message, llm_client)
         except Exception as e:
-            print(f"[sub_agents] Routing fehlgeschlagen: {e}")
+            logger.debug("[sub_agents] Routing fehlgeschlagen: {e}")
             yield AgentEvent(AgentEventType.SUBAGENT_ERROR, {"error": f"Routing: {e}"})
             return
 
@@ -425,7 +428,7 @@ class AgentOrchestrator:
         })
 
         if not selected_agents:
-            print("[sub_agents] Keine relevanten Agenten ermittelt – überspringe Phase")
+            logger.debug("[sub_agents] Keine relevanten Agenten ermittelt – überspringe Phase")
             return
 
         # Phase 3: Ausgewählte Agenten parallel ausführen
@@ -437,7 +440,7 @@ class AgentOrchestrator:
                 tool_registry=self.tools,
             )
         except Exception as e:
-            print(f"[sub_agents] Dispatch fehlgeschlagen: {e}")
+            logger.debug("[sub_agents] Dispatch fehlgeschlagen: {e}")
             yield AgentEvent(AgentEventType.SUBAGENT_ERROR, {"error": str(e)})
             return
 
@@ -469,9 +472,9 @@ class AgentOrchestrator:
                     "content": context_block,
                 })
                 budget.add("context", context_tokens)
-                print(f"[sub_agents] Context injiziert: {context_tokens} Tokens")
+                logger.debug("[sub_agents] Context injiziert: {context_tokens} Tokens")
             else:
-                print(f"[sub_agents] Context zu groß ({context_tokens} Tokens), übersprungen")
+                logger.debug("[sub_agents] Context zu groß ({context_tokens} Tokens), übersprungen")
 
     async def process(
         self,
@@ -512,13 +515,13 @@ class AgentOrchestrator:
         if mcp_match:
             forced_capability = mcp_match.group(1)
             user_message = mcp_match.group(2).strip()
-            print(f"[agent] Forced MCP capability: {forced_capability}")
+            logger.debug("[agent] Forced MCP capability: {forced_capability}")
 
         # ── Continue-Handling (nach Bestätigung) ───────────────────────────────
         # [CONTINUE] wird nach Schreibbestätigung gesendet um weitere Tools auszuführen
         is_continue = user_message.strip() == "[CONTINUE]"
         if is_continue:
-            print("[agent] Continue nach Bestätigung erkannt")
+            logger.debug("[agent] Continue nach Bestätigung erkannt")
             # Ersetze durch System-Hinweis statt User-Message
             user_message = (
                 "Die letzte Datei-Operation wurde bestätigt und ausgeführt. "
@@ -554,7 +557,7 @@ class AgentOrchestrator:
                 ):
                     state.mode = AgentMode.PLAN_THEN_EXECUTE
                     include_write_ops = False
-                    print(f"[agent] Skill erfordert Planungsphase → Modus auf PLAN_THEN_EXECUTE gesetzt")
+                    logger.debug("[agent] Skill erfordert Planungsphase → Modus auf PLAN_THEN_EXECUTE gesetzt")
             except Exception:
                 pass
 
@@ -569,9 +572,9 @@ class AgentOrchestrator:
                 mcp_tools = self._mcp_bridge.get_tool_definitions()
                 tool_schemas.extend(mcp_tools)
                 if mcp_tools:
-                    print(f"[agent] MCP tools added: {len(mcp_tools)}")
+                    logger.debug("[agent] MCP tools added: {len(mcp_tools)}")
             except Exception as e:
-                print(f"[agent] MCP bridge initialization failed: {e}")
+                logger.debug("[agent] MCP bridge initialization failed: {e}")
 
         # Agent-Instruktionen
         agent_instructions = self._build_agent_instructions(state.mode, state.plan_approved)
@@ -600,7 +603,7 @@ class AgentOrchestrator:
                 messages.append({"role": "system", "content": memory_context})
                 budget.set("memory", estimate_tokens(memory_context))
         except Exception as e:
-            print(f"[agent] Memory loading failed: {e}")
+            logger.debug("[agent] Memory loading failed: {e}")
 
         # Entity-Kontext: Bekannte Entitäten aus dieser Session (Java ↔ Handbuch ↔ PDF)
         entity_hint = state.entity_tracker.get_context_hint()
@@ -631,7 +634,7 @@ class AgentOrchestrator:
                 )
                 messages.append({"role": "system", "content": ctx_msg})
                 budget.set("memory", budget.used_memory + estimate_tokens(ctx_msg))
-                print(f"[agent] Nutzer-Kontext injiziert: {hint_parts}")
+                logger.debug("[agent] Nutzer-Kontext injiziert: {hint_parts}")
 
         # Konversations-Historie hinzufügen (für Multi-Turn)
         # context_items werden NICHT als separate System-Message eingefügt,
@@ -693,7 +696,7 @@ class AgentOrchestrator:
                         if not budget.needs_compaction():
                             state.compaction_attempted_while_full = False
                 except Exception as e:
-                    print(f"[agent] Compaction failed: {e}")
+                    logger.debug("[agent] Compaction failed: {e}")
         else:
             # Budget unter 80% → bereit für nächste Komprimierung wenn nötig
             state.compaction_attempted_while_full = False
@@ -714,7 +717,7 @@ class AgentOrchestrator:
         # === FORCED CAPABILITY EXECUTION ===
         # Wenn User /brainstorm, /design etc. nutzt, direkt ausführen
         if forced_capability:
-            print(f"[agent] Executing forced capability: {forced_capability}")
+            logger.debug("[agent] Executing forced capability: {forced_capability}")
 
             if self._mcp_bridge is None:
                 self._mcp_bridge = get_tool_bridge()
@@ -781,7 +784,7 @@ class AgentOrchestrator:
         last_model = ""
 
         # Debug: Tool-Schemas Anzahl loggen
-        print(f"[agent] Starting with {len(tool_schemas)} tools, mode={state.mode.value}")
+        logger.debug("[agent] Starting with {len(tool_schemas)} tools, mode={state.mode.value}")
 
         for iteration in range(self.max_iterations):
             try:
@@ -791,7 +794,7 @@ class AgentOrchestrator:
                     return
 
                 # LLM aufrufen (nicht-streamend für Tool-Calls)
-                print(f"[agent] Iteration {iteration + 1}: Calling LLM with {len(tool_schemas)} tools")
+                logger.debug("[agent] Iteration {iteration + 1}: Calling LLM with {len(tool_schemas)} tools")
                 response = await self._call_llm_with_tools(
                     messages, tool_schemas, model, is_tool_phase=True
                 )
@@ -800,9 +803,9 @@ class AgentOrchestrator:
                 finish_reason = response.get("finish_reason", "")
                 native_tools = response.get("native_tools", True)
 
-                print(
-                    f"[agent] LLM response: finish_reason={finish_reason!r}, "
-                    f"tool_calls={len(tool_calls)}, content_len={len(content or '')}"
+                logger.debug(
+                    "[agent] LLM response: finish_reason=%r, tool_calls=%d, content_len=%d",
+                    finish_reason, len(tool_calls), len(content or '')
                 )
 
                 # Token-Nutzung akkumulieren
@@ -818,7 +821,7 @@ class AgentOrchestrator:
                 if not tool_calls and content:
                     text_tool_calls = _parse_text_tool_calls(content, tool_schemas)
                     if text_tool_calls:
-                        print(f"[agent] Text-Parser erkannte {len(text_tool_calls)} Tool-Calls im Content")
+                        logger.debug("[agent] Text-Parser erkannte {len(text_tool_calls)} Tool-Calls im Content")
                         tool_calls = text_tool_calls
                         native_tools = False  # Text-geparst, kein natives tool_calls-Format
                         finish_reason = "tool_calls"
@@ -1015,7 +1018,7 @@ class AgentOrchestrator:
                         try:
                             parsed_args = json.loads(raw_args)
                         except json.JSONDecodeError as e:
-                            print(f"[agent] Malformed tool arguments JSON: {e} — raw: {raw_args[:100]}")
+                            logger.debug("[agent] Malformed tool arguments JSON: {e} — raw: {raw_args[:100]}")
                             parsed_args = {}
                     else:
                         parsed_args = raw_args
@@ -1031,7 +1034,7 @@ class AgentOrchestrator:
                         file_path = tool_call.arguments.get("path", "")
                         read_count = state.read_files_this_request.get(file_path, 0)
                         if read_count >= 2:
-                            print(f"[agent] Loop-Prävention: {file_path} wurde bereits {read_count}x gelesen, überspringe")
+                            logger.debug("[agent] Loop-Prävention: {file_path} wurde bereits {read_count}x gelesen, überspringe")
                             messages.append({
                                 "role": "tool",
                                 "tool_call_id": tool_call.id,
@@ -1326,13 +1329,13 @@ class AgentOrchestrator:
         if model:
             # User hat explizit ein Modell ausgewählt - das hat Vorrang
             selected_model = model
-            print(f"[stream] Using user-selected model: {selected_model}")
+            logger.debug("[stream] Using user-selected model: {selected_model}")
         elif settings.llm.analysis_model:
             selected_model = settings.llm.analysis_model
-            print(f"[stream] Using analysis_model: {selected_model}")
+            logger.debug("[stream] Using analysis_model: {selected_model}")
         else:
             selected_model = settings.llm.default_model
-            print(f"[stream] Using default_model: {selected_model}")
+            logger.debug("[stream] Using default_model: {selected_model}")
 
         base_url = settings.llm.base_url.rstrip("/")
 
@@ -1362,7 +1365,7 @@ class AgentOrchestrator:
             last_exc = None
             for attempt, delay in enumerate([0] + _RETRY_DELAYS):
                 if delay:
-                    print(f"[agent] Stream Retry {attempt} nach {delay}s")
+                    logger.debug("[agent] Stream Retry {attempt} nach {delay}s")
                     await asyncio.sleep(delay)
                 try:
                     client = _get_http_client()
@@ -1416,9 +1419,9 @@ class AgentOrchestrator:
                 except Exception as e:
                     last_exc = e
                     if _is_retryable(e) and attempt < len(_RETRY_DELAYS):
-                        print(f"[agent] Stream unterbrochen: {e}, Retry {attempt + 1}")
+                        logger.debug("[agent] Stream unterbrochen: {e}, Retry {attempt + 1}")
                         continue
-                    print(f"[agent] Stream Fehler (kein Retry): {e}")
+                    logger.debug("[agent] Stream Fehler (kein Retry): {e}")
                     break
 
             # Fallback: Wenn kein Usage vom Server, schätzen wir basierend auf Zeichenzahl
@@ -1480,16 +1483,16 @@ class AgentOrchestrator:
             if model:
                 # User hat explizit ein Modell ausgewählt - das hat Vorrang
                 selected_model = model
-                print(f"[model] Using user-selected model: {selected_model}")
+                logger.debug("[model] Using user-selected model: {selected_model}")
             elif is_tool_phase and tools and settings.llm.tool_model:
                 selected_model = settings.llm.tool_model
-                print(f"[model] Using tool_model: {selected_model}")
+                logger.debug("[model] Using tool_model: {selected_model}")
             elif not is_tool_phase and settings.llm.analysis_model:
                 selected_model = settings.llm.analysis_model
-                print(f"[model] Using analysis_model: {selected_model}")
+                logger.debug("[model] Using analysis_model: {selected_model}")
             else:
                 selected_model = settings.llm.default_model
-                print(f"[model] Using default_model: {selected_model}")
+                logger.debug("[model] Using default_model: {selected_model}")
 
         base_url = settings.llm.base_url.rstrip("/")
 
@@ -1521,7 +1524,7 @@ class AgentOrchestrator:
         data = None
         for attempt, delay in enumerate([0] + _RETRY_DELAYS):
             if delay:
-                print(f"[agent] LLM Retry {attempt} nach {delay}s (Modell: {selected_model})")
+                logger.debug("[agent] LLM Retry {attempt} nach {delay}s (Modell: {selected_model})")
                 await asyncio.sleep(delay)
             try:
                 client = _get_http_client()
@@ -1536,7 +1539,7 @@ class AgentOrchestrator:
             except Exception as e:
                 last_exc = e
                 if _is_retryable(e) and attempt < len(_RETRY_DELAYS):
-                    print(f"[agent] LLM Fehler (Retry {attempt + 1}): {e}")
+                    logger.debug("[agent] LLM Fehler (Retry {attempt + 1}): {e}")
                     continue
                 # Nicht wiederholbarer Fehler
                 raise
@@ -1546,7 +1549,7 @@ class AgentOrchestrator:
 
         # Debug: Rohe Antwort prüfen
         if "choices" not in data or not data["choices"]:
-            print(f"[agent] WARNING: No choices in LLM response: {list(data.keys())}")
+            logger.debug("[agent] WARNING: No choices in LLM response: {list(data.keys())}")
             return {"content": "", "tool_calls": [], "usage": TokenUsage(), "finish_reason": "error"}
 
         choice = data["choices"][0]
@@ -1557,10 +1560,10 @@ class AgentOrchestrator:
 
         # Debug für Modelle mit Text-basierten Tool-Calls
         if finish_reason == "tool_calls" and not tool_calls_in_msg:
-            print(
-                f"[agent] WARNING: finish_reason='tool_calls' aber keine tool_calls im message-Objekt!\n"
-                f"  Modell: {selected_model}\n"
-                f"  Content (erste 500 Zeichen): {(content or '')[:500]}"
+            logger.warning(
+                "[agent] finish_reason='tool_calls' aber keine tool_calls im message-Objekt! "
+                "Modell: %s, Content (erste 500 Zeichen): %s",
+                selected_model, (content or '')[:500]
             )
 
         # Token-Nutzung extrahieren
@@ -1625,7 +1628,7 @@ class AgentOrchestrator:
                             f"[Java-Querverweis für {entity.name}]\n{java_result.data[:1500]}"
                         )
             except Exception as e:
-                print(f"[entity_enrichment] Fehler bei Anreicherung für {entity.name}: {e}")
+                logger.debug("[entity_enrichment] Fehler bei Anreicherung für {entity.name}: {e}")
 
         return enrichments
 
@@ -1955,7 +1958,7 @@ Sei vorsichtig und mache nur notwendige Änderungen.
         """Bricht die laufende Anfrage einer Session ab."""
         state = self._get_state(session_id)
         state.cancelled = True
-        print(f"[agent] Anfrage für Session {session_id} abgebrochen")
+        logger.debug("[agent] Anfrage für Session {session_id} abgebrochen")
 
     def clear_session(self, session_id: str) -> None:
         """Löscht den State einer Session (Speicher + Disk)."""
