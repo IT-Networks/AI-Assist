@@ -244,6 +244,51 @@ async def get_runtime_info() -> Dict[str, Any]:
     return info
 
 
+@router.get("/image")
+async def get_image_status() -> Dict[str, Any]:
+    """
+    Prüft ob das konfigurierte Container-Image verfügbar ist.
+    """
+    if not settings.docker_sandbox.enabled:
+        raise HTTPException(status_code=400, detail="Docker Sandbox ist nicht aktiviert")
+
+    from app.agent.docker_tools import _get_container_image, _check_image_exists
+
+    image = _get_container_image()
+    exists = await _check_image_exists(image)
+
+    return {
+        "image": image,
+        "exists": exists,
+        "message": f"Image '{image}' ist lokal verfügbar" if exists else f"Image '{image}' ist NICHT lokal vorhanden. Nutze POST /pull um es herunterzuladen."
+    }
+
+
+@router.post("/pull")
+async def pull_image() -> Dict[str, Any]:
+    """
+    Lädt das konfigurierte Container-Image herunter.
+
+    Dies kann einige Minuten dauern (je nach Image-Größe und Netzwerk).
+    """
+    if not settings.docker_sandbox.enabled:
+        raise HTTPException(status_code=400, detail="Docker Sandbox ist nicht aktiviert")
+
+    from app.agent.docker_tools import _get_container_image, _pull_image
+
+    image = _get_container_image()
+    success, message = await _pull_image(image)
+
+    if not success:
+        raise HTTPException(status_code=500, detail=message)
+
+    return {
+        "image": image,
+        "success": True,
+        "message": message
+    }
+
+
 # ══════════════════════════════════════════════════════════════════════════════
 # Session Endpoints
 # ══════════════════════════════════════════════════════════════════════════════

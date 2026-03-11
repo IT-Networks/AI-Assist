@@ -238,6 +238,71 @@ def _get_container_image() -> str:
     return cfg.custom_image if cfg.custom_image else cfg.image
 
 
+async def _check_image_exists(image: str) -> bool:
+    """Prüft ob ein Container-Image lokal vorhanden ist."""
+    try:
+        runtime = get_container_runtime()
+        proc = await asyncio.create_subprocess_exec(
+            runtime, "image", "inspect", image,
+            stdout=asyncio.subprocess.DEVNULL,
+            stderr=asyncio.subprocess.DEVNULL
+        )
+        await proc.wait()
+        return proc.returncode == 0
+    except Exception as e:
+        logger.warning(f"[sandbox] Error checking image {image}: {e}")
+        return False
+
+
+async def _pull_image(image: str) -> tuple[bool, str]:
+    """
+    Zieht ein Container-Image herunter.
+
+    Returns:
+        Tuple (success, message)
+    """
+    runtime = get_container_runtime()
+    logger.info(f"[sandbox] Pulling image: {image}")
+
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            runtime, "pull", image,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE
+        )
+        stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=300)  # 5 min timeout
+
+        if proc.returncode == 0:
+            logger.info(f"[sandbox] Image pulled successfully: {image}")
+            return True, f"Image {image} erfolgreich heruntergeladen"
+        else:
+            error_msg = stderr.decode("utf-8", errors="replace").strip()
+            logger.error(f"[sandbox] Failed to pull image {image}: {error_msg}")
+            return False, f"Fehler beim Herunterladen: {error_msg}"
+
+    except asyncio.TimeoutError:
+        return False, "Timeout beim Herunterladen des Images (5 Minuten)"
+    except Exception as e:
+        return False, f"Fehler: {str(e)}"
+
+
+async def _ensure_image_available(image: str) -> tuple[bool, str]:
+    """
+    Stellt sicher dass ein Image verfügbar ist, lädt es ggf. herunter.
+
+    Returns:
+        Tuple (success, message)
+    """
+    # Prüfen ob Image existiert
+    if await _check_image_exists(image):
+        logger.debug(f"[sandbox] Image exists: {image}")
+        return True, f"Image {image} ist verfügbar"
+
+    # Image herunterladen
+    logger.info(f"[sandbox] Image not found locally, pulling: {image}")
+    return await _pull_image(image)
+
+
 def _build_container_run_args(
     container_name: Optional[str] = None,
     detach: bool = False,
@@ -341,8 +406,8 @@ async def _test_container_basic() -> Dict[str, Any]:
     """
     Einfacher Container-Test OHNE Paket-Installation.
 
-    Prüft nur ob die Container-Runtime funktioniert und das Image verfügbar ist.
-    Viel schneller als docker_execute_python da keine Pakete installiert werden.
+    Prüft ob die Container-Runtime funktioniert und das Image verfügbar ist.
+    Lädt das Image automatisch herunter falls es nicht existiert.
 
     Returns:
         Dict mit success, stdout, stderr, command (für Debug)
@@ -358,8 +423,18 @@ async def _test_container_basic() -> Dict[str, Any]:
     except RuntimeError as e:
         return {"error": str(e), "success": False}
 
-    # Minimale Container-Argumente (ohne Paket-Installation)
+    # Image prüfen und ggf. herunterladen
     image = _get_container_image()
+    image_ok, image_msg = await _ensure_image_available(image)
+    if not image_ok:
+        return {
+            "error": f"Image nicht verfügbar: {image_msg}",
+            "success": False,
+            "image": image,
+            "execution_time_seconds": round(time.time() - start_time, 2)
+        }
+
+    # Minimale Container-Argumente (ohne Paket-Installation)
     args = [
         runtime, "run", "--rm",
         "-m", cfg.memory_limit,
@@ -420,11 +495,18 @@ async def docker_execute_python(
 
     start_time = time.time()
 
+    # Image prüfen und ggf. herunterladen
+    image = _get_container_image()
+    image_ok, image_msg = await _ensure_image_available(image)
+    if not image_ok:
+        return {
+            "error": f"Image nicht verfügbar: {image_msg}",
+            "exit_code": -1,
+            "success": False
+        }
+
     # Docker-Befehl aufbauen
     args = _build_container_run_args(network=cfg.network_enabled)
-
-    # Image
-    image = _get_container_image()
 
     # Pakete vorinstallieren?
     all_packages = list(cfg.preinstalled_packages)
