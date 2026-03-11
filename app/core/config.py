@@ -279,6 +279,7 @@ class ServerConfig(BaseModel):
     host: str = "0.0.0.0"
     port: int = 8000
     reload: bool = False
+    reload_excludes: List[str] = ["chats/*", "output/*", "generated/*", "*.pyc", "__pycache__/*"]
     chats_directory: str = "./chats"
 
 

@@ -116,7 +116,13 @@ uploads:
 server:
   host: 0.0.0.0
   port: 8000
-  reload: false
+  reload: true  # Auto-Reload bei Code-Änderungen (Development)
+  reload_excludes:  # Diese Pfade lösen keinen Reload aus
+    - "chats/*"
+    - "output/*"
+    - "generated/*"
+    - "*.pyc"
+    - "__pycache__/*"
   chats_directory: ./chats
 
 # Such-Index (SQLite FTS5)

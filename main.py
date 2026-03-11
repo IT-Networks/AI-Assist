@@ -509,6 +509,10 @@ if __name__ == "__main__":
         "reload": settings.server.reload,
     }
 
+    # Reload-Excludes hinzufügen wenn reload aktiv
+    if settings.server.reload and settings.server.reload_excludes:
+        uvicorn_config["reload_excludes"] = settings.server.reload_excludes
+
     if sys.platform == "win32":
         # loop="asyncio" nutzt die gesetzte Policy (ProactorEventLoop)
         uvicorn_config["loop"] = "asyncio"
