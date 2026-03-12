@@ -385,7 +385,7 @@ internal_fetch:
 # Container Sandbox (Docker/Podman) - Sichere Code-Ausführung
 docker_sandbox:
   enabled: true
-  backend: auto  # auto = Docker oder Podman (was verfügbar ist), docker, podman
+  backend: auto  # auto | docker | podman | wsl-podman
   docker_path: ''  # Leer = automatische Erkennung aus PATH
   podman_path: ''  # Leer = automatische Erkennung aus PATH
   image: python:3.11-slim
@@ -414,6 +414,22 @@ docker_sandbox:
   - chardet
   read_only_filesystem: false
   drop_capabilities: true
+  # Podman Machine Konfiguration (für Windows ohne WSL)
+  podman_machine:
+    enabled: true
+    name: podman-machine-default
+    image_path: ''           # Pfad für interne Image-Bereitstellung (z.B. Netzlaufwerk)
+    cpus: 2
+    memory_mb: 2048
+    disk_size_gb: 20
+    auto_start: true
+  # WSL Integration (nutzt existierende WSL-Distribution statt Podman VM)
+  wsl_integration:
+    enabled: false           # Auf true setzen um WSL zu nutzen
+    mode: auto               # auto | native | wsl-distro
+    distro_name: ''          # z.B. "Ubuntu-24.04" - leer = auto-detect
+    podman_path_in_wsl: /usr/bin/podman
+    auto_detect: true
 
 mcp:
   enabled: true

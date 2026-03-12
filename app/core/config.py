@@ -867,6 +867,35 @@ class MCPConfig(BaseModel):
 # Container Sandbox (Sichere Code-Ausführung mit Podman)
 # ══════════════════════════════════════════════════════════════════════════════
 
+class PodmanMachineConfig(BaseModel):
+    """Konfiguration für Podman Machine (Windows VM).
+
+    Ermöglicht die Initialisierung einer Podman-VM mit benutzerdefinierten
+    Ressourcen und optionalem Image-Pfad für interne Registries.
+    """
+    enabled: bool = True
+    name: str = "podman-machine-default"  # Name der Machine
+    image_path: str = ""                   # Custom Image-Pfad (für interne Registries)
+    cpus: int = 2                          # Anzahl CPUs für die VM
+    memory_mb: int = 2048                  # RAM in MB
+    disk_size_gb: int = 20                 # Disk-Größe in GB
+    auto_start: bool = True                # Machine automatisch starten wenn nicht aktiv
+
+
+class WSLIntegrationConfig(BaseModel):
+    """Konfiguration für WSL-Integration.
+
+    Ermöglicht die Nutzung von Podman in einer existierenden WSL-Distribution
+    statt einer separaten Podman-VM. Spart Ressourcen und nutzt vorhandene
+    WSL-Umgebung.
+    """
+    enabled: bool = False
+    mode: str = "auto"                     # auto | native | wsl-distro
+    distro_name: str = ""                  # WSL-Distribution (z.B. "Ubuntu-24.04")
+    podman_path_in_wsl: str = "/usr/bin/podman"  # Pfad zu Podman in WSL
+    auto_detect: bool = True               # Automatische Erkennung der besten Option
+
+
 class DockerSandboxConfig(BaseModel):
     """Podman Sandbox für sichere Python-Code-Ausführung.
 
@@ -909,6 +938,13 @@ class DockerSandboxConfig(BaseModel):
     # Sicherheit
     read_only_filesystem: bool = False     # Read-only Root (kann pip install verhindern)
     drop_capabilities: bool = True         # Alle Linux Capabilities entfernen
+    # Backend-Auswahl
+    backend: str = "auto"                  # auto | docker | podman | wsl-podman
+    docker_path: str = ""                  # Pfad zu Docker (für Docker-Backend)
+    # Podman Machine Konfiguration (Windows)
+    podman_machine: PodmanMachineConfig = Field(default_factory=PodmanMachineConfig)
+    # WSL Integration (Windows mit WSL2)
+    wsl_integration: WSLIntegrationConfig = Field(default_factory=WSLIntegrationConfig)
 
 
 class GitHubConfig(BaseModel):

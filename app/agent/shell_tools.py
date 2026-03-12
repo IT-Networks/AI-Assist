@@ -471,7 +471,7 @@ async def shell_execute(
     working_dir: Optional[str] = None,
     timeout: int = 120,
     mount_repo: bool = False
-) -> Dict[str, Any]:
+) -> ToolResult:
     """
     Führt einen Shell-Befehl im Container aus (Container-First).
 
@@ -485,20 +485,22 @@ async def shell_execute(
         mount_repo: True um Java/Python-Repo zu mounten (read-only)
 
     Returns:
-        Dict mit Ergebnis und execution_id für Eskalation
+        ToolResult mit Ergebnis und execution_id für Eskalation
     """
     # Klassifizieren
     classification = classify_command(command)
 
     # Blockiert?
     if classification.level == SafetyLevel.BLOCKED:
-        return {
-            "success": False,
-            "error": f"Befehl blockiert: {classification.block_reason}",
-            "command": command,
-            "safety_level": classification.level.name,
-            "category": classification.category
-        }
+        return ToolResult(
+            success=False,
+            error=f"Befehl blockiert: {classification.block_reason}",
+            data={
+                "command": command,
+                "safety_level": classification.level.name,
+                "category": classification.category
+            }
+        )
 
     # Mount-Pfad ermitteln
     mount_path = None
@@ -529,21 +531,30 @@ async def shell_execute(
     )
     _executions[execution_id] = execution
 
-    # Ergebnis zusammenstellen
-    return {
-        **result,
-        "execution_id": execution_id,
-        "command": command,
-        "safety_level": classification.level.name,
-        "category": classification.category,
-        "can_escalate_to_local": classification.requires_confirmation,
-        "working_dir": working_dir,
-        "hint": (
-            "Nutze shell_execute_local mit dieser execution_id um den Befehl lokal auszuführen."
-            if classification.requires_confirmation and result.get("success")
-            else None
-        )
-    }
+    # Hint für Eskalation
+    hint = None
+    if classification.requires_confirmation and result.get("success"):
+        hint = "Nutze shell_execute_local mit dieser execution_id um den Befehl lokal auszuführen."
+
+    # Ergebnis als ToolResult
+    return ToolResult(
+        success=result.get("success", False),
+        data={
+            "execution_id": execution_id,
+            "command": command,
+            "stdout": result.get("stdout", ""),
+            "stderr": result.get("stderr", ""),
+            "exit_code": result.get("exit_code", -1),
+            "duration_seconds": result.get("duration_seconds", 0),
+            "executed_in": result.get("executed_in", "container"),
+            "safety_level": classification.level.name,
+            "category": classification.category,
+            "can_escalate_to_local": classification.requires_confirmation,
+            "working_dir": working_dir,
+            "hint": hint
+        },
+        error=result.get("error")
+    )
 
 
 async def shell_execute_local(
@@ -577,15 +588,11 @@ async def shell_execute_local(
     # Befehl geändert? → Neuer Container-Test
     if modified_command and modified_command.strip() != execution.command:
         logger.debug("Befehl geändert - neuer Container-Test")
-        new_result = await shell_execute(
+        # shell_execute returns ToolResult now
+        return await shell_execute(
             command=modified_command,
             working_dir=execution.container_result.get("working_dir") if execution.container_result else None,
             timeout=120
-        )
-        return ToolResult(
-            success=new_result.get("success", False),
-            data=new_result,
-            error=new_result.get("error")
         )
 
     # Bereits eskaliert?
@@ -630,12 +637,12 @@ async def shell_execute_local(
     )
 
 
-async def shell_list_executions() -> Dict[str, Any]:
+async def shell_list_executions() -> ToolResult:
     """
     Listet alle gecachten Shell-Ausführungen.
 
     Returns:
-        Dict mit Liste der Ausführungen
+        ToolResult mit Liste der Ausführungen
     """
     executions = []
     for eid, ex in _executions.items():
@@ -649,10 +656,13 @@ async def shell_list_executions() -> Dict[str, Any]:
             "created_at": ex.created_at.isoformat()
         })
 
-    return {
-        "count": len(executions),
-        "executions": sorted(executions, key=lambda x: x["created_at"], reverse=True)
-    }
+    return ToolResult(
+        success=True,
+        data={
+            "count": len(executions),
+            "executions": sorted(executions, key=lambda x: x["created_at"], reverse=True)
+        }
+    )
 
 
 # ══════════════════════════════════════════════════════════════════════════════

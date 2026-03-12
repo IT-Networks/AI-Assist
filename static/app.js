@@ -1508,6 +1508,23 @@ async function processAgentEvent(event, bubble, msgDiv, chat) {
       showThinkingError(data, chat);
       break;
     }
+    // v2: Extended MCP Events
+    case 'mcp_branch_start': {
+      handleMcpBranchStart(data, chat);
+      break;
+    }
+    case 'mcp_branch_end': {
+      handleMcpBranchEnd(data, chat);
+      break;
+    }
+    case 'mcp_assumption_created': {
+      handleMcpAssumption(data, chat);
+      break;
+    }
+    case 'mcp_tool_recommendation': {
+      handleMcpToolRec(data, chat);
+      break;
+    }
   }
 }
 
@@ -7616,7 +7633,7 @@ function showThinkingPanel(data, chat) {
     chat.mcpSessions = {};
   }
 
-  // Session-State speichern
+  // Session-State speichern (mit v2 Features)
   chat.mcpSessions[sessionId] = {
     id: sessionId,
     toolName: data.tool_name || 'sequential_thinking',
@@ -7626,7 +7643,13 @@ function showThinkingPanel(data, chat) {
     steps: [],
     startTime: Date.now(),
     maxSteps: data.estimated_steps || data.max_steps || 10,
-    currentStep: 0
+    currentStep: 0,
+    // v2: Tree View Features
+    branches: {},           // branch_id -> { info, steps[] }
+    activeBranch: null,     // Currently active branch
+    assumptions: {},        // assumption_id -> { text, confidence, critical, status }
+    revisionCount: 0,
+    riskScore: 0
   };
 
   if (isActive && sessionsContainer) {
@@ -7693,11 +7716,34 @@ function addThinkingStep(data, chat) {
     title: data.title || `Schritt ${data.step_number}`,
     content: data.content || '',
     confidence: data.confidence || 0,
-    timestamp: Date.now()
+    timestamp: Date.now(),
+    // v2: Extended step properties
+    isRevision: data.is_revision || false,
+    revisesStep: data.revises_step || null,
+    revisionReason: data.revision_reason || null,
+    branchId: data.branch_id || null,
+    branchFromStep: data.branch_from_step || null,
+    assumptions: data.assumptions || [],
+    toolRecommendations: data.tool_recommendations || []
   };
 
   session.steps.push(step);
   session.currentStep = step.number;
+
+  // v2: Track revision count
+  if (step.isRevision) {
+    session.revisionCount = (session.revisionCount || 0) + 1;
+  }
+
+  // Dynamische Tiefensteuerung: max_steps aktualisieren wenn vom Backend angepasst
+  if (data.total_steps && data.total_steps > (session.maxSteps || 0)) {
+    const oldMax = session.maxSteps || session.initialMaxSteps || 10;
+    session.maxSteps = data.total_steps;
+    session.stepsAdded = (session.stepsAdded || 0) + (data.total_steps - oldMax);
+  }
+  if (data.steps_added !== undefined) {
+    session.stepsAdded = data.steps_added;
+  }
 
   const isActive = chat.id === chatManager.activeId;
   if (!isActive) return;
@@ -7705,23 +7751,97 @@ function addThinkingStep(data, chat) {
   const stepsContainer = document.getElementById(`mcp-steps-${sessionId}`);
   if (!stepsContainer) return;
 
-  // Step-Element erstellen
+  // Step-Element erstellen mit v2 Features
   const stepEl = document.createElement('div');
-  stepEl.className = 'mcp-step';
+
+  // Build CSS classes based on step properties
+  let stepClasses = 'mcp-step';
+  if (step.isRevision) stepClasses += ' revision';
+  if (step.branchId) stepClasses += ' branch-step';
+  if (step.type === 'conclusion') stepClasses += ' conclusion';
+  stepEl.className = stepClasses;
+  stepEl.dataset.step = step.number;
+  if (step.branchId) stepEl.dataset.branch = step.branchId;
 
   const typeIcons = {
     analysis: '🔍', hypothesis: '💡', verification: '✓', conclusion: '🎯',
     refinement: '🔄', exploration: '🗺️', evaluation: '⚖️', synthesis: '🧩',
-    planning: '📋', decision: '⚖️', revision: '🔄'
+    planning: '📋', decision: '⚖️', revision: '🔄', branch_start: '🌿', branch_merge: '🔀'
   };
 
+  // v2: Build revision indicator
+  let revisionHtml = '';
+  if (step.isRevision && step.revisesStep) {
+    revisionHtml = `<a class="mcp-revision-link" href="#" onclick="scrollToStep('${sessionId}', ${step.revisesStep}); return false;">↩ korrigiert #${step.revisesStep}</a>`;
+  }
+
+  // v2: Build branch indicator
+  let branchHtml = '';
+  if (step.branchId && step.type === 'branch_start') {
+    branchHtml = `<span class="mcp-branch-badge">${step.branchId}</span>`;
+  }
+
+  // v2: Build assumption warnings
+  let assumptionHtml = '';
+  if (step.assumptions && step.assumptions.length > 0) {
+    const assumption = session.assumptions?.[step.assumptions[0]];
+    if (assumption?.critical) {
+      assumptionHtml = `
+        <div class="mcp-assumption-warning" title="${escapeHtml(assumption.text)}">
+          ⚠️ <span class="assumption-text">${escapeHtml(assumption.text.substring(0, 30))}...</span>
+          <span class="assumption-confidence">(${Math.round(assumption.confidence * 100)}%)</span>
+        </div>`;
+    }
+  }
+
+  // v2: Build tool recommendations
+  let toolRecHtml = '';
+  if (step.toolRecommendations && step.toolRecommendations.length > 0) {
+    const chips = step.toolRecommendations.map(r =>
+      `<span class="mcp-tool-chip" data-tool="${r.tool_name}" onclick="insertToolCall('${r.tool_name}')" title="${escapeHtml(r.reason)}">
+        💡 ${r.tool_name} <span class="confidence">${Math.round(r.confidence * 100)}%</span>
+      </span>`
+    ).join('');
+    toolRecHtml = `<div class="mcp-tool-recommendations">${chips}</div>`;
+  }
+
+  // Zeige "needs more" Indikator wenn LLM mehr Schritte anfordert
+  const needsMoreIndicator = data.needs_more_steps ? '<span class="mcp-needs-more"></span>' : '';
+
+  // Tree-view connector
+  const connector = step.type === 'conclusion' ? '└──' : '├──';
+
   stepEl.innerHTML = `
-    <span class="mcp-step-number">${step.number}</span>
+    <span class="mcp-step-connector">${connector}</span>
+    <span class="mcp-step-number">${step.number}${needsMoreIndicator}</span>
+    ${branchHtml}
     <div class="mcp-step-content">
-      <span class="mcp-step-title">${escapeHtml(step.title)}<span class="mcp-step-type">${typeIcons[step.type] || '📝'} ${step.type}</span></span>
+      <span class="mcp-step-title">
+        ${escapeHtml(step.title)}
+        <span class="mcp-step-type">${typeIcons[step.type] || '📝'} ${step.type}</span>
+        ${revisionHtml}
+      </span>
       <div class="mcp-step-text">${escapeHtml(step.content?.substring(0, 200) || '')}</div>
+      ${assumptionHtml}
+      ${toolRecHtml}
     </div>
   `;
+
+  // v2: Mark revised steps as superseded
+  if (step.isRevision && step.revisesStep) {
+    const revisedStepEl = stepsContainer.querySelector(`[data-step="${step.revisesStep}"]`);
+    if (revisedStepEl && !revisedStepEl.classList.contains('superseded')) {
+      revisedStepEl.classList.add('superseded');
+      const titleEl = revisedStepEl.querySelector('.mcp-step-title');
+      if (titleEl && !titleEl.querySelector('.mcp-superseded-badge')) {
+        const badge = document.createElement('span');
+        badge.className = 'mcp-superseded-badge';
+        badge.textContent = `→#${step.number}`;
+        badge.title = `Revidiert in Schritt ${step.number}`;
+        titleEl.appendChild(badge);
+      }
+    }
+  }
 
   stepsContainer.appendChild(stepEl);
   stepEl.scrollIntoView({ behavior: 'smooth', block: 'end' });
@@ -7731,6 +7851,18 @@ function addThinkingStep(data, chat) {
   if (progressBar && session.maxSteps) {
     const percent = Math.min(100, Math.round((step.number / session.maxSteps) * 100));
     progressBar.style.width = `${percent}%`;
+  }
+
+  // Session-Name aktualisieren mit Steps-Added Info
+  if (session.stepsAdded > 0) {
+    const sessionEl = document.getElementById(`mcp-session-${sessionId}`);
+    if (sessionEl) {
+      const nameEl = sessionEl.querySelector('.mcp-session-name');
+      if (nameEl && !nameEl.dataset.updated) {
+        nameEl.innerHTML = `${session.typeInfo?.label || 'MCP'} <span class="mcp-steps-added">(+${session.stepsAdded})</span>`;
+        nameEl.dataset.updated = 'true';
+      }
+    }
   }
 }
 
@@ -7927,6 +8059,234 @@ function updateMcpBadge(chat) {
 function updateThinkingBadge(active, text = null) {
   const chat = chatManager.getActive();
   updateMcpBadge(chat);
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+//   v2: Extended MCP Event Handlers
+// ══════════════════════════════════════════════════════════════════════════════
+
+/**
+ * Handles branch start event.
+ * @param {Object} data - Branch start event data
+ * @param {Object} chat - Chat object
+ */
+function handleMcpBranchStart(data, chat) {
+  const sessionId = data.session_id || Object.keys(chat.mcpSessions || {}).pop();
+  if (!sessionId || !chat.mcpSessions?.[sessionId]) return;
+
+  const session = chat.mcpSessions[sessionId];
+  const branchId = data.branch_id;
+
+  // Store branch info
+  if (!session.branches) session.branches = {};
+  session.branches[branchId] = {
+    id: branchId,
+    fromStep: data.from_step,
+    description: data.description,
+    status: 'active',
+    steps: []
+  };
+  session.activeBranch = branchId;
+
+  const isActive = chat.id === chatManager.activeId;
+  if (!isActive) return;
+
+  // Add visual branch indicator to the steps container
+  const stepsContainer = document.getElementById(`mcp-steps-${sessionId}`);
+  if (!stepsContainer) return;
+
+  const branchEl = document.createElement('div');
+  branchEl.className = 'mcp-branch-marker';
+  branchEl.id = `mcp-branch-${sessionId}-${branchId}`;
+  branchEl.innerHTML = `
+    <div class="mcp-branch-header" onclick="toggleBranch('${sessionId}', '${branchId}')">
+      <span class="mcp-branch-connector">├─ Branch:</span>
+      <span class="mcp-branch-name">${escapeHtml(branchId)}</span>
+      <span class="mcp-branch-status active">⟳</span>
+      <span class="mcp-branch-desc">${escapeHtml(data.description || '')}</span>
+    </div>
+    <div class="mcp-branch-content expanded" id="mcp-branch-content-${sessionId}-${branchId}"></div>
+  `;
+  stepsContainer.appendChild(branchEl);
+}
+
+/**
+ * Handles branch end event (merge or abandon).
+ * @param {Object} data - Branch end event data
+ * @param {Object} chat - Chat object
+ */
+function handleMcpBranchEnd(data, chat) {
+  const sessionId = data.session_id || Object.keys(chat.mcpSessions || {}).pop();
+  if (!sessionId || !chat.mcpSessions?.[sessionId]) return;
+
+  const session = chat.mcpSessions[sessionId];
+  const branchId = data.branch_id;
+
+  // Update branch status
+  if (session.branches?.[branchId]) {
+    session.branches[branchId].status = data.status; // 'merged' or 'abandoned'
+    session.branches[branchId].summary = data.summary;
+  }
+
+  if (session.activeBranch === branchId) {
+    session.activeBranch = null;
+  }
+
+  const isActive = chat.id === chatManager.activeId;
+  if (!isActive) return;
+
+  // Update visual indicator
+  const branchEl = document.getElementById(`mcp-branch-${sessionId}-${branchId}`);
+  if (branchEl) {
+    const statusEl = branchEl.querySelector('.mcp-branch-status');
+    if (statusEl) {
+      statusEl.className = `mcp-branch-status ${data.status}`;
+      statusEl.textContent = data.status === 'merged' ? '✓' : '✗';
+    }
+  }
+}
+
+/**
+ * Handles assumption created event.
+ * @param {Object} data - Assumption event data
+ * @param {Object} chat - Chat object
+ */
+function handleMcpAssumption(data, chat) {
+  const sessionId = data.session_id || Object.keys(chat.mcpSessions || {}).pop();
+  if (!sessionId || !chat.mcpSessions?.[sessionId]) return;
+
+  const session = chat.mcpSessions[sessionId];
+  const assumption = data.assumption;
+
+  if (!assumption?.id) return;
+
+  // Store assumption
+  if (!session.assumptions) session.assumptions = {};
+  session.assumptions[assumption.id] = {
+    id: assumption.id,
+    text: assumption.text,
+    confidence: assumption.confidence,
+    critical: assumption.critical,
+    status: assumption.status || 'unverified',
+    riskScore: assumption.risk_score || 0
+  };
+
+  // Update session risk score
+  const criticalAssumptions = Object.values(session.assumptions).filter(a => a.critical);
+  if (criticalAssumptions.length > 0) {
+    session.riskScore = criticalAssumptions.reduce((sum, a) => sum + (a.riskScore || 0), 0) / criticalAssumptions.length;
+  }
+
+  const isActive = chat.id === chatManager.activeId;
+  if (!isActive) return;
+
+  // Update session header with risk indicator if high risk
+  if (session.riskScore > 0.5) {
+    const sessionEl = document.getElementById(`mcp-session-${sessionId}`);
+    if (sessionEl && !sessionEl.querySelector('.mcp-risk-badge')) {
+      const nameEl = sessionEl.querySelector('.mcp-session-name');
+      if (nameEl) {
+        const badge = document.createElement('span');
+        badge.className = 'mcp-risk-badge';
+        badge.title = 'Hohe Risiko-Annahmen';
+        badge.textContent = '⚠️';
+        nameEl.appendChild(badge);
+      }
+    }
+  }
+}
+
+/**
+ * Handles tool recommendation event.
+ * @param {Object} data - Tool recommendation event data
+ * @param {Object} chat - Chat object
+ */
+function handleMcpToolRec(data, chat) {
+  // Tool recommendations are usually included in step events
+  // This handler is for standalone recommendations
+  const sessionId = data.session_id || Object.keys(chat.mcpSessions || {}).pop();
+  if (!sessionId || !chat.mcpSessions?.[sessionId]) return;
+
+  const stepNumber = data.step_number;
+  const recommendations = data.recommendations || [];
+
+  const isActive = chat.id === chatManager.activeId;
+  if (!isActive || recommendations.length === 0) return;
+
+  // Find the step and add recommendations
+  const stepsContainer = document.getElementById(`mcp-steps-${sessionId}`);
+  if (!stepsContainer) return;
+
+  const stepEl = stepsContainer.querySelector(`[data-step="${stepNumber}"]`);
+  if (!stepEl) return;
+
+  // Check if recommendations already exist
+  if (stepEl.querySelector('.mcp-tool-recommendations')) return;
+
+  const chips = recommendations.map(r =>
+    `<span class="mcp-tool-chip" data-tool="${r.tool_name}" onclick="insertToolCall('${r.tool_name}')" title="${escapeHtml(r.reason || '')}">
+      💡 ${r.tool_name} <span class="confidence">${Math.round((r.confidence || 0) * 100)}%</span>
+    </span>`
+  ).join('');
+
+  const recDiv = document.createElement('div');
+  recDiv.className = 'mcp-tool-recommendations';
+  recDiv.innerHTML = chips;
+  stepEl.querySelector('.mcp-step-content')?.appendChild(recDiv);
+}
+
+/**
+ * Scrolls to a specific step in the MCP session.
+ * @param {string} sessionId - Session ID
+ * @param {number} stepNumber - Step number to scroll to
+ */
+function scrollToStep(sessionId, stepNumber) {
+  const stepsContainer = document.getElementById(`mcp-steps-${sessionId}`);
+  if (!stepsContainer) return;
+
+  const stepEl = stepsContainer.querySelector(`[data-step="${stepNumber}"]`);
+  if (stepEl) {
+    stepEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    stepEl.classList.add('highlighted');
+    setTimeout(() => stepEl.classList.remove('highlighted'), 2000);
+  }
+}
+
+/**
+ * Toggles a branch's visibility.
+ * @param {string} sessionId - Session ID
+ * @param {string} branchId - Branch ID
+ */
+function toggleBranch(sessionId, branchId) {
+  const contentEl = document.getElementById(`mcp-branch-content-${sessionId}-${branchId}`);
+  if (contentEl) {
+    contentEl.classList.toggle('expanded');
+    contentEl.classList.toggle('collapsed');
+  }
+}
+
+/**
+ * Inserts a tool call into the chat input.
+ * @param {string} toolName - Name of the tool to insert
+ */
+function insertToolCall(toolName) {
+  const input = document.getElementById('message-input');
+  if (!input) return;
+
+  const toolCommands = {
+    'read_file': '/read ',
+    'glob_search': '/search ',
+    'grep_search': '/grep ',
+    'edit_file': '/edit ',
+    'write_file': '/write ',
+    'run_tests': '/test',
+    'git_operation': '/git ',
+    'http_request': '/fetch '
+  };
+
+  const command = toolCommands[toolName] || `Use tool: ${toolName}`;
+  input.value = command;
+  input.focus();
 }
 
 /**

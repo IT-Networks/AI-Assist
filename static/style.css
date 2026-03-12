@@ -4260,3 +4260,288 @@ a:visited {
   transition: width 0.3s ease;
   width: 0%;
 }
+
+/* Dynamic Depth Indicators */
+.mcp-steps-added {
+  font-size: 0.7rem;
+  font-weight: 400;
+  color: var(--warning);
+  margin-left: 4px;
+}
+
+.mcp-needs-more {
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--warning);
+  margin-left: 6px;
+  animation: needsMorePulse 1.2s ease-in-out infinite;
+}
+
+@keyframes needsMorePulse {
+  0%, 100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.5;
+    transform: scale(1.3);
+  }
+}
+
+/* Step with dynamic extension indicator */
+.mcp-step.extended {
+  border-left: 2px solid var(--warning);
+}
+
+.mcp-step-extended-badge {
+  font-size: 0.65rem;
+  padding: 1px 4px;
+  background: var(--warning-bg);
+  color: var(--warning);
+  border-radius: 3px;
+  margin-left: 6px;
+}
+
+/* ══════════════════════════════════════════════════════════════════════════════
+   v2: Tree View Styles
+   ══════════════════════════════════════════════════════════════════════════════ */
+
+/* Tree structure */
+.mcp-steps {
+  position: relative;
+  padding-left: 4px;
+}
+
+.mcp-step-connector {
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  margin-right: 4px;
+  flex-shrink: 0;
+}
+
+/* Revision styling */
+.mcp-step.revision {
+  border-left: 3px solid var(--warning);
+  padding-left: 8px;
+  margin-left: -3px;
+}
+
+.mcp-revision-link {
+  font-size: 0.7rem;
+  color: var(--accent);
+  text-decoration: none;
+  margin-left: 8px;
+  opacity: 0.8;
+}
+
+.mcp-revision-link:hover {
+  text-decoration: underline;
+  opacity: 1;
+}
+
+.mcp-step.superseded .mcp-step-text {
+  text-decoration: line-through;
+  opacity: 0.5;
+}
+
+.mcp-step.superseded .mcp-step-title {
+  opacity: 0.7;
+}
+
+.mcp-superseded-badge {
+  font-size: 0.65rem;
+  background: var(--surface-hover);
+  color: var(--text-muted);
+  padding: 1px 4px;
+  border-radius: 3px;
+  margin-left: 6px;
+}
+
+/* Branch styling */
+.mcp-step.branch-step {
+  margin-left: 16px;
+  border-left: 2px dashed var(--info);
+  padding-left: 8px;
+}
+
+.mcp-branch-badge {
+  font-size: 0.65rem;
+  background: var(--info);
+  color: var(--bg);
+  padding: 1px 6px;
+  border-radius: 8px;
+  margin-right: 6px;
+}
+
+.mcp-branch-marker {
+  margin: 8px 0;
+  margin-left: 8px;
+}
+
+.mcp-branch-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px;
+  background: var(--surface);
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 0.8rem;
+}
+
+.mcp-branch-header:hover {
+  background: var(--surface-hover);
+}
+
+.mcp-branch-connector {
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+}
+
+.mcp-branch-name {
+  font-weight: 600;
+  color: var(--info);
+}
+
+.mcp-branch-status {
+  font-size: 0.75rem;
+  padding: 1px 4px;
+  border-radius: 3px;
+}
+
+.mcp-branch-status.active {
+  background: var(--accent-bg);
+  color: var(--accent);
+}
+
+.mcp-branch-status.merged {
+  background: var(--success-bg);
+  color: var(--success);
+}
+
+.mcp-branch-status.abandoned {
+  background: var(--danger-bg);
+  color: var(--danger);
+}
+
+.mcp-branch-desc {
+  font-size: 0.75rem;
+  color: var(--text-secondary);
+  font-style: italic;
+}
+
+.mcp-branch-content {
+  margin-left: 16px;
+  border-left: 2px dashed var(--border-light);
+  padding-left: 8px;
+  transition: max-height 0.2s ease, opacity 0.2s ease;
+}
+
+.mcp-branch-content.collapsed {
+  max-height: 0;
+  overflow: hidden;
+  opacity: 0;
+}
+
+.mcp-branch-content.expanded {
+  max-height: 500px;
+  opacity: 1;
+}
+
+/* Assumption warning */
+.mcp-assumption-warning {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 0.75rem;
+  background: var(--warning-bg);
+  color: var(--warning);
+  padding: 2px 8px;
+  border-radius: 4px;
+  margin-top: 6px;
+}
+
+.assumption-text {
+  max-width: 200px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.assumption-confidence {
+  opacity: 0.7;
+  font-size: 0.7rem;
+}
+
+.mcp-risk-badge {
+  margin-left: 4px;
+  animation: riskPulse 2s ease-in-out infinite;
+}
+
+@keyframes riskPulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
+}
+
+/* Tool recommendations */
+.mcp-tool-recommendations {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 6px;
+}
+
+.mcp-tool-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  background: var(--accent-bg);
+  border: 1px solid var(--accent);
+  border-radius: 12px;
+  font-size: 0.7rem;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.mcp-tool-chip:hover {
+  background: var(--accent);
+  color: var(--bg);
+}
+
+.mcp-tool-chip .confidence {
+  opacity: 0.7;
+  font-size: 0.65rem;
+}
+
+/* Conclusion step styling */
+.mcp-step.conclusion {
+  background: var(--success-bg);
+  border-radius: 6px;
+  padding: 8px;
+  margin-top: 4px;
+}
+
+.mcp-step.conclusion .mcp-step-number {
+  color: var(--success);
+}
+
+/* Highlighted step (for scroll-to) */
+.mcp-step.highlighted {
+  animation: highlightPulse 0.5s ease-out;
+  box-shadow: 0 0 0 2px var(--accent);
+}
+
+@keyframes highlightPulse {
+  0% {
+    box-shadow: 0 0 0 4px var(--accent);
+    background: var(--accent-bg);
+  }
+  100% {
+    box-shadow: 0 0 0 2px var(--accent);
+    background: transparent;
+  }
+}

@@ -224,6 +224,11 @@ class AgentEventType(str, Enum):
     MCP_PROGRESS = "mcp_progress"          # Fortschritts-Update (Prozent)
     MCP_COMPLETE = "mcp_complete"          # MCP-Tool fertig mit Zusammenfassung
     MCP_ERROR = "mcp_error"                # Fehler während MCP-Verarbeitung
+    # v2: Extended MCP Events
+    MCP_BRANCH_START = "mcp_branch_start"  # Branch in Sequential Thinking gestartet
+    MCP_BRANCH_END = "mcp_branch_end"      # Branch merged oder abandoned
+    MCP_ASSUMPTION = "mcp_assumption_created"  # Neue Assumption erstellt
+    MCP_TOOL_REC = "mcp_tool_recommendation"   # Tool-Empfehlung
 
 
 @dataclass
@@ -584,6 +589,11 @@ class AgentOrchestrator:
             "mcp_progress": AgentEventType.MCP_PROGRESS,
             "mcp_complete": AgentEventType.MCP_COMPLETE,
             "mcp_error": AgentEventType.MCP_ERROR,
+            # v2: Extended events
+            "mcp_branch_start": AgentEventType.MCP_BRANCH_START,
+            "mcp_branch_end": AgentEventType.MCP_BRANCH_END,
+            "mcp_assumption_created": AgentEventType.MCP_ASSUMPTION,
+            "mcp_tool_recommendation": AgentEventType.MCP_TOOL_REC,
         }
         async for event in self._event_bridge.drain():
             event_type_enum = type_mapping.get(event.event_type, AgentEventType.MCP_STEP)
