@@ -342,7 +342,7 @@ def _build_container_run_args(
     # Sicherheit
     if cfg.drop_capabilities:
         args.extend(["--cap-drop", "ALL"])
-    args.append("--no-new-privileges")
+    args.append("--security-opt=no-new-privileges")
 
     if cfg.read_only_filesystem:
         args.append("--read-only")
@@ -455,7 +455,7 @@ async def _test_container_basic() -> Dict[str, Any]:
         "run", "--rm",
         "-m", cfg.memory_limit,
         "--cpus", str(cfg.cpu_limit),
-        "--no-new-privileges",
+        "--security-opt=no-new-privileges",
         image,
         "python", "-c", "import sys; print(f'Python {sys.version}')"
     ]
