@@ -387,32 +387,35 @@ async def _ddg_search_legacy(query: str, max_results: int, timeout: int) -> List
                 "https://api.duckduckgo.com/",
                 params={"q": query, "format": "json", "no_html": "1", "skip_disambig": "1"},
             )
-            # Robuste Dekodierung: Ersetze ungültige UTF-8 Bytes
-            raw_bytes = r.content
-            try:
-                # Zuerst versuchen: UTF-8 mit Fehler-Ersetzung
-                text = raw_bytes.decode('utf-8', errors='replace')
-                data = json_module.loads(text)
-            except (UnicodeDecodeError, json_module.JSONDecodeError) as decode_err:
-                print(f"[search] JSON decode fallback (encoding issue): {decode_err}")
-                # Letzter Versuch: Latin-1 (akzeptiert alle Bytes)
-                text = raw_bytes.decode('latin-1', errors='replace')
-                data = json_module.loads(text)
 
-            abstract = data.get("AbstractText", "")
-            if abstract:
-                results.append({
-                    "title": data.get("Heading", query),
-                    "snippet": abstract[:500],
-                    "url": data.get("AbstractURL", ""),
-                })
-            for topic in data.get("RelatedTopics", [])[:max_results]:
-                if isinstance(topic, dict) and topic.get("Text"):
-                    results.append({
-                        "title": topic.get("Text", "")[:80],
-                        "snippet": topic.get("Text", "")[:300],
-                        "url": topic.get("FirstURL", ""),
-                    })
+            # Response validieren
+            raw_bytes = r.content
+            if not raw_bytes or len(raw_bytes) < 2:
+                print(f"[search] JSON API returned empty response (status: {r.status_code})")
+            else:
+                # Prüfen ob es wirklich JSON ist (nicht HTML-Fehlerseite)
+                text = raw_bytes.decode('utf-8', errors='replace').strip()
+                if text.startswith('<') or text.startswith('<!'):
+                    print(f"[search] JSON API returned HTML instead of JSON (blocked?)")
+                elif text:
+                    try:
+                        data = json_module.loads(text)
+                        abstract = data.get("AbstractText", "")
+                        if abstract:
+                            results.append({
+                                "title": data.get("Heading", query),
+                                "snippet": abstract[:500],
+                                "url": data.get("AbstractURL", ""),
+                            })
+                        for topic in data.get("RelatedTopics", [])[:max_results]:
+                            if isinstance(topic, dict) and topic.get("Text"):
+                                results.append({
+                                    "title": topic.get("Text", "")[:80],
+                                    "snippet": topic.get("Text", "")[:300],
+                                    "url": topic.get("FirstURL", ""),
+                                })
+                    except json_module.JSONDecodeError as e:
+                        print(f"[search] JSON parse error: {e} | Response: {text[:100]}...")
         except Exception as e:
             print(f"[search] JSON API fallback failed: {e}")
 
