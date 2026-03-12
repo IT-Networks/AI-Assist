@@ -7583,7 +7583,6 @@ function showThinkingPanel(data, chat) {
     maxSteps: data.max_steps || 5,
     currentStep: 0,
     steps: [],
-    complexity: data.complexity_score || 0,
     startTime: Date.now()
   };
 
@@ -7595,12 +7594,11 @@ function showThinkingPanel(data, chat) {
     const modeLabel = document.getElementById('thinking-mode-label');
     const progressBar = document.getElementById('thinking-progress-bar');
     const stepsContainer = document.getElementById('thinking-steps');
-    const complexityEl = document.getElementById('thinking-complexity');
 
     if (modeLabel) {
       const modeIcons = { quick: '⚡', normal: '🧠', deep: '🔬', ultra: '🎯' };
       const modeNames = { quick: 'Quick', normal: 'Normal', deep: 'Deep', ultra: 'Ultra' };
-      modeLabel.innerHTML = `${modeIcons[data.mode] || '🧠'} ${modeNames[data.mode] || 'Thinking'} Mode`;
+      modeLabel.innerHTML = `${modeIcons[data.mode] || '🧠'} ${modeNames[data.mode] || 'Sequential Thinking'} Mode`;
     }
 
     if (progressBar) {
@@ -7610,15 +7608,6 @@ function showThinkingPanel(data, chat) {
 
     if (stepsContainer) {
       stepsContainer.innerHTML = '';
-    }
-
-    if (complexityEl) {
-      const percent = Math.round((data.complexity_score || 0) * 100);
-      complexityEl.textContent = `Komplexität: ${percent}%`;
-      complexityEl.className = 'thinking-complexity';
-      if (percent >= 80) complexityEl.classList.add('high');
-      else if (percent >= 50) complexityEl.classList.add('medium');
-      else complexityEl.classList.add('low');
     }
 
     // Query anzeigen
