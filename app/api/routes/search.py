@@ -380,13 +380,25 @@ async def _ddg_search_legacy(query: str, max_results: int, timeout: int) -> List
 
     if not results:
         # Fallback: DuckDuckGo Instant Answer JSON
+        import json as json_module
         try:
             client = _get_search_client()
             r = await client.get(
                 "https://api.duckduckgo.com/",
                 params={"q": query, "format": "json", "no_html": "1", "skip_disambig": "1"},
             )
-            data = r.json()
+            # Robuste Dekodierung: Ersetze ungültige UTF-8 Bytes
+            raw_bytes = r.content
+            try:
+                # Zuerst versuchen: UTF-8 mit Fehler-Ersetzung
+                text = raw_bytes.decode('utf-8', errors='replace')
+                data = json_module.loads(text)
+            except (UnicodeDecodeError, json_module.JSONDecodeError) as decode_err:
+                print(f"[search] JSON decode fallback (encoding issue): {decode_err}")
+                # Letzter Versuch: Latin-1 (akzeptiert alle Bytes)
+                text = raw_bytes.decode('latin-1', errors='replace')
+                data = json_module.loads(text)
+
             abstract = data.get("AbstractText", "")
             if abstract:
                 results.append({
