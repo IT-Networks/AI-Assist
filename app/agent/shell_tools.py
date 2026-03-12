@@ -389,7 +389,7 @@ async def _run_container_shell(
     args.extend(["--cpus", str(cfg.cpu_limit)])
 
     # Sicherheit
-    args.append("--no-new-privileges")
+    args.append("--security-opt=no-new-privileges")
 
     # Netzwerk (für curl etc.)
     if not cfg.network_enabled:

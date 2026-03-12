@@ -54,6 +54,7 @@ class WSLConfigUpdate(BaseModel):
     """WSL Podman Konfiguration."""
     distro_name: Optional[str] = None
     podman_path_in_wsl: Optional[str] = None
+    internal_image_path: Optional[str] = None
 
 
 class ConfigUpdateRequest(BaseModel):
@@ -106,6 +107,7 @@ async def get_config() -> Dict[str, Any]:
         "wsl_integration": {
             "distro_name": cfg.wsl_integration.distro_name,
             "podman_path_in_wsl": cfg.wsl_integration.podman_path_in_wsl,
+            "internal_image_path": cfg.wsl_integration.internal_image_path,
         },
     }
 
@@ -155,6 +157,8 @@ async def update_config(request: ConfigUpdateRequest) -> Dict[str, Any]:
             cfg.wsl_integration.distro_name = wsl.distro_name
         if wsl.podman_path_in_wsl is not None:
             cfg.wsl_integration.podman_path_in_wsl = wsl.podman_path_in_wsl
+        if wsl.internal_image_path is not None:
+            cfg.wsl_integration.internal_image_path = wsl.internal_image_path
 
     # Config speichern
     from app.api.routes.settings import _save_config

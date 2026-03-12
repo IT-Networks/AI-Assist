@@ -987,6 +987,22 @@ class SequentialThinking:
             # Prompt für nächsten Schritt aktualisieren
             thinking_prompt = self._build_continuation_prompt(session)
 
+        # ═══════════════════════════════════════════════════════════════════
+        # WICHTIG: Session abschließen falls max_steps erreicht ohne Conclusion
+        # ═══════════════════════════════════════════════════════════════════
+        if not session.is_complete and session.completed_at is None:
+            # Letzte Antwort als Fazit verwenden
+            last_content = session.steps[-1].content if session.steps else "Analyse abgeschlossen."
+            conclusion = f"Analyse nach {len(session.steps)} Schritten abgeschlossen.\n\n{last_content}"
+
+            if emit_events and self.event_callback:
+                await self.complete_session_async(session.session_id, conclusion)
+            else:
+                session.completed_at = datetime.utcnow().isoformat()
+                session.final_conclusion = conclusion
+
+            logger.debug(f"[SeqThink:{session.session_id}] Auto-completed after max_steps reached")
+
     def _think_without_llm(self, session: ThinkingSession, query: str) -> None:
         """Grundlegende Strukturierung ohne LLM."""
         # Hypothese

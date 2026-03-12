@@ -6647,6 +6647,14 @@ async function renderDockerSandboxSection() {
         style="font-family:var(--font-mono);font-size:13px">
     </div>
 
+    <div class="settings-field">
+      <label for="ds-wsl-image-path">Interner Image-Pfad (optional)</label>
+      <input type="text" id="ds-wsl-image-path" value="${escapeHtml(cfg.wsl_integration?.internal_image_path || '')}"
+        placeholder="/mnt/images oder registry.intern:5000" onchange="markSettingsModified()"
+        style="font-family:var(--font-mono);font-size:13px">
+      <small style="color:var(--text-muted)">Lokaler Pfad oder interne Registry fuer Images (air-gapped)</small>
+    </div>
+
     <div class="settings-section" style="margin-top:20px">
       <h3 class="settings-section-title">CONTAINER IMAGE</h3>
     </div>
@@ -6799,6 +6807,7 @@ function collectDockerSandboxSettings() {
     wsl_integration: {
       distro_name: document.getElementById('ds-wsl-distro')?.value?.trim() || 'Ubuntu',
       podman_path_in_wsl: document.getElementById('ds-wsl-podman-path')?.value?.trim() || '/usr/bin/podman',
+      internal_image_path: document.getElementById('ds-wsl-image-path')?.value?.trim() || '',
     },
   };
 }

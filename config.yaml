@@ -414,8 +414,9 @@ docker_sandbox:
   drop_capabilities: true
   # WSL Podman Einstellungen
   wsl_integration:
-    distro_name: podman-machine-default      # WSL Distribution mit Podman
+    distro_name: Ubuntu                      # WSL Distribution mit Podman (z.B. Ubuntu, Ubuntu-24.04)
     podman_path_in_wsl: /usr/bin/podman
+    internal_image_path: ''                  # Lokaler Pfad oder interne Registry für Images
 
 mcp:
   enabled: true

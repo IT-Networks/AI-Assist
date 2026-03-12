@@ -255,17 +255,49 @@ def _get_container_image() -> str:
     return cfg.custom_image if cfg.custom_image else cfg.image
 
 
+def _resolve_image_name(image: str) -> str:
+    """
+    Löst einen Image-Namen auf, berücksichtigt internal_image_path.
+
+    Bei konfigurierter interner Registry wird das Image mit Prefix versehen,
+    wenn es nicht bereits einen Namespace/Registry enthält.
+    """
+    cfg = settings.docker_sandbox
+    internal_path = cfg.wsl_integration.internal_image_path
+
+    if internal_path and "/" not in image.split(":")[0]:
+        return f"{internal_path.rstrip('/')}/{image}"
+    return image
+
+
 async def _check_image_exists(image: str) -> bool:
     """Prüft ob ein Container-Image lokal vorhanden ist."""
+    # Auch mit internal_image_path prüfen
+    actual_image = _resolve_image_name(image)
+
     try:
-        cmd = get_wsl_command_prefix() + ["image", "inspect", image]
+        cmd = get_wsl_command_prefix() + ["image", "inspect", actual_image]
         proc = await asyncio.create_subprocess_exec(
             *cmd,
             stdout=asyncio.subprocess.DEVNULL,
             stderr=asyncio.subprocess.DEVNULL
         )
         await proc.wait()
-        return proc.returncode == 0
+        if proc.returncode == 0:
+            return True
+
+        # Falls internal_path gesetzt war, auch Original prüfen
+        if actual_image != image:
+            cmd = get_wsl_command_prefix() + ["image", "inspect", image]
+            proc = await asyncio.create_subprocess_exec(
+                *cmd,
+                stdout=asyncio.subprocess.DEVNULL,
+                stderr=asyncio.subprocess.DEVNULL
+            )
+            await proc.wait()
+            return proc.returncode == 0
+
+        return False
     except Exception as e:
         logger.warning(f"[sandbox] Error checking image {image}: {e}")
         return False
@@ -275,11 +307,17 @@ async def _pull_image(image: str) -> tuple[bool, str]:
     """
     Zieht ein Container-Image herunter.
 
+    Unterstützt interne Image-Registries über internal_image_path (siehe _resolve_image_name).
+
     Returns:
         Tuple (success, message)
     """
-    cmd = get_wsl_command_prefix() + ["pull", image]
-    logger.info(f"[sandbox] Pulling image: {image}")
+    actual_image = _resolve_image_name(image)
+    if actual_image != image:
+        logger.info(f"[sandbox] Using internal registry: {actual_image}")
+
+    cmd = get_wsl_command_prefix() + ["pull", actual_image]
+    logger.info(f"[sandbox] Pulling image: {actual_image}")
 
     try:
         proc = await asyncio.create_subprocess_exec(

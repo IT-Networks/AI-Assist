@@ -874,6 +874,8 @@ class WSLIntegrationConfig(BaseModel):
     """
     distro_name: str = "Ubuntu"            # WSL-Distribution (z.B. "Ubuntu", "Ubuntu-24.04")
     podman_path_in_wsl: str = "/usr/bin/podman"  # Pfad zu Podman in WSL
+    # Interne Image-Registry/Pfad für podman (z.B. für air-gapped Umgebungen)
+    internal_image_path: str = ""          # Lokaler Pfad oder Registry-URL für Images
 
 
 class DockerSandboxConfig(BaseModel):
