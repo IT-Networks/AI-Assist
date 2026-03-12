@@ -635,38 +635,65 @@ CONTINUE: [yes/no]
         - Länge der Anfrage
         - Anzahl technischer Begriffe
         - Vorhandensein von Multi-Step-Indikatoren
+        - Task-Komplexität (mehrere Aktionen)
         """
         score = 0.0
+        query_lower = query.lower()
 
-        # Länge (normalisiert auf 0-0.3)
-        length_score = min(len(query) / 500, 0.3)
+        # Länge (normalisiert auf 0-0.25) - sensibler
+        length_score = min(len(query) / 300, 0.25)
         score += length_score
 
-        # Technische Begriffe (0-0.3)
+        # Technische Begriffe (0-0.35) - erweitert
         tech_terms = [
-            'error', 'exception', 'bug', 'debug', 'trace',
-            'implement', 'refactor', 'optimize', 'architect',
-            'integrate', 'migrate', 'deploy', 'configure',
-            'fehler', 'problem', 'analysier', 'komplex'
+            # Englisch - Entwicklung
+            'error', 'exception', 'bug', 'debug', 'trace', 'stacktrace',
+            'implement', 'refactor', 'optimize', 'architect', 'design',
+            'integrate', 'migrate', 'deploy', 'configure', 'setup',
+            'test', 'junit', 'mock', 'assert', 'validate',
+            'sql', 'query', 'database', 'table', 'join',
+            'api', 'endpoint', 'service', 'controller', 'repository',
+            'java', 'python', 'code', 'class', 'method', 'function',
+            # Deutsch - Entwicklung
+            'fehler', 'problem', 'analysier', 'komplex', 'prüf',
+            'implementier', 'erstell', 'extrahier', 'nachstell', 'reproduzier',
+            'testdaten', 'testfall', 'abfrage', 'datenbank',
+            # Tools & Tickets
+            'jira', 'confluence', 'github', 'jenkins', 'docker',
+            'ticket', 'issue', 'task', 'story', 'epic',
         ]
-        query_lower = query.lower()
         tech_count = sum(1 for term in tech_terms if term in query_lower)
-        tech_score = min(tech_count * 0.1, 0.3)
+        tech_score = min(tech_count * 0.07, 0.35)
         score += tech_score
 
-        # Multi-Step-Indikatoren (0-0.4)
+        # Multi-Step-Indikatoren (0-0.25)
         multi_step_patterns = [
             r'\d+\.\s',           # Nummerierte Liste
-            r'first.*then',      # Sequenz
-            r'step\s*\d',        # Schritte
-            r'and\s+then',       # Verkettung
-            r'after\s+that',     # Sequenz
-            r'zunächst.*dann',   # Deutsch
-            r'erstens.*zweitens' # Deutsch
+            r'first.*then',       # Sequenz
+            r'step\s*\d',         # Schritte
+            r'and\s+then',        # Verkettung
+            r'after\s+that',      # Sequenz
+            r'zunächst.*dann',    # Deutsch
+            r'erstens.*zweitens', # Deutsch
+            r'sowie',             # Und-Verkettung
+            r'\bund\b.*\bund\b',  # Mehrere "und"
         ]
         multi_count = sum(1 for p in multi_step_patterns if re.search(p, query_lower))
-        multi_score = min(multi_count * 0.15, 0.4)
+        multi_score = min(multi_count * 0.1, 0.25)
         score += multi_score
+
+        # Task-Komplexität (0-0.15) - mehrere Aktionen
+        action_verbs = [
+            'lesen', 'schreiben', 'erstellen', 'ändern', 'löschen',
+            'extrahieren', 'analysieren', 'vergleichen', 'testen',
+            'read', 'write', 'create', 'update', 'delete',
+            'extract', 'analyze', 'compare', 'test', 'check',
+        ]
+        action_count = sum(1 for verb in action_verbs if verb in query_lower)
+        if action_count >= 2:
+            score += min(action_count * 0.05, 0.15)
+
+        logger.debug(f"[complexity] query='{query[:50]}...' score={score:.2f} (len={length_score:.2f}, tech={tech_score:.2f}, multi={multi_score:.2f})")
 
         return min(score, 1.0)
 

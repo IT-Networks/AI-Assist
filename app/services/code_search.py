@@ -319,53 +319,54 @@ class CodeSearchEngine:
         case_sensitive: bool
     ) -> List[SearchMatch]:
         """
-        Fallback-Suche mit GNU grep + find.
-        """
-        # Build find command
-        find_parts = ["find", shlex.quote(path), "-type", "f"]
+        Fallback-Suche mit GNU grep (rekursiv).
 
-        # File patterns
+        Verwendet grep -r direkt statt find+xargs für bessere Windows-Kompatibilität.
+        """
+        # Build grep command
+        cmd = [self._grep_path, "-r", "-n", "-H"]  # recursive, line numbers, filename
+
+        if not case_sensitive:
+            cmd.append("-i")
+
+        if context_lines > 0:
+            cmd.append(f"-C{context_lines}")
+
+        # File patterns (--include)
         if patterns and patterns != ["*"]:
-            find_parts.append("\\(")
-            for i, pattern in enumerate(patterns):
-                if i > 0:
-                    find_parts.append("-o")
-                find_parts.extend(["-name", shlex.quote(pattern)])
-            find_parts.append("\\)")
+            for pattern in patterns:
+                cmd.append(f"--include={pattern}")
 
         # Exclude directories
         for exclude in self.EXCLUDE_DIRS:
-            find_parts.extend(["-not", "-path", f"'*/{exclude}/*'"])
+            cmd.append(f"--exclude-dir={exclude}")
 
-        find_cmd = " ".join(find_parts)
+        # Query and path
+        cmd.append("--")
+        cmd.append(query)
+        cmd.append(path)
 
-        # Build grep flags
-        grep_flags = ["-n", "-H"]  # Line numbers, filename
-        if not case_sensitive:
-            grep_flags.append("-i")
-        if context_lines > 0:
-            grep_flags.append(f"-C{context_lines}")
+        logger.debug(f"[code_search] Running: {' '.join(cmd[:8])}...")
 
-        grep_flags_str = " ".join(grep_flags)
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                *cmd,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE
+            )
+            stdout, stderr = await asyncio.wait_for(
+                proc.communicate(),
+                timeout=60.0
+            )
 
-        # Full command with pipe
-        full_cmd = (
-            f"{find_cmd} 2>/dev/null | "
-            f"xargs grep {grep_flags_str} -- {shlex.quote(query)} 2>/dev/null | "
-            f"head -{max_results * 10}"
-        )
+            if stderr:
+                stderr_text = stderr.decode(errors="replace").strip()
+                if stderr_text:
+                    logger.debug(f"[code_search] grep stderr: {stderr_text[:200]}")
 
-        logger.debug(f"[code_search] Running grep: {full_cmd[:100]}...")
-
-        proc = await asyncio.create_subprocess_shell(
-            full_cmd,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE
-        )
-        stdout, _ = await asyncio.wait_for(
-            proc.communicate(),
-            timeout=60.0
-        )
+        except asyncio.TimeoutError:
+            logger.warning("[code_search] grep timed out after 60s")
+            return []
 
         return self._parse_grep_output(stdout.decode(errors="replace"), path, max_results)
 
