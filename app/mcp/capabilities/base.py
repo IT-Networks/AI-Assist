@@ -157,6 +157,26 @@ class CapabilitySession:
         """Get all artifacts of a specific type."""
         return [a for a in self.artifacts if a.artifact_type == artifact_type]
 
+    @property
+    def is_complete(self) -> bool:
+        """Check if the session has completed successfully."""
+        return self.status == CapabilityStatus.COMPLETED
+
+    @property
+    def final_conclusion(self) -> Optional[str]:
+        """Get the final conclusion from the last step or artifacts."""
+        # Try to get from metadata first
+        if "conclusion" in self.metadata:
+            return self.metadata["conclusion"]
+        # Try to get from OUTPUT phase step
+        output_steps = [s for s in self.steps if s.phase == CapabilityPhase.OUTPUT]
+        if output_steps:
+            return output_steps[-1].content
+        # Try to get from last step
+        if self.steps:
+            return self.steps[-1].content
+        return None
+
     def to_dict(self) -> Dict[str, Any]:
         return {
             "session_id": self.session_id,

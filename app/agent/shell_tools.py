@@ -55,94 +55,95 @@ class CommandClassification:
     block_reason: Optional[str] = None
 
 
-# Klassifizierungs-Regeln
-COMMAND_PATTERNS = {
-    # BLOCKED - Immer verboten
-    "blocked": [
-        (r"^git\s+", "Git-Befehle: Nutze die git_* Tools stattdessen"),
-        (r"^rm\s+-rf\s+[/~]", "Gefährlicher rm-Befehl"),
-        (r"^rm\s+-rf\s+\*", "Gefährlicher rm-Befehl"),
-        (r"^sudo\b", "sudo nicht erlaubt"),
-        (r"^su\s+", "su nicht erlaubt"),
-        (r"^chmod\s+777", "chmod 777 nicht erlaubt"),
-        (r"\|\s*(bash|sh|zsh|cmd)", "Pipe zu Shell nicht erlaubt"),
-        (r">\s*/dev/sd", "Schreiben auf Blockdevice nicht erlaubt"),
-        (r"^mkfs\b", "Filesystem-Kommandos nicht erlaubt"),
-        (r"^dd\s+if=", "dd nicht erlaubt"),
-        (r"^format\b", "format nicht erlaubt"),
-        (r"curl.*\|\s*(bash|sh)", "curl | bash nicht erlaubt"),
-        (r"wget.*\|\s*(bash|sh)", "wget | sh nicht erlaubt"),
-    ],
+# ══════════════════════════════════════════════════════════════════════════════
+# Pre-compiled Regex Patterns (Performance: avoid re-compilation on each call)
+# ══════════════════════════════════════════════════════════════════════════════
 
-    # READ_ONLY - Sicher, keine Änderungen
-    "read_only": [
-        r"^ls\b",
-        r"^cat\b",
-        r"^head\b",
-        r"^tail\b",
-        r"^grep\b",
-        r"^find\b.*-type",
-        r"^wc\b",
-        r"^file\b",
-        r"^which\b",
-        r"^where\b",
-        r"^type\b",
-        r"^echo\b",
-        r"^pwd\b",
-        r"^env\b",
-        r"^printenv\b",
-        # Maven read-only
-        r"^mvn\s+dependency:(tree|list|analyze)",
-        r"^mvn\s+help:",
-        r"^mvn\s+-v",
-        r"^mvn\s+--version",
-        # NPM read-only
-        r"^npm\s+(list|ls|outdated|audit|view|info)",
-        r"^npm\s+-v",
-        r"^npm\s+--version",
-        # Pip read-only
-        r"^pip\s+(list|show|freeze|check)",
-        r"^pip\s+-V",
-        r"^pip\s+--version",
-        # Python version
-        r"^python\s+--version",
-        r"^python3\s+--version",
-        # Curl GET (ohne -X POST etc.)
-        r"^curl\s+(?!.*-X\s*(POST|PUT|DELETE|PATCH))(?!.*--data)(?!.*-d\s)",
-    ],
+# BLOCKED - Immer verboten (compiled pattern, reason)
+_BLOCKED_PATTERNS = [
+    (re.compile(r"^git\s+", re.IGNORECASE), "Git-Befehle: Nutze die git_* Tools stattdessen"),
+    (re.compile(r"^rm\s+-rf\s+[/~]", re.IGNORECASE), "Gefährlicher rm-Befehl"),
+    (re.compile(r"^rm\s+-rf\s+\*", re.IGNORECASE), "Gefährlicher rm-Befehl"),
+    (re.compile(r"^sudo\b", re.IGNORECASE), "sudo nicht erlaubt"),
+    (re.compile(r"^su\s+", re.IGNORECASE), "su nicht erlaubt"),
+    (re.compile(r"^chmod\s+777", re.IGNORECASE), "chmod 777 nicht erlaubt"),
+    (re.compile(r"\|\s*(bash|sh|zsh|cmd)", re.IGNORECASE), "Pipe zu Shell nicht erlaubt"),
+    (re.compile(r">\s*/dev/sd", re.IGNORECASE), "Schreiben auf Blockdevice nicht erlaubt"),
+    (re.compile(r"^mkfs\b", re.IGNORECASE), "Filesystem-Kommandos nicht erlaubt"),
+    (re.compile(r"^dd\s+if=", re.IGNORECASE), "dd nicht erlaubt"),
+    (re.compile(r"^format\b", re.IGNORECASE), "format nicht erlaubt"),
+    (re.compile(r"curl.*\|\s*(bash|sh)", re.IGNORECASE), "curl | bash nicht erlaubt"),
+    (re.compile(r"wget.*\|\s*(bash|sh)", re.IGNORECASE), "wget | sh nicht erlaubt"),
+]
 
-    # BUILD - Build-Operationen
-    "build": [
-        r"^mvn\s+(clean|compile|package|install|verify)",
-        r"^gradle\s+(clean|build|assemble|check)",
-        r"^npm\s+run\b",
-        r"^npm\s+build\b",
-        r"^pip\s+install\b",
-        r"^npm\s+install\b(?!.*-g)",  # Nicht global
-        r"^python\s+setup\.py\s+(build|install)",
-    ],
+# READ_ONLY - Sicher, keine Änderungen
+_READ_ONLY_PATTERNS = [
+    re.compile(r"^ls\b", re.IGNORECASE),
+    re.compile(r"^cat\b", re.IGNORECASE),
+    re.compile(r"^head\b", re.IGNORECASE),
+    re.compile(r"^tail\b", re.IGNORECASE),
+    re.compile(r"^grep\b", re.IGNORECASE),
+    re.compile(r"^find\b.*-type", re.IGNORECASE),
+    re.compile(r"^wc\b", re.IGNORECASE),
+    re.compile(r"^file\b", re.IGNORECASE),
+    re.compile(r"^which\b", re.IGNORECASE),
+    re.compile(r"^where\b", re.IGNORECASE),
+    re.compile(r"^type\b", re.IGNORECASE),
+    re.compile(r"^echo\b", re.IGNORECASE),
+    re.compile(r"^pwd\b", re.IGNORECASE),
+    re.compile(r"^env\b", re.IGNORECASE),
+    re.compile(r"^printenv\b", re.IGNORECASE),
+    # Maven read-only
+    re.compile(r"^mvn\s+dependency:(tree|list|analyze)", re.IGNORECASE),
+    re.compile(r"^mvn\s+help:", re.IGNORECASE),
+    re.compile(r"^mvn\s+-v", re.IGNORECASE),
+    re.compile(r"^mvn\s+--version", re.IGNORECASE),
+    # NPM read-only
+    re.compile(r"^npm\s+(list|ls|outdated|audit|view|info)", re.IGNORECASE),
+    re.compile(r"^npm\s+-v", re.IGNORECASE),
+    re.compile(r"^npm\s+--version", re.IGNORECASE),
+    # Pip read-only
+    re.compile(r"^pip\s+(list|show|freeze|check)", re.IGNORECASE),
+    re.compile(r"^pip\s+-V", re.IGNORECASE),
+    re.compile(r"^pip\s+--version", re.IGNORECASE),
+    # Python version
+    re.compile(r"^python\s+--version", re.IGNORECASE),
+    re.compile(r"^python3\s+--version", re.IGNORECASE),
+    # Curl GET (ohne -X POST etc.)
+    re.compile(r"^curl\s+(?!.*-X\s*(POST|PUT|DELETE|PATCH))(?!.*--data)(?!.*-d\s)", re.IGNORECASE),
+]
 
-    # TEST - Test-Ausführung
-    "test": [
-        r"^pytest\b",
-        r"^python\s+-m\s+pytest",
-        r"^npm\s+test\b",
-        r"^mvn\s+test\b",
-        r"^mvn\s+verify\b",
-        r"^gradle\s+test\b",
-        r"^python\s+-m\s+unittest",
-    ],
+# BUILD - Build-Operationen
+_BUILD_PATTERNS = [
+    re.compile(r"^mvn\s+(clean|compile|package|install|verify)", re.IGNORECASE),
+    re.compile(r"^gradle\s+(clean|build|assemble|check)", re.IGNORECASE),
+    re.compile(r"^npm\s+run\b", re.IGNORECASE),
+    re.compile(r"^npm\s+build\b", re.IGNORECASE),
+    re.compile(r"^pip\s+install\b", re.IGNORECASE),
+    re.compile(r"^npm\s+install\b(?!.*-g)", re.IGNORECASE),  # Nicht global
+    re.compile(r"^python\s+setup\.py\s+(build|install)", re.IGNORECASE),
+]
 
-    # SERVER - Server/Prozesse
-    "server": [
-        r"^uvicorn\b",
-        r"^python\s+-m\s+uvicorn",
-        r"^python\s+-m\s+http\.server",
-        r"^flask\s+run",
-        r"^npm\s+start\b",
-        r"^node\b",
-    ],
-}
+# TEST - Test-Ausführung
+_TEST_PATTERNS = [
+    re.compile(r"^pytest\b", re.IGNORECASE),
+    re.compile(r"^python\s+-m\s+pytest", re.IGNORECASE),
+    re.compile(r"^npm\s+test\b", re.IGNORECASE),
+    re.compile(r"^mvn\s+test\b", re.IGNORECASE),
+    re.compile(r"^mvn\s+verify\b", re.IGNORECASE),
+    re.compile(r"^gradle\s+test\b", re.IGNORECASE),
+    re.compile(r"^python\s+-m\s+unittest", re.IGNORECASE),
+]
+
+# SERVER - Server/Prozesse
+_SERVER_PATTERNS = [
+    re.compile(r"^uvicorn\b", re.IGNORECASE),
+    re.compile(r"^python\s+-m\s+uvicorn", re.IGNORECASE),
+    re.compile(r"^python\s+-m\s+http\.server", re.IGNORECASE),
+    re.compile(r"^flask\s+run", re.IGNORECASE),
+    re.compile(r"^npm\s+start\b", re.IGNORECASE),
+    re.compile(r"^node\b", re.IGNORECASE),
+]
 
 
 def classify_command(command: str) -> CommandClassification:
@@ -157,9 +158,9 @@ def classify_command(command: str) -> CommandClassification:
     """
     command = command.strip()
 
-    # BLOCKED prüfen
-    for pattern, reason in COMMAND_PATTERNS["blocked"]:
-        if re.search(pattern, command, re.IGNORECASE):
+    # BLOCKED prüfen (pre-compiled patterns)
+    for pattern, reason in _BLOCKED_PATTERNS:
+        if pattern.search(command):
             return CommandClassification(
                 command=command,
                 level=SafetyLevel.BLOCKED,
@@ -169,9 +170,9 @@ def classify_command(command: str) -> CommandClassification:
                 block_reason=reason
             )
 
-    # READ_ONLY prüfen
-    for pattern in COMMAND_PATTERNS["read_only"]:
-        if re.search(pattern, command, re.IGNORECASE):
+    # READ_ONLY prüfen (pre-compiled patterns)
+    for pattern in _READ_ONLY_PATTERNS:
+        if pattern.search(command):
             return CommandClassification(
                 command=command,
                 level=SafetyLevel.READ_ONLY,
@@ -180,9 +181,9 @@ def classify_command(command: str) -> CommandClassification:
                 requires_confirmation=False
             )
 
-    # BUILD prüfen
-    for pattern in COMMAND_PATTERNS["build"]:
-        if re.search(pattern, command, re.IGNORECASE):
+    # BUILD prüfen (pre-compiled patterns)
+    for pattern in _BUILD_PATTERNS:
+        if pattern.search(command):
             return CommandClassification(
                 command=command,
                 level=SafetyLevel.LOCAL_WRITE,
@@ -191,9 +192,9 @@ def classify_command(command: str) -> CommandClassification:
                 requires_confirmation=True
             )
 
-    # TEST prüfen
-    for pattern in COMMAND_PATTERNS["test"]:
-        if re.search(pattern, command, re.IGNORECASE):
+    # TEST prüfen (pre-compiled patterns)
+    for pattern in _TEST_PATTERNS:
+        if pattern.search(command):
             return CommandClassification(
                 command=command,
                 level=SafetyLevel.LOCAL_WRITE,
@@ -202,9 +203,9 @@ def classify_command(command: str) -> CommandClassification:
                 requires_confirmation=True
             )
 
-    # SERVER prüfen
-    for pattern in COMMAND_PATTERNS["server"]:
-        if re.search(pattern, command, re.IGNORECASE):
+    # SERVER prüfen (pre-compiled patterns)
+    for pattern in _SERVER_PATTERNS:
+        if pattern.search(command):
             return CommandClassification(
                 command=command,
                 level=SafetyLevel.LOCAL_WRITE,

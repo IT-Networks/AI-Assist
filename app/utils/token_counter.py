@@ -1,8 +1,13 @@
+from functools import lru_cache
 from typing import List, Optional
 
 
+@lru_cache(maxsize=1024)
 def estimate_tokens(text: Optional[str]) -> int:
-    """Rough token estimate: ~4 characters per token."""
+    """Rough token estimate: ~4 characters per token.
+
+    Cached for performance - same text returns cached result.
+    """
     if not text:
         return 1
     return max(1, len(text) // 4)

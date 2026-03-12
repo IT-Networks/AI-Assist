@@ -15,6 +15,7 @@ Routing:
 
 import asyncio
 import json
+import logging
 import re
 import time
 import uuid
@@ -24,6 +25,18 @@ from typing import Any, Dict, List, Optional
 import httpx
 
 from app.core.config import settings
+
+logger = logging.getLogger(__name__)
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Pre-compiled Regex Patterns (Performance: avoid re-compilation on each call)
+# ══════════════════════════════════════════════════════════════════════════════
+_RE_MISTRAL_COMPACT = re.compile(r'\[TOOL_CALLS\](\w+)(\{.*?\}|\[.*?\])', re.DOTALL)
+_RE_MISTRAL_STANDARD = re.compile(r'\[TOOL_CALLS\]\s*(\[.*?\])', re.DOTALL)
+_RE_XML_TOOL_CALL = re.compile(r'<(?:tool_call|functioncall)>(.*?)</(?:tool_call|functioncall)>', re.DOTALL | re.IGNORECASE)
+_RE_JSON_BLOCK = re.compile(r'```(?:json)?\s*(\{.*?\})\s*```', re.DOTALL)
+_RE_JSON_EXTRACT = re.compile(r"```(?:json)?\s*([\s\S]*?)```")
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -46,12 +59,8 @@ def _parse_text_tool_calls(content: str, allowed_tools: List[str]) -> List[Dict]
     tool_names = set(allowed_tools) if allowed_tools else set()
     parsed_calls = []
 
-    # Format 1a: Mistral Compact Format
-    mistral_compact_matches = re.findall(
-        r'\[TOOL_CALLS\](\w+)(\{.*?\}|\[.*?\])',
-        content,
-        re.DOTALL
-    )
+    # Format 1a: Mistral Compact Format (pre-compiled pattern)
+    mistral_compact_matches = _RE_MISTRAL_COMPACT.findall(content)
     if mistral_compact_matches:
         for name, args_str in mistral_compact_matches:
             if not tool_names or name in tool_names:
@@ -74,8 +83,8 @@ def _parse_text_tool_calls(content: str, allowed_tools: List[str]) -> List[Dict]
         if parsed_calls:
             return parsed_calls
 
-    # Format 1b: Mistral Standard Format
-    mistral_match = re.search(r'\[TOOL_CALLS\]\s*(\[.*?\])', content, re.DOTALL)
+    # Format 1b: Mistral Standard Format (pre-compiled pattern)
+    mistral_match = _RE_MISTRAL_STANDARD.search(content)
     if mistral_match:
         try:
             calls = json.loads(mistral_match.group(1))
@@ -97,12 +106,8 @@ def _parse_text_tool_calls(content: str, allowed_tools: List[str]) -> List[Dict]
         except (json.JSONDecodeError, KeyError):
             pass
 
-    # Format 2: XML <tool_call> oder <functioncall>
-    xml_matches = re.findall(
-        r'<(?:tool_call|functioncall)>(.*?)</(?:tool_call|functioncall)>',
-        content,
-        re.DOTALL | re.IGNORECASE
-    )
+    # Format 2: XML <tool_call> oder <functioncall> (pre-compiled pattern)
+    xml_matches = _RE_XML_TOOL_CALL.findall(content)
     for match in xml_matches:
         try:
             data = json.loads(match.strip())
@@ -122,8 +127,8 @@ def _parse_text_tool_calls(content: str, allowed_tools: List[str]) -> List[Dict]
     if parsed_calls:
         return parsed_calls
 
-    # Format 3: JSON-Block mit Tool-Call-Struktur
-    json_blocks = re.findall(r'```(?:json)?\s*(\{.*?\})\s*```', content, re.DOTALL)
+    # Format 3: JSON-Block mit Tool-Call-Struktur (pre-compiled pattern)
+    json_blocks = _RE_JSON_BLOCK.findall(content)
     for block in json_blocks:
         try:
             data = json.loads(block)
@@ -248,8 +253,8 @@ class SubAgent:
         matching = [t for t in self.allowed_tools if t in available_tools]
         missing = [t for t in self.allowed_tools if t not in available_tools]
         if missing:
-            print(f"[sub_agent:{self.name}] Fehlende Tools: {missing}")
-        print(f"[sub_agent:{self.name}] {len(tool_schemas)} Tools verfügbar: {matching[:5]}...")
+            logger.warning(f"[sub_agent:{self.name}] Fehlende Tools: {missing}")
+        logger.debug(f"[sub_agent:{self.name}] {len(tool_schemas)} Tools verfügbar: {matching[:5]}...")
 
         if not tool_schemas:
             return SubAgentResult(
@@ -271,14 +276,14 @@ class SubAgent:
         final_result: Optional[SubAgentResult] = None
 
         for iteration in range(max_iterations):
-            print(f"[sub_agent:{self.name}] Iteration {iteration + 1}/{max_iterations}")
+            logger.debug(f"[sub_agent:{self.name}] Iteration {iteration + 1}/{max_iterations}")
             try:
                 response_text, tool_calls_raw = await self._call_llm(
                     llm_client, messages, tool_schemas
                 )
-                print(f"[sub_agent:{self.name}] LLM response: {len(tool_calls_raw)} tool_calls, {len(response_text or '')} chars text")
+                logger.debug(f"[sub_agent:{self.name}] LLM response: {len(tool_calls_raw)} tool_calls, {len(response_text or '')} chars text")
             except Exception as e:
-                print(f"[sub_agent:{self.name}] LLM-Fehler in Iteration {iteration + 1}: {e}")
+                logger.error(f"[sub_agent:{self.name}] LLM-Fehler in Iteration {iteration + 1}: {e}")
                 return SubAgentResult(
                     agent_name=self.display_name,
                     success=False,
@@ -294,7 +299,7 @@ class SubAgent:
             if not tool_calls_raw and response_text:
                 text_tool_calls = _parse_text_tool_calls(response_text, self.allowed_tools)
                 if text_tool_calls:
-                    print(f"[sub_agent:{self.name}] Text-Parser erkannte {len(text_tool_calls)} Tool-Calls")
+                    logger.debug(f"[sub_agent:{self.name}] Text-Parser erkannte {len(text_tool_calls)} Tool-Calls")
                     tool_calls_raw = text_tool_calls
                     native_tools = False
 
@@ -429,7 +434,7 @@ class SubAgent:
 
                 # Robuste Response-Parsing
                 if "choices" not in data or not data["choices"]:
-                    print(f"[sub_agent:{self.name}] Keine 'choices' in LLM-Response: {list(data.keys())}")
+                    logger.warning(f"[sub_agent:{self.name}] Keine 'choices' in LLM-Response: {list(data.keys())}")
                     return "", []
 
                 choice = data["choices"][0]
@@ -440,8 +445,8 @@ class SubAgent:
 
                 # Debug-Log bei unerwarteten Situationen
                 if finish_reason == "tool_calls" and not tool_calls:
-                    print(f"[sub_agent:{self.name}] finish_reason='tool_calls' aber keine tool_calls!")
-                    print(f"  Content (erste 300 Zeichen): {text[:300]}")
+                    logger.warning(f"[sub_agent:{self.name}] finish_reason='tool_calls' aber keine tool_calls!")
+                    logger.debug(f"  Content (erste 300 Zeichen): {text[:300]}")
 
                 return text, tool_calls
 
@@ -452,14 +457,14 @@ class SubAgent:
                     error_body = e.response.text[:500]
                 except Exception:
                     pass
-                print(f"[sub_agent:{self.name}] HTTP {e.response.status_code}: {error_body}")
+                logger.warning(f"[sub_agent:{self.name}] HTTP {e.response.status_code}: {error_body}")
                 if _is_retryable(e) and attempt < len(_RETRY_DELAYS):
                     continue
                 break
 
             except Exception as e:
                 last_exc = e
-                print(f"[sub_agent:{self.name}] Fehler bei LLM-Call: {type(e).__name__}: {e}")
+                logger.error(f"[sub_agent:{self.name}] Fehler bei LLM-Call: {type(e).__name__}: {e}")
                 if _is_retryable(e) and attempt < len(_RETRY_DELAYS):
                     continue
                 break
@@ -478,11 +483,10 @@ class SubAgent:
                 error="Leere Antwort",
             )
 
-        # JSON aus Text extrahieren (auch aus Markdown-Blöcken)
+        # JSON aus Text extrahieren (auch aus Markdown-Blöcken, pre-compiled pattern)
         json_text = text
         if "```" in text:
-            import re
-            match = re.search(r"```(?:json)?\s*([\s\S]*?)```", text)
+            match = _RE_JSON_EXTRACT.search(text)
             if match:
                 json_text = match.group(1).strip()
 
@@ -624,10 +628,10 @@ class SubAgentDispatcher:
                 # Nur aktivierte und bekannte Agenten
                 result = [a for a in raw_agents if a in enabled and a in self._agents]
                 if result:
-                    print(f"[sub_agents] Intent-Routing: {result}")
+                    logger.debug(f"[sub_agents] Intent-Routing: {result}")
                     return result
         except Exception as e:
-            print(f"[sub_agents] Intent-Routing fehlgeschlagen ({e}), nutze Keyword-Fallback")
+            logger.debug(f"[sub_agents] Intent-Routing fehlgeschlagen ({e}), nutze Keyword-Fallback")
 
         return self._keyword_routing(query, enabled)
 
@@ -645,7 +649,7 @@ class SubAgentDispatcher:
         if not matched:
             matched = [a for a in enabled if a in self._agents]
 
-        print(f"[sub_agents] Keyword-Routing: {matched}")
+        logger.debug(f"[sub_agents] Keyword-Routing: {matched}")
         return matched
 
     async def dispatch(
@@ -671,10 +675,10 @@ class SubAgentDispatcher:
         relevant_agents = await self.classify_intent(query, llm_client)
 
         if not relevant_agents:
-            print("[sub_agents] Keine relevanten Agenten ermittelt")
+            logger.debug("[sub_agents] Keine relevanten Agenten ermittelt")
             return []
 
-        print(f"[sub_agents] Starte {len(relevant_agents)} Agenten parallel: {relevant_agents}")
+        logger.info(f"[sub_agents] Starte {len(relevant_agents)} Agenten parallel: {relevant_agents}")
 
         # Alle relevanten Agenten parallel ausführen
         async def run_with_timeout(agent_name: str) -> SubAgentResult:
@@ -708,7 +712,7 @@ class SubAgentDispatcher:
         )
 
         successful = sum(1 for r in results if r.success)
-        print(f"[sub_agents] Fertig: {successful}/{len(results)} erfolgreich")
+        logger.info(f"[sub_agents] Fertig: {successful}/{len(results)} erfolgreich")
         return list(results)
 
     async def dispatch_selected(
@@ -727,10 +731,10 @@ class SubAgentDispatcher:
         # Unbekannte oder deaktivierte Agenten herausfiltern
         valid = [a for a in agents if a in self._agents]
         if not valid:
-            print("[sub_agents] Keine gültigen Agenten in der Auswahl")
+            logger.debug("[sub_agents] Keine gültigen Agenten in der Auswahl")
             return []
 
-        print(f"[sub_agents] Starte {len(valid)} Agenten parallel: {valid}")
+        logger.info(f"[sub_agents] Starte {len(valid)} Agenten parallel: {valid}")
 
         async def run_with_timeout(agent_name: str) -> SubAgentResult:
             agent = self._agents[agent_name]
@@ -760,7 +764,7 @@ class SubAgentDispatcher:
 
         results = await asyncio.gather(*[run_with_timeout(name) for name in valid])
         successful = sum(1 for r in results if r.success)
-        print(f"[sub_agents] Fertig: {successful}/{len(results)} erfolgreich")
+        logger.info(f"[sub_agents] Fertig: {successful}/{len(results)} erfolgreich")
         return list(results)
 
 
