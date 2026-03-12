@@ -180,7 +180,9 @@ class ThinkingEngine:
 
     def should_auto_activate(self, query: str, is_error: bool = False) -> bool:
         """
-        Prüft ob Thinking automatisch aktiviert werden sollte.
+        Prüft ob Thinking automatisch aktiviert werden sollte (sync/keyword-basiert).
+
+        HINWEIS: Für LLM-basierte Prüfung should_auto_activate_async() verwenden.
 
         Args:
             query: Die Benutzeranfrage
@@ -193,6 +195,24 @@ class ThinkingEngine:
             return False
 
         return self._sequential.should_auto_activate(query, is_error)
+
+    async def should_auto_activate_async(self, query: str, is_error: bool = False) -> tuple[bool, float]:
+        """
+        Prüft ob Thinking aktiviert werden sollte (async/LLM-basiert).
+
+        Verwendet LLM für robuste Komplexitäts-Einschätzung.
+
+        Args:
+            query: Die Benutzeranfrage
+            is_error: True bei Fehleranalyse
+
+        Returns:
+            Tuple von (should_activate, complexity_score)
+        """
+        if not self.is_enabled:
+            return False, 0.0
+
+        return await self._sequential.should_auto_activate_async(query, is_error)
 
     def estimate_complexity(self, query: str) -> float:
         """Schätzt die Komplexität synchron (Keyword-basiert, schnell)."""

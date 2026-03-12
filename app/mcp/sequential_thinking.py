@@ -596,7 +596,9 @@ CONTINUE: [yes/no]
 
     def should_auto_activate(self, query: str, is_error: bool = False) -> bool:
         """
-        Prüft ob Sequential Thinking automatisch aktiviert werden soll.
+        Prüft ob Sequential Thinking automatisch aktiviert werden soll (sync/keyword-basiert).
+
+        HINWEIS: Für LLM-basierte Prüfung should_auto_activate_async() verwenden.
 
         Args:
             query: Die Benutzeranfrage
@@ -620,12 +622,50 @@ CONTINUE: [yes/no]
             if any(kw in query_lower for kw in planning_keywords):
                 return True
 
-        # Komplexitätsprüfung
+        # Komplexitätsprüfung (keyword-basiert)
         complexity = self.estimate_complexity(query)
         if complexity >= settings.mcp.min_complexity_score:
             return True
 
         return False
+
+    async def should_auto_activate_async(self, query: str, is_error: bool = False) -> tuple[bool, float]:
+        """
+        Prüft ob Sequential Thinking aktiviert werden soll (async/LLM-basiert).
+
+        Verwendet LLM für robuste Komplexitäts-Einschätzung (versteht Tippfehler, Kontext).
+
+        Args:
+            query: Die Benutzeranfrage
+            is_error: True wenn es sich um eine Fehleranalyse handelt
+
+        Returns:
+            Tuple von (should_activate, complexity_score)
+        """
+        if not self.is_enabled:
+            return False, 0.0
+
+        # Bei Fehlern - schneller Pfad
+        if is_error and settings.mcp.auto_activate_on_error:
+            return True, 0.8
+
+        # Bei Planungsaufgaben - schneller Pfad
+        if settings.mcp.auto_activate_on_planning:
+            planning_keywords = [
+                'plan', 'design', 'architect', 'strateg',
+                'implementier', 'develop', 'build',
+                'analysier', 'evaluat', 'compar'
+            ]
+            query_lower = query.lower()
+            if any(kw in query_lower for kw in planning_keywords):
+                return True, 0.7
+
+        # LLM-basierte Komplexitätsprüfung
+        complexity = await self.estimate_complexity_async(query)
+        if complexity >= settings.mcp.min_complexity_score:
+            return True, complexity
+
+        return False, complexity
 
     # Cache für LLM-basierte Komplexitäts-Schätzungen
     _complexity_cache: Dict[str, float] = {}

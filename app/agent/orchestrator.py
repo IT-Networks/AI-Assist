@@ -1084,25 +1084,31 @@ class AgentOrchestrator:
 
         # === THINKING PHASE (Strukturiertes Denken für komplexe Anfragen) ===
         # Aktiviert automatisch bei hoher Komplexität oder Fehleranalysen
+        # Verwendet LLM-basierte Komplexitäts-Einschätzung für bessere Erkennung
         thinking_engine = self._get_thinking_engine()
         is_error_query = any(kw in user_message.lower() for kw in [
             "fehler", "error", "exception", "problem", "nicht funktioniert",
             "bug", "crash", "failed", "schlägt fehl", "kaputt"
         ])
 
-        if (
-            thinking_engine.is_enabled
-            and not forced_capability
-            and thinking_engine.should_auto_activate(user_message, is_error=is_error_query)
-        ):
+        # Async/LLM-basierte Aktivierungsprüfung
+        should_think, complexity_score = (False, 0.0)
+        if thinking_engine.is_enabled and not forced_capability:
+            should_think, complexity_score = await thinking_engine.should_auto_activate_async(
+                user_message, is_error=is_error_query
+            )
+            logger.debug(f"[agent] Thinking check: activate={should_think}, complexity={complexity_score:.2f}")
+
+        if should_think:
             try:
                 logger.debug("[agent] Activating thinking phase...")
 
                 # Thinking durchführen (Events werden via Queue emittiert)
+                # Komplexität wird bereits berechnet, also force=True um erneute Berechnung zu vermeiden
                 thinking_result = await thinking_engine.think(
                     query=user_message,
                     context=None,  # Kann später Memory-Kontext sein
-                    force=False
+                    force=True  # Komplexität wurde bereits geprüft
                 )
 
                 # MCP Events aus Queue yielden
