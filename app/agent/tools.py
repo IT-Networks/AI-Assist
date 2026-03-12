@@ -2118,6 +2118,7 @@ READ_CONFLUENCE_PAGE_TOOL = Tool(
 
 async def search_jira(query: str, project: str = "", max_results: int = 15) -> ToolResult:
     """Durchsucht Jira per JQL oder Freitext."""
+    import re
     from app.services.jira_client import get_jira_client
     from app.core.config import settings
 
@@ -2125,6 +2126,16 @@ async def search_jira(query: str, project: str = "", max_results: int = 15) -> T
         return ToolResult(success=False, error="Jira ist nicht konfiguriert oder deaktiviert")
 
     try:
+        # Issue-Key aus URL extrahieren (z.B. https://jira.example.com/browse/DIKA-123)
+        url_match = re.search(r'/browse/([A-Z]+-\d+)', query, re.IGNORECASE)
+        if url_match:
+            issue_key = url_match.group(1).upper()
+            return await read_jira_issue(issue_key)
+
+        # Direkter Issue-Key (z.B. "DIKA-123") - direkt lesen statt suchen
+        if re.match(r'^[A-Z]+-\d+$', query.strip(), re.IGNORECASE):
+            return await read_jira_issue(query.strip().upper())
+
         client = get_jira_client()
 
         # Wenn die Query kein JQL-Operator enthält, als Textsuche behandeln
@@ -2196,10 +2207,18 @@ async def read_jira_issue(issue_key: str) -> ToolResult:
 
 SEARCH_JIRA_TOOL = Tool(
     name="search_jira",
-    description="Durchsucht Jira nach Issues. Unterstützt JQL-Queries und Freitext-Suche. Gibt Issue-Keys, Titel, Status und Zuweisungen zurück.",
+    description="""Durchsucht Jira nach Issues. Unterstützt JQL-Queries, Freitext-Suche und direkte Issue-Keys.
+
+WICHTIG: Bei direktem Issue-Key (z.B. 'DIKA-123') oder Jira-URL wird automatisch das vollständige Issue geladen.
+
+Beispiele:
+- "DIKA-123" → Lädt Issue direkt
+- "https://jira.example.com/browse/DIKA-123" → Lädt Issue direkt
+- "Login Fehler" → Textsuche
+- "project=DIKA AND status=Open" → JQL-Suche""",
     category=ToolCategory.SEARCH,
     parameters=[
-        ToolParameter("query", "string", "Suchbegriff oder JQL-Query (z.B. 'project=PROJ AND status=Open')"),
+        ToolParameter("query", "string", "Issue-Key (PROJ-123), Jira-URL, Suchbegriff oder JQL-Query"),
         ToolParameter("project", "string", "Optional: Projekt-Key für Freitext-Suche", required=False, default=""),
         ToolParameter("max_results", "integer", "Maximale Anzahl Ergebnisse", required=False, default=15),
     ],
@@ -2208,7 +2227,10 @@ SEARCH_JIRA_TOOL = Tool(
 
 READ_JIRA_ISSUE_TOOL = Tool(
     name="read_jira_issue",
-    description="Liest ein einzelnes Jira-Issue mit vollständiger Beschreibung, Details und den letzten Kommentaren.",
+    description="""Liest ein einzelnes Jira-Issue mit vollständiger Beschreibung, Details und den letzten Kommentaren.
+
+WANN VERWENDEN: Wenn ein konkreter Issue-Key bekannt ist (z.B. DIKA-123).
+HINWEIS: search_jira erkennt Issue-Keys automatisch und ruft diese Funktion intern auf.""",
     category=ToolCategory.KNOWLEDGE,
     parameters=[
         ToolParameter("issue_key", "string", "Issue-Schlüssel (z.B. 'PROJ-123')"),

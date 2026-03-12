@@ -215,6 +215,8 @@ class AgentEventType(str, Enum):
     MCP_PROGRESS = "mcp_progress"          # Fortschritts-Update (Prozent)
     MCP_COMPLETE = "mcp_complete"          # MCP-Tool fertig mit Zusammenfassung
     MCP_ERROR = "mcp_error"                # Fehler während MCP-Verarbeitung
+    # Thinking Check Event (immer gesendet)
+    THINKING_CHECK = "thinking_check"      # Komplexitäts-Check Ergebnis (immer)
 
 
 @dataclass
@@ -1098,6 +1100,14 @@ class AgentOrchestrator:
                 user_message, is_error=is_error_query
             )
             logger.debug(f"[agent] Thinking check: activate={should_think}, complexity={complexity_score:.2f}")
+
+            # IMMER Event senden mit Komplexitäts-Score (für UI)
+            yield AgentEvent(AgentEventType.THINKING_CHECK, {
+                "complexity_score": round(complexity_score, 2),
+                "will_activate": should_think,
+                "is_error_query": is_error_query,
+                "threshold": settings.mcp.min_complexity_score
+            })
 
         if should_think:
             try:
