@@ -563,6 +563,42 @@ class AgentOrchestrator:
             )
         return self._thinking_engine
 
+    def _build_cot_prompt(self, complexity: float, is_error: bool) -> str:
+        """
+        Erstellt einen Chain-of-Thought Prompt basierend auf Komplexität.
+
+        Leichtgewichtig: Nur Prompt-Injection, kein separater LLM-Call.
+        Für tiefe Analyse: User kann /seq (Sequential Thinking) verwenden.
+        """
+        if is_error:
+            return """## Analyse-Hinweis
+
+Diese Anfrage betrifft einen Fehler oder ein Problem. Gehe systematisch vor:
+1. Identifiziere die Symptome und Fehlermeldungen
+2. Analysiere mögliche Ursachen
+3. Prüfe den relevanten Code oder die Logs
+4. Schlage konkrete Lösungen vor
+
+Denke Schritt für Schritt und erkläre deine Überlegungen."""
+
+        if complexity >= 0.8:
+            return """## Analyse-Hinweis
+
+Diese Anfrage ist komplex und erfordert sorgfältige Überlegung.
+Bevor du antwortest:
+1. Zerlege das Problem in Teilaspekte
+2. Betrachte verschiedene Lösungsansätze
+3. Wäge Vor- und Nachteile ab
+4. Strukturiere deine Antwort klar
+
+Für eine tiefgehende Schritt-für-Schritt-Analyse kann der Befehl `/seq` verwendet werden."""
+
+        # Standard CoT für mittlere Komplexität
+        return """## Analyse-Hinweis
+
+Denke bei dieser Aufgabe Schritt für Schritt bevor du antwortest.
+Strukturiere deine Überlegungen und begründe deine Empfehlungen."""
+
     async def _emit_mcp_event(self, event_type: str, data: Dict[str, Any]) -> None:
         """
         Callback für MCP/Thinking Events.
@@ -1084,63 +1120,42 @@ class AgentOrchestrator:
             # Budget unter 80% → bereit für nächste Komprimierung wenn nötig
             state.compaction_attempted_while_full = False
 
-        # === THINKING PHASE (Strukturiertes Denken für komplexe Anfragen) ===
-        # Aktiviert automatisch bei hoher Komplexität oder Fehleranalysen
-        # Verwendet LLM-basierte Komplexitäts-Einschätzung für bessere Erkennung
+        # === CHAIN-OF-THOUGHT PHASE (Leichtgewichtiges Denken für komplexe Anfragen) ===
+        # Bei hoher Komplexität: Injiziert CoT-Prompt für bessere Antworten
+        # Für tiefe Analyse: Nutze /seq (Sequential Thinking MCP)
         thinking_engine = self._get_thinking_engine()
         is_error_query = any(kw in user_message.lower() for kw in [
             "fehler", "error", "exception", "problem", "nicht funktioniert",
             "bug", "crash", "failed", "schlägt fehl", "kaputt"
         ])
 
-        # Async/LLM-basierte Aktivierungsprüfung
-        should_think, complexity_score = (False, 0.0)
+        # Async/LLM-basierte Komplexitätsprüfung
+        should_cot, complexity_score = (False, 0.0)
         if thinking_engine.is_enabled and not forced_capability:
-            should_think, complexity_score = await thinking_engine.should_auto_activate_async(
+            should_cot, complexity_score = await thinking_engine.should_auto_activate_async(
                 user_message, is_error=is_error_query
             )
-            logger.debug(f"[agent] Thinking check: activate={should_think}, complexity={complexity_score:.2f}")
+            logger.debug(f"[agent] CoT check: activate={should_cot}, complexity={complexity_score:.2f}")
 
             # IMMER Event senden mit Komplexitäts-Score (für UI)
             yield AgentEvent(AgentEventType.THINKING_CHECK, {
                 "complexity_score": round(complexity_score, 2),
-                "will_activate": should_think,
+                "will_activate": should_cot,
                 "is_error_query": is_error_query,
-                "threshold": settings.mcp.min_complexity_score
+                "threshold": settings.mcp.min_complexity_score,
+                "mode": "cot"  # Chain-of-Thought (leicht), nicht Sequential (schwer)
             })
 
-        if should_think:
-            try:
-                logger.debug("[agent] Activating thinking phase...")
+        if should_cot:
+            # Leichtgewichtiger CoT-Prompt statt schwerem Sequential Thinking
+            # Für tiefe Analyse: User kann /seq verwenden
+            cot_prompt = self._build_cot_prompt(complexity_score, is_error_query)
+            cot_tokens = estimate_tokens(cot_prompt)
 
-                # Thinking durchführen (Events werden via Queue emittiert)
-                # Komplexität wird bereits berechnet, also force=True um erneute Berechnung zu vermeiden
-                thinking_result = await thinking_engine.think(
-                    query=user_message,
-                    context=None,  # Kann später Memory-Kontext sein
-                    force=True  # Komplexität wurde bereits geprüft
-                )
-
-                # MCP Events aus Queue yielden
-                async for event in self._drain_mcp_events():
-                    yield event
-
-                # Thinking-Ergebnis als Kontext injizieren wenn erfolgreich
-                if thinking_result.session.is_complete and thinking_result.session.final_conclusion:
-                    thinking_context = f"""## Strukturierte Analyse (automatisch)
-
-{thinking_engine.format_for_context(thinking_result)}
-"""
-                    # Als System-Message injizieren (nach User-Message)
-                    thinking_tokens = estimate_tokens(thinking_context)
-                    if budget.can_add("context", thinking_tokens):
-                        messages.append({"role": "system", "content": thinking_context})
-                        budget.add("context", thinking_tokens)
-                        logger.debug(f"[agent] Thinking context injected: {thinking_tokens} tokens")
-
-            except Exception as e:
-                logger.warning(f"[agent] Thinking phase failed: {e}")
-                # Nicht kritisch - weiter mit normalem Flow
+            if budget.can_add("context", cot_tokens):
+                messages.append({"role": "system", "content": cot_prompt})
+                budget.add("context", cot_tokens)
+                logger.debug(f"[agent] CoT prompt injected: {cot_tokens} tokens")
 
         # === RESEARCH PHASE (Parallele Quellensuche) ===
         # Aktiviert bei Fragen oder Keywords - sucht parallel in Memory, Code, Web, Docs

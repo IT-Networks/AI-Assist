@@ -813,7 +813,7 @@ const _CMD_LIST = [
   { cmd: '/design',     desc: 'MCP: Architektur & Design 📐',     alias: '/des' },
   { cmd: '/implement',  desc: 'MCP: Code-Generierung 💻',         alias: '/impl' },
   { cmd: '/analyze',    desc: 'MCP: Code-Analyse 🔍',             alias: '/ana' },
-  { cmd: '/think',      desc: 'MCP: Sequential Thinking 🧠',      alias: '/t' },
+  { cmd: '/seq',        desc: 'MCP: Sequential Thinking 🧠',      alias: null },
   // Sonstige
   { cmd: '/suche an',   desc: 'Web-Suche aktivieren 🔍',          alias: null },
   { cmd: '/suche aus',  desc: 'Web-Suche deaktivieren',           alias: null },
@@ -954,7 +954,7 @@ function _buildHelpText() {
 \`/design\` \`/des\`  → Architektur & System-Design 📐
 \`/implement\` \`/impl\`  → Code-Generierung 💻
 \`/analyze\` \`/ana\`  → Code-Analyse & Review 🔍
-\`/think\` \`/t\`  → Sequential Thinking 🧠
+\`/seq\`  → Sequential Thinking (tiefgehende Analyse) 🧠
 
 _Beispiel: \`/brainstorm Neues Feature für User-Login\`_
 
@@ -1054,9 +1054,8 @@ async function handleChatCommand(text) {
     'analyze': { name: 'analyze', icon: '🔍', label: 'Analyze' },
     'ana': { name: 'analyze', icon: '🔍', label: 'Analyze' },
     'review': { name: 'analyze', icon: '🔍', label: 'Analyze' },
-    'think': { name: 'sequential_thinking', icon: '🧠', label: 'Sequential Thinking' },
+    // /seq für explizites Sequential Thinking MCP (tiefgehende Analyse)
     'seq': { name: 'sequential_thinking', icon: '🧠', label: 'Sequential Thinking' },
-    't': { name: 'sequential_thinking', icon: '🧠', label: 'Sequential Thinking' },
   };
 
   // Parse: /brainstorm Was soll das Feature können?
@@ -7579,17 +7578,20 @@ document.addEventListener('keydown', (e) => {
  *   - will_activate: boolean
  *   - threshold: number
  *   - is_error_query: boolean
+ *   - mode: string ("cot" für Chain-of-Thought, "sequential" für MCP)
  * @param {Object} chat - Chat-Objekt
  */
 function showThinkingCheck(data, chat) {
   const complexityEl = document.getElementById('thinking-complexity');
   const isActive = chat.id === chatManager.activeId;
+  const mode = data.mode || 'cot';  // Default: Chain-of-Thought
 
   // Komplexität im Chat speichern
   chat.lastComplexityCheck = {
     score: data.complexity_score || 0,
     willActivate: data.will_activate || false,
     threshold: data.threshold || 0.3,
+    mode: mode,
     timestamp: Date.now()
   };
 
@@ -7598,14 +7600,22 @@ function showThinkingCheck(data, chat) {
     const thresholdPercent = Math.round((data.threshold || 0.3) * 100);
 
     if (data.will_activate) {
-      // Thinking wird aktiviert - zeige kurz den Check, dann übernimmt mcp_start
-      complexityEl.textContent = `Komplexität: ${percent}% → Thinking...`;
+      // CoT wird aktiviert - zeige den Modus
+      const modeLabel = mode === 'cot' ? 'CoT' : 'Seq';
+      complexityEl.textContent = `Komplexität: ${percent}% → ${modeLabel}`;
       complexityEl.className = 'thinking-complexity';
       if (percent >= 80) complexityEl.classList.add('high');
       else if (percent >= 50) complexityEl.classList.add('medium');
       else complexityEl.classList.add('low');
+
+      // Bei CoT-Modus: Nach 3 Sekunden ausblenden (kein Panel-Wechsel)
+      if (mode === 'cot') {
+        setTimeout(() => {
+          complexityEl.textContent = '';
+        }, 3000);
+      }
     } else {
-      // Thinking wird NICHT aktiviert - zeige Komplexität dauerhaft
+      // Thinking wird NICHT aktiviert - zeige Komplexität
       complexityEl.textContent = `Komplexität: ${percent}% (< ${thresholdPercent}%)`;
       complexityEl.className = 'thinking-complexity skipped';
 
