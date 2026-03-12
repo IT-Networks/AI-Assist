@@ -893,3 +893,32 @@ async def get_token_budget(session_id: str) -> Dict[str, Any]:
             "budget": None,
             "message": "Kein aktives Budget (Session noch nicht gestartet)"
         }
+
+
+@router.get("/cache/stats")
+async def get_cache_stats() -> Dict[str, Any]:
+    """
+    Gibt LLM-Cache-Statistiken zurück.
+
+    Returns:
+        - enabled: Ob Caching aktiv ist
+        - type: Cache-Typ (local/redis)
+        - hits: Anzahl Cache-Treffer
+        - misses: Anzahl Cache-Misses
+        - hit_rate: Trefferquote in %
+        - size: Anzahl Cache-Einträge
+        - evictions: Anzahl entfernter Einträge
+    """
+    from app.services.llm_cache import get_cache_stats
+    return get_cache_stats()
+
+
+@router.post("/cache/clear")
+async def clear_cache() -> Dict[str, str]:
+    """
+    Leert den LLM-Response-Cache.
+    """
+    from app.services.llm_cache import get_cache_manager
+    cache = await get_cache_manager()
+    await cache.clear()
+    return {"status": "ok", "message": "Cache cleared"}

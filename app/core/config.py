@@ -114,6 +114,22 @@ class DataSourcesConfig(BaseModel):
     sources: List[DataSourceConfig] = []
 
 
+class LLMCacheConfig(BaseModel):
+    """Konfiguration für LLM Response Caching."""
+    enabled: bool = False              # Feature-Flag für Caching
+    type: str = "local"                # "local" (in-memory) oder "redis"
+    ttl_seconds: int = 300             # Cache TTL (5 Minuten default)
+    max_size: int = 1000               # Max Einträge für local cache
+    # Redis-Konfiguration (nur wenn type="redis")
+    redis_host: str = "localhost"
+    redis_port: int = 6379
+    redis_password: str = ""
+    # Cache-Kategorien aktivieren
+    cache_complexity: bool = True      # Komplexitäts-Checks cachen
+    cache_routing: bool = True         # Sub-Agent Routing cachen
+    cache_quick_calls: bool = True     # chat_quick() Calls cachen
+
+
 class LLMConfig(BaseModel):
     base_url: str = "http://localhost/v1"
     api_key: str = "none"
@@ -137,6 +153,8 @@ class LLMConfig(BaseModel):
     llm_context_limits: Dict[str, int] = {}
     # Standard-Kontext-Limit falls kein LLM-spezifisches definiert ist
     default_context_limit: int = 32000
+    # Caching-Konfiguration
+    cache: LLMCacheConfig = Field(default_factory=LLMCacheConfig)
 
 
 class RepoEntry(BaseModel):

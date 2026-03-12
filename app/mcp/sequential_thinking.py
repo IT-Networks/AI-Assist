@@ -722,16 +722,28 @@ CONTINUE: [yes/no]
         LLM-basierte Komplexitäts-Einschätzung.
 
         Robust gegen Tippfehler, versteht Kontext und Semantik.
-        Nutzt chat_quick für schnellen Response (~15s Timeout).
+        Nutzt gecachte Calls wenn aktiviert (settings.llm.cache.enabled).
         """
-        from app.services.llm_client import llm_client
-
         # Modell für Komplexitäts-Einschätzung
         model = (
             settings.llm.complexity_model
             or settings.llm.tool_model
             or settings.llm.default_model
         )
+
+        # Versuche gecachte Version zuerst
+        if settings.llm.cache.enabled and settings.llm.cache.cache_complexity:
+            try:
+                from app.services.llm_cache import cached_complexity_check
+                score = await cached_complexity_check(query, model)
+                if score is not None:
+                    logger.debug(f"[complexity] Cached estimate: {score:.2f} for '{query[:50]}...'")
+                    return score
+            except Exception as e:
+                logger.debug(f"[complexity] Cache fallback: {e}")
+
+        # Fallback: Direkter LLM-Call
+        from app.services.llm_client import llm_client
 
         prompt = """Bewerte die Komplexität dieser Aufgabe auf einer Skala von 0.0 bis 1.0:
 
@@ -749,20 +761,18 @@ Antworte NUR mit einer Zahl zwischen 0.0 und 1.0, z.B.: 0.7"""
                 {"role": "user", "content": prompt.format(query=query[:500])}
             ]
 
-            # Nutze chat_quick für schnelle Klassifikation (kurzer Timeout)
             response = await llm_client.chat_quick(
                 messages=messages,
                 model=model,
                 temperature=0.0,
-                max_tokens=32,  # Nur eine Zahl erwartet
+                max_tokens=32,
             )
             response = response.strip()
 
-            # Zahl extrahieren (auch aus "0.7" oder "Die Komplexität ist 0.7")
             match = re.search(r'(\d+\.?\d*)', response)
             if match:
                 score = float(match.group(1))
-                score = max(0.0, min(1.0, score))  # Clamp auf 0-1
+                score = max(0.0, min(1.0, score))
                 logger.debug(f"[complexity] LLM estimate: {score:.2f} for '{query[:50]}...'")
                 return score
 
