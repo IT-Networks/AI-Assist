@@ -63,30 +63,46 @@ class CodeSearchEngine:
         "all": ["*"],
     }
 
+    # Lokaler Tools-Ordner relativ zum Projekt
+    LOCAL_TOOLS_DIR = Path(__file__).parent.parent.parent / "tools"
+
     def __init__(self):
         self._rg_path: Optional[str] = None
         self._grep_path: Optional[str] = None
         self._checked = False
 
     async def _check_tools(self) -> None:
-        """Prüft verfügbare Such-Tools (einmalig)."""
+        """Prüft verfügbare Such-Tools (einmalig).
+
+        Sucht zuerst im lokalen tools/-Ordner, dann im System-PATH.
+        """
         if self._checked:
             return
 
-        # Check ripgrep
-        self._rg_path = shutil.which("rg")
-        if self._rg_path:
-            logger.debug(f"[code_search] ripgrep found: {self._rg_path}")
+        # Check ripgrep - erst lokal, dann PATH
+        local_rg = self.LOCAL_TOOLS_DIR / ("rg.exe" if shutil.os.name == "nt" else "rg")
+        if local_rg.exists():
+            self._rg_path = str(local_rg)
+            logger.info(f"[code_search] ripgrep found (local): {self._rg_path}")
+        else:
+            self._rg_path = shutil.which("rg")
+            if self._rg_path:
+                logger.debug(f"[code_search] ripgrep found (PATH): {self._rg_path}")
 
-        # Check grep
-        self._grep_path = shutil.which("grep")
-        if self._grep_path:
-            logger.debug(f"[code_search] grep found: {self._grep_path}")
+        # Check grep - erst lokal, dann PATH
+        local_grep = self.LOCAL_TOOLS_DIR / ("grep.exe" if shutil.os.name == "nt" else "grep")
+        if local_grep.exists():
+            self._grep_path = str(local_grep)
+            logger.info(f"[code_search] grep found (local): {self._grep_path}")
+        else:
+            self._grep_path = shutil.which("grep")
+            if self._grep_path:
+                logger.debug(f"[code_search] grep found (PATH): {self._grep_path}")
 
         self._checked = True
 
         if not self._rg_path and not self._grep_path:
-            logger.warning("[code_search] Weder ripgrep noch grep gefunden!")
+            logger.warning(f"[code_search] Weder ripgrep noch grep gefunden! (Lokaler Ordner: {self.LOCAL_TOOLS_DIR})")
 
     @property
     def has_ripgrep(self) -> bool:
