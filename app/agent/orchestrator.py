@@ -519,7 +519,13 @@ class AgentOrchestrator:
 
         Ermöglicht echtes LLM-Denken statt Template-Fallback.
         """
-        messages = []
+        system_prompt = """Du bist ein strukturierter analytischer Denker.
+Antworte IMMER im exakten Format das im Prompt angegeben ist.
+Sei präzise und gib detaillierte Analyse-Schritte."""
+
+        messages = [
+            {"role": "system", "content": system_prompt}
+        ]
         if context:
             messages.append({"role": "system", "content": context})
         messages.append({"role": "user", "content": prompt})
@@ -527,9 +533,10 @@ class AgentOrchestrator:
         try:
             response = await central_llm_client.chat_quick(
                 messages=messages,
-                temperature=0.3,
-                max_tokens=1024
+                temperature=0.2,  # Niedrig für konsistentes Format
+                max_tokens=2048   # Mehr Tokens für detaillierte Schritte
             )
+            logger.debug(f"[MCP] LLM callback response length: {len(response)}")
             return response
         except Exception as e:
             logger.warning(f"[MCP] LLM callback failed: {e}")
@@ -594,12 +601,9 @@ class AgentOrchestrator:
         """
         await self._event_bridge.emit(event_type, data)
 
-    async def _drain_mcp_events(self) -> AsyncGenerator[AgentEvent, None]:
-        """
-        Liefert alle wartenden MCP Events aus der Event Bridge.
-        Mappt Event-Typen zu AgentEventType.
-        """
-        type_mapping = {
+    def _get_mcp_event_type_mapping(self) -> Dict[str, AgentEventType]:
+        """Mapping von MCP Event-Typen zu AgentEventType."""
+        return {
             "MCP_START": AgentEventType.MCP_START,
             "MCP_STEP": AgentEventType.MCP_STEP,
             "MCP_PROGRESS": AgentEventType.MCP_PROGRESS,
@@ -617,9 +621,30 @@ class AgentOrchestrator:
             "mcp_assumption_created": AgentEventType.MCP_ASSUMPTION,
             "mcp_tool_recommendation": AgentEventType.MCP_TOOL_REC,
         }
+
+    async def _drain_mcp_events(self) -> AsyncGenerator[AgentEvent, None]:
+        """
+        Liefert alle wartenden MCP Events aus der Event Bridge.
+        Mappt Event-Typen zu AgentEventType.
+        """
+        type_mapping = self._get_mcp_event_type_mapping()
         async for event in self._event_bridge.drain():
             event_type_enum = type_mapping.get(event.event_type, AgentEventType.MCP_STEP)
             yield AgentEvent(event_type_enum, event.data)
+
+    async def _drain_mcp_events_from_queue(self, queue: asyncio.Queue, timeout: float = 0.01) -> AsyncGenerator[AgentEvent, None]:
+        """
+        Liefert alle wartenden MCP Events aus einer bestehenden Queue.
+        Verwendet für persistente Subscriptions während Tool-Ausführung.
+        """
+        type_mapping = self._get_mcp_event_type_mapping()
+        while True:
+            try:
+                event = await asyncio.wait_for(queue.get(), timeout=timeout)
+                event_type_enum = type_mapping.get(event.event_type, AgentEventType.MCP_STEP)
+                yield AgentEvent(event_type_enum, event.data)
+            except asyncio.TimeoutError:
+                break
 
     def _get_research_capability(self) -> Optional["ResearchCapability"]:
         """Initialisiert und gibt die ResearchCapability zurück."""
@@ -1166,26 +1191,33 @@ class AgentOrchestrator:
             })
 
             try:
-                # Capability in separatem Task ausführen für Live-Event-Streaming
-                tool_task = asyncio.create_task(
-                    self._mcp_bridge.call_tool(
-                        forced_capability,
-                        {"query": user_message, "context": None}
+                # Persistente Subscription BEVOR Tool startet
+                mcp_queue = self._event_bridge.subscribe()
+
+                try:
+                    # Capability in separatem Task ausführen für Live-Event-Streaming
+                    tool_task = asyncio.create_task(
+                        self._mcp_bridge.call_tool(
+                            forced_capability,
+                            {"query": user_message, "context": None}
+                        )
                     )
-                )
 
-                # Events live streamen während Tool läuft
-                while not tool_task.done():
-                    async for mcp_event in self._drain_mcp_events():
+                    # Events live streamen während Tool läuft
+                    while not tool_task.done():
+                        async for mcp_event in self._drain_mcp_events_from_queue(mcp_queue):
+                            yield mcp_event
+                        await asyncio.sleep(0.05)
+
+                    # Tool-Result abholen
+                    mcp_result = await tool_task
+
+                    # Finale Events (falls noch welche da sind)
+                    async for mcp_event in self._drain_mcp_events_from_queue(mcp_queue, timeout=0.1):
                         yield mcp_event
-                    await asyncio.sleep(0.05)
-
-                # Tool-Result abholen
-                mcp_result = await tool_task
-
-                # Finale Events (falls noch welche da sind)
-                async for mcp_event in self._drain_mcp_events():
-                    yield mcp_event
+                finally:
+                    # Subscription aufräumen
+                    self._event_bridge.unsubscribe(mcp_queue)
 
                 # Ergebnis formatieren
                 if mcp_result.get("success"):
@@ -1640,25 +1672,32 @@ class AgentOrchestrator:
                         event_callback=self._emit_mcp_event
                     )
 
-                        # Tool in separatem Task ausführen
-                        tool_task = asyncio.create_task(
-                            self._mcp_bridge.call_tool(tool_call.name, tool_call.arguments)
-                        )
+                        # Persistente Subscription BEVOR Tool startet
+                        mcp_queue = self._event_bridge.subscribe()
 
-                        # Events live streamen während Tool läuft
-                        while not tool_task.done():
-                            # Events pollen und yielden
-                            async for mcp_event in self._drain_mcp_events():
+                        try:
+                            # Tool in separatem Task ausführen
+                            tool_task = asyncio.create_task(
+                                self._mcp_bridge.call_tool(tool_call.name, tool_call.arguments)
+                            )
+
+                            # Events live streamen während Tool läuft
+                            while not tool_task.done():
+                                # Events pollen und yielden
+                                async for mcp_event in self._drain_mcp_events_from_queue(mcp_queue):
+                                    yield mcp_event
+                                # Kurz warten bevor nächster Poll
+                                await asyncio.sleep(0.05)
+
+                            # Tool-Result abholen
+                            mcp_result = await tool_task
+
+                            # Finale Events (falls noch welche da sind)
+                            async for mcp_event in self._drain_mcp_events_from_queue(mcp_queue, timeout=0.1):
                                 yield mcp_event
-                            # Kurz warten bevor nächster Poll
-                            await asyncio.sleep(0.05)
-
-                        # Tool-Result abholen
-                        mcp_result = await tool_task
-
-                        # Finale Events (falls noch welche da sind)
-                        async for mcp_event in self._drain_mcp_events():
-                            yield mcp_event
+                        finally:
+                            # Subscription aufräumen
+                            self._event_bridge.unsubscribe(mcp_queue)
 
                         result = ToolResult(
                             success=mcp_result.get("success", False),
