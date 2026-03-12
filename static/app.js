@@ -6747,6 +6747,71 @@ async function renderDockerSandboxSection() {
       <small style="color:var(--text-muted)">Ein Paket pro Zeile</small>
     </div>
 
+    <div class="settings-section" style="margin-top:20px">
+      <h3 class="settings-section-title">PODMAN MACHINE</h3>
+      <p class="settings-section-desc">
+        Podman Machine VM-Einstellungen fuer Windows (ohne WSL).
+        Hier kann ein internes Image-Repository angegeben werden.
+      </p>
+    </div>
+
+    <div class="settings-field">
+      <label for="ds-pm-enabled">Podman Machine aktiviert</label>
+      <label class="checkbox-label">
+        <input type="checkbox" id="ds-pm-enabled" ${cfg.podman_machine?.enabled !== false ? 'checked' : ''} onchange="markSettingsModified()">
+        Aktiviert
+      </label>
+    </div>
+
+    <div class="settings-field">
+      <label for="ds-pm-name">Machine Name</label>
+      <input type="text" id="ds-pm-name" value="${escapeHtml(cfg.podman_machine?.name || 'podman-machine-default')}"
+        placeholder="podman-machine-default" onchange="markSettingsModified()"
+        style="font-family:var(--font-mono);font-size:13px">
+    </div>
+
+    <div class="settings-field">
+      <label for="ds-pm-image-url">Image URL (intern)</label>
+      <input type="text" id="ds-pm-image-url" value="${escapeHtml(cfg.podman_machine?.image_url || '')}"
+        placeholder="docker://registry.example.com/podman/machine-os:5.0" onchange="markSettingsModified()"
+        style="font-family:var(--font-mono);font-size:13px">
+      <small style="color:var(--text-muted)">Fuer interne Registry: docker://host/image:tag</small>
+    </div>
+
+    <div class="settings-field">
+      <label for="ds-pm-image-path">Image Pfad (lokal)</label>
+      <input type="text" id="ds-pm-image-path" value="${escapeHtml(cfg.podman_machine?.image_path || '')}"
+        placeholder="C:/path/to/machine-image.qcow2" onchange="markSettingsModified()"
+        style="font-family:var(--font-mono);font-size:13px">
+      <small style="color:var(--text-muted)">Alternative: Lokaler Pfad zu VM-Image</small>
+    </div>
+
+    <div class="settings-field">
+      <label for="ds-pm-cpus">CPUs</label>
+      <input type="number" id="ds-pm-cpus" value="${cfg.podman_machine?.cpus || 2}"
+        min="1" max="8" onchange="markSettingsModified()" style="width:100px">
+    </div>
+
+    <div class="settings-field">
+      <label for="ds-pm-memory">Memory (MB)</label>
+      <input type="number" id="ds-pm-memory" value="${cfg.podman_machine?.memory_mb || 2048}"
+        min="512" max="16384" step="256" onchange="markSettingsModified()" style="width:100px">
+    </div>
+
+    <div class="settings-field">
+      <label for="ds-pm-disk">Disk (GB)</label>
+      <input type="number" id="ds-pm-disk" value="${cfg.podman_machine?.disk_size_gb || 20}"
+        min="10" max="100" onchange="markSettingsModified()" style="width:100px">
+    </div>
+
+    <div class="settings-field">
+      <label for="ds-pm-autostart">Auto-Start</label>
+      <label class="checkbox-label">
+        <input type="checkbox" id="ds-pm-autostart" ${cfg.podman_machine?.auto_start !== false ? 'checked' : ''} onchange="markSettingsModified()">
+        Machine automatisch starten
+      </label>
+    </div>
+
     <div class="settings-actions-section" style="margin-top:20px">
       <button class="btn btn-secondary" onclick="dockerSandboxTestConnection()">
         🔌 Verbindung testen
@@ -6807,6 +6872,17 @@ function collectDockerSandboxSettings() {
     max_sessions: parseInt(document.getElementById('ds-max-sessions')?.value) || 5,
     file_upload_enabled: document.getElementById('ds-upload')?.checked || false,
     preinstalled_packages: packages,
+    // Podman Machine settings
+    podman_machine: {
+      enabled: document.getElementById('ds-pm-enabled')?.checked || false,
+      name: document.getElementById('ds-pm-name')?.value?.trim() || 'podman-machine-default',
+      image_url: document.getElementById('ds-pm-image-url')?.value?.trim() || '',
+      image_path: document.getElementById('ds-pm-image-path')?.value?.trim() || '',
+      cpus: parseInt(document.getElementById('ds-pm-cpus')?.value) || 2,
+      memory_mb: parseInt(document.getElementById('ds-pm-memory')?.value) || 2048,
+      disk_size_gb: parseInt(document.getElementById('ds-pm-disk')?.value) || 20,
+      auto_start: document.getElementById('ds-pm-autostart')?.checked || false,
+    },
   };
 }
 
