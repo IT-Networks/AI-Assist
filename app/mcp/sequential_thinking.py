@@ -598,8 +598,9 @@ class SequentialThinking:
         if not session:
             raise ValueError(f"Session not found: {session_id}")
 
-        if session.current_step >= self.max_steps:
-            raise ValueError(f"Max steps ({self.max_steps}) reached")
+        # Nutze session.max_steps (dynamisch angepasst), nicht self.max_steps (statisch aus Config)
+        if session.current_step >= session.max_steps:
+            raise ValueError(f"Max steps ({session.max_steps}) reached")
 
         step = ThinkingStep(
             step_number=session.current_step + 1,
@@ -810,8 +811,9 @@ class SequentialThinking:
         session.max_steps = max_steps
         session.initial_max_steps = max_steps
 
-        # Absolute Obergrenze um Endlos-Loops zu vermeiden
-        ABSOLUTE_MAX_STEPS = 20
+        # Grenzen für dynamische Erhöhung
+        MAX_ADDITIONAL_STEPS = 5  # Maximal 5 Schritte über Budget
+        ABSOLUTE_MAX_STEPS = min(session.initial_max_steps + MAX_ADDITIONAL_STEPS, 15)
 
         step_num = 1  # Step 1 ist bereits Analyse
         while step_num < session.max_steps:
@@ -851,15 +853,24 @@ class SequentialThinking:
             estimated_remaining = parsed["estimated_remaining"]
 
             # Dynamische Tiefensteuerung: max_steps anpassen wenn LLM mehr braucht
+            # Aber nur bis MAX_ADDITIONAL_STEPS über dem ursprünglichen Budget
             if needs_more_steps and estimated_remaining > 0:
                 new_max = step_num + estimated_remaining
-                if new_max > session.max_steps and new_max <= ABSOLUTE_MAX_STEPS:
+                # Auf Absolute-Grenze beschränken
+                new_max = min(new_max, ABSOLUTE_MAX_STEPS)
+
+                if new_max > session.max_steps:
                     old_max = session.max_steps
                     session.max_steps = new_max
                     session.steps_added += (new_max - old_max)
                     logger.info(
                         f"[SeqThink:{session.session_id}] Dynamische Anpassung: "
-                        f"{old_max} -> {new_max} Schritte (+{new_max - old_max})"
+                        f"{old_max} -> {new_max} Schritte (+{new_max - old_max}, max={ABSOLUTE_MAX_STEPS})"
+                    )
+                elif session.steps_added >= MAX_ADDITIONAL_STEPS:
+                    logger.warning(
+                        f"[SeqThink:{session.session_id}] Budget-Limit erreicht: "
+                        f"Keine weiteren Schritte über {ABSOLUTE_MAX_STEPS} erlaubt"
                     )
 
             # ═══════════════════════════════════════════════════════════════
@@ -1080,6 +1091,8 @@ PROBLEM:
 {session.query}
 {branch_info}{assumption_info}
 
+BUDGET: Du hast {session.initial_max_steps} Schritte. Arbeite effizient und fordere NUR dann mehr an, wenn absolut notwendig.
+
 BISHERIGE SCHRITTE:
 {session.get_context()}
 
@@ -1137,9 +1150,10 @@ URSPRÜNGLICHES PROBLEM:
 BISHERIGE SCHRITTE:
 {session.get_context()}
 
-AKTUELLER STATUS: Schritt {session.current_step} von {session.max_steps}{branch_info}
+AKTUELLER STATUS: Schritt {session.current_step} von {session.initial_max_steps} (Budget){branch_info}
 {f"Revisionen: {session.revision_count}" if session.revision_count > 0 else ""}{risk_info}
 
+Arbeite innerhalb des Budgets. Fordere NUR mehr Schritte an wenn ABSOLUT notwendig.
 Was ist der nächste logische Denkschritt?
 - Bei Fehlern in früheren Schritten: TYPE: REVISION
 - Um Alternative zu testen: TYPE: BRANCH

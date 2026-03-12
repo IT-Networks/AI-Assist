@@ -138,15 +138,21 @@ class SearchConfigRequest(BaseModel):
 
 # ── DuckDuckGo Search ─────────────────────────────────────────────────────────
 
-# duckduckgo-search Library (stabiler als HTML-Scraping)
+# ddgs Library (ehemals duckduckgo-search)
 try:
-    from duckduckgo_search import DDGS
+    from ddgs import DDGS
     _DDG_AVAILABLE = True
-    print("[search] duckduckgo-search library available")
+    print("[search] ddgs library available (v9+)")
 except ImportError:
-    _DDG_AVAILABLE = False
-    DDGS = None
-    print("[search] WARNING: duckduckgo-search not installed, using legacy fallback")
+    try:
+        # Fallback auf alte Library
+        from duckduckgo_search import DDGS
+        _DDG_AVAILABLE = True
+        print("[search] WARNING: using old duckduckgo-search library, upgrade with: pip install ddgs")
+    except ImportError:
+        _DDG_AVAILABLE = False
+        DDGS = None
+        print("[search] WARNING: ddgs not installed, using legacy fallback")
 
 # Fallback: Legacy HTML scraping (veraltet, wird blockiert)
 _DDG_URL = "https://html.duckduckgo.com/html/"
@@ -265,7 +271,7 @@ async def _ddg_search_library(
     proxy_url: Optional[str],
     timeout: int
 ) -> List[Dict[str, str]]:
-    """Suche mit duckduckgo-search Library."""
+    """Suche mit ddgs Library (v9+)."""
     import asyncio
 
     results = []
@@ -273,32 +279,21 @@ async def _ddg_search_library(
     def sync_search():
         """Synchrone Suche (Library ist nicht async)."""
         try:
-            # DDGS mit Proxy und Headers konfigurieren
-            ddgs_kwargs = {
-                "timeout": timeout,
-                "headers": {
-                    "User-Agent": _EDGE_USER_AGENT,
-                    "Accept-Language": "de-DE,de;q=0.9,en-US;q=0.8,en;q=0.7",
-                },
-            }
-
-            # Proxy konfigurieren
+            # ddgs v9+ hat eine simplere API ohne constructor params
+            # Proxy wird über Umgebungsvariablen konfiguriert wenn nötig
             if proxy_url:
-                ddgs_kwargs["proxy"] = proxy_url
-                print(f"[search] Using proxy: {proxy_url[:50]}...")
+                import os
+                os.environ["HTTP_PROXY"] = proxy_url
+                os.environ["HTTPS_PROXY"] = proxy_url
+                print(f"[search] Using proxy via env: {proxy_url[:50]}...")
 
-            # SSL-Verifizierung
-            if not settings.search.verify_ssl:
-                ddgs_kwargs["verify"] = False
-                print("[search] SSL verification disabled")
+            print(f"[search] DDGS config: timeout={timeout}, proxy={bool(proxy_url)}")
 
-            print(f"[search] DDGS config: timeout={timeout}, proxy={bool(proxy_url)}, verify_ssl={settings.search.verify_ssl}")
-
-            with DDGS(**ddgs_kwargs) as ddgs:
-                # Text-Suche durchführen
+            with DDGS() as ddgs:
+                # Text-Suche durchführen (wt-wt = worldwide für bessere Ergebnisse)
                 search_results = list(ddgs.text(
                     query,
-                    region="de-de",
+                    region="wt-wt",
                     safesearch="moderate",
                     max_results=max_results
                 ))
@@ -324,8 +319,10 @@ async def _ddg_search_library(
 
     for r in search_results:
         title = r.get("title", "")
-        snippet = r.get("body", "")
-        url = r.get("href", "")
+        # ddgs v9+ uses "body", older versions use "snippet"
+        snippet = r.get("body", "") or r.get("snippet", "")
+        # ddgs v9+ uses "href", older versions use "url"
+        url = r.get("href", "") or r.get("url", "")
         results.append({
             "title": title,
             "snippet": snippet[:500] if snippet else "",

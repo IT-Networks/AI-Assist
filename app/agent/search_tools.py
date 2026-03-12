@@ -96,6 +96,11 @@ def register_search_tools(registry: ToolRegistry) -> int:
                         "result_count": len(results),
                         "results": results,
                         "source": "DuckDuckGo",
+                        "hint": (
+                            "Diese Ergebnisse enthalten nur Kurzauszüge (Snippets). "
+                            "Um den vollständigen Inhalt einer Seite zu lesen, "
+                            "nutze fetch_webpage(url='...') mit einer URL aus den Ergebnissen."
+                        ),
                     },
                 )
             elif status == "rejected":
@@ -125,7 +130,10 @@ def register_search_tools(registry: ToolRegistry) -> int:
             "Maven-Fehler ('NoSuchMethodError spring-core 5.3'), "
             "Bibliotheksversionen ('jackson-databind 2.15 security fix'), "
             "allgemeine Technologiedokumentation. "
-            "VERBOTEN: Interne IPs, Hostnamen, Datenpfade, Projektnamen in der Query."
+            "VERBOTEN: Interne IPs, Hostnamen, Datenpfade, Projektnamen in der Query. "
+            "WICHTIG: Diese Suche liefert nur Snippets (Kurzauszüge). "
+            "Um den VOLLSTÄNDIGEN Inhalt einer gefundenen Seite zu lesen, "
+            "nutze anschließend 'fetch_webpage' mit der URL aus den Ergebnissen!"
         ),
         category=ToolCategory.SEARCH,
         parameters=[
