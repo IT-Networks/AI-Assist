@@ -722,6 +722,7 @@ CONTINUE: [yes/no]
         LLM-basierte Komplexitäts-Einschätzung.
 
         Robust gegen Tippfehler, versteht Kontext und Semantik.
+        Nutzt chat_quick für schnellen Response (~15s Timeout).
         """
         from app.services.llm_client import llm_client
 
@@ -748,7 +749,13 @@ Antworte NUR mit einer Zahl zwischen 0.0 und 1.0, z.B.: 0.7"""
                 {"role": "user", "content": prompt.format(query=query[:500])}
             ]
 
-            response = await llm_client.chat(messages, model=model)
+            # Nutze chat_quick für schnelle Klassifikation (kurzer Timeout)
+            response = await llm_client.chat_quick(
+                messages=messages,
+                model=model,
+                temperature=0.0,
+                max_tokens=32,  # Nur eine Zahl erwartet
+            )
             response = response.strip()
 
             # Zahl extrahieren (auch aus "0.7" oder "Die Komplexität ist 0.7")

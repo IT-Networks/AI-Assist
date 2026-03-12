@@ -22,9 +22,12 @@ import uuid
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
-import httpx
-
 from app.core.config import settings
+from app.services.llm_client import (
+    llm_client as default_llm_client,
+    TIMEOUT_QUICK,
+    TIMEOUT_TOOL,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -396,80 +399,31 @@ class SubAgent:
         tool_schemas: List[Dict],
     ):
         """
-        Ruft das LLM mit Tool-Definitionen auf (kein Streaming, kein Konfirmations-Flow).
-        Gibt (response_text, tool_calls_raw) zurück.
-        """
-        from app.services.llm_client import _get_http_client, _RETRY_DELAYS, _is_retryable
+        Ruft das LLM mit Tool-Definitionen auf (kein Streaming).
+        Nutzt zentralen LLM-Client für Connection-Pooling und Retry.
 
-        # Sub-Agenten nutzen tool_temperature (deterministischer) für zuverlässiges Tool-Calling
+        Returns:
+            Tuple (response_text, tool_calls_raw)
+        """
+        # Sub-Agenten nutzen tool_temperature (deterministischer)
         temperature = settings.llm.tool_temperature if settings.llm.tool_temperature >= 0 else 0.0
 
-        payload = {
-            "model": self._model,
-            "messages": messages,
-            "temperature": temperature,
-            "max_tokens": min(settings.llm.max_tokens, 2048),  # Sub-Agenten brauchen weniger
-            "stream": False,
-            "tools": tool_schemas,
-            "tool_choice": "auto",
-        }
+        response = await default_llm_client.chat_with_tools(
+            messages=messages,
+            tools=tool_schemas,
+            model=self._model,
+            temperature=temperature,
+            max_tokens=min(settings.llm.max_tokens, 2048),  # Sub-Agenten brauchen weniger
+            timeout=TIMEOUT_TOOL,
+        )
 
-        headers = {"Content-Type": "application/json"}
-        if settings.llm.api_key and settings.llm.api_key != "none":
-            headers["Authorization"] = f"Bearer {settings.llm.api_key}"
+        # Debug-Log bei unerwarteten Situationen
+        if response.finish_reason == "tool_calls" and not response.tool_calls:
+            logger.warning(f"[sub_agent:{self.name}] finish_reason='tool_calls' aber keine tool_calls!")
+            if response.content:
+                logger.debug(f"  Content (erste 300 Zeichen): {response.content[:300]}")
 
-        last_exc = None
-        for attempt, delay in enumerate([0] + _RETRY_DELAYS):
-            if delay:
-                await asyncio.sleep(delay)
-            try:
-                client = _get_http_client()
-                response = await client.post(
-                    f"{settings.llm.base_url.rstrip('/')}/chat/completions",
-                    headers=headers,
-                    json=payload,
-                )
-                response.raise_for_status()
-                data = response.json()
-
-                # Robuste Response-Parsing
-                if "choices" not in data or not data["choices"]:
-                    logger.warning(f"[sub_agent:{self.name}] Keine 'choices' in LLM-Response: {list(data.keys())}")
-                    return "", []
-
-                choice = data["choices"][0]
-                message = choice.get("message", {})
-                text = message.get("content") or ""
-                tool_calls = message.get("tool_calls") or []
-                finish_reason = choice.get("finish_reason", "")
-
-                # Debug-Log bei unerwarteten Situationen
-                if finish_reason == "tool_calls" and not tool_calls:
-                    logger.warning(f"[sub_agent:{self.name}] finish_reason='tool_calls' aber keine tool_calls!")
-                    logger.debug(f"  Content (erste 300 Zeichen): {text[:300]}")
-
-                return text, tool_calls
-
-            except httpx.HTTPStatusError as e:
-                last_exc = e
-                error_body = ""
-                try:
-                    error_body = e.response.text[:500]
-                except Exception:
-                    pass
-                logger.warning(f"[sub_agent:{self.name}] HTTP {e.response.status_code}: {error_body}")
-                if _is_retryable(e) and attempt < len(_RETRY_DELAYS):
-                    continue
-                break
-
-            except Exception as e:
-                last_exc = e
-                logger.error(f"[sub_agent:{self.name}] Fehler bei LLM-Call: {type(e).__name__}: {e}")
-                if _is_retryable(e) and attempt < len(_RETRY_DELAYS):
-                    continue
-                break
-
-        raise RuntimeError(f"LLM-Aufruf fehlgeschlagen nach {len(_RETRY_DELAYS)+1} Versuchen: {last_exc}")
+        return response.content or "", response.tool_calls
 
     def _parse_final_response(self, text: str) -> SubAgentResult:
         """Parst die finale JSON-Antwort des Sub-Agenten."""
@@ -593,31 +547,13 @@ class SubAgentDispatcher:
         messages = [{"role": "user", "content": prompt}]
 
         try:
-            from app.services.llm_client import _get_http_client
-
-            headers = {"Content-Type": "application/json"}
-            if settings.llm.api_key and settings.llm.api_key != "none":
-                headers["Authorization"] = f"Bearer {settings.llm.api_key}"
-
-            payload = {
-                "model": self._model,
-                "messages": messages,
-                "temperature": 0.0,
-                "max_tokens": 150,
-                "stream": False,
-            }
-
-            client = _get_http_client()
-            response = await asyncio.wait_for(
-                client.post(
-                    f"{settings.llm.base_url.rstrip('/')}/chat/completions",
-                    headers=headers,
-                    json=payload,
-                ),
-                timeout=10.0,  # Kurzer Timeout für Routing-Call
+            # Nutze chat_quick für schnelle Klassifikation mit kurzem Timeout
+            text = await default_llm_client.chat_quick(
+                messages=messages,
+                model=self._model,
+                temperature=0.0,
+                max_tokens=150,
             )
-            response.raise_for_status()
-            text = response.json()["choices"][0]["message"]["content"] or ""
 
             # JSON parsen
             start = text.find("{")

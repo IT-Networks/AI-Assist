@@ -1,11 +1,15 @@
 import asyncio
 import json
-from typing import AsyncGenerator, List, Optional
+import logging
+from dataclasses import dataclass
+from typing import Any, AsyncGenerator, Dict, List, Optional
 
 import httpx
 
 from app.core.config import settings
 from app.core.exceptions import LLMError
+
+logger = logging.getLogger(__name__)
 
 # Shared HTTP Client für Connection-Pooling (Performance-Optimierung)
 # Vermeidet TCP/TLS-Handshake bei jedem Request (~200ms Ersparnis)
@@ -70,6 +74,34 @@ Wenn du [STOP] oder [HINWEIS] Nachrichten erhältst, befolge diese und höre auf
 """
 
 _RETRY_DELAYS = [2, 4, 8]  # Exponential Backoff in Sekunden
+
+# Differenzierte Timeouts für verschiedene Call-Typen
+TIMEOUT_QUICK = 15.0      # Complexity-Check, einfache Klassifikation
+TIMEOUT_TOOL = 60.0       # Tool-Calls (Standard)
+TIMEOUT_ANALYSIS = 120.0  # Lange Analysen, Streaming
+
+
+@dataclass
+class LLMResponse:
+    """Strukturierte LLM-Antwort für Tool-basierte Calls."""
+    content: Optional[str] = None
+    tool_calls: List[Dict[str, Any]] = None
+    finish_reason: str = ""
+    model: str = ""
+    prompt_tokens: int = 0
+    completion_tokens: int = 0
+
+    def __post_init__(self):
+        if self.tool_calls is None:
+            self.tool_calls = []
+
+    @property
+    def has_tool_calls(self) -> bool:
+        return bool(self.tool_calls)
+
+    @property
+    def total_tokens(self) -> int:
+        return self.prompt_tokens + self.completion_tokens
 
 
 def _is_retryable(exc: Exception) -> bool:
@@ -214,6 +246,142 @@ class LLMClient:
         except Exception:
             return []
 
+    async def chat_with_tools(
+        self,
+        messages: List[Dict],
+        tools: Optional[List[Dict]] = None,
+        model: Optional[str] = None,
+        temperature: Optional[float] = None,
+        max_tokens: Optional[int] = None,
+        timeout: Optional[float] = None,
+        tool_choice: str = "auto",
+    ) -> LLMResponse:
+        """
+        Zentraler LLM-Call mit Tool-Support.
+
+        Konsolidiert alle Tool-basierten Aufrufe aus orchestrator.py und sub_agent.py.
+        Nutzt Connection-Pooling und Retry-Logik.
+
+        Args:
+            messages: Chat-Nachrichten
+            tools: Optional Tool-Definitionen (OpenAI-Format)
+            model: Modell (default: default_model)
+            temperature: Temperature (default: settings.llm.temperature)
+            max_tokens: Max Tokens (default: settings.llm.max_tokens)
+            timeout: Request-Timeout in Sekunden (default: TIMEOUT_TOOL)
+            tool_choice: "auto", "none", oder {"type": "function", "function": {"name": "..."}}
+
+        Returns:
+            LLMResponse mit content, tool_calls, finish_reason, usage
+        """
+        model = model or self.default_model
+        temperature = temperature if temperature is not None else self.temperature
+        max_tokens = max_tokens or self.max_tokens
+        timeout = timeout or TIMEOUT_TOOL
+
+        payload = {
+            "model": model,
+            "messages": messages,
+            "temperature": temperature,
+            "max_tokens": max_tokens,
+            "stream": False,
+        }
+
+        if tools:
+            payload["tools"] = tools
+            payload["tool_choice"] = tool_choice
+
+        last_exc = None
+        for attempt, delay in enumerate([0] + _RETRY_DELAYS):
+            if delay:
+                logger.debug(f"[llm] Retry {attempt} nach {delay}s")
+                await asyncio.sleep(delay)
+            try:
+                client = _get_http_client()
+                response = await client.post(
+                    f"{self.base_url}/chat/completions",
+                    headers=self._headers(),
+                    json=payload,
+                    timeout=timeout,
+                )
+                response.raise_for_status()
+                data = response.json()
+
+                # Response parsen
+                if "choices" not in data or not data["choices"]:
+                    logger.warning(f"[llm] Keine 'choices' in Response: {list(data.keys())}")
+                    return LLMResponse(finish_reason="error", model=model)
+
+                choice = data["choices"][0]
+                message = choice.get("message", {})
+                usage = data.get("usage", {})
+
+                return LLMResponse(
+                    content=message.get("content"),
+                    tool_calls=message.get("tool_calls") or [],
+                    finish_reason=choice.get("finish_reason", ""),
+                    model=model,
+                    prompt_tokens=usage.get("prompt_tokens", 0),
+                    completion_tokens=usage.get("completion_tokens", 0),
+                )
+
+            except httpx.HTTPStatusError as e:
+                last_exc = e
+                status = e.response.status_code
+                body = ""
+                try:
+                    body = e.response.text[:500]
+                except Exception:
+                    pass
+                logger.warning(f"[llm] HTTP {status} (Versuch {attempt + 1}): {body}")
+                if status >= 500 and attempt < len(_RETRY_DELAYS):
+                    continue
+                raise LLMError(f"LLM API Fehler {status}: {body}") from e
+
+            except httpx.TimeoutException as e:
+                last_exc = e
+                logger.warning(f"[llm] Timeout nach {timeout}s (Versuch {attempt + 1})")
+                if attempt < len(_RETRY_DELAYS):
+                    continue
+                raise LLMError(f"LLM Timeout nach {attempt + 1} Versuchen") from e
+
+            except httpx.RequestError as e:
+                last_exc = e
+                logger.warning(f"[llm] Verbindungsfehler (Versuch {attempt + 1}): {e}")
+                if attempt < len(_RETRY_DELAYS):
+                    continue
+                raise LLMError(f"LLM Verbindungsfehler: {e}") from e
+
+            except Exception as e:
+                last_exc = e
+                logger.error(f"[llm] Unerwarteter Fehler: {type(e).__name__}: {e}")
+                if _is_retryable(e) and attempt < len(_RETRY_DELAYS):
+                    continue
+                break
+
+        raise LLMError(f"LLM-Aufruf fehlgeschlagen: {last_exc}") from last_exc
+
+    async def chat_quick(
+        self,
+        messages: List[Dict],
+        model: Optional[str] = None,
+        temperature: float = 0.0,
+        max_tokens: int = 256,
+    ) -> str:
+        """
+        Schneller LLM-Call für einfache Aufgaben (Klassifikation, Komplexität).
+
+        Nutzt kurzen Timeout und wenige Tokens.
+        """
+        response = await self.chat_with_tools(
+            messages=messages,
+            model=model,
+            temperature=temperature,
+            max_tokens=max_tokens,
+            timeout=TIMEOUT_QUICK,
+        )
+        return response.content or ""
+
 
 llm_client = LLMClient()
 
@@ -221,3 +389,20 @@ llm_client = LLMClient()
 def get_llm_client() -> LLMClient:
     """Gibt die LLM-Client Instanz zurück."""
     return llm_client
+
+
+# Exports für andere Module
+__all__ = [
+    "LLMClient",
+    "LLMResponse",
+    "llm_client",
+    "get_llm_client",
+    "close_http_client",
+    "_get_http_client",
+    "_is_retryable",
+    "_RETRY_DELAYS",
+    "TIMEOUT_QUICK",
+    "TIMEOUT_TOOL",
+    "TIMEOUT_ANALYSIS",
+    "SYSTEM_PROMPT",
+]
