@@ -142,9 +142,11 @@ class SearchConfigRequest(BaseModel):
 try:
     from duckduckgo_search import DDGS
     _DDG_AVAILABLE = True
+    print("[search] duckduckgo-search library available")
 except ImportError:
     _DDG_AVAILABLE = False
     DDGS = None
+    print("[search] WARNING: duckduckgo-search not installed, using legacy fallback")
 
 # Fallback: Legacy HTML scraping (veraltet, wird blockiert)
 _DDG_URL = "https://html.duckduckgo.com/html/"
@@ -303,14 +305,17 @@ async def _ddg_search_library(
                 return search_results
         except Exception as e:
             error_msg = str(e).lower()
+            error_short = str(e)[:200]  # Begrenze Fehlerausgabe
             if "proxy" in error_msg:
-                print(f"[search] DDGS Proxy error: {e}")
+                print(f"[search] DDGS Proxy error: {error_short}")
             elif "ssl" in error_msg or "certificate" in error_msg:
-                print(f"[search] DDGS SSL error: {e} (try disabling SSL verification in settings)")
+                print(f"[search] DDGS SSL error: {error_short} (try disabling SSL verification)")
             elif "timeout" in error_msg:
-                print(f"[search] DDGS Timeout: {e}")
+                print(f"[search] DDGS Timeout: {error_short}")
+            elif "ratelimit" in error_msg or "rate" in error_msg:
+                print(f"[search] DDGS Rate-Limit: {error_short}")
             else:
-                print(f"[search] DDGS error: {e}")
+                print(f"[search] DDGS error: {error_short}")
             raise
 
     # In Thread ausführen (Library ist synchron)
