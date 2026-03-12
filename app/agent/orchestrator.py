@@ -52,7 +52,16 @@ from app.mcp.thinking_engine import get_thinking_engine, ThinkingEngine, Thinkin
 from app.mcp.capabilities.research import get_research_capability, ResearchCapability
 from app.core.token_budget import TokenBudget, create_budget_from_config
 from app.core.conversation_summarizer import get_summarizer
-from app.services.llm_client import SYSTEM_PROMPT, _get_http_client, _RETRY_DELAYS, _is_retryable
+from app.services.llm_client import (
+    SYSTEM_PROMPT,
+    _get_http_client,
+    _RETRY_DELAYS,
+    _is_retryable,
+    llm_client as central_llm_client,
+    LLMResponse,
+    TIMEOUT_TOOL,
+    TIMEOUT_ANALYSIS,
+)
 from app.services.memory_store import get_memory_store
 from app.services.context_manager import get_context_manager, ContextManager
 from app.services.transcript_logger import get_transcript_logger, TranscriptLogger, TranscriptEntry
@@ -2097,127 +2106,53 @@ Strukturiere deine Überlegungen und begründe deine Empfehlungen."""
         # Falls immer noch zu groß: Trim anwenden
         trimmed_messages = _trim_messages_to_limit(messages, model_limit)
 
-        payload = {
-            "model": selected_model,
-            "messages": trimmed_messages,
-            "temperature": effective_temperature,
-            "max_tokens": settings.llm.max_tokens,
-        }
-
-        # Tools nur hinzufügen wenn vorhanden
-        if tools:
-            payload["tools"] = tools
-            payload["tool_choice"] = "auto"
-
-        last_exc = None
-        data = None
-
-        # Kontextgröße schätzen für bessere Fehlermeldungen (nach Trimming)
+        # Kontextgröße schätzen für Logging
         estimated_tokens = estimate_messages_tokens(trimmed_messages)
         logger.debug(f"[agent] LLM Request: ~{estimated_tokens} tokens, model={selected_model}, limit={model_limit}")
 
-        for attempt, delay in enumerate([0] + _RETRY_DELAYS):
-            if delay:
-                logger.warning(f"[agent] LLM Retry {attempt} nach {delay}s (Modell: {selected_model}, ~{estimated_tokens} tokens)")
-                await asyncio.sleep(delay)
-            try:
-                client = _get_http_client()
-                response = await client.post(
-                    f"{base_url}/chat/completions",
-                    headers=headers,
-                    json=payload
-                )
-                response.raise_for_status()
-                data = response.json()
-                break  # Erfolg
-            except httpx.HTTPStatusError as e:
-                last_exc = e
-                status_code = e.response.status_code
-                error_body = ""
-                try:
-                    error_body = e.response.text[:500]
-                except Exception:
-                    pass
+        # Timeout basierend auf Phase
+        timeout = TIMEOUT_TOOL if is_tool_phase else TIMEOUT_ANALYSIS
 
-                if status_code >= 500:
-                    logger.warning(f"[agent] LLM Server Error {status_code} (Versuch {attempt + 1}, ~{estimated_tokens} tokens): {error_body}")
-                    if attempt < len(_RETRY_DELAYS):
-                        continue
-                    # Nach allen Retries: Benutzerfreundliche Fehlermeldung
-                    raise RuntimeError(
-                        f"LLM-Server Fehler {status_code} nach {attempt + 1} Versuchen. "
-                        f"Kontext: ~{estimated_tokens} Token. "
-                        f"Mögliche Ursachen: Server überlastet, Kontext zu groß, oder Timeout. "
-                        f"Details: {error_body[:200]}"
-                    ) from e
-                else:
-                    # 4xx Fehler - kein Retry
-                    raise RuntimeError(f"LLM API Fehler {status_code}: {error_body}") from e
-
-            except httpx.TimeoutException as e:
-                last_exc = e
-                logger.warning(f"[agent] LLM Timeout (Versuch {attempt + 1}, ~{estimated_tokens} tokens)")
-                if attempt < len(_RETRY_DELAYS):
-                    continue
-                raise RuntimeError(
-                    f"LLM-Anfrage Timeout nach {attempt + 1} Versuchen. "
-                    f"Kontext: ~{estimated_tokens} Token. "
-                    f"Erhöhe timeout_seconds in config.yaml oder reduziere den Kontext."
-                ) from e
-
-            except httpx.RequestError as e:
-                last_exc = e
-                logger.warning(f"[agent] LLM Verbindungsfehler (Versuch {attempt + 1}): {e}")
-                if attempt < len(_RETRY_DELAYS):
-                    continue
-                raise RuntimeError(f"LLM Verbindungsfehler: {e}") from e
-
-            except Exception as e:
-                last_exc = e
-                if _is_retryable(e) and attempt < len(_RETRY_DELAYS):
-                    logger.debug(f"[agent] LLM Fehler (Retry {attempt + 1}): {e}")
-                    continue
-                raise
-
-        if data is None:
-            raise last_exc or RuntimeError("LLM Aufruf fehlgeschlagen")
-
-        # Debug: Rohe Antwort prüfen
-        if "choices" not in data or not data["choices"]:
-            logger.debug("[agent] WARNING: No choices in LLM response: {list(data.keys())}")
-            return {"content": "", "tool_calls": [], "usage": TokenUsage(), "finish_reason": "error"}
-
-        choice = data["choices"][0]
-        message = choice.get("message", {})
-        finish_reason = choice.get("finish_reason", "")
-        tool_calls_in_msg = message.get("tool_calls", [])
-        content = message.get("content", "")
+        # Zentraler LLM-Call mit Retry-Logik
+        try:
+            response: LLMResponse = await central_llm_client.chat_with_tools(
+                messages=trimmed_messages,
+                tools=tools if tools else None,
+                model=selected_model,
+                temperature=effective_temperature,
+                max_tokens=settings.llm.max_tokens,
+                timeout=timeout,
+            )
+        except Exception as e:
+            # Kontext-Info für bessere Fehlermeldungen hinzufügen
+            raise RuntimeError(
+                f"LLM-Fehler (Kontext: ~{estimated_tokens} Token, Modell: {selected_model}): {e}"
+            ) from e
 
         # Debug für Modelle mit Text-basierten Tool-Calls
-        if finish_reason == "tool_calls" and not tool_calls_in_msg:
+        if response.finish_reason == "tool_calls" and not response.tool_calls:
             logger.warning(
                 "[agent] finish_reason='tool_calls' aber keine tool_calls im message-Objekt! "
                 "Modell: %s, Content (erste 500 Zeichen): %s",
-                selected_model, (content or '')[:500]
+                selected_model, (response.content or '')[:500]
             )
 
-        # Token-Nutzung extrahieren
-        usage_data = data.get("usage", {})
+        # TokenUsage aus LLMResponse erstellen
         usage = TokenUsage(
-            prompt_tokens=usage_data.get("prompt_tokens", 0),
-            completion_tokens=usage_data.get("completion_tokens", 0),
-            total_tokens=usage_data.get("total_tokens", 0),
-            finish_reason=finish_reason,
+            prompt_tokens=response.prompt_tokens,
+            completion_tokens=response.completion_tokens,
+            total_tokens=response.prompt_tokens + response.completion_tokens,
+            finish_reason=response.finish_reason,
             model=selected_model,
-            truncated=(finish_reason == "length")
+            truncated=(response.finish_reason == "length")
         )
 
         return {
-            "content": content,
-            "tool_calls": tool_calls_in_msg,
-            "native_tools": bool(tool_calls_in_msg),  # True = LLM hat nativ tool_calls geliefert
+            "content": response.content or "",
+            "tool_calls": response.tool_calls,
+            "native_tools": bool(response.tool_calls),
             "usage": usage,
-            "finish_reason": finish_reason
+            "finish_reason": response.finish_reason
         }
 
     async def _enrich_from_entity_tracker(
