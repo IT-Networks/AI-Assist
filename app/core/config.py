@@ -867,67 +867,40 @@ class MCPConfig(BaseModel):
 # Container Sandbox (Sichere Code-Ausführung mit Podman)
 # ══════════════════════════════════════════════════════════════════════════════
 
-class PodmanMachineConfig(BaseModel):
-    """Konfiguration für Podman Machine (Windows VM).
-
-    Ermöglicht die Initialisierung einer Podman-VM mit benutzerdefinierten
-    Ressourcen und optionalem Image aus interner Registry.
-
-    image_url: Remote Image URL für --image Parameter
-               z.B. "docker://registry.example.com/podman/machine-os:5.0"
-    image_path: Lokaler Pfad für --image-path Parameter (Alternative zu image_url)
-    """
-    enabled: bool = True
-    name: str = "podman-machine-default"   # Name der Machine
-    image_url: str = ""                    # Remote Image URL (z.B. docker://registry/image:tag)
-    image_path: str = ""                   # Lokaler Image-Pfad (Alternative)
-    cpus: int = 2                          # Anzahl CPUs für die VM
-    memory_mb: int = 2048                  # RAM in MB
-    disk_size_gb: int = 20                 # Disk-Größe in GB
-    auto_start: bool = True                # Machine automatisch starten wenn nicht aktiv
-
-
 class WSLIntegrationConfig(BaseModel):
-    """Konfiguration für WSL-Integration.
+    """WSL Podman Konfiguration.
 
-    Ermöglicht die Nutzung von Podman in einer existierenden WSL-Distribution
-    statt einer separaten Podman-VM. Spart Ressourcen und nutzt vorhandene
-    WSL-Umgebung.
+    Container-Ausführung über Podman in WSL2 Ubuntu.
     """
-    enabled: bool = False
-    mode: str = "auto"                     # auto | native | wsl-distro
-    distro_name: str = ""                  # WSL-Distribution (z.B. "Ubuntu-24.04")
+    distro_name: str = "Ubuntu"            # WSL-Distribution (z.B. "Ubuntu", "Ubuntu-24.04")
     podman_path_in_wsl: str = "/usr/bin/podman"  # Pfad zu Podman in WSL
-    auto_detect: bool = True               # Automatische Erkennung der besten Option
 
 
 class DockerSandboxConfig(BaseModel):
-    """Podman Sandbox für sichere Python-Code-Ausführung.
+    """WSL Podman Sandbox für sichere Python-Code-Ausführung.
 
-    Verwendet Podman Desktop (daemonless, portable, kein Admin nötig).
-    Docker wird nicht mehr unterstützt.
+    Verwendet Podman innerhalb von WSL2 Ubuntu.
+    Voraussetzung: WSL2 mit Ubuntu und installiertem Podman.
     """
     enabled: bool = False
-    # Pfad zu Podman (leer = aus PATH suchen)
-    podman_path: str = ""                  # z.B. "C:/podman/bin/podman.exe" (portable)
-    image: str = "python:3.11-slim"       # Base-Image (oder custom mit Paketen)
+    image: str = "python:3.11-slim"        # Base-Image
     custom_image: str = ""                 # Custom Image mit vorinstallierten Paketen
     # Ressourcen-Limits
-    memory_limit: str = "512m"             # Max RAM (z.B. "256m", "512m", "1g")
-    cpu_limit: float = 1.0                 # Max CPU-Cores (z.B. 0.5, 1.0, 2.0)
+    memory_limit: str = "512m"             # Max RAM
+    cpu_limit: float = 1.0                 # Max CPU-Cores
     timeout_seconds: int = 60              # Max Ausführungszeit
     max_output_bytes: int = 131072         # Max Output-Größe (128KB)
     # Netzwerk
-    network_enabled: bool = True           # Lesender Netzwerkzugriff (für requests etc.)
+    network_enabled: bool = True           # Lesender Netzwerkzugriff
     # Session-Management
     session_enabled: bool = True           # Variablen zwischen Aufrufen erhalten
-    session_timeout_minutes: int = 30      # Session-Timeout nach Inaktivität
+    session_timeout_minutes: int = 30      # Session-Timeout
     max_sessions: int = 5                  # Max gleichzeitige Sessions
     # Datei-Upload
     file_upload_enabled: bool = True       # Dateien in Container hochladen
-    max_upload_size_mb: int = 10           # Max Upload-Größe pro Datei
-    upload_directory: str = "./sandbox_uploads"  # Temporäres Upload-Verzeichnis
-    # Vorinstallierte Pakete (bei Nutzung von python:slim werden diese installiert)
+    max_upload_size_mb: int = 10           # Max Upload-Größe
+    upload_directory: str = "./sandbox_uploads"
+    # Vorinstallierte Pakete
     preinstalled_packages: List[str] = [
         "requests",
         "pandas",
@@ -941,14 +914,9 @@ class DockerSandboxConfig(BaseModel):
         "chardet",
     ]
     # Sicherheit
-    read_only_filesystem: bool = False     # Read-only Root (kann pip install verhindern)
-    drop_capabilities: bool = True         # Alle Linux Capabilities entfernen
-    # Backend-Auswahl
-    backend: str = "auto"                  # auto | docker | podman | wsl-podman
-    docker_path: str = ""                  # Pfad zu Docker (für Docker-Backend)
-    # Podman Machine Konfiguration (Windows)
-    podman_machine: PodmanMachineConfig = Field(default_factory=PodmanMachineConfig)
-    # WSL Integration (Windows mit WSL2)
+    read_only_filesystem: bool = False
+    drop_capabilities: bool = True
+    # WSL Podman Einstellungen
     wsl_integration: WSLIntegrationConfig = Field(default_factory=WSLIntegrationConfig)
 
 

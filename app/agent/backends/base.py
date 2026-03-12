@@ -17,9 +17,6 @@ logger = logging.getLogger(__name__)
 
 class BackendType(Enum):
     """Supported container backend types."""
-    DOCKER = "docker"
-    PODMAN_NATIVE = "podman"
-    PODMAN_MACHINE = "podman-machine"
     WSL_PODMAN = "wsl-podman"
 
 
@@ -52,11 +49,8 @@ class ContainerBackend(ABC):
     """
     Abstract base class for container runtime backends.
 
-    Implementations:
-    - DockerBackend: Native Docker
-    - PodmanNativeBackend: Native Podman
-    - WSLPodmanBackend: Podman inside WSL2
-    - PodmanMachineBackend: Podman with managed VM
+    Implementation:
+    - WSLPodmanBackend: Podman inside WSL2 Ubuntu
     """
 
     backend_type: BackendType

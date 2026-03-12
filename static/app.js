@@ -6578,10 +6578,10 @@ function collectInternalFetchSettings() {
   };
 }
 
-// ── Docker/Podman Sandbox Settings Section ───────────────────────────────────────
+// ── WSL Podman Sandbox Settings Section ───────────────────────────────────────
 
 async function renderDockerSandboxSection() {
-  // Erst Runtime-Info und Config laden
+  // Runtime-Info und Config laden
   let runtimeInfo = { available: false, runtime: 'none', version: null };
   let cfg = {};
 
@@ -6601,15 +6601,15 @@ async function renderDockerSandboxSection() {
 
   const packages = (cfg.preinstalled_packages || []).join('\n');
   const runtimeBadge = runtimeInfo.available
-    ? `<span class="badge badge-success">${runtimeInfo.runtime} ${runtimeInfo.version || ''}</span>`
-    : `<span class="badge badge-error">Nicht gefunden</span>`;
+    ? `<span class="badge badge-success">WSL Podman ${runtimeInfo.version || ''}</span>`
+    : `<span class="badge badge-error">Nicht verfuegbar</span>`;
 
   const form = document.getElementById('settings-form');
   form.innerHTML = `
     <div class="settings-section">
-      <h3 class="settings-section-title">CONTAINER SANDBOX</h3>
+      <h3 class="settings-section-title">WSL PODMAN SANDBOX</h3>
       <p class="settings-section-desc">
-        Sichere Python-Code-Ausfuehrung in isolierten Containern (Docker oder Podman).
+        Sichere Python-Code-Ausfuehrung in isolierten Containern via Podman in WSL2 Ubuntu.
         Die AI kann hier Code ausfuehren ohne das Host-System zu gefaehrden.
       </p>
       <p class="settings-section-desc">
@@ -6626,35 +6626,24 @@ async function renderDockerSandboxSection() {
     </div>
 
     <div class="settings-section" style="margin-top:20px">
-      <h3 class="settings-section-title">CONTAINER RUNTIME</h3>
+      <h3 class="settings-section-title">WSL KONFIGURATION</h3>
       <p class="settings-section-desc">
-        Waehle Docker oder Podman. Podman ist empfohlen (portable, kein Daemon).
+        Podman wird in der WSL2 Ubuntu Distribution ausgefuehrt.
       </p>
     </div>
 
     <div class="settings-field">
-      <label for="ds-backend">Backend</label>
-      <select id="ds-backend" onchange="markSettingsModified()">
-        <option value="auto" ${cfg.backend === 'auto' || !cfg.backend ? 'selected' : ''}>Auto (Podman bevorzugt)</option>
-        <option value="wsl-podman" ${cfg.backend === 'wsl-podman' ? 'selected' : ''}>WSL Podman (empfohlen)</option>
-        <option value="podman" ${cfg.backend === 'podman' ? 'selected' : ''}>Podman (Windows)</option>
-        <option value="docker" ${cfg.backend === 'docker' ? 'selected' : ''}>Docker</option>
-      </select>
-      <small style="color:var(--text-muted)">WSL Podman = Podman in WSL2-Distribution</small>
-    </div>
-
-    <div class="settings-field">
-      <label for="ds-podman-path">Podman Pfad (optional)</label>
-      <input type="text" id="ds-podman-path" value="${escapeHtml(cfg.podman_path || '')}"
-        placeholder="C:/podman/bin/podman.exe (leer = aus PATH)" onchange="markSettingsModified()"
+      <label for="ds-wsl-distro">WSL Distribution</label>
+      <input type="text" id="ds-wsl-distro" value="${escapeHtml(cfg.wsl_integration?.distro_name || 'Ubuntu')}"
+        placeholder="Ubuntu" onchange="markSettingsModified()"
         style="font-family:var(--font-mono);font-size:13px">
-      <small style="color:var(--text-muted)">Fuer portable Podman-Installation</small>
+      <small style="color:var(--text-muted)">Name der WSL-Distribution (wsl -l zeigt alle)</small>
     </div>
 
     <div class="settings-field">
-      <label for="ds-docker-path">Docker Pfad (optional)</label>
-      <input type="text" id="ds-docker-path" value="${escapeHtml(cfg.docker_path || '')}"
-        placeholder="C:/Program Files/Docker/docker.exe (leer = aus PATH)" onchange="markSettingsModified()"
+      <label for="ds-wsl-podman-path">Podman Pfad in WSL</label>
+      <input type="text" id="ds-wsl-podman-path" value="${escapeHtml(cfg.wsl_integration?.podman_path_in_wsl || '/usr/bin/podman')}"
+        placeholder="/usr/bin/podman" onchange="markSettingsModified()"
         style="font-family:var(--font-mono);font-size:13px">
     </div>
 
@@ -6671,7 +6660,7 @@ async function renderDockerSandboxSection() {
     <div class="settings-field">
       <label for="ds-custom-image">Custom Image (optional)</label>
       <input type="text" id="ds-custom-image" value="${escapeHtml(cfg.custom_image || '')}"
-        placeholder="my-sandbox:latest (mit vorinstallierten Paketen)" onchange="markSettingsModified()"
+        placeholder="my-sandbox:latest" onchange="markSettingsModified()"
         style="font-family:var(--font-mono)">
       <small style="color:var(--text-muted)">Eigenes Image mit vorinstallierten Paketen</small>
     </div>
@@ -6749,120 +6738,6 @@ async function renderDockerSandboxSection() {
       <small style="color:var(--text-muted)">Ein Paket pro Zeile</small>
     </div>
 
-    <div class="settings-section" style="margin-top:20px">
-      <h3 class="settings-section-title">PODMAN MACHINE</h3>
-      <p class="settings-section-desc">
-        Podman Machine VM-Einstellungen fuer Windows (ohne WSL).
-        Hier kann ein internes Image-Repository angegeben werden.
-      </p>
-    </div>
-
-    <div class="settings-field">
-      <label for="ds-pm-enabled">Podman Machine aktiviert</label>
-      <label class="checkbox-label">
-        <input type="checkbox" id="ds-pm-enabled" ${cfg.podman_machine?.enabled !== false ? 'checked' : ''} onchange="markSettingsModified()">
-        Aktiviert
-      </label>
-    </div>
-
-    <div class="settings-field">
-      <label for="ds-pm-name">Machine Name</label>
-      <input type="text" id="ds-pm-name" value="${escapeHtml(cfg.podman_machine?.name || 'podman-machine-default')}"
-        placeholder="podman-machine-default" onchange="markSettingsModified()"
-        style="font-family:var(--font-mono);font-size:13px">
-    </div>
-
-    <div class="settings-field">
-      <label for="ds-pm-image-url">Image URL (intern)</label>
-      <input type="text" id="ds-pm-image-url" value="${escapeHtml(cfg.podman_machine?.image_url || '')}"
-        placeholder="docker://registry.example.com/podman/machine-os:5.0" onchange="markSettingsModified()"
-        style="font-family:var(--font-mono);font-size:13px">
-      <small style="color:var(--text-muted)">Fuer interne Registry: docker://host/image:tag</small>
-    </div>
-
-    <div class="settings-field">
-      <label for="ds-pm-image-path">Image Pfad (lokal)</label>
-      <input type="text" id="ds-pm-image-path" value="${escapeHtml(cfg.podman_machine?.image_path || '')}"
-        placeholder="C:/path/to/machine-image.qcow2" onchange="markSettingsModified()"
-        style="font-family:var(--font-mono);font-size:13px">
-      <small style="color:var(--text-muted)">Alternative: Lokaler Pfad zu VM-Image</small>
-    </div>
-
-    <div class="settings-field">
-      <label for="ds-pm-cpus">CPUs</label>
-      <input type="number" id="ds-pm-cpus" value="${cfg.podman_machine?.cpus || 2}"
-        min="1" max="8" onchange="markSettingsModified()" style="width:100px">
-    </div>
-
-    <div class="settings-field">
-      <label for="ds-pm-memory">Memory (MB)</label>
-      <input type="number" id="ds-pm-memory" value="${cfg.podman_machine?.memory_mb || 2048}"
-        min="512" max="16384" step="256" onchange="markSettingsModified()" style="width:100px">
-    </div>
-
-    <div class="settings-field">
-      <label for="ds-pm-disk">Disk (GB)</label>
-      <input type="number" id="ds-pm-disk" value="${cfg.podman_machine?.disk_size_gb || 20}"
-        min="10" max="100" onchange="markSettingsModified()" style="width:100px">
-    </div>
-
-    <div class="settings-field">
-      <label for="ds-pm-autostart">Auto-Start</label>
-      <label class="checkbox-label">
-        <input type="checkbox" id="ds-pm-autostart" ${cfg.podman_machine?.auto_start !== false ? 'checked' : ''} onchange="markSettingsModified()">
-        Machine automatisch starten
-      </label>
-    </div>
-
-    <div class="settings-section" style="margin-top:20px">
-      <h3 class="settings-section-title">WSL INTEGRATION</h3>
-      <p class="settings-section-desc">
-        Nutze Podman/Docker innerhalb einer WSL2-Distribution (z.B. Ubuntu).
-        Empfohlen fuer bessere Performance und native Linux-Container.
-      </p>
-    </div>
-
-    <div class="settings-field">
-      <label for="ds-wsl-enabled">WSL Integration aktiviert</label>
-      <label class="checkbox-label">
-        <input type="checkbox" id="ds-wsl-enabled" ${cfg.wsl_integration?.enabled ? 'checked' : ''} onchange="markSettingsModified()">
-        Aktiviert
-      </label>
-    </div>
-
-    <div class="settings-field">
-      <label for="ds-wsl-mode">Modus</label>
-      <select id="ds-wsl-mode" onchange="markSettingsModified()">
-        <option value="auto" ${cfg.wsl_integration?.mode === 'auto' || !cfg.wsl_integration?.mode ? 'selected' : ''}>Auto (erkennt beste Option)</option>
-        <option value="wsl-distro" ${cfg.wsl_integration?.mode === 'wsl-distro' ? 'selected' : ''}>WSL Distribution</option>
-        <option value="native" ${cfg.wsl_integration?.mode === 'native' ? 'selected' : ''}>Native (Windows)</option>
-      </select>
-      <small style="color:var(--text-muted)">WSL-Distro = Podman in WSL ausfuehren</small>
-    </div>
-
-    <div class="settings-field">
-      <label for="ds-wsl-distro">WSL Distribution</label>
-      <input type="text" id="ds-wsl-distro" value="${escapeHtml(cfg.wsl_integration?.distro_name || 'Ubuntu')}"
-        placeholder="Ubuntu, Ubuntu-24.04, Debian, etc." onchange="markSettingsModified()"
-        style="font-family:var(--font-mono);font-size:13px">
-      <small style="color:var(--text-muted)">Name der WSL-Distribution (wsl -l zeigt alle)</small>
-    </div>
-
-    <div class="settings-field">
-      <label for="ds-wsl-podman-path">Podman Pfad in WSL</label>
-      <input type="text" id="ds-wsl-podman-path" value="${escapeHtml(cfg.wsl_integration?.podman_path_in_wsl || '/usr/bin/podman')}"
-        placeholder="/usr/bin/podman" onchange="markSettingsModified()"
-        style="font-family:var(--font-mono);font-size:13px">
-    </div>
-
-    <div class="settings-field">
-      <label for="ds-wsl-autodetect">Auto-Detect</label>
-      <label class="checkbox-label">
-        <input type="checkbox" id="ds-wsl-autodetect" ${cfg.wsl_integration?.auto_detect !== false ? 'checked' : ''} onchange="markSettingsModified()">
-        Automatisch beste Distribution erkennen
-      </label>
-    </div>
-
     <div class="settings-actions-section" style="margin-top:20px">
       <button class="btn btn-secondary" onclick="dockerSandboxTestConnection()">
         🔌 Verbindung testen
@@ -6910,9 +6785,6 @@ function collectDockerSandboxSettings() {
 
   return {
     enabled: document.getElementById('ds-enabled')?.checked || false,
-    backend: document.getElementById('ds-backend')?.value || 'auto',
-    podman_path: document.getElementById('ds-podman-path')?.value?.trim() || '',
-    docker_path: document.getElementById('ds-docker-path')?.value?.trim() || '',
     image: document.getElementById('ds-image')?.value?.trim() || 'python:3.11-slim',
     custom_image: document.getElementById('ds-custom-image')?.value?.trim() || '',
     memory_limit: document.getElementById('ds-memory')?.value?.trim() || '512m',
@@ -6923,24 +6795,10 @@ function collectDockerSandboxSettings() {
     max_sessions: parseInt(document.getElementById('ds-max-sessions')?.value) || 5,
     file_upload_enabled: document.getElementById('ds-upload')?.checked || false,
     preinstalled_packages: packages,
-    // Podman Machine settings
-    podman_machine: {
-      enabled: document.getElementById('ds-pm-enabled')?.checked || false,
-      name: document.getElementById('ds-pm-name')?.value?.trim() || 'podman-machine-default',
-      image_url: document.getElementById('ds-pm-image-url')?.value?.trim() || '',
-      image_path: document.getElementById('ds-pm-image-path')?.value?.trim() || '',
-      cpus: parseInt(document.getElementById('ds-pm-cpus')?.value) || 2,
-      memory_mb: parseInt(document.getElementById('ds-pm-memory')?.value) || 2048,
-      disk_size_gb: parseInt(document.getElementById('ds-pm-disk')?.value) || 20,
-      auto_start: document.getElementById('ds-pm-autostart')?.checked || false,
-    },
-    // WSL Integration settings
+    // WSL Podman settings
     wsl_integration: {
-      enabled: document.getElementById('ds-wsl-enabled')?.checked || false,
-      mode: document.getElementById('ds-wsl-mode')?.value || 'auto',
       distro_name: document.getElementById('ds-wsl-distro')?.value?.trim() || 'Ubuntu',
       podman_path_in_wsl: document.getElementById('ds-wsl-podman-path')?.value?.trim() || '/usr/bin/podman',
-      auto_detect: document.getElementById('ds-wsl-autodetect')?.checked || false,
     },
   };
 }

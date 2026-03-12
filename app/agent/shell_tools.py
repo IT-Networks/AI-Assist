@@ -460,6 +460,39 @@ async def _run_container_shell(
 # Local Execution (mit Bestätigung)
 # ══════════════════════════════════════════════════════════════════════════════
 
+def _wrap_podman_for_wsl(command: str) -> str:
+    """
+    Wandelt podman/docker Befehle für WSL-Ausführung um.
+
+    Auf Windows mit aktivierter WSL-Sandbox werden podman/docker Befehle
+    automatisch über WSL ausgeführt, da Podman in WSL installiert ist.
+
+    Args:
+        command: Original-Befehl
+
+    Returns:
+        WSL-wrapped Befehl oder Original
+    """
+    if os.name != "nt":
+        return command  # Nicht Windows
+
+    if not settings.docker_sandbox.enabled:
+        return command  # Sandbox nicht aktiviert
+
+    # Prüfe ob es ein podman/docker Befehl ist
+    cmd_lower = command.strip().lower()
+    if not (cmd_lower.startswith("podman ") or cmd_lower.startswith("docker ")):
+        return command  # Kein Container-Befehl
+
+    # WSL-Config holen
+    wsl_cfg = settings.docker_sandbox.wsl_integration
+    distro = wsl_cfg.distro_name or "Ubuntu"
+
+    # Befehl für WSL wrappen
+    # podman ps -> wsl -d Ubuntu podman ps
+    return f'wsl -d {distro} {command}'
+
+
 async def _run_local_shell(
     command: str,
     working_dir: Optional[str] = None,
@@ -480,6 +513,11 @@ async def _run_local_shell(
     """
     start_time = time.time()
 
+    # Podman/Docker-Befehle für WSL wrappen (Windows)
+    actual_command = _wrap_podman_for_wsl(command)
+    if actual_command != command:
+        logger.debug("WSL-wrapped: %s -> %s", command, actual_command)
+
     # Shell ermitteln
     if os.name == "nt":
         shell = True  # Windows CMD
@@ -488,7 +526,7 @@ async def _run_local_shell(
 
     try:
         proc = await asyncio.create_subprocess_shell(
-            command,
+            actual_command,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
             cwd=working_dir
@@ -506,7 +544,7 @@ async def _run_local_shell(
         stdout_str = stdout.decode("utf-8", errors="replace")[:max_bytes]
         stderr_str = stderr.decode("utf-8", errors="replace")[:max_bytes]
 
-        return {
+        result = {
             "success": proc.returncode == 0,
             "stdout": stdout_str.strip(),
             "stderr": stderr_str.strip(),
@@ -514,6 +552,11 @@ async def _run_local_shell(
             "duration_seconds": round(duration, 2),
             "executed_in": "local"
         }
+        # Wenn WSL-wrapped, den tatsächlichen Befehl anzeigen
+        if actual_command != command:
+            result["actual_command"] = actual_command
+            result["wsl_wrapped"] = True
+        return result
 
     except asyncio.TimeoutError:
         try:

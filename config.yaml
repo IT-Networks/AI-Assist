@@ -382,12 +382,10 @@ internal_fetch:
     - '#cookie-consent'
     preserve_selectors: []
 
-# Container Sandbox (Docker/Podman) - Sichere Code-Ausführung
+# Container Sandbox - WSL Podman
+# Sichere Code-Ausführung in Podman-Containern innerhalb WSL Ubuntu
 docker_sandbox:
   enabled: true
-  backend: wsl-podman  # auto | docker | podman | wsl-podman (empfohlen)
-  docker_path: ''  # Leer = automatische Erkennung aus PATH
-  podman_path: ''  # Leer = automatische Erkennung aus PATH
   image: python:3.11-slim
   custom_image: ''
   memory_limit: 512m
@@ -414,23 +412,10 @@ docker_sandbox:
   - chardet
   read_only_filesystem: false
   drop_capabilities: true
-  # Podman Machine Konfiguration (für Windows ohne WSL)
-  podman_machine:
-    enabled: true
-    name: podman-machine-default
-    image_url: ''            # Remote Image URL (z.B. docker://registry.example.com/podman/machine-os:5.0)
-    image_path: ''           # Lokaler Image-Pfad (Alternative zu image_url)
-    cpus: 2
-    memory_mb: 2048
-    disk_size_gb: 20
-    auto_start: true
-  # WSL Integration (nutzt existierende WSL-Distribution statt Podman VM)
+  # WSL Podman Einstellungen
   wsl_integration:
-    enabled: true            # WSL als Standard-Backend
-    mode: wsl-distro         # auto | native | wsl-distro
-    distro_name: Ubuntu      # z.B. "Ubuntu", "Ubuntu-24.04", "Debian"
+    distro_name: podman-machine-default      # WSL Distribution mit Podman
     podman_path_in_wsl: /usr/bin/podman
-    auto_detect: true
 
 mcp:
   enabled: true

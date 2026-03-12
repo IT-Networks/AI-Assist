@@ -1,17 +1,13 @@
 """
-Container Backend Abstraction Layer.
+Container Backend - WSL Podman.
 
-Provides a unified interface for different container runtimes:
-- Docker (native)
-- Podman (native)
-- Podman via WSL (wsl-podman)
-- Podman Machine (Windows VM)
+Provides container execution via Podman inside WSL2 Ubuntu.
 
 Usage:
-    from app.agent.backends import ContainerBackendFactory
+    from app.agent.backends import WSLPodmanBackend
 
-    backend = await ContainerBackendFactory.create()
-    if backend:
+    backend = WSLPodmanBackend("Ubuntu")
+    if await backend.is_available():
         result = await backend.run("python:3.11", ["python", "-c", "print('hello')"])
 """
 
@@ -20,11 +16,17 @@ from app.agent.backends.base import (
     ContainerResult,
     ContainerBackend,
 )
-from app.agent.backends.factory import ContainerBackendFactory
+from app.agent.backends.wsl_podman import (
+    WSLPodmanBackend,
+    detect_wsl_distros,
+    find_best_wsl_distro,
+)
 
 __all__ = [
     "BackendType",
     "ContainerResult",
     "ContainerBackend",
-    "ContainerBackendFactory",
+    "WSLPodmanBackend",
+    "detect_wsl_distros",
+    "find_best_wsl_distro",
 ]

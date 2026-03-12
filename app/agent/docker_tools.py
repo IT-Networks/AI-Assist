@@ -1,7 +1,7 @@
 """
 Container Sandbox Tools - Sichere Python-Code-Ausführung in isolierten Containern.
 
-Verwendet Podman Desktop (daemonless, portable, kein Admin nötig).
+Verwendet Podman in WSL2 Ubuntu (daemonless, native Linux-Container).
 
 Features:
 - Stateless Execution: Einmalige Code-Ausführung ohne Session
@@ -18,8 +18,8 @@ Sicherheit:
 - Keine Privilegien-Eskalation
 
 Container Runtime:
-- Podman Desktop (daemonless, portable)
-- Kein Docker erforderlich
+- Podman in WSL2 Ubuntu
+- Native Linux-Container Performance
 """
 
 import asyncio
@@ -42,96 +42,149 @@ logger = logging.getLogger(__name__)
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# Container Runtime Detection (Podman)
+# WSL Podman Runtime - Nur WSL Ubuntu mit Podman
 # ══════════════════════════════════════════════════════════════════════════════
 
-_container_runtime: Optional[str] = None  # Cache für erkannte Runtime
+_wsl_validated: bool = False
+_wsl_distro: Optional[str] = None
+_podman_path_in_wsl: str = "/usr/bin/podman"
 _runtime_version: Optional[str] = None
 
 
-def _detect_container_runtime() -> Optional[str]:
+def _detect_wsl_podman() -> bool:
     """
-    Erkennt die Podman-Installation.
-
-    Prüft in dieser Reihenfolge:
-    1. Konfigurierter Pfad (podman_path in config)
-    2. System PATH
+    Erkennt WSL Ubuntu mit Podman.
 
     Returns:
-        Vollständiger Pfad zu Podman oder None wenn nicht gefunden
+        True wenn WSL Podman verfügbar ist
     """
-    global _container_runtime, _runtime_version
+    global _wsl_validated, _wsl_distro, _podman_path_in_wsl, _runtime_version
+    import subprocess
 
-    # Cache nutzen
-    if _container_runtime is not None:
-        return _container_runtime if _container_runtime else None
+    if _wsl_validated:
+        return _wsl_distro is not None
 
     cfg = settings.docker_sandbox
+    wsl_cfg = cfg.wsl_integration
 
-    # 1. Konfigurierter Pfad prüfen
-    if cfg.podman_path and os.path.isfile(cfg.podman_path):
-        _container_runtime = cfg.podman_path
-        _runtime_version = _get_runtime_version(cfg.podman_path)
-        logger.info("Sandbox: Using configured Podman: %s %s", cfg.podman_path, _runtime_version or "")
-        return _container_runtime
+    # Distro aus Config oder Standard
+    distro = wsl_cfg.distro_name or "Ubuntu"
+    podman_path = wsl_cfg.podman_path_in_wsl or "/usr/bin/podman"
 
-    # 2. System PATH prüfen
-    podman_path = shutil.which("podman")
-    if podman_path:
-        _container_runtime = podman_path
-        _runtime_version = _get_runtime_version(podman_path)
-        logger.info("Sandbox: Found Podman in PATH: %s %s", podman_path, _runtime_version or "")
-        return _container_runtime
-
-    logger.warning("Sandbox: Podman nicht gefunden! Bitte Podman Desktop installieren.")
-    _container_runtime = ""  # Markiere als "nicht gefunden"
-    return None
-
-
-def _get_runtime_version(runtime: str) -> Optional[str]:
-    """Holt die Version der Container-Runtime."""
-    import subprocess
+    # 1. Prüfe ob WSL verfügbar
     try:
         result = subprocess.run(
-            [runtime, "--version"],
+            ["wsl", "--status"],
             capture_output=True,
             text=True,
-            timeout=5
+            timeout=10
         )
-        if result.returncode == 0:
-            # Erste Zeile, z.B. "podman version 4.5.0" oder "Docker version 24.0.2"
-            return result.stdout.strip().split("\n")[0]
-    except Exception:
-        pass
-    return None
+        if result.returncode != 0:
+            logger.warning("WSL nicht verfügbar")
+            _wsl_validated = True
+            return False
+    except Exception as e:
+        logger.warning("WSL Check fehlgeschlagen: %s", e)
+        _wsl_validated = True
+        return False
+
+    # 2. Prüfe ob Distro existiert
+    try:
+        result = subprocess.run(
+            ["wsl", "-d", distro, "echo", "ok"],
+            capture_output=True,
+            text=True,
+            timeout=10
+        )
+        if result.returncode != 0:
+            logger.warning("WSL Distro '%s' nicht gefunden", distro)
+            _wsl_validated = True
+            return False
+    except Exception as e:
+        logger.warning("WSL Distro Check fehlgeschlagen: %s", e)
+        _wsl_validated = True
+        return False
+
+    # 3. Prüfe ob Podman in Distro installiert
+    try:
+        result = subprocess.run(
+            ["wsl", "-d", distro, podman_path, "--version"],
+            capture_output=True,
+            text=True,
+            timeout=10
+        )
+        if result.returncode != 0:
+            logger.warning("Podman nicht in WSL '%s' gefunden. Installiere mit: wsl -d %s sudo apt install podman", distro, distro)
+            _wsl_validated = True
+            return False
+        _runtime_version = result.stdout.strip().split("\n")[0]
+    except Exception as e:
+        logger.warning("Podman Check fehlgeschlagen: %s", e)
+        _wsl_validated = True
+        return False
+
+    # Erfolgreich!
+    _wsl_distro = distro
+    _podman_path_in_wsl = podman_path
+    _wsl_validated = True
+    logger.info("WSL Podman verfügbar: %s in %s", _runtime_version, distro)
+    return True
+
+
+def get_wsl_command_prefix() -> List[str]:
+    """
+    Gibt das WSL Podman Befehlspräfix zurück.
+
+    Returns:
+        ['wsl', '-d', 'Ubuntu', '/usr/bin/podman']
+    """
+    if not _detect_wsl_podman():
+        raise RuntimeError(
+            "WSL Podman nicht verfügbar.\n"
+            "1. WSL installieren: wsl --install\n"
+            "2. Ubuntu installieren: wsl --install Ubuntu\n"
+            "3. Podman installieren: wsl -d Ubuntu sudo apt update && sudo apt install -y podman"
+        )
+    return ["wsl", "-d", _wsl_distro, _podman_path_in_wsl]
 
 
 def get_container_runtime() -> str:
     """
-    Gibt den Pfad zu Podman zurück.
+    Gibt 'wsl-podman' zurück wenn verfügbar.
 
-    Raises:
-        RuntimeError wenn Podman nicht verfügbar
+    DEPRECATED: Nutze get_wsl_command_prefix() für Befehle.
     """
-    runtime = _detect_container_runtime()
-    if not runtime:
-        raise RuntimeError(
-            "Podman nicht gefunden.\n"
-            "Bitte Podman Desktop installieren: https://podman-desktop.io/\n"
-            "Download: https://podman.io/getting-started/installation"
-        )
-    return runtime
+    if _detect_wsl_podman():
+        return "wsl-podman"
+    raise RuntimeError("WSL Podman nicht verfügbar")
 
 
 def get_runtime_info() -> Dict[str, Any]:
-    """Gibt Informationen zur Podman-Installation zurück."""
-    runtime = _detect_container_runtime()
+    """Gibt Informationen zur WSL Podman-Installation zurück."""
+    available = _detect_wsl_podman()
     return {
-        "runtime": "podman",
-        "path": runtime or "none",
+        "runtime": "wsl-podman",
+        "distro": _wsl_distro,
+        "podman_path": _podman_path_in_wsl,
         "version": _runtime_version,
-        "available": runtime is not None and runtime != ""
+        "available": available
     }
+
+
+def _windows_to_wsl_path(windows_path: str) -> str:
+    """
+    Konvertiert Windows-Pfad zu WSL-Pfad.
+
+    C:\\Users\\marku\\code -> /mnt/c/Users/marku/code
+    """
+    if windows_path.startswith("/"):
+        return windows_path
+    path = windows_path.replace("\\", "/")
+    if len(path) >= 2 and path[1] == ":":
+        drive = path[0].lower()
+        rest = path[2:].lstrip("/")
+        return f"/mnt/{drive}/{rest}"
+    return path
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -181,9 +234,9 @@ async def _cleanup_expired_sessions():
 async def _stop_container(container_id: str):
     """Stoppt und entfernt einen Container."""
     try:
-        runtime = get_container_runtime()
+        cmd = get_wsl_command_prefix() + ["rm", "-f", container_id]
         proc = await asyncio.create_subprocess_exec(
-            runtime, "rm", "-f", container_id,
+            *cmd,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE
         )
@@ -205,9 +258,9 @@ def _get_container_image() -> str:
 async def _check_image_exists(image: str) -> bool:
     """Prüft ob ein Container-Image lokal vorhanden ist."""
     try:
-        runtime = get_container_runtime()
+        cmd = get_wsl_command_prefix() + ["image", "inspect", image]
         proc = await asyncio.create_subprocess_exec(
-            runtime, "image", "inspect", image,
+            *cmd,
             stdout=asyncio.subprocess.DEVNULL,
             stderr=asyncio.subprocess.DEVNULL
         )
@@ -225,12 +278,12 @@ async def _pull_image(image: str) -> tuple[bool, str]:
     Returns:
         Tuple (success, message)
     """
-    runtime = get_container_runtime()
+    cmd = get_wsl_command_prefix() + ["pull", image]
     logger.info(f"[sandbox] Pulling image: {image}")
 
     try:
         proc = await asyncio.create_subprocess_exec(
-            runtime, "pull", image,
+            *cmd,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE
         )
@@ -273,10 +326,9 @@ def _build_container_run_args(
     network: bool = True,
     workdir: str = "/workspace"
 ) -> List[str]:
-    """Baut die Container-Run-Argumente auf (Docker/Podman kompatibel)."""
+    """Baut die Container-Run-Argumente auf (WSL Podman)."""
     cfg = settings.docker_sandbox
-    runtime = get_container_runtime()
-    args = [runtime, "run"]
+    args = get_wsl_command_prefix() + ["run"]
 
     if not detach:
         args.append("--rm")
@@ -352,16 +404,16 @@ async def _ensure_packages_installed(container_id: str, packages: List[str]) -> 
     if not packages:
         return True
 
-    runtime = get_container_runtime()
+    prefix = get_wsl_command_prefix()
 
     # Prüfen ob pip verfügbar
-    check_cmd = [runtime, "exec", container_id, "pip", "--version"]
+    check_cmd = prefix + ["exec", container_id, "pip", "--version"]
     code, _, _ = await _run_container_command(check_cmd, timeout=10)
     if code != 0:
         return False
 
     # Pakete installieren
-    install_cmd = [runtime, "exec", container_id, "pip", "install", "-q"] + packages
+    install_cmd = prefix + ["exec", container_id, "pip", "install", "-q"] + packages
     code, stdout, stderr = await _run_container_command(install_cmd, timeout=120)
     return code == 0
 
@@ -383,7 +435,7 @@ async def _test_container_basic() -> Dict[str, Any]:
     start_time = time.time()
 
     try:
-        runtime = get_container_runtime()
+        prefix = get_wsl_command_prefix()
     except RuntimeError as e:
         return {"error": str(e), "success": False}
 
@@ -399,8 +451,8 @@ async def _test_container_basic() -> Dict[str, Any]:
         }
 
     # Minimale Container-Argumente (ohne Paket-Installation)
-    args = [
-        runtime, "run", "--rm",
+    args = prefix + [
+        "run", "--rm",
         "-m", cfg.memory_limit,
         "--cpus", str(cfg.cpu_limit),
         "--no-new-privileges",
@@ -483,12 +535,12 @@ async def podman_build_image(
     start_time = time.time()
 
     try:
-        runtime = get_container_runtime()
+        prefix = get_wsl_command_prefix()
     except RuntimeError as e:
         return ToolResult(success=False, error=str(e))
 
     # Build-Befehl zusammenbauen
-    args = [runtime, "build"]
+    args = prefix + ["build"]
 
     # Image-Name
     args.extend(["-t", image_name])
@@ -529,8 +581,9 @@ async def podman_build_image(
         if proc.returncode == 0:
             # Image-ID ermitteln
             image_id = None
+            inspect_cmd = prefix + ["image", "inspect", image_name, "--format", "{{.Id}}"]
             inspect_proc = await asyncio.create_subprocess_exec(
-                runtime, "image", "inspect", image_name, "--format", "{{.Id}}",
+                *inspect_cmd,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.DEVNULL
             )
@@ -601,11 +654,11 @@ async def podman_list_images(
         return ToolResult(success=False, error="Container Sandbox ist nicht aktiviert")
 
     try:
-        runtime = get_container_runtime()
+        prefix = get_wsl_command_prefix()
     except RuntimeError as e:
         return ToolResult(success=False, error=str(e))
 
-    args = [runtime, "images", "--format", "{{.Repository}}:{{.Tag}}\t{{.ID}}\t{{.Size}}\t{{.Created}}"]
+    args = prefix + ["images", "--format", "{{.Repository}}:{{.Tag}}\t{{.ID}}\t{{.Size}}\t{{.Created}}"]
 
     if filter_name:
         args.extend(["--filter", f"reference=*{filter_name}*"])
@@ -664,11 +717,11 @@ async def podman_remove_image(
         return ToolResult(success=False, error="Container Sandbox ist nicht aktiviert")
 
     try:
-        runtime = get_container_runtime()
+        prefix = get_wsl_command_prefix()
     except RuntimeError as e:
         return ToolResult(success=False, error=str(e))
 
-    args = [runtime, "rmi"]
+    args = prefix + ["rmi"]
     if force:
         args.append("-f")
     args.append(image_name)
@@ -968,9 +1021,9 @@ except Exception:
     pass  # Nicht-serialisierbare Objekte ignorieren
 '''
 
-    runtime = get_container_runtime()
-    args = [
-        runtime, "exec", container_id,
+    prefix = get_wsl_command_prefix()
+    args = prefix + [
+        "exec", container_id,
         "python", "-c", wrapper_code
     ]
 
@@ -1132,11 +1185,11 @@ async def docker_upload_file(
 
     try:
         target_file = f"{target_path.rstrip('/')}/{filename}"
-        runtime = get_container_runtime()
+        cmd = get_wsl_command_prefix() + ["cp", tmp_path, f"{container_id}:{target_file}"]
 
         # container cp tmp_path container:/workspace/filename
         proc = await asyncio.create_subprocess_exec(
-            runtime, "cp", tmp_path, f"{container_id}:{target_file}",
+            *cmd,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE
         )
