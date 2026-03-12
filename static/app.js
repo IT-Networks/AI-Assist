@@ -1489,6 +1489,10 @@ async function processAgentEvent(event, bubble, msgDiv, chat) {
       break;
 
     // ── MCP Thinking Events ──
+    case 'thinking_check': {
+      showThinkingCheck(data, chat);
+      break;
+    }
     case 'mcp_start': {
       showThinkingPanel(data, chat);
       break;
@@ -7569,6 +7573,58 @@ document.addEventListener('keydown', (e) => {
 // ══════════════════════════════════════════════════════════════════════════════
 
 /**
+ * Zeigt das Ergebnis des Thinking-Checks an (wird IMMER gesendet).
+ * @param {Object} data - THINKING_CHECK Event-Daten
+ *   - complexity_score: number (0.0-1.0)
+ *   - will_activate: boolean
+ *   - threshold: number
+ *   - is_error_query: boolean
+ * @param {Object} chat - Chat-Objekt
+ */
+function showThinkingCheck(data, chat) {
+  const complexityEl = document.getElementById('thinking-complexity');
+  const isActive = chat.id === chatManager.activeId;
+
+  // Komplexität im Chat speichern
+  chat.lastComplexityCheck = {
+    score: data.complexity_score || 0,
+    willActivate: data.will_activate || false,
+    threshold: data.threshold || 0.3,
+    timestamp: Date.now()
+  };
+
+  if (isActive && complexityEl) {
+    const percent = Math.round((data.complexity_score || 0) * 100);
+    const thresholdPercent = Math.round((data.threshold || 0.3) * 100);
+
+    if (data.will_activate) {
+      // Thinking wird aktiviert - zeige kurz den Check, dann übernimmt mcp_start
+      complexityEl.textContent = `Komplexität: ${percent}% → Thinking...`;
+      complexityEl.className = 'thinking-complexity';
+      if (percent >= 80) complexityEl.classList.add('high');
+      else if (percent >= 50) complexityEl.classList.add('medium');
+      else complexityEl.classList.add('low');
+    } else {
+      // Thinking wird NICHT aktiviert - zeige Komplexität dauerhaft
+      complexityEl.textContent = `Komplexität: ${percent}% (< ${thresholdPercent}%)`;
+      complexityEl.className = 'thinking-complexity skipped';
+
+      // Nach 5 Sekunden ausblenden
+      setTimeout(() => {
+        if (complexityEl.classList.contains('skipped')) {
+          complexityEl.textContent = '';
+        }
+      }, 5000);
+    }
+  }
+
+  // Badge kurz anzeigen wenn Komplexität hoch aber nicht aktiviert
+  if (!data.will_activate && data.complexity_score >= 0.3) {
+    updateThinkingBadge(false, `${Math.round(data.complexity_score * 100)}%`);
+  }
+}
+
+/**
  * Zeigt das Thinking-Panel an und initialisiert es.
  * @param {Object} data - MCP_START Event-Daten
  * @param {Object} chat - Chat-Objekt
@@ -7830,13 +7886,24 @@ function showThinkingError(data, chat) {
 /**
  * Aktualisiert das Thinking-Badge im Tab.
  * @param {boolean} active - Ob Thinking aktiv ist
+ * @param {string} [text] - Optionaler Text (z.B. "75%")
  */
-function updateThinkingBadge(active) {
+function updateThinkingBadge(active, text = null) {
   const badge = document.getElementById('thinking-badge');
   if (badge) {
-    badge.style.display = active ? 'inline-block' : 'none';
+    badge.style.display = active || text ? 'inline-block' : 'none';
     if (active) {
       badge.classList.add('pulse');
+      badge.textContent = '🧠';
+    } else if (text) {
+      badge.classList.remove('pulse');
+      badge.textContent = `🧠 ${text}`;
+      // Nach 3 Sekunden ausblenden wenn nicht aktiv
+      setTimeout(() => {
+        if (!badge.classList.contains('pulse')) {
+          badge.style.display = 'none';
+        }
+      }, 3000);
     } else {
       badge.classList.remove('pulse');
     }

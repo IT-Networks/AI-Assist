@@ -3786,6 +3786,13 @@ a:visited {
   color: var(--success);
 }
 
+.thinking-complexity.skipped {
+  background: var(--surface);
+  color: var(--text-secondary);
+  opacity: 0.8;
+  font-style: italic;
+}
+
 .thinking-status {
   display: flex;
   align-items: center;
