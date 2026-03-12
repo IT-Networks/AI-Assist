@@ -76,6 +76,20 @@ _BLOCKED_PATTERNS = [
     (re.compile(r"wget.*\|\s*(bash|sh)", re.IGNORECASE), "wget | sh nicht erlaubt"),
 ]
 
+# LOCAL_ONLY - System-Befehle die IMMER lokal ausgeführt werden (nicht im Container)
+# Diese Tools existieren nicht im Container und müssen auf dem Host laufen
+_LOCAL_ONLY_PATTERNS = [
+    re.compile(r"^podman\b", re.IGNORECASE),       # Podman-Befehle
+    re.compile(r"^docker\b", re.IGNORECASE),       # Docker-Befehle
+    re.compile(r"^wsl\b", re.IGNORECASE),          # WSL-Befehle
+    re.compile(r"^kubectl\b", re.IGNORECASE),      # Kubernetes
+    re.compile(r"^az\b", re.IGNORECASE),           # Azure CLI
+    re.compile(r"^aws\b", re.IGNORECASE),          # AWS CLI
+    re.compile(r"^gcloud\b", re.IGNORECASE),       # Google Cloud CLI
+    re.compile(r"^systemctl\b", re.IGNORECASE),    # Systemd
+    re.compile(r"^journalctl\b", re.IGNORECASE),   # Systemd logs
+]
+
 # READ_ONLY - Sicher, keine Änderungen
 _READ_ONLY_PATTERNS = [
     re.compile(r"^ls\b", re.IGNORECASE),
@@ -168,6 +182,17 @@ def classify_command(command: str) -> CommandClassification:
                 can_container_test=False,
                 requires_confirmation=False,
                 block_reason=reason
+            )
+
+    # LOCAL_ONLY prüfen - System-Befehle die nicht im Container laufen können
+    for pattern in _LOCAL_ONLY_PATTERNS:
+        if pattern.search(command):
+            return CommandClassification(
+                command=command,
+                level=SafetyLevel.READ_ONLY,  # Versionsabfragen sind read-only
+                category="local_system",
+                can_container_test=False,  # NICHT im Container!
+                requires_confirmation=False
             )
 
     # READ_ONLY prüfen (pre-compiled patterns)
@@ -502,22 +527,32 @@ async def shell_execute(
             }
         )
 
-    # Mount-Pfad ermitteln
-    mount_path = None
-    if mount_repo:
-        # Versuche Java-Repo
-        if settings.java.repo_path and os.path.isdir(settings.java.repo_path):
-            mount_path = settings.java.repo_path
-        # Fallback: Python-Repo
-        elif settings.python.repo_path and os.path.isdir(settings.python.repo_path):
-            mount_path = settings.python.repo_path
+    # LOCAL_ONLY Befehle (podman, docker, wsl, etc.) direkt lokal ausführen
+    if not classification.can_container_test:
+        logger.debug("Befehl als local_system klassifiziert, führe lokal aus: %s", command)
+        result = await _run_local_shell(
+            command=command,
+            working_dir=working_dir,
+            timeout=timeout
+        )
+        result["executed_in"] = "local"
+    else:
+        # Mount-Pfad ermitteln
+        mount_path = None
+        if mount_repo:
+            # Versuche Java-Repo
+            if settings.java.repo_path and os.path.isdir(settings.java.repo_path):
+                mount_path = settings.java.repo_path
+            # Fallback: Python-Repo
+            elif settings.python.repo_path and os.path.isdir(settings.python.repo_path):
+                mount_path = settings.python.repo_path
 
-    # Im Container ausführen
-    result = await _run_container_shell(
-        command=command,
-        timeout=timeout,
-        mount_path=mount_path
-    )
+        # Im Container ausführen
+        result = await _run_container_shell(
+            command=command,
+            timeout=timeout,
+            mount_path=mount_path
+        )
 
     # Execution speichern für Eskalation
     execution_id = str(uuid.uuid4())[:12]
