@@ -385,7 +385,7 @@ internal_fetch:
 # Container Sandbox (Docker/Podman) - Sichere Code-Ausführung
 docker_sandbox:
   enabled: true
-  backend: auto  # auto | docker | podman | wsl-podman
+  backend: wsl-podman  # auto | docker | podman | wsl-podman (empfohlen)
   docker_path: ''  # Leer = automatische Erkennung aus PATH
   podman_path: ''  # Leer = automatische Erkennung aus PATH
   image: python:3.11-slim
@@ -426,9 +426,9 @@ docker_sandbox:
     auto_start: true
   # WSL Integration (nutzt existierende WSL-Distribution statt Podman VM)
   wsl_integration:
-    enabled: false           # Auf true setzen um WSL zu nutzen
-    mode: auto               # auto | native | wsl-distro
-    distro_name: ''          # z.B. "Ubuntu-24.04" - leer = auto-detect
+    enabled: true            # WSL als Standard-Backend
+    mode: wsl-distro         # auto | native | wsl-distro
+    distro_name: Ubuntu      # z.B. "Ubuntu", "Ubuntu-24.04", "Debian"
     podman_path_in_wsl: /usr/bin/podman
     auto_detect: true
 

@@ -6636,9 +6636,11 @@ async function renderDockerSandboxSection() {
       <label for="ds-backend">Backend</label>
       <select id="ds-backend" onchange="markSettingsModified()">
         <option value="auto" ${cfg.backend === 'auto' || !cfg.backend ? 'selected' : ''}>Auto (Podman bevorzugt)</option>
-        <option value="podman" ${cfg.backend === 'podman' ? 'selected' : ''}>Podman</option>
+        <option value="wsl-podman" ${cfg.backend === 'wsl-podman' ? 'selected' : ''}>WSL Podman (empfohlen)</option>
+        <option value="podman" ${cfg.backend === 'podman' ? 'selected' : ''}>Podman (Windows)</option>
         <option value="docker" ${cfg.backend === 'docker' ? 'selected' : ''}>Docker</option>
       </select>
+      <small style="color:var(--text-muted)">WSL Podman = Podman in WSL2-Distribution</small>
     </div>
 
     <div class="settings-field">
@@ -6812,6 +6814,55 @@ async function renderDockerSandboxSection() {
       </label>
     </div>
 
+    <div class="settings-section" style="margin-top:20px">
+      <h3 class="settings-section-title">WSL INTEGRATION</h3>
+      <p class="settings-section-desc">
+        Nutze Podman/Docker innerhalb einer WSL2-Distribution (z.B. Ubuntu).
+        Empfohlen fuer bessere Performance und native Linux-Container.
+      </p>
+    </div>
+
+    <div class="settings-field">
+      <label for="ds-wsl-enabled">WSL Integration aktiviert</label>
+      <label class="checkbox-label">
+        <input type="checkbox" id="ds-wsl-enabled" ${cfg.wsl_integration?.enabled ? 'checked' : ''} onchange="markSettingsModified()">
+        Aktiviert
+      </label>
+    </div>
+
+    <div class="settings-field">
+      <label for="ds-wsl-mode">Modus</label>
+      <select id="ds-wsl-mode" onchange="markSettingsModified()">
+        <option value="auto" ${cfg.wsl_integration?.mode === 'auto' || !cfg.wsl_integration?.mode ? 'selected' : ''}>Auto (erkennt beste Option)</option>
+        <option value="wsl-distro" ${cfg.wsl_integration?.mode === 'wsl-distro' ? 'selected' : ''}>WSL Distribution</option>
+        <option value="native" ${cfg.wsl_integration?.mode === 'native' ? 'selected' : ''}>Native (Windows)</option>
+      </select>
+      <small style="color:var(--text-muted)">WSL-Distro = Podman in WSL ausfuehren</small>
+    </div>
+
+    <div class="settings-field">
+      <label for="ds-wsl-distro">WSL Distribution</label>
+      <input type="text" id="ds-wsl-distro" value="${escapeHtml(cfg.wsl_integration?.distro_name || 'Ubuntu')}"
+        placeholder="Ubuntu, Ubuntu-24.04, Debian, etc." onchange="markSettingsModified()"
+        style="font-family:var(--font-mono);font-size:13px">
+      <small style="color:var(--text-muted)">Name der WSL-Distribution (wsl -l zeigt alle)</small>
+    </div>
+
+    <div class="settings-field">
+      <label for="ds-wsl-podman-path">Podman Pfad in WSL</label>
+      <input type="text" id="ds-wsl-podman-path" value="${escapeHtml(cfg.wsl_integration?.podman_path_in_wsl || '/usr/bin/podman')}"
+        placeholder="/usr/bin/podman" onchange="markSettingsModified()"
+        style="font-family:var(--font-mono);font-size:13px">
+    </div>
+
+    <div class="settings-field">
+      <label for="ds-wsl-autodetect">Auto-Detect</label>
+      <label class="checkbox-label">
+        <input type="checkbox" id="ds-wsl-autodetect" ${cfg.wsl_integration?.auto_detect !== false ? 'checked' : ''} onchange="markSettingsModified()">
+        Automatisch beste Distribution erkennen
+      </label>
+    </div>
+
     <div class="settings-actions-section" style="margin-top:20px">
       <button class="btn btn-secondary" onclick="dockerSandboxTestConnection()">
         🔌 Verbindung testen
@@ -6882,6 +6933,14 @@ function collectDockerSandboxSettings() {
       memory_mb: parseInt(document.getElementById('ds-pm-memory')?.value) || 2048,
       disk_size_gb: parseInt(document.getElementById('ds-pm-disk')?.value) || 20,
       auto_start: document.getElementById('ds-pm-autostart')?.checked || false,
+    },
+    // WSL Integration settings
+    wsl_integration: {
+      enabled: document.getElementById('ds-wsl-enabled')?.checked || false,
+      mode: document.getElementById('ds-wsl-mode')?.value || 'auto',
+      distro_name: document.getElementById('ds-wsl-distro')?.value?.trim() || 'Ubuntu',
+      podman_path_in_wsl: document.getElementById('ds-wsl-podman-path')?.value?.trim() || '/usr/bin/podman',
+      auto_detect: document.getElementById('ds-wsl-autodetect')?.checked || false,
     },
   };
 }
