@@ -138,11 +138,28 @@ class SearchConfigRequest(BaseModel):
 
 # ── DuckDuckGo Search ─────────────────────────────────────────────────────────
 
+# duckduckgo-search Library (stabiler als HTML-Scraping)
+try:
+    from duckduckgo_search import DDGS
+    _DDG_AVAILABLE = True
+except ImportError:
+    _DDG_AVAILABLE = False
+    DDGS = None
+
+# Fallback: Legacy HTML scraping (veraltet, wird blockiert)
 _DDG_URL = "https://html.duckduckgo.com/html/"
 _DDG_HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-                  "(KHTML, like Gecko) Chrome/120.0 Safari/537.36",
-    "Accept-Language": "de,en;q=0.9",
+                  "(KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
+    "Accept-Language": "de-DE,de;q=0.9,en-US;q=0.8,en;q=0.7",
+    "Accept-Encoding": "gzip, deflate, br",
+    "Cache-Control": "no-cache",
+    "Upgrade-Insecure-Requests": "1",
+    "Sec-Fetch-Dest": "document",
+    "Sec-Fetch-Mode": "navigate",
+    "Sec-Fetch-Site": "none",
+    "Sec-Fetch-User": "?1",
 }
 
 # Entferne HTML-Tags und &entity;
@@ -203,18 +220,90 @@ def _get_proxy_config(target_url: str = "") -> dict:
 
 
 async def _ddg_search(query: str, max_results: int = 5) -> List[Dict[str, str]]:
-    """Führt eine DuckDuckGo-HTML-Suche durch und gibt Treffer zurück."""
+    """
+    Führt eine DuckDuckGo-Suche durch.
+
+    Verwendet die duckduckgo-search Library (empfohlen) mit HTML-Scraping als Fallback.
+    """
     timeout = settings.search.timeout_seconds or 30
+    proxy_url = settings.search.get_proxy_url()
 
-    # Proxy-Konfiguration (mit no_proxy-Prüfung)
-    proxy_config = _get_proxy_config(_DDG_URL)
+    print(f"[search] Query: {query[:50]}... | method={'library' if _DDG_AVAILABLE else 'legacy'} | proxy={bool(proxy_url)}")
 
-    # Debug-Logging für SSL-Einstellungen
-    print(f"[search] Query: {query[:50]}... | verify_ssl={settings.search.verify_ssl} | proxy={bool(proxy_config)}")
+    # ═══════════════════════════════════════════════════════════════════════════
+    # Methode 1: duckduckgo-search Library (bevorzugt)
+    # ═══════════════════════════════════════════════════════════════════════════
+    if _DDG_AVAILABLE:
+        try:
+            results = await _ddg_search_library(query, max_results, proxy_url, timeout)
+            if results:
+                return results
+            print("[search] Library returned no results, trying fallback...")
+        except Exception as e:
+            print(f"[search] Library search failed: {e}, trying fallback...")
 
+    # ═══════════════════════════════════════════════════════════════════════════
+    # Methode 2: Legacy HTML-Scraping (Fallback)
+    # ═══════════════════════════════════════════════════════════════════════════
+    return await _ddg_search_legacy(query, max_results, timeout)
+
+
+async def _ddg_search_library(
+    query: str,
+    max_results: int,
+    proxy_url: Optional[str],
+    timeout: int
+) -> List[Dict[str, str]]:
+    """Suche mit duckduckgo-search Library."""
+    import asyncio
+
+    results = []
+
+    def sync_search():
+        """Synchrone Suche (Library ist nicht async)."""
+        try:
+            # DDGS mit Proxy konfigurieren
+            ddgs_kwargs = {
+                "timeout": timeout,
+            }
+            if proxy_url:
+                ddgs_kwargs["proxy"] = proxy_url
+
+            with DDGS(**ddgs_kwargs) as ddgs:
+                # Text-Suche durchführen
+                search_results = list(ddgs.text(
+                    query,
+                    region="de-de",
+                    safesearch="moderate",
+                    max_results=max_results
+                ))
+                return search_results
+        except Exception as e:
+            print(f"[search] DDGS error: {e}")
+            raise
+
+    # In Thread ausführen (Library ist synchron)
+    loop = asyncio.get_event_loop()
+    search_results = await loop.run_in_executor(None, sync_search)
+
+    for r in search_results:
+        title = r.get("title", "")
+        snippet = r.get("body", "")
+        url = r.get("href", "")
+        results.append({
+            "title": title,
+            "snippet": snippet[:500] if snippet else "",
+            "url": url,
+        })
+        print(f"[search] Result: {title[:60]}... | {url[:50]}...")
+
+    print(f"[search] Library found {len(results)} results")
+    return results
+
+
+async def _ddg_search_legacy(query: str, max_results: int, timeout: int) -> List[Dict[str, str]]:
+    """Legacy HTML-Scraping (Fallback wenn Library nicht verfügbar)."""
     try:
-        # Use shared client for better performance (connection reuse)
-        # Note: proxy_config handled via environment or client init
         client = _get_search_client()
         resp = await client.post(_DDG_URL, data={"q": query, "kl": "de-de"})
         html = resp.text
@@ -236,57 +325,30 @@ async def _ddg_search(query: str, max_results: int = 5) -> List[Dict[str, str]]:
             }]
         return [{"title": "Verbindungsfehler", "snippet": str(e), "url": ""}]
     except Exception as e:
-        error_str = str(e).lower()
-        if "ssl" in error_str or "certificate" in error_str:
-            ssl_status = "aktiviert" if settings.search.verify_ssl else "deaktiviert"
-            return [{
-                "title": "SSL-Zertifikatsfehler",
-                "snippet": f"SSL-Verifizierung fehlgeschlagen ({e}). SSL-Prüfung ist aktuell {ssl_status}. "
-                          f"Für selbstsignierte Proxy-Zertifikate: Settings → Web-Suche → "
-                          f"'SSL-Zertifikate verifizieren' deaktivieren und speichern.",
-                "url": ""
-            }]
         return [{"title": "Fehler", "snippet": str(e), "url": ""}]
 
     results = []
 
-    # Debug: HTML-Länge und erste Zeichen loggen
-    print(f"[search] HTML response length: {len(html)} chars")
-    # Immer ersten Teil der Antwort loggen für Debugging
-    html_preview = html[:800].replace('\n', ' ').replace('\r', '')
-    print(f"[search] HTML preview: {html_preview[:400]}...")
+    # Debug: HTML-Länge loggen
+    print(f"[search] Legacy HTML response: {len(html)} chars")
     if len(html) < 1000:
-        print(f"[search] WARNING: Short response (possible block/error)")
-        print(f"[search] Full short response: {html}")
+        print(f"[search] WARNING: Short response (possible block)")
 
     # Titel: class="result__a"
-    title_blocks = re.findall(
-        r'class="result__a"[^>]*>(.*?)</a>', html, re.DOTALL
-    )
-    # Snippet: class="result__snippet"
-    snippet_blocks = re.findall(
-        r'class="result__snippet[^"]*"[^>]*>(.*?)</span>', html, re.DOTALL
-    )
-    # URL: uddg=<encoded-url>
+    title_blocks = re.findall(r'class="result__a"[^>]*>(.*?)</a>', html, re.DOTALL)
+    snippet_blocks = re.findall(r'class="result__snippet[^"]*"[^>]*>(.*?)</span>', html, re.DOTALL)
     url_blocks = re.findall(r'uddg=([^&"]+)', html)
 
-    print(f"[search] Found: {len(title_blocks)} titles, {len(snippet_blocks)} snippets, {len(url_blocks)} urls")
+    print(f"[search] Legacy found: {len(title_blocks)} titles, {len(snippet_blocks)} snippets")
 
     for i in range(min(max_results, len(title_blocks))):
         title = _clean(title_blocks[i])
         snippet = _clean(snippet_blocks[i]) if i < len(snippet_blocks) else ""
         url = unquote(url_blocks[i]) if i < len(url_blocks) else ""
-        results.append({
-            "title": title,
-            "snippet": snippet,
-            "url": url,
-        })
-        # Log jeden einzelnen Treffer
-        print(f"[search] Result {i+1}: {title[:60]}... | {snippet[:80]}... | {url[:50]}...")
+        results.append({"title": title, "snippet": snippet, "url": url})
 
     if not results:
         # Fallback: DuckDuckGo Instant Answer JSON
-        print(f"[search] No HTML results, trying JSON API fallback...")
         try:
             client = _get_search_client()
             r = await client.get(
@@ -295,13 +357,11 @@ async def _ddg_search(query: str, max_results: int = 5) -> List[Dict[str, str]]:
             )
             data = r.json()
             abstract = data.get("AbstractText", "")
-            abstract_url = data.get("AbstractURL", "")
-            print(f"[search] JSON API response: abstract={bool(abstract)}, topics={len(data.get('RelatedTopics', []))}")
             if abstract:
                 results.append({
                     "title": data.get("Heading", query),
                     "snippet": abstract[:500],
-                    "url": abstract_url,
+                    "url": data.get("AbstractURL", ""),
                 })
             for topic in data.get("RelatedTopics", [])[:max_results]:
                 if isinstance(topic, dict) and topic.get("Text"):
@@ -314,13 +374,9 @@ async def _ddg_search(query: str, max_results: int = 5) -> List[Dict[str, str]]:
             print(f"[search] JSON API fallback failed: {e}")
 
     if not results:
-        print(f"[search] No results found for query: {query[:50]}...")
-        # Hilfreiche Fehlermeldung mit Debug-Info
         return [{
             "title": "Keine Ergebnisse",
-            "snippet": f"DuckDuckGo hat keine Treffer geliefert. "
-                      f"HTML-Länge: {len(html)} Zeichen. "
-                      f"Mögliche Ursachen: Proxy blockiert Anfrage, Query zu speziell, oder Captcha/Rate-Limiting.",
+            "snippet": f"DuckDuckGo hat keine Treffer geliefert. Mögliche Ursachen: Bot-Sperre, Proxy blockiert, oder Rate-Limiting.",
             "url": ""
         }]
 
@@ -523,75 +579,38 @@ async def test_search() -> Dict[str, Any]:
     """
     test_query = "python programming"
     timeout = settings.search.timeout_seconds or 30
-    proxy_config = _get_proxy_config(_DDG_URL)
+    proxy_url = settings.search.get_proxy_url()
 
     debug_info = {
         "query": test_query,
+        "search_method": "duckduckgo-search library" if _DDG_AVAILABLE else "legacy HTML scraping",
+        "library_available": _DDG_AVAILABLE,
         "proxy_url": settings.search.proxy_url or "(kein Proxy)",
-        "proxy_configured": bool(proxy_config),
+        "proxy_configured": bool(proxy_url),
         "verify_ssl": settings.search.verify_ssl,
         "timeout": timeout,
     }
 
     try:
-        client = _get_search_client()
-        resp = await client.post(_DDG_URL, data={"q": test_query, "kl": "de-de"})
-        html = resp.text
-        status_code = resp.status_code
-
-        debug_info["http_status"] = status_code
-        debug_info["response_length"] = len(html)
-        debug_info["response_preview"] = html[:1000] if len(html) < 5000 else html[:500] + "\n...[truncated]...\n" + html[-500:]
-
-        # Regex-Matching testen
-        title_blocks = re.findall(r'class="result__a"[^>]*>(.*?)</a>', html, re.DOTALL)
-        snippet_blocks = re.findall(r'class="result__snippet[^"]*"[^>]*>(.*?)</span>', html, re.DOTALL)
-        url_blocks = re.findall(r'uddg=([^&"]+)', html)
-
-        debug_info["regex_matches"] = {
-            "titles_found": len(title_blocks),
-            "snippets_found": len(snippet_blocks),
-            "urls_found": len(url_blocks),
-            "first_title": _clean(title_blocks[0])[:100] if title_blocks else None,
-        }
-
-        # Alternative: Prüfe ob es eine Bot-Block-Seite ist
-        bot_indicators = [
-            "robot" in html.lower(),
-            "captcha" in html.lower(),
-            "blocked" in html.lower(),
-            "unusual traffic" in html.lower(),
-            "js-challenge" in html.lower(),
-        ]
-        debug_info["bot_block_indicators"] = {
-            "robot": "robot" in html.lower(),
-            "captcha": "captcha" in html.lower(),
-            "blocked": "blocked" in html.lower(),
-            "unusual_traffic": "unusual traffic" in html.lower(),
-            "possible_block": any(bot_indicators),
-        }
-
-        # Vollständige Suche ausführen
+        # Vollständige Suche ausführen (verwendet Library wenn verfügbar)
         results = await _ddg_search(test_query, 3)
+
         debug_info["search_results"] = results
+        debug_info["result_count"] = len(results)
+
+        # Prüfe ob Ergebnisse "echte" Treffer sind
+        has_real_results = any(
+            r.get("url") and not r.get("title", "").startswith("Keine")
+            for r in results
+        )
+        debug_info["has_real_results"] = has_real_results
 
         return {
-            "success": True,
+            "success": has_real_results,
+            "message": "Suche erfolgreich" if has_real_results else "Keine echten Ergebnisse gefunden",
             "debug": debug_info,
         }
 
-    except httpx.TimeoutException as e:
-        return {
-            "success": False,
-            "error": f"Timeout nach {timeout}s",
-            "debug": debug_info,
-        }
-    except httpx.ProxyError as e:
-        return {
-            "success": False,
-            "error": f"Proxy-Fehler: {e}",
-            "debug": debug_info,
-        }
     except Exception as e:
         return {
             "success": False,
@@ -599,3 +618,17 @@ async def test_search() -> Dict[str, Any]:
             "error_type": type(e).__name__,
             "debug": debug_info,
         }
+
+
+@router.get("/info")
+async def get_search_info() -> Dict[str, Any]:
+    """Gibt Informationen über die Such-Konfiguration zurück."""
+    return {
+        "library_available": _DDG_AVAILABLE,
+        "library_name": "duckduckgo-search" if _DDG_AVAILABLE else None,
+        "search_method": "library" if _DDG_AVAILABLE else "legacy",
+        "enabled": settings.search.enabled,
+        "proxy_configured": bool(settings.search.proxy_url),
+        "verify_ssl": settings.search.verify_ssl,
+        "timeout_seconds": settings.search.timeout_seconds,
+    }

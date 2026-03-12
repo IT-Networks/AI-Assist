@@ -277,132 +277,121 @@ async def get_active_repositories() -> ToolResult:
 async def search_code(
     query: str,
     language: str = "all",
-    top_k: int = 5,
-    read_files: bool = True
+    max_results: int = 20,
+    context_lines: int = 2,
+    case_sensitive: bool = False,
+    file_pattern: str = "",
+    subpath: str = "",
+    read_files: bool = False
 ) -> ToolResult:
-    """Durchsucht Code-Repositories und liest gefundene Dateien."""
+    """
+    Durchsucht Code-Repositories mit ripgrep (rg) oder grep.
+
+    Verwendet ripgrep als primäres Such-Tool mit GNU grep als Fallback.
+    Keine Index-Abhängigkeit - durchsucht Dateien direkt.
+    """
     from app.core.config import settings
+    from app.services.code_search import get_code_search_engine
     from pathlib import Path
-    import re
+    import logging
 
-    results = []
+    logger = logging.getLogger(__name__)
 
-    # Java durchsuchen
-    if language in ("all", "java") and settings.java.get_active_path():
-        try:
-            from app.services.java_indexer import get_java_indexer
-            indexer = get_java_indexer()
-            if indexer.is_built():
-                java_results = indexer.search(query, top_k=top_k)
-                for r in java_results:
-                    results.append({
-                        "language": "java",
-                        "file_path": r["file_path"],
-                        "snippet": r["snippet"],
-                        "repo_path": settings.java.get_active_path()
-                    })
-        except Exception:
-            pass
+    # Basis-Pfad bestimmen
+    base_path = None
+    repo_name = None
 
-    # Python durchsuchen
+    # Prüfe Java-Repo
+    if language in ("all", "java", "sql") and settings.java.get_active_path():
+        java_path = settings.java.get_active_path()
+        if Path(java_path).exists():
+            base_path = java_path
+            repo_name = "Java-Repo"
+
+    # Prüfe Python-Repo (überschreibt Java wenn language=python)
     if language in ("all", "python") and settings.python.get_active_path():
-        try:
-            from app.services.python_indexer import get_python_indexer
-            indexer = get_python_indexer()
-            if indexer.is_built():
-                py_results = indexer.search(query, top_k=top_k)
-                for r in py_results:
-                    results.append({
-                        "language": "python",
-                        "file_path": r["file_path"],
-                        "snippet": r.get("snippet", ""),
-                        "repo_path": settings.python.get_active_path()
-                    })
-        except Exception:
-            pass
+        python_path = settings.python.get_active_path()
+        if Path(python_path).exists():
+            if language == "python" or base_path is None:
+                base_path = python_path
+                repo_name = "Python-Repo"
 
-    # SQL/SQLJ durchsuchen (einfache Dateisuche)
-    if language in ("all", "sql", "sqlj"):
-        repo_paths = []
-        if settings.java.get_active_path():
-            repo_paths.append(Path(settings.java.get_active_path()))
-        if settings.python.get_active_path():
-            repo_paths.append(Path(settings.python.get_active_path()))
-
-        query_lower = query.lower()
-        query_words = query_lower.split()
-
-        for repo_path in repo_paths:
-            if not repo_path.exists():
-                continue
-
-            # Suche SQL und SQLJ Dateien
-            for ext in ("*.sql", "*.sqlj"):
-                for sql_file in repo_path.rglob(ext):
-                    # Skip excluded directories
-                    exclude_dirs = settings.java.exclude_dirs if settings.java.get_active_path() else []
-                    if any(ex in str(sql_file) for ex in exclude_dirs):
-                        continue
-
-                    try:
-                        content = sql_file.read_text(encoding="utf-8", errors="replace")
-                        content_lower = content.lower()
-
-                        # Prüfen ob Query-Begriffe vorkommen
-                        if any(word in content_lower for word in query_words):
-                            # Relevanten Snippet extrahieren
-                            snippet = ""
-                            for word in query_words:
-                                idx = content_lower.find(word)
-                                if idx >= 0:
-                                    start = max(0, idx - 50)
-                                    end = min(len(content), idx + 150)
-                                    snippet = content[start:end].strip()
-                                    snippet = re.sub(r'\s+', ' ', snippet)
-                                    break
-
-                            results.append({
-                                "language": "sql",
-                                "file_path": str(sql_file.relative_to(repo_path)),
-                                "snippet": snippet,
-                                "repo_path": str(repo_path)
-                            })
-                    except Exception:
-                        pass
-
-    if not results:
+    if not base_path:
         return ToolResult(
-            success=True,
-            data="Keine relevanten Code-Dateien gefunden."
+            success=False,
+            error="Kein aktives Repository konfiguriert. Nutze get_active_repositories."
         )
 
-    # Formatieren mit klaren Pfad-Hinweisen
-    output = f"Gefundene Code-Dateien für '{query}':\n\n"
+    try:
+        engine = get_code_search_engine()
+        matches, tool_used, duration = await engine.search(
+            query=query,
+            base_path=base_path,
+            language=language,
+            file_pattern=file_pattern,
+            max_results=max_results,
+            context_lines=context_lines,
+            case_sensitive=case_sensitive,
+            subpath=subpath
+        )
 
-    for r in results[:top_k]:
-        output += f"[{r['language'].upper()}] {r['file_path']}\n"
-        # Klarer Hinweis wie der Pfad zu verwenden ist
-        output += f"  → read_file(path=\"{r['file_path']}\")\n"
+        if not matches:
+            return ToolResult(
+                success=True,
+                data=f"Keine Treffer für '{query}' in {repo_name} (via {tool_used}, {duration:.2f}s)"
+            )
 
-        # Datei lesen wenn gewünscht
-        if read_files:
-            try:
-                full_path = Path(r['repo_path']) / r['file_path']
-                if full_path.exists():
-                    content = full_path.read_text(encoding="utf-8", errors="replace")
-                    # Vollständig lesen, nur in Ausgabe Hinweis auf Länge
-                    char_count = len(content)
-                    output += f"```{r['language']}\n{content}\n```\n"
-                    output += f"[{char_count:,} Zeichen]\n\n"
-                else:
-                    output += f"  [Datei nicht lesbar]\n\n"
-            except Exception as e:
-                output += f"  [Fehler beim Lesen: {e}]\n\n"
-        else:
-            if r.get('snippet'):
-                output += f"  {r['snippet'][:200]}...\n\n"
+        # Formatieren (wie Claude Code Grep Output)
+        output = f"Gefunden: {len(matches)} Treffer für '{query}' in {repo_name}\n"
+        output += f"(via {tool_used}, {duration:.2f}s)\n\n"
 
-    return ToolResult(success=True, data=output)
+        current_file = None
+        for match in matches:
+            # Datei-Header wenn neue Datei
+            if match.file_path != current_file:
+                current_file = match.file_path
+                output += f"── {match.file_path} ──\n"
+                output += f"  → read_file(path=\"{match.file_path}\")\n"
+
+            # Zeilen mit Kontext
+            line_num_width = len(str(match.line_number + context_lines))
+
+            for i, ctx_line in enumerate(match.context_before):
+                ctx_num = match.line_number - len(match.context_before) + i
+                output += f"  {ctx_num:>{line_num_width}}│ {ctx_line}\n"
+
+            # Match-Zeile hervorheben
+            output += f"  {match.line_number:>{line_num_width}}│ {match.line_content}  ◀━━\n"
+
+            for i, ctx_line in enumerate(match.context_after):
+                ctx_num = match.line_number + 1 + i
+                output += f"  {ctx_num:>{line_num_width}}│ {ctx_line}\n"
+
+            output += "\n"
+
+        # Dateiinhalt lesen wenn gewünscht
+        if read_files and matches:
+            unique_files = list(dict.fromkeys(m.file_path for m in matches))[:3]
+            output += "\n=== Dateiinhalte ===\n"
+            for file_path in unique_files:
+                try:
+                    full_path = Path(base_path) / file_path
+                    if full_path.exists():
+                        content = full_path.read_text(encoding="utf-8", errors="replace")
+                        ext = full_path.suffix.lstrip(".")
+                        char_count = len(content)
+                        output += f"\n[{file_path}] ({char_count:,} Zeichen)\n"
+                        output += f"```{ext}\n{content}\n```\n"
+                except Exception as e:
+                    output += f"\n[{file_path}] Fehler: {e}\n"
+
+        return ToolResult(success=True, data=output)
+
+    except FileNotFoundError as e:
+        return ToolResult(success=False, error=str(e))
+    except Exception as e:
+        logger.error(f"[search_code] Error: {e}")
+        return ToolResult(success=False, error=f"Suchfehler: {e}")
 
 
 async def search_handbook(
@@ -730,14 +719,22 @@ async def grep_content(
     case_sensitive: bool = False
 ) -> ToolResult:
     """
-    Durchsucht Dateiinhalte nach Text/Regex (wie Claude Code Grep Tool).
+    Durchsucht Dateiinhalte nach Text/Regex mit ripgrep/grep.
+
+    Verwendet ripgrep als primäres Such-Tool mit GNU grep als Fallback.
+    Funktioniert ohne Index - durchsucht Dateien direkt.
     """
     from app.core.config import settings
+    from app.services.code_search import get_code_search_engine
     from pathlib import Path as PyPath
+    import logging
+
+    logger = logging.getLogger(__name__)
 
     # Basis-Pfad auflösen
     base_path = path
     resolved_from = None
+    subpath = ""
 
     if not PyPath(path).is_absolute():
         java_path = settings.java.get_active_path()
@@ -746,11 +743,18 @@ async def grep_content(
         # Wenn path != ".", prüfe ob Unterverzeichnis in einem Repo existiert
         if path != ".":
             if java_path and (PyPath(java_path) / path).exists():
-                base_path = str(PyPath(java_path) / path)
+                base_path = java_path
+                subpath = path
                 resolved_from = f"Java-Repo/{path}"
             elif python_path and (PyPath(python_path) / path).exists():
-                base_path = str(PyPath(python_path) / path)
+                base_path = python_path
+                subpath = path
                 resolved_from = f"Python-Repo/{path}"
+            else:
+                # Direkter Pfad versuchen
+                if PyPath(path).exists():
+                    base_path = path
+                    resolved_from = path
         else:
             if java_path and PyPath(java_path).exists():
                 base_path = java_path
@@ -760,27 +764,36 @@ async def grep_content(
                 resolved_from = "Python-Repo"
 
     try:
-        from app.services.file_manager import get_file_manager
-        manager = get_file_manager()
-        results = await manager.grep_content(
-            pattern, base_path, file_pattern, context_lines, max_results, case_sensitive
+        engine = get_code_search_engine()
+        matches, tool_used, duration = await engine.search(
+            query=pattern,
+            base_path=base_path,
+            language="all",
+            file_pattern=file_pattern if file_pattern != "*" else "",
+            max_results=max_results,
+            context_lines=context_lines,
+            case_sensitive=case_sensitive,
+            subpath=subpath
         )
 
-        if not results:
+        if not matches:
             hint = f" (gesucht in: {resolved_from})" if resolved_from else ""
-            return ToolResult(success=True, data=f"Keine Treffer für '{pattern}'{hint}")
+            return ToolResult(
+                success=True,
+                data=f"Keine Treffer für '{pattern}'{hint} (via {tool_used}, {duration:.2f}s)"
+            )
 
         # Formatieren (wie Claude Code Grep Output)
         repo_hint = f" in {resolved_from}" if resolved_from else ""
-        output = f"Gefunden: {len(results)} Treffer für '{pattern}'{repo_hint}\n\n"
+        output = f"Gefunden: {len(matches)} Treffer für '{pattern}'{repo_hint}\n"
+        output += f"(via {tool_used}, {duration:.2f}s)\n\n"
 
         current_file = None
-        for match in results:
+        for match in matches:
             # Datei-Header wenn neue Datei
             if match.file_path != current_file:
                 current_file = match.file_path
-                output += f"{match.file_path}\n"
-                # Zeige wie man die Datei lesen kann
+                output += f"── {match.file_path} ──\n"
                 output += f"  → read_file(path=\"{match.file_path}\")\n"
 
             # Zeilen mit Kontext
@@ -800,10 +813,12 @@ async def grep_content(
             output += "\n"
 
         return ToolResult(success=True, data=output)
-    except ValueError as e:
+
+    except FileNotFoundError as e:
         return ToolResult(success=False, error=str(e))
     except Exception as e:
-        return ToolResult(success=False, error=str(e))
+        logger.error(f"[grep_content] Error: {e}")
+        return ToolResult(success=False, error=f"Grep-Fehler: {e}")
 
 
 async def write_file(path: str, content: str) -> ToolResult:
@@ -1672,17 +1687,22 @@ async def debug_java_with_testdata(
 SEARCH_CODE_TOOL = Tool(
     name="search_code",
     description=(
-        "Durchsucht das LOKALE Repository nach Java/Python/SQL-Dateien per Volltextsuche. "
-        "WICHTIG: Nur für LOKALE Dateien! Für GitHub-PRs/Branches verwende github_pr_diff oder github_get_file. "
-        "Nutze für: Klassennamen, Methodennamen, SQL-Patterns im lokalen Code. "
+        "Durchsucht das LOKALE Repository per ripgrep/grep (KEIN Index nötig!). "
+        "Unterstützt Regex-Patterns und zeigt Kontext-Zeilen. "
+        "WICHTIG: Nur für LOKALE Dateien! Für GitHub-PRs verwende github_pr_diff. "
+        "Nutze für: Klassennamen, Methodennamen, SQL-Patterns, Fehlermeldungen, Code-Patterns. "
         "ERGEBNIS enthält relative Pfade die direkt mit read_file verwendet werden können."
     ),
     category=ToolCategory.SEARCH,
     parameters=[
-        ToolParameter("query", "string", "Suchbegriff (Klassenname, Methode, Tabellenname, Konzept)"),
-        ToolParameter("language", "string", "Sprache: 'java', 'python', 'sql', 'sqlj' oder 'all'", required=False, default="all", enum=["java", "python", "sql", "sqlj", "all"]),
-        ToolParameter("top_k", "integer", "Maximale Anzahl Ergebnisse", required=False, default=3),
-        ToolParameter("read_files", "boolean", "Ob Dateiinhalt gelesen werden soll (default: true)", required=False, default=True),
+        ToolParameter("query", "string", "Suchbegriff oder Regex-Pattern (z.B. 'OrderService', 'def process_', 'class.*Handler')"),
+        ToolParameter("language", "string", "Sprache für Dateifilter: 'java', 'python', 'sql' oder 'all'", required=False, default="all", enum=["java", "python", "sql", "all"]),
+        ToolParameter("max_results", "integer", "Maximale Anzahl Treffer", required=False, default=20),
+        ToolParameter("context_lines", "integer", "Kontext-Zeilen vor/nach Match", required=False, default=2),
+        ToolParameter("case_sensitive", "boolean", "Groß-/Kleinschreibung beachten", required=False, default=False),
+        ToolParameter("file_pattern", "string", "Optionales Glob-Pattern (überschreibt language)", required=False, default=""),
+        ToolParameter("subpath", "string", "Optionales Unterverzeichnis für gezielte Suche", required=False, default=""),
+        ToolParameter("read_files", "boolean", "Gefundene Dateien vollständig lesen (max 3)", required=False, default=False),
     ],
     handler=search_code
 )
@@ -1786,21 +1806,21 @@ GLOB_FILES_TOOL = Tool(
 GREP_CONTENT_TOOL = Tool(
     name="grep_content",
     description=(
-        "Durchsucht Dateiinhalte nach Text/Regex (wie Claude Code Grep). Funktioniert OHNE Index! "
-        "Nutze für: Funktionen finden ('def process_'), Klassen ('class.*Handler'), Imports, Fehlermeldungen. "
+        "Durchsucht Dateiinhalte mit ripgrep/grep (KEIN Index nötig!). "
+        "Nutze für: Funktionen ('def process_'), Klassen ('class.*Handler'), Imports, Fehlermeldungen. "
         "PFAD: Bei '.' wird im aktiven Java/Python-Repo gesucht. "
-        "STACKTRACE-TIPP: Extrahiere Klassennamen aus Stacktraces und suche mit pattern='class ClassName'. "
+        "TIPP: Extrahiere Klassennamen aus Stacktraces und suche mit pattern='class ClassName'. "
         "Zeigt Kontext-Zeilen vor/nach dem Treffer."
     ),
     category=ToolCategory.SEARCH,
     parameters=[
-        ToolParameter("pattern", "string", "Suchtext oder Regex (z.B. 'def process_', 'class.*Handler', Fehlermeldung aus Stacktrace)"),
+        ToolParameter("pattern", "string", "Suchtext oder Regex (z.B. 'def process_', 'class.*Handler', Fehlermeldung)"),
         ToolParameter("path", "string",
             "Verzeichnis oder Datei. '.' = aktives Repository. "
-            "Bei Stacktrace: Verwende Verzeichnis aus Stacktrace-Pfad (z.B. 'src/main/java/com/example').",
+            "Bei Stacktrace: Verzeichnis aus Stacktrace-Pfad (z.B. 'src/main/java/com/example').",
             required=False, default="."
         ),
-        ToolParameter("file_pattern", "string", "Datei-Filter (z.B. '*.py', '*.java')", required=False, default="*"),
+        ToolParameter("file_pattern", "string", "Glob-Filter (z.B. '*.py', '*.java')", required=False, default="*"),
         ToolParameter("context_lines", "integer", "Zeilen vor/nach Match", required=False, default=2),
         ToolParameter("max_results", "integer", "Max Treffer", required=False, default=50),
         ToolParameter("case_sensitive", "boolean", "Groß-/Kleinschreibung beachten", required=False, default=False),

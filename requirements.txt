@@ -24,3 +24,4 @@ pytest-asyncio==0.24.0
 
 # Performance
 cachetools==5.5.0
+duckduckgo-search>=8.0.0

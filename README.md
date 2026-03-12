@@ -68,7 +68,8 @@ User Query
 - **Service-Suche** – Volltextsuche über alle Dokumentation
 
 ### Code-Repositories
-- **Java** – Dateibaum, Klassen-Analyse, POM-Abhängigkeiten, Index-Suche
+- **Code-Suche** – ripgrep-basiert (kein Index nötig!), Regex-Support, Kontext-Zeilen
+- **Java** – Dateibaum, Klassen-Analyse, POM-Abhängigkeiten
 - **Python** – Symbol-Suche, Validierung (flake8/ruff/mypy), Tests (pytest)
 
 ### Settings-UI
@@ -94,6 +95,35 @@ cd AI-Assist
 python -m venv .venv
 source .venv/bin/activate  # Windows: .venv\Scripts\activate
 pip install -r requirements.txt
+```
+
+### Optionale Abhängigkeiten
+
+#### ripgrep (empfohlen)
+Für schnelle Code-Suche wird [ripgrep](https://github.com/BurntSushi/ripgrep) empfohlen.
+Falls nicht installiert, wird GNU grep als Fallback verwendet.
+
+```bash
+# Windows (winget)
+winget install BurntSushi.ripgrep.MSVC
+
+# Windows (scoop)
+scoop install ripgrep
+
+# macOS
+brew install ripgrep
+
+# Ubuntu/Debian
+sudo apt install ripgrep
+
+# Arch Linux
+sudo pacman -S ripgrep
+```
+
+**Prüfen:**
+```bash
+rg --version
+# ripgrep 14.0.0 oder höher
 ```
 
 ## Konfiguration
