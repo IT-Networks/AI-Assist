@@ -40,13 +40,11 @@ models:
 - id: qwen-428b
   display_name: Qwen 428B
 
-# Java-Repository
+# Java-Repository (leer = nicht konfiguriert)
 java:
-  repo_path: /home/user/projects/my-java-app
-  repos:
-  - name: Beispiel-Projekt
-    path: /home/user/projects/my-java-app
-  active_repo: Beispiel-Projekt
+  repo_path: ''
+  repos: []
+  active_repo: ''
   exclude_dirs:
   - target
   - build
@@ -420,12 +418,10 @@ docker_sandbox:
 mcp:
   enabled: true
   servers: []
+  # Sequential Thinking (explizit via /seq aktiviert)
   sequential_thinking_enabled: true
   max_thinking_steps: 15
   thinking_timeout_seconds: 180
-  auto_activate_on_error: true
-  auto_activate_on_planning: true
-  min_complexity_score: 0.5  # Reduziert für häufigere Aktivierung
   debug_logging: true  # Für Entwicklung
   # Research Phase Settings
   research_enabled: true

@@ -438,47 +438,6 @@ async def cached_completion(
         return None
 
 
-async def cached_complexity_check(query: str, model: str) -> Optional[float]:
-    """
-    Gecachte Komplexitäts-Einschätzung.
-
-    Gleiche Anfragen haben die gleiche Komplexität.
-    """
-    if not settings.llm.cache.cache_complexity:
-        return None
-
-    prompt = """Bewerte die Komplexität dieser Aufgabe auf einer Skala von 0.0 bis 1.0:
-
-- 0.0-0.2: Einfache Frage, Begrüßung, einzelne Suche
-- 0.3-0.5: Mittlere Aufgabe, einfache Analyse, einzelner Schritt
-- 0.6-0.7: Komplexere Aufgabe, mehrere Schritte, Datenextraktion
-- 0.8-1.0: Sehr komplex, Debugging, mehrere Systeme, Code-Erstellung
-
-Aufgabe: {query}
-
-Antworte NUR mit einer Zahl zwischen 0.0 und 1.0, z.B.: 0.7"""
-
-    messages = [{"role": "user", "content": prompt.format(query=query[:500])}]
-
-    response = await cached_completion(
-        messages=messages,
-        model=model,
-        temperature=0.0,
-        max_tokens=32,
-        category="complexity",
-        ttl=settings.llm.cache.ttl_seconds
-    )
-
-    if response:
-        import re
-        match = re.search(r'(\d+\.?\d*)', response)
-        if match:
-            score = float(match.group(1))
-            return max(0.0, min(1.0, score))
-
-    return None
-
-
 async def cached_routing_classification(
     query: str,
     model: str,

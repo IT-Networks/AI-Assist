@@ -1487,11 +1487,7 @@ async function processAgentEvent(event, bubble, msgDiv, chat) {
       showSuggestions(data.question, data.options || []);
       break;
 
-    // ── MCP Thinking Events ──
-    case 'thinking_check': {
-      showThinkingCheck(data, chat);
-      break;
-    }
+    // ── MCP Thinking Events (explizit via /seq) ──
     case 'mcp_start': {
       showThinkingPanel(data, chat);
       break;
@@ -7568,71 +7564,8 @@ document.addEventListener('keydown', (e) => {
 });
 
 // ══════════════════════════════════════════════════════════════════════════════
-//   MCP Thinking Panel
+//   MCP Thinking Panel (explizit via /seq aktiviert)
 // ══════════════════════════════════════════════════════════════════════════════
-
-/**
- * Zeigt das Ergebnis des Thinking-Checks an (wird IMMER gesendet).
- * @param {Object} data - THINKING_CHECK Event-Daten
- *   - complexity_score: number (0.0-1.0)
- *   - will_activate: boolean
- *   - threshold: number
- *   - is_error_query: boolean
- *   - mode: string ("cot" für Chain-of-Thought, "sequential" für MCP)
- * @param {Object} chat - Chat-Objekt
- */
-function showThinkingCheck(data, chat) {
-  const complexityEl = document.getElementById('thinking-complexity');
-  const isActive = chat.id === chatManager.activeId;
-  const mode = data.mode || 'cot';  // Default: Chain-of-Thought
-
-  // Komplexität im Chat speichern
-  chat.lastComplexityCheck = {
-    score: data.complexity_score || 0,
-    willActivate: data.will_activate || false,
-    threshold: data.threshold || 0.3,
-    mode: mode,
-    timestamp: Date.now()
-  };
-
-  if (isActive && complexityEl) {
-    const percent = Math.round((data.complexity_score || 0) * 100);
-    const thresholdPercent = Math.round((data.threshold || 0.3) * 100);
-
-    if (data.will_activate) {
-      // CoT wird aktiviert - zeige den Modus
-      const modeLabel = mode === 'cot' ? 'CoT' : 'Seq';
-      complexityEl.textContent = `Komplexität: ${percent}% → ${modeLabel}`;
-      complexityEl.className = 'thinking-complexity';
-      if (percent >= 80) complexityEl.classList.add('high');
-      else if (percent >= 50) complexityEl.classList.add('medium');
-      else complexityEl.classList.add('low');
-
-      // Bei CoT-Modus: Nach 3 Sekunden ausblenden (kein Panel-Wechsel)
-      if (mode === 'cot') {
-        setTimeout(() => {
-          complexityEl.textContent = '';
-        }, 3000);
-      }
-    } else {
-      // Thinking wird NICHT aktiviert - zeige Komplexität
-      complexityEl.textContent = `Komplexität: ${percent}% (< ${thresholdPercent}%)`;
-      complexityEl.className = 'thinking-complexity skipped';
-
-      // Nach 5 Sekunden ausblenden
-      setTimeout(() => {
-        if (complexityEl.classList.contains('skipped')) {
-          complexityEl.textContent = '';
-        }
-      }, 5000);
-    }
-  }
-
-  // Badge kurz anzeigen wenn Komplexität hoch aber nicht aktiviert
-  if (!data.will_activate && data.complexity_score >= 0.3) {
-    updateThinkingBadge(false, `${Math.round(data.complexity_score * 100)}%`);
-  }
-}
 
 /**
  * Zeigt das Thinking-Panel an und initialisiert es.

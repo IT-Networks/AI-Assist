@@ -5,7 +5,7 @@ Verbindet SequentialThinking mit dem Agent-Event-System für
 Echtzeit-Visualisierung im Frontend.
 
 Features:
-- Automatische Thinking-Aktivierung basierend auf Komplexität
+- Explizite Aktivierung durch User via /seq Befehl
 - SSE Events für Live-UI-Updates
 - Thinking-Modes: QUICK, NORMAL, DEEP, ULTRA
 - Integration mit Memory (zukünftig)
@@ -61,17 +61,13 @@ class ThinkingResult:
     """Ergebnis einer Thinking-Session."""
     session: ThinkingSession
     mode: ThinkingMode
-    complexity_score: float
     duration_ms: int
-    auto_activated: bool = False
 
     def to_dict(self) -> Dict[str, Any]:
         return {
             "session_id": self.session.session_id,
             "mode": self.mode.value,
-            "complexity_score": self.complexity_score,
             "duration_ms": self.duration_ms,
-            "auto_activated": self.auto_activated,
             "steps_count": len(self.session.steps),
             "conclusion": self.session.final_conclusion,
             "is_complete": self.session.is_complete
@@ -150,13 +146,12 @@ class ThinkingEngine:
         }
         return mapping.get(event_type, event_type)
 
-    def determine_mode(self, query: str, complexity: float) -> ThinkingMode:
+    def determine_mode(self, query: str) -> ThinkingMode:
         """
-        Bestimmt den Thinking-Mode basierend auf Query und Komplexität.
+        Bestimmt den Thinking-Mode basierend auf Query-Keywords.
 
         Args:
             query: Die Benutzeranfrage
-            complexity: Berechneter Komplexitätsscore (0.0-1.0)
 
         Returns:
             Empfohlener ThinkingMode
@@ -167,107 +162,44 @@ class ThinkingEngine:
             "performance", "security", "scalab",
             "architecture", "implementier", "system"
         ]
+        ultra_keywords = ["ultra", "komplex", "umfassend", "vollständig"]
+
         query_lower = query.lower()
         has_deep_keyword = any(kw in query_lower for kw in deep_keywords)
+        has_ultra_keyword = any(kw in query_lower for kw in ultra_keywords)
 
-        # Mode basierend auf Komplexität und Keywords
-        if complexity >= 0.8 or has_deep_keyword:
-            return ThinkingMode.DEEP if complexity < 0.9 else ThinkingMode.ULTRA
-        elif complexity >= 0.5:
-            return ThinkingMode.NORMAL
+        if has_ultra_keyword:
+            return ThinkingMode.ULTRA
+        elif has_deep_keyword:
+            return ThinkingMode.DEEP
         else:
-            return ThinkingMode.QUICK
-
-    def should_auto_activate(self, query: str, is_error: bool = False) -> bool:
-        """
-        Prüft ob Thinking automatisch aktiviert werden sollte (sync/keyword-basiert).
-
-        HINWEIS: Für LLM-basierte Prüfung should_auto_activate_async() verwenden.
-
-        Args:
-            query: Die Benutzeranfrage
-            is_error: True bei Fehleranalyse
-
-        Returns:
-            True wenn Thinking aktiviert werden soll
-        """
-        if not self.is_enabled:
-            return False
-
-        return self._sequential.should_auto_activate(query, is_error)
-
-    async def should_auto_activate_async(self, query: str, is_error: bool = False) -> tuple[bool, float]:
-        """
-        Prüft ob Thinking aktiviert werden sollte (async/LLM-basiert).
-
-        Verwendet LLM für robuste Komplexitäts-Einschätzung.
-
-        Args:
-            query: Die Benutzeranfrage
-            is_error: True bei Fehleranalyse
-
-        Returns:
-            Tuple von (should_activate, complexity_score)
-        """
-        if not self.is_enabled:
-            return False, 0.0
-
-        return await self._sequential.should_auto_activate_async(query, is_error)
-
-    def estimate_complexity(self, query: str) -> float:
-        """Schätzt die Komplexität synchron (Keyword-basiert, schnell)."""
-        return self._sequential.estimate_complexity(query)
-
-    async def estimate_complexity_async(self, query: str) -> float:
-        """Schätzt die Komplexität mit LLM (robust gegen Tippfehler)."""
-        return await self._sequential.estimate_complexity_async(query)
+            return ThinkingMode.NORMAL
 
     async def think(
         self,
         query: str,
         context: Optional[str] = None,
-        mode: Optional[ThinkingMode] = None,
-        force: bool = False
+        mode: Optional[ThinkingMode] = None
     ) -> ThinkingResult:
         """
-        Führt strukturiertes Denken durch.
+        Führt strukturiertes Denken durch (explizit durch User aktiviert via /seq).
 
         Args:
             query: Die zu analysierende Frage/Problem
             context: Optional zusätzlicher Kontext
-            mode: Optional - Thinking-Mode (sonst auto-detect)
-            force: True um Thinking auch bei niedriger Komplexität zu erzwingen
+            mode: Optional - Thinking-Mode (sonst aus Keywords bestimmt)
 
         Returns:
             ThinkingResult mit Session und Metadaten
         """
         start_time = time.monotonic()
 
-        # Komplexität berechnen (LLM-basiert für bessere Erkennung)
-        complexity = await self.estimate_complexity_async(query)
-
-        # Mode bestimmen
+        # Mode bestimmen aus Keywords wenn nicht explizit angegeben
         if mode is None:
-            mode = self.determine_mode(query, complexity)
-
-        # Auto-Aktivierung prüfen
-        auto_activated = False
-        if not force:
-            auto_activated = self.should_auto_activate(query)
-            if not auto_activated and complexity < settings.mcp.min_complexity_score:
-                # Zu einfach für Thinking - Fallback
-                logger.debug(f"[ThinkingEngine] Skipping thinking (complexity={complexity:.2f})")
-                session = self._create_simple_session(query, context)
-                return ThinkingResult(
-                    session=session,
-                    mode=ThinkingMode.QUICK,
-                    complexity_score=complexity,
-                    duration_ms=0,
-                    auto_activated=False
-                )
+            mode = self.determine_mode(query)
 
         # Start-Event emittieren
-        await self._emit_start_event(query, mode, complexity)
+        await self._emit_start_event(query, mode)
 
         try:
             # Thinking durchführen
@@ -283,9 +215,7 @@ class ThinkingEngine:
             result = ThinkingResult(
                 session=session,
                 mode=mode,
-                complexity_score=complexity,
-                duration_ms=duration_ms,
-                auto_activated=auto_activated
+                duration_ms=duration_ms
             )
 
             # In aktive Sessions speichern
@@ -298,27 +228,10 @@ class ThinkingEngine:
             await self._emit_error_event(str(e))
             raise
 
-    def _create_simple_session(self, query: str, context: Optional[str]) -> ThinkingSession:
-        """Erstellt eine minimale Session für einfache Anfragen."""
-        session = self._sequential.create_session(query)
-        self._sequential.add_step(
-            session.session_id,
-            ThinkingType.ANALYSIS,
-            "Direkte Analyse",
-            f"Anfrage ist einfach genug für direkte Bearbeitung.\n\nQuery: {query}",
-            confidence=0.8
-        )
-        self._sequential.complete_session(
-            session.session_id,
-            "Direkte Bearbeitung ohne mehrstufige Analyse."
-        )
-        return session
-
     async def _emit_start_event(
         self,
         query: str,
-        mode: ThinkingMode,
-        complexity: float
+        mode: ThinkingMode
     ) -> None:
         """Emittiert das Start-Event."""
         if self.event_emitter:
@@ -327,7 +240,6 @@ class ThinkingEngine:
                 "mode": mode.value,
                 "mode_description": mode.description,
                 "max_steps": mode.max_steps,
-                "complexity_score": round(complexity, 2),
                 "query": query[:200] if len(query) > 200 else query
             })
 
@@ -368,7 +280,7 @@ class ThinkingEngine:
         Returns:
             Formatierter String mit allen Thinking-Schritten
         """
-        result = await self.think(query, context, mode, force=True)
+        result = await self.think(query, context, mode)
         return self.format_for_context(result)
 
 

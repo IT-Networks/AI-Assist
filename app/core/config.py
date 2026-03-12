@@ -125,7 +125,6 @@ class LLMCacheConfig(BaseModel):
     redis_port: int = 6379
     redis_password: str = ""
     # Cache-Kategorien aktivieren
-    cache_complexity: bool = True      # Komplexitäts-Checks cachen
     cache_routing: bool = True         # Sub-Agent Routing cachen
     cache_quick_calls: bool = True     # chat_quick() Calls cachen
 
@@ -846,14 +845,10 @@ class MCPConfig(BaseModel):
     """MCP (Model Context Protocol) Konfiguration - Lokale Implementation."""
     enabled: bool = False
     servers: List[MCPServerEntry] = []
-    # Sequential Thinking (lokale Implementation)
+    # Sequential Thinking (lokale Implementation) - aktiviert durch User via /seq
     sequential_thinking_enabled: bool = True
     max_thinking_steps: int = 10       # Max. Denkschritte pro Anfrage
     thinking_timeout_seconds: int = 120
-    # Wann Sequential Thinking automatisch aktivieren
-    auto_activate_on_error: bool = True     # Bei komplexen Fehlern
-    auto_activate_on_planning: bool = True  # Bei Planungsaufgaben
-    min_complexity_score: float = 0.7       # Komplexitätsschwelle (0.0-1.0)
     # Research Phase (Hybrid Orchestration)
     research_enabled: bool = True
     auto_research_on_question: bool = True  # Bei Fragen automatisch recherchieren

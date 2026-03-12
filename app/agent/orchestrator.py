@@ -48,7 +48,6 @@ _RE_HINT_TOOL_KEY = re.compile(r'"tool"\s*:')
 from app.agent.tools import ToolRegistry, ToolResult, get_tool_registry
 from app.core.config import settings
 from app.mcp.tool_bridge import get_tool_bridge, MCPToolBridge
-from app.mcp.thinking_engine import get_thinking_engine, ThinkingEngine, ThinkingMode
 from app.mcp.capabilities.research import get_research_capability, ResearchCapability
 from app.core.token_budget import TokenBudget, create_budget_from_config
 from app.core.conversation_summarizer import get_summarizer
@@ -224,8 +223,6 @@ class AgentEventType(str, Enum):
     MCP_PROGRESS = "mcp_progress"          # Fortschritts-Update (Prozent)
     MCP_COMPLETE = "mcp_complete"          # MCP-Tool fertig mit Zusammenfassung
     MCP_ERROR = "mcp_error"                # Fehler während MCP-Verarbeitung
-    # Thinking Check Event (immer gesendet)
-    THINKING_CHECK = "thinking_check"      # Komplexitäts-Check Ergebnis (immer)
 
 
 @dataclass
@@ -505,8 +502,6 @@ class AgentOrchestrator:
         self.auto_learner = get_auto_learner()
         # MCP Tool Bridge (für Sequential Thinking und externe MCP-Server)
         self._mcp_bridge: Optional[MCPToolBridge] = None
-        # Thinking Engine für strukturiertes Denken mit UI-Integration
-        self._thinking_engine: Optional[ThinkingEngine] = None
         # Research Capability für parallele Quellensuche
         self._research_capability: Optional[ResearchCapability] = None
         # Event Queue für asynchrone MCP-Events (Thinking-Steps etc.)
@@ -563,50 +558,6 @@ class AgentOrchestrator:
         # Transcript-Logger mit Projekt konfigurieren
         if project_id:
             self.transcript_logger.project_id = project_id
-
-    def _get_thinking_engine(self) -> ThinkingEngine:
-        """Initialisiert und gibt die ThinkingEngine zurück."""
-        if self._thinking_engine is None:
-            self._thinking_engine = get_thinking_engine(
-                event_emitter=self._emit_mcp_event
-            )
-        return self._thinking_engine
-
-    def _build_cot_prompt(self, complexity: float, is_error: bool) -> str:
-        """
-        Erstellt einen Chain-of-Thought Prompt basierend auf Komplexität.
-
-        Leichtgewichtig: Nur Prompt-Injection, kein separater LLM-Call.
-        Für tiefe Analyse: User kann /seq (Sequential Thinking) verwenden.
-        """
-        if is_error:
-            return """## Analyse-Hinweis
-
-Diese Anfrage betrifft einen Fehler oder ein Problem. Gehe systematisch vor:
-1. Identifiziere die Symptome und Fehlermeldungen
-2. Analysiere mögliche Ursachen
-3. Prüfe den relevanten Code oder die Logs
-4. Schlage konkrete Lösungen vor
-
-Denke Schritt für Schritt und erkläre deine Überlegungen."""
-
-        if complexity >= 0.8:
-            return """## Analyse-Hinweis
-
-Diese Anfrage ist komplex und erfordert sorgfältige Überlegung.
-Bevor du antwortest:
-1. Zerlege das Problem in Teilaspekte
-2. Betrachte verschiedene Lösungsansätze
-3. Wäge Vor- und Nachteile ab
-4. Strukturiere deine Antwort klar
-
-Für eine tiefgehende Schritt-für-Schritt-Analyse kann der Befehl `/seq` verwendet werden."""
-
-        # Standard CoT für mittlere Komplexität
-        return """## Analyse-Hinweis
-
-Denke bei dieser Aufgabe Schritt für Schritt bevor du antwortest.
-Strukturiere deine Überlegungen und begründe deine Empfehlungen."""
 
     async def _emit_mcp_event(self, event_type: str, data: Dict[str, Any]) -> None:
         """
@@ -1128,43 +1079,6 @@ Strukturiere deine Überlegungen und begründe deine Empfehlungen."""
         else:
             # Budget unter 80% → bereit für nächste Komprimierung wenn nötig
             state.compaction_attempted_while_full = False
-
-        # === CHAIN-OF-THOUGHT PHASE (Leichtgewichtiges Denken für komplexe Anfragen) ===
-        # Bei hoher Komplexität: Injiziert CoT-Prompt für bessere Antworten
-        # Für tiefe Analyse: Nutze /seq (Sequential Thinking MCP)
-        thinking_engine = self._get_thinking_engine()
-        is_error_query = any(kw in user_message.lower() for kw in [
-            "fehler", "error", "exception", "problem", "nicht funktioniert",
-            "bug", "crash", "failed", "schlägt fehl", "kaputt"
-        ])
-
-        # Async/LLM-basierte Komplexitätsprüfung
-        should_cot, complexity_score = (False, 0.0)
-        if thinking_engine.is_enabled and not forced_capability:
-            should_cot, complexity_score = await thinking_engine.should_auto_activate_async(
-                user_message, is_error=is_error_query
-            )
-            logger.debug(f"[agent] CoT check: activate={should_cot}, complexity={complexity_score:.2f}")
-
-            # IMMER Event senden mit Komplexitäts-Score (für UI)
-            yield AgentEvent(AgentEventType.THINKING_CHECK, {
-                "complexity_score": round(complexity_score, 2),
-                "will_activate": should_cot,
-                "is_error_query": is_error_query,
-                "threshold": settings.mcp.min_complexity_score,
-                "mode": "cot"  # Chain-of-Thought (leicht), nicht Sequential (schwer)
-            })
-
-        if should_cot:
-            # Leichtgewichtiger CoT-Prompt statt schwerem Sequential Thinking
-            # Für tiefe Analyse: User kann /seq verwenden
-            cot_prompt = self._build_cot_prompt(complexity_score, is_error_query)
-            cot_tokens = estimate_tokens(cot_prompt)
-
-            if budget.can_add("context", cot_tokens):
-                messages.append({"role": "system", "content": cot_prompt})
-                budget.add("context", cot_tokens)
-                logger.debug(f"[agent] CoT prompt injected: {cot_tokens} tokens")
 
         # === RESEARCH PHASE (Parallele Quellensuche) ===
         # Aktiviert bei Fragen oder Keywords - sucht parallel in Memory, Code, Web, Docs
