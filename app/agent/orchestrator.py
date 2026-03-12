@@ -513,6 +513,28 @@ class AgentOrchestrator:
         # Event Bridge für Live-Streaming von MCP-Events
         self._event_bridge: MCPEventBridge = get_event_bridge()
 
+    async def _llm_callback_for_mcp(self, prompt: str, context: Optional[str] = None) -> str:
+        """
+        LLM-Callback für MCP Sequential Thinking.
+
+        Ermöglicht echtes LLM-Denken statt Template-Fallback.
+        """
+        messages = []
+        if context:
+            messages.append({"role": "system", "content": context})
+        messages.append({"role": "user", "content": prompt})
+
+        try:
+            response = await central_llm_client.chat_quick(
+                messages=messages,
+                temperature=0.3,
+                max_tokens=1024
+            )
+            return response
+        except Exception as e:
+            logger.warning(f"[MCP] LLM callback failed: {e}")
+            return ""
+
     def _get_state(self, session_id: str) -> AgentState:
         """Holt oder erstellt den State für eine Session. Stellt bei Bedarf vom Disk wieder her."""
         if session_id not in self._states:
@@ -913,7 +935,10 @@ class AgentOrchestrator:
         if settings.mcp.sequential_thinking_enabled or settings.mcp.enabled:
             try:
                 if self._mcp_bridge is None:
-                    self._mcp_bridge = get_tool_bridge(event_callback=self._emit_mcp_event)
+                    self._mcp_bridge = get_tool_bridge(
+                        llm_callback=self._llm_callback_for_mcp,
+                        event_callback=self._emit_mcp_event
+                    )
                 mcp_tools = self._mcp_bridge.get_tool_definitions()
                 tool_schemas.extend(mcp_tools)
                 if mcp_tools:
@@ -1127,7 +1152,10 @@ class AgentOrchestrator:
             logger.debug("[agent] Executing forced capability: {forced_capability}")
 
             if self._mcp_bridge is None:
-                self._mcp_bridge = get_tool_bridge(event_callback=self._emit_mcp_event)
+                self._mcp_bridge = get_tool_bridge(
+                        llm_callback=self._llm_callback_for_mcp,
+                        event_callback=self._emit_mcp_event
+                    )
 
             # TOOL_START Event
             yield AgentEvent(AgentEventType.TOOL_START, {
@@ -1607,7 +1635,10 @@ class AgentOrchestrator:
                     if tool_call.name.startswith("mcp_") or tool_call.name in MCP_CAPABILITY_TOOLS:
                         # MCP-Tool über Bridge ausführen mit Live-Event-Streaming
                         if self._mcp_bridge is None:
-                            self._mcp_bridge = get_tool_bridge(event_callback=self._emit_mcp_event)
+                            self._mcp_bridge = get_tool_bridge(
+                        llm_callback=self._llm_callback_for_mcp,
+                        event_callback=self._emit_mcp_event
+                    )
 
                         # Tool in separatem Task ausführen
                         tool_task = asyncio.create_task(
