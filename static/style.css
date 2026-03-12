@@ -4033,3 +4033,230 @@ a:visited {
     opacity: 0.8;
   }
 }
+
+/* ══════════════════════════════════════════════════════════════════════════════
+   MCP Activity Panel - Accordion Layout
+   ══════════════════════════════════════════════════════════════════════════════ */
+
+.badge-mcp {
+  background: var(--accent);
+  color: var(--bg);
+  font-size: 0.65rem;
+  font-weight: 600;
+  padding: 1px 5px;
+  border-radius: 8px;
+  margin-left: 4px;
+  min-width: 16px;
+  text-align: center;
+}
+
+.mcp-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.mcp-title {
+  font-weight: 600;
+  font-size: 0.9rem;
+}
+
+.mcp-sessions {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 8px;
+  overflow-y: auto;
+  max-height: calc(100vh - 200px);
+}
+
+/* MCP Session Accordion Item */
+.mcp-session {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  overflow: hidden;
+  transition: all 0.15s ease;
+}
+
+.mcp-session.active {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent-bg);
+}
+
+.mcp-session-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  cursor: pointer;
+  user-select: none;
+  transition: background 0.15s ease;
+}
+
+.mcp-session-header:hover {
+  background: var(--surface-hover);
+}
+
+.mcp-session-arrow {
+  font-size: 0.7rem;
+  color: var(--text-secondary);
+  transition: transform 0.15s ease;
+}
+
+.mcp-session.expanded .mcp-session-arrow {
+  transform: rotate(90deg);
+}
+
+.mcp-session-icon {
+  font-size: 1.1rem;
+  width: 24px;
+  text-align: center;
+}
+
+/* MCP Type Colors */
+.mcp-session-icon.thinking { color: #58a6ff; }
+.mcp-session-icon.brainstorm { color: #f0c000; }
+.mcp-session-icon.design { color: #3fb950; }
+.mcp-session-icon.implement { color: #f78166; }
+.mcp-session-icon.analyze { color: #a371f7; }
+.mcp-session-icon.research { color: #39c5cf; }
+
+.mcp-session-name {
+  flex: 1;
+  font-size: 0.85rem;
+  font-weight: 500;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.mcp-session-status {
+  font-size: 0.75rem;
+  padding: 2px 6px;
+  border-radius: 4px;
+}
+
+.mcp-session-status.running {
+  background: var(--accent-bg);
+  color: var(--accent);
+}
+
+.mcp-session-status.running::before {
+  content: '';
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--accent);
+  margin-right: 4px;
+  animation: statusPulse 1s ease-in-out infinite;
+}
+
+.mcp-session-status.complete {
+  background: var(--success-bg);
+  color: var(--success);
+}
+
+.mcp-session-status.error {
+  background: var(--danger-bg);
+  color: var(--danger);
+}
+
+@keyframes statusPulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.4; }
+}
+
+/* MCP Session Content (Accordion Body) */
+.mcp-session-content {
+  max-height: 0;
+  overflow: hidden;
+  transition: max-height 0.2s ease;
+  background: var(--bg-secondary);
+}
+
+.mcp-session.expanded .mcp-session-content {
+  max-height: 400px;
+  overflow-y: auto;
+}
+
+.mcp-session-query {
+  padding: 8px 12px;
+  font-size: 0.8rem;
+  color: var(--text-secondary);
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  gap: 6px;
+}
+
+.mcp-session-query-label {
+  color: var(--text-muted);
+}
+
+.mcp-session-query-text {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* MCP Steps */
+.mcp-steps {
+  padding: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.mcp-step {
+  display: flex;
+  gap: 8px;
+  padding: 8px 10px;
+  background: var(--surface);
+  border-radius: 6px;
+  font-size: 0.8rem;
+}
+
+.mcp-step-number {
+  color: var(--text-muted);
+  font-weight: 600;
+  min-width: 20px;
+}
+
+.mcp-step-content {
+  flex: 1;
+}
+
+.mcp-step-title {
+  font-weight: 500;
+  color: var(--text);
+  margin-bottom: 2px;
+}
+
+.mcp-step-type {
+  font-size: 0.7rem;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  margin-left: 6px;
+}
+
+.mcp-step-text {
+  color: var(--text-secondary);
+  line-height: 1.4;
+  word-break: break-word;
+}
+
+/* Progress bar for session */
+.mcp-session-progress {
+  height: 2px;
+  background: var(--border);
+  overflow: hidden;
+}
+
+.mcp-session-progress-bar {
+  height: 100%;
+  background: var(--accent);
+  transition: width 0.3s ease;
+  width: 0%;
+}

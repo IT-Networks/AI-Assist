@@ -362,8 +362,8 @@
   <!-- Right Sidebar - Context & Confirmation -->
   <aside id="sidebar-right" class="sidebar">
     <div class="sidebar-tabs sidebar-tabs-compact">
-      <button class="sidebar-tab" data-panel="thinking-panel" title="AI Thinking">
-        &#129504; <span class="badge badge-thinking pulse" id="thinking-badge" style="display:none"></span>
+      <button class="sidebar-tab" data-panel="mcp-panel" title="MCP Activity">
+        &#129504; <span class="badge badge-mcp pulse" id="mcp-badge" style="display:none">0</span>
       </button>
       <button class="sidebar-tab active" data-panel="tools-panel" title="Tool-Aktivität">&#128295;</button>
       <button class="sidebar-tab" data-panel="confirm-panel" title="Ausstehende Bestätigungen">
@@ -378,30 +378,21 @@
       <button class="sidebar-tab" data-panel="maven-panel" title="Maven Build">&#128736;</button>
     </div>
 
-    <!-- Thinking Panel -->
-    <div class="sidebar-panel" id="thinking-panel">
-      <div class="panel-header thinking-header">
-        <div class="thinking-title">
-          <span id="thinking-mode-label">&#129504; Sequential Thinking</span>
+    <!-- MCP Activity Panel -->
+    <div class="sidebar-panel" id="mcp-panel">
+      <div class="panel-header mcp-header">
+        <div class="mcp-title">
+          <span>&#129504; MCP Activity</span>
         </div>
-        <div class="thinking-status" id="thinking-status">
-          <span class="status-icon pulse">&#9679;</span>
-          <span id="thinking-progress-text">Bereit</span>
-        </div>
+        <button class="icon-btn" onclick="clearMcpSessions()" title="Alle löschen">&#128465;</button>
       </div>
-      <div class="thinking-progress">
-        <div class="thinking-progress-bar" id="thinking-progress-bar"></div>
-      </div>
-      <div class="thinking-query-container">
-        <span class="query-label">Analysiere:</span>
-        <span class="query-text" id="thinking-query">-</span>
-      </div>
-      <div class="thinking-steps" id="thinking-steps">
-        <div class="empty-state">
+      <div class="mcp-sessions" id="mcp-sessions">
+        <div class="empty-state" id="mcp-empty-state">
           <span>&#129504;</span>
-          <p>Thinking Panel</p>
-          <small>Hier werden die Denkschritte der KI angezeigt.</small>
+          <p>MCP Activity</p>
+          <small>Hier werden aktive MCP-Prozesse angezeigt.</small>
         </div>
+        <!-- MCP Sessions werden hier dynamisch eingefügt -->
       </div>
     </div>
 
