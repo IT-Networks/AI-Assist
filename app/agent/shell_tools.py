@@ -76,18 +76,49 @@ _BLOCKED_PATTERNS = [
     (re.compile(r"wget.*\|\s*(bash|sh)", re.IGNORECASE), "wget | sh nicht erlaubt"),
 ]
 
-# LOCAL_ONLY - System-Befehle die IMMER lokal ausgeführt werden (nicht im Container)
-# Diese Tools existieren nicht im Container und müssen auf dem Host laufen
-_LOCAL_ONLY_PATTERNS = [
-    re.compile(r"^podman\b", re.IGNORECASE),       # Podman-Befehle
-    re.compile(r"^docker\b", re.IGNORECASE),       # Docker-Befehle
-    re.compile(r"^wsl\b", re.IGNORECASE),          # WSL-Befehle
-    re.compile(r"^kubectl\b", re.IGNORECASE),      # Kubernetes
-    re.compile(r"^az\b", re.IGNORECASE),           # Azure CLI
-    re.compile(r"^aws\b", re.IGNORECASE),          # AWS CLI
-    re.compile(r"^gcloud\b", re.IGNORECASE),       # Google Cloud CLI
-    re.compile(r"^systemctl\b", re.IGNORECASE),    # Systemd
-    re.compile(r"^journalctl\b", re.IGNORECASE),   # Systemd logs
+# LOCAL_ONLY_SAFE - Sichere System-Befehle die lokal ohne Bestätigung laufen
+# NUR read-only Operationen wie Versionsabfragen und Status-Checks
+_LOCAL_ONLY_SAFE_PATTERNS = [
+    # Podman - nur sichere read-only Befehle
+    re.compile(r"^podman\s+(--version|-v|version)$", re.IGNORECASE),
+    re.compile(r"^podman\s+(ps|images|info|system\s+info)(\s|$)", re.IGNORECASE),
+    re.compile(r"^podman\s+machine\s+(list|ls|info|inspect)(\s|$)", re.IGNORECASE),
+    # Docker - nur sichere read-only Befehle
+    re.compile(r"^docker\s+(--version|-v|version)$", re.IGNORECASE),
+    re.compile(r"^docker\s+(ps|images|info|system\s+info)(\s|$)", re.IGNORECASE),
+    # WSL - nur sichere read-only Befehle
+    re.compile(r"^wsl\s+(--list|--status|-l)(\s|$)", re.IGNORECASE),
+    re.compile(r"^wsl\s+--version$", re.IGNORECASE),
+    # Kubectl - nur sichere read-only Befehle
+    re.compile(r"^kubectl\s+(version|get|describe|logs)(\s|$)", re.IGNORECASE),
+    # Journalctl - read-only
+    re.compile(r"^journalctl\b", re.IGNORECASE),
+]
+
+# LOCAL_ONLY_DANGEROUS - System-Befehle die Bestätigung erfordern
+# Diese können Daten löschen oder Systeme beeinflussen
+_LOCAL_ONLY_DANGEROUS_PATTERNS = [
+    # Podman - gefährliche Operationen
+    (re.compile(r"^podman\s+(rm|rmi|kill|stop|prune|system\s+prune)", re.IGNORECASE),
+     "Podman: Kann Container/Images löschen"),
+    (re.compile(r"^podman\s+machine\s+(rm|stop|reset)", re.IGNORECASE),
+     "Podman Machine: Kann VM stoppen/löschen"),
+    # Docker - gefährliche Operationen
+    (re.compile(r"^docker\s+(rm|rmi|kill|stop|prune|system\s+prune)", re.IGNORECASE),
+     "Docker: Kann Container/Images löschen"),
+    # WSL - gefährliche Operationen
+    (re.compile(r"^wsl\s+--(shutdown|terminate|unregister)", re.IGNORECASE),
+     "WSL: Kann Distributionen beenden/löschen"),
+    # Kubectl - gefährliche Operationen
+    (re.compile(r"^kubectl\s+(delete|apply|create|patch|edit)", re.IGNORECASE),
+     "Kubectl: Kann Kubernetes-Ressourcen ändern/löschen"),
+    # Systemctl - gefährliche Operationen
+    (re.compile(r"^systemctl\s+(stop|restart|disable|mask)", re.IGNORECASE),
+     "Systemctl: Kann Services stoppen/deaktivieren"),
+    # Cloud CLIs - generell gefährlich
+    (re.compile(r"^az\b", re.IGNORECASE), "Azure CLI: Kann Cloud-Ressourcen ändern"),
+    (re.compile(r"^aws\b", re.IGNORECASE), "AWS CLI: Kann Cloud-Ressourcen ändern"),
+    (re.compile(r"^gcloud\b", re.IGNORECASE), "GCloud CLI: Kann Cloud-Ressourcen ändern"),
 ]
 
 # READ_ONLY - Sicher, keine Änderungen
@@ -184,15 +215,27 @@ def classify_command(command: str) -> CommandClassification:
                 block_reason=reason
             )
 
-    # LOCAL_ONLY prüfen - System-Befehle die nicht im Container laufen können
-    for pattern in _LOCAL_ONLY_PATTERNS:
+    # LOCAL_ONLY_SAFE prüfen - Sichere System-Befehle (read-only)
+    for pattern in _LOCAL_ONLY_SAFE_PATTERNS:
         if pattern.search(command):
             return CommandClassification(
                 command=command,
-                level=SafetyLevel.READ_ONLY,  # Versionsabfragen sind read-only
+                level=SafetyLevel.READ_ONLY,
                 category="local_system",
                 can_container_test=False,  # NICHT im Container!
                 requires_confirmation=False
+            )
+
+    # LOCAL_ONLY_DANGEROUS prüfen - Gefährliche System-Befehle (Bestätigung!)
+    for pattern, reason in _LOCAL_ONLY_DANGEROUS_PATTERNS:
+        if pattern.search(command):
+            return CommandClassification(
+                command=command,
+                level=SafetyLevel.SYSTEM_WRITE,
+                category="local_system_dangerous",
+                can_container_test=False,  # NICHT im Container!
+                requires_confirmation=True,
+                block_reason=reason  # Wird als Warnung angezeigt
             )
 
     # READ_ONLY prüfen (pre-compiled patterns)
@@ -527,9 +570,39 @@ async def shell_execute(
             }
         )
 
-    # LOCAL_ONLY Befehle (podman, docker, wsl, etc.) direkt lokal ausführen
+    # LOCAL_ONLY Befehle (podman, docker, wsl, etc.)
     if not classification.can_container_test:
-        logger.debug("Befehl als local_system klassifiziert, führe lokal aus: %s", command)
+        # Gefährliche Befehle erfordern Bestätigung via shell_execute_local
+        if classification.requires_confirmation:
+            logger.debug("Gefährlicher lokaler Befehl, erfordert Bestätigung: %s", command)
+            # Execution speichern für spätere Ausführung nach Bestätigung
+            execution_id = str(uuid.uuid4())[:12]
+            _cleanup_old_executions()
+            execution = ShellExecution(
+                execution_id=execution_id,
+                command=command,
+                classification=classification,
+                container_result=None
+            )
+            _executions[execution_id] = execution
+
+            return ToolResult(
+                success=False,  # Noch nicht ausgeführt!
+                data={
+                    "execution_id": execution_id,
+                    "command": command,
+                    "safety_level": classification.level.name,
+                    "category": classification.category,
+                    "warning": classification.block_reason,
+                    "requires_confirmation": True,
+                    "executed_in": "pending",
+                },
+                error=f"⚠️ Gefährlicher Befehl: {classification.block_reason}. "
+                      f"Nutze shell_execute_local(execution_id='{execution_id}') zur Bestätigung."
+            )
+
+        # Sichere lokale Befehle direkt ausführen
+        logger.debug("Sicherer lokaler Befehl, führe aus: %s", command)
         result = await _run_local_shell(
             command=command,
             working_dir=working_dir,
