@@ -379,6 +379,10 @@ class CodeSearchEngine:
         path/to/file.java:11:matching line
         path/to/file.java-12-context after
         --
+
+        Windows format (with drive letter):
+        C:/path/to/file.java:11:matching line
+        C:/path/to/file.java-10-context before
         """
         matches: List[SearchMatch] = []
         base = Path(base_path)
@@ -401,45 +405,96 @@ class CodeSearchEngine:
                 continue
 
             # Parse line: file:num:content or file-num-content
-            if ":" in line:
+            # Handle Windows paths with drive letter (C:/path/file.py:42:content)
+            file_path = None
+            line_num_str = None
+            content = None
+            is_match_line = False
+
+            # Check for Windows drive letter (e.g., "C:" at start)
+            if len(line) > 2 and line[1] == ':' and line[0].isalpha():
+                # Windows path - parse after drive letter
+                rest = line[2:]  # Everything after "C:"
+
+                # Try match line first (file:num:content)
+                if ':' in rest:
+                    parts = rest.split(":", 2)
+                    if len(parts) >= 3:
+                        try:
+                            line_num = int(parts[1])
+                            file_path = line[0:2] + parts[0]  # "C:" + "/path/file.py"
+                            line_num_str = parts[1]
+                            content = parts[2]
+                            is_match_line = True
+                        except ValueError:
+                            pass
+
+                # Try context line (file-num-content)
+                if not is_match_line and '-' in rest and current_match:
+                    parts = rest.split("-", 2)
+                    if len(parts) >= 3:
+                        try:
+                            int(parts[1])  # Validate it's a line number
+                            content = parts[2]
+                            if context_mode == "before":
+                                current_match.context_before.append(content)
+                            else:
+                                current_match.context_after.append(content)
+                        except ValueError:
+                            pass
+                    continue
+
+            elif ":" in line:
+                # Unix path - match line
                 parts = line.split(":", 2)
                 if len(parts) >= 3:
-                    file_path, line_num_str, content = parts[0], parts[1], parts[2]
-                    try:
-                        line_num = int(line_num_str)
-
-                        # Relativen Pfad
-                        try:
-                            rel_path = str(Path(file_path).relative_to(base))
-                        except ValueError:
-                            rel_path = file_path
-
-                        # This is a match line
-                        if current_match:
-                            matches.append(current_match)
-                            if len(matches) >= max_results:
-                                break
-
-                        current_match = SearchMatch(
-                            file_path=rel_path,
-                            line_number=line_num,
-                            line_content=content,
-                            context_before=[],
-                            context_after=[]
-                        )
-                        context_mode = "after"
-                    except ValueError:
-                        pass
+                    file_path = parts[0]
+                    line_num_str = parts[1]
+                    content = parts[2]
+                    is_match_line = True
 
             elif "-" in line and current_match:
-                # Context line (file-num-content)
+                # Unix path - context line
                 parts = line.split("-", 2)
                 if len(parts) >= 3:
-                    content = parts[2]
-                    if context_mode == "before":
-                        current_match.context_before.append(content)
-                    else:
-                        current_match.context_after.append(content)
+                    try:
+                        int(parts[1])  # Validate it's a line number
+                        content = parts[2]
+                        if context_mode == "before":
+                            current_match.context_before.append(content)
+                        else:
+                            current_match.context_after.append(content)
+                    except ValueError:
+                        pass
+                continue
+
+            # Process match line
+            if is_match_line and file_path and line_num_str and content is not None:
+                try:
+                    line_num = int(line_num_str)
+
+                    # Relativen Pfad
+                    try:
+                        rel_path = str(Path(file_path).relative_to(base))
+                    except ValueError:
+                        rel_path = file_path
+
+                    # This is a match line
+                    if current_match:
+                        matches.append(current_match)
+                        if len(matches) >= max_results:
+                            break
+
+                    current_match = SearchMatch(
+                        file_path=rel_path,
+                        line_number=line_num,
+                        line_content=content,
+                        context_before=[],
+                        context_after=[]
+                    )
+                    context_mode = "after"
+                except ValueError:
+                    pass
 
         # Don't forget last match
         if current_match and len(matches) < max_results:
