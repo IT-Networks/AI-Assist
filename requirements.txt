@@ -1,30 +1,56 @@
+# ══════════════════════════════════════════════════════════════════════════════
+# AI-Assist Core Dependencies
+# ══════════════════════════════════════════════════════════════════════════════
+
+# Web Framework
 fastapi==0.111.0
 uvicorn[standard]==0.30.1
-httpx==0.27.0
-pyyaml==6.0.1
-python-dotenv==1.0.1
 python-multipart==0.0.9
+
+# HTTP & Data
+httpx==0.27.0
 pydantic==2.7.1
 pydantic-settings==2.3.1
+
+# Config & Utils
+pyyaml==6.0.1
+python-dotenv==1.0.1
+aiofiles==24.1.0
+cachetools==5.5.0
+
+# Parsing
 pdfplumber==0.11.0
-# Optional: PyMuPDF für schnellere PDF-Suche (pdfplumber als Fallback)
-# PyMuPDF==1.24.5
 lxml==5.2.2
 beautifulsoup4==4.12.3
 javalang==0.13.0
-tiktoken==0.7.0
-aiofiles==24.1.0
-# Optional: DB2 JDBC Support
+
+# Web Search
+duckduckgo-search>=8.0.0
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Optional Dependencies
+# ══════════════════════════════════════════════════════════════════════════════
+
+# DB2 JDBC Support (für Datenbank-Anbindung)
 jaydebeapi==1.2.3
 JPype1==1.5.0
 
+# PyMuPDF für schnellere PDF-Suche (pdfplumber als Fallback)
+# PyMuPDF==1.24.5
+
+# Redis für persistentes LLM-Caching
+# redis>=5.0.0
+
+# ══════════════════════════════════════════════════════════════════════════════
 # Testing
+# ══════════════════════════════════════════════════════════════════════════════
 pytest==8.3.5
 pytest-asyncio==0.24.0
 
-# Performance
-cachetools==5.5.0
-duckduckgo-search>=8.0.0
-
-# Optional: Redis für persistentes LLM-Caching
-# redis>=5.0.0
+# ══════════════════════════════════════════════════════════════════════════════
+# External Tools (nicht pip, manuell installieren)
+# ══════════════════════════════════════════════════════════════════════════════
+# ripgrep (rg) - Schnelle Code-Suche
+#   Windows: winget install BurntSushi.ripgrep.MSVC
+#   macOS:   brew install ripgrep
+#   Linux:   apt install ripgrep
