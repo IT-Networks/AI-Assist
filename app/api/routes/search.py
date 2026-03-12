@@ -148,9 +148,15 @@ except ImportError:
 
 # Fallback: Legacy HTML scraping (veraltet, wird blockiert)
 _DDG_URL = "https://html.duckduckgo.com/html/"
+
+# Edge User-Agent (Chrome ist im internen Netz oft gesperrt)
+_EDGE_USER_AGENT = (
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+    "(KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36 Edg/131.0.0.0"
+)
+
 _DDG_HEADERS = {
-    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-                  "(KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+    "User-Agent": _EDGE_USER_AGENT,
     "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
     "Accept-Language": "de-DE,de;q=0.9,en-US;q=0.8,en;q=0.7",
     "Accept-Encoding": "gzip, deflate, br",
@@ -160,6 +166,9 @@ _DDG_HEADERS = {
     "Sec-Fetch-Mode": "navigate",
     "Sec-Fetch-Site": "none",
     "Sec-Fetch-User": "?1",
+    "Sec-Ch-Ua": '"Microsoft Edge";v="131", "Chromium";v="131", "Not_A Brand";v="24"',
+    "Sec-Ch-Ua-Mobile": "?0",
+    "Sec-Ch-Ua-Platform": '"Windows"',
 }
 
 # Entferne HTML-Tags und &entity;
@@ -262,12 +271,26 @@ async def _ddg_search_library(
     def sync_search():
         """Synchrone Suche (Library ist nicht async)."""
         try:
-            # DDGS mit Proxy konfigurieren
+            # DDGS mit Proxy und Headers konfigurieren
             ddgs_kwargs = {
                 "timeout": timeout,
+                "headers": {
+                    "User-Agent": _EDGE_USER_AGENT,
+                    "Accept-Language": "de-DE,de;q=0.9,en-US;q=0.8,en;q=0.7",
+                },
             }
+
+            # Proxy konfigurieren
             if proxy_url:
                 ddgs_kwargs["proxy"] = proxy_url
+                print(f"[search] Using proxy: {proxy_url[:50]}...")
+
+            # SSL-Verifizierung
+            if not settings.search.verify_ssl:
+                ddgs_kwargs["verify"] = False
+                print("[search] SSL verification disabled")
+
+            print(f"[search] DDGS config: timeout={timeout}, proxy={bool(proxy_url)}, verify_ssl={settings.search.verify_ssl}")
 
             with DDGS(**ddgs_kwargs) as ddgs:
                 # Text-Suche durchführen
@@ -279,7 +302,15 @@ async def _ddg_search_library(
                 ))
                 return search_results
         except Exception as e:
-            print(f"[search] DDGS error: {e}")
+            error_msg = str(e).lower()
+            if "proxy" in error_msg:
+                print(f"[search] DDGS Proxy error: {e}")
+            elif "ssl" in error_msg or "certificate" in error_msg:
+                print(f"[search] DDGS SSL error: {e} (try disabling SSL verification in settings)")
+            elif "timeout" in error_msg:
+                print(f"[search] DDGS Timeout: {e}")
+            else:
+                print(f"[search] DDGS error: {e}")
             raise
 
     # In Thread ausführen (Library ist synchron)
