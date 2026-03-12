@@ -627,9 +627,108 @@ CONTINUE: [yes/no]
 
         return False
 
+    # Cache für LLM-basierte Komplexitäts-Schätzungen
+    _complexity_cache: Dict[str, float] = {}
+    _COMPLEXITY_CACHE_MAX = 100
+
     def estimate_complexity(self, query: str) -> float:
         """
-        Schätzt die Komplexität einer Anfrage (0.0 - 1.0).
+        Schätzt die Komplexität synchron (Keyword-basiert).
+
+        Für LLM-basierte Schätzung: estimate_complexity_async() verwenden.
+        """
+        return self._estimate_complexity_keywords(query)
+
+    async def estimate_complexity_async(self, query: str) -> float:
+        """
+        Schätzt die Komplexität einer Anfrage mit LLM (0.0 - 1.0).
+
+        Hybrid-Ansatz:
+        1. Cache prüfen
+        2. LLM-Einschätzung versuchen (robust gegen Tippfehler)
+        3. Fallback auf Keyword-Matching
+        """
+        # Cache prüfen (normalisierter Key)
+        cache_key = query.strip().lower()[:200]
+        if cache_key in self._complexity_cache:
+            cached = self._complexity_cache[cache_key]
+            logger.debug(f"[complexity] Cache hit: {cached:.2f}")
+            return cached
+
+        # LLM-basierte Schätzung versuchen
+        try:
+            score = await self._estimate_complexity_llm(query)
+            if score is not None:
+                self._cache_complexity(cache_key, score)
+                return score
+        except Exception as e:
+            logger.warning(f"[complexity] LLM estimation failed: {e}")
+
+        # Fallback: Keyword-basiert
+        score = self._estimate_complexity_keywords(query)
+        self._cache_complexity(cache_key, score)
+        return score
+
+    def _cache_complexity(self, key: str, score: float) -> None:
+        """Speichert Komplexitäts-Score im Cache."""
+        if len(self._complexity_cache) >= self._COMPLEXITY_CACHE_MAX:
+            # Ältesten Eintrag entfernen (FIFO)
+            first_key = next(iter(self._complexity_cache))
+            del self._complexity_cache[first_key]
+        self._complexity_cache[key] = score
+
+    async def _estimate_complexity_llm(self, query: str) -> Optional[float]:
+        """
+        LLM-basierte Komplexitäts-Einschätzung.
+
+        Robust gegen Tippfehler, versteht Kontext und Semantik.
+        """
+        from app.services.llm_client import llm_client
+
+        # Modell für Komplexitäts-Einschätzung
+        model = (
+            settings.llm.complexity_model
+            or settings.llm.tool_model
+            or settings.llm.default_model
+        )
+
+        prompt = """Bewerte die Komplexität dieser Aufgabe auf einer Skala von 0.0 bis 1.0:
+
+- 0.0-0.2: Einfache Frage, Begrüßung, einzelne Suche
+- 0.3-0.5: Mittlere Aufgabe, einfache Analyse, einzelner Schritt
+- 0.6-0.7: Komplexere Aufgabe, mehrere Schritte, Datenextraktion
+- 0.8-1.0: Sehr komplex, Debugging, mehrere Systeme, Code-Erstellung
+
+Aufgabe: {query}
+
+Antworte NUR mit einer Zahl zwischen 0.0 und 1.0, z.B.: 0.7"""
+
+        try:
+            messages = [
+                {"role": "user", "content": prompt.format(query=query[:500])}
+            ]
+
+            response = await llm_client.chat(messages, model=model)
+            response = response.strip()
+
+            # Zahl extrahieren (auch aus "0.7" oder "Die Komplexität ist 0.7")
+            match = re.search(r'(\d+\.?\d*)', response)
+            if match:
+                score = float(match.group(1))
+                score = max(0.0, min(1.0, score))  # Clamp auf 0-1
+                logger.debug(f"[complexity] LLM estimate: {score:.2f} for '{query[:50]}...'")
+                return score
+
+            logger.warning(f"[complexity] LLM response not parseable: {response[:50]}")
+            return None
+
+        except Exception as e:
+            logger.warning(f"[complexity] LLM call failed: {e}")
+            return None
+
+    def _estimate_complexity_keywords(self, query: str) -> float:
+        """
+        Keyword-basierte Komplexitäts-Schätzung (Fallback).
 
         Faktoren:
         - Länge der Anfrage

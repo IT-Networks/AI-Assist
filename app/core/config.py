@@ -126,6 +126,7 @@ class LLMConfig(BaseModel):
     # Modell-Aufteilung für Agent
     tool_model: str = ""  # Schnelles Modell für Tool-Aufrufe/Suche (leer = default_model)
     analysis_model: str = ""  # Größeres Modell für Analyse/Antwort (leer = default_model)
+    complexity_model: str = ""  # Modell für Komplexitäts-Einschätzung (leer = tool_model)
     # Pro-Tool Modell-Zuweisung: {"tool_name": "model_id"} (leer = tool_model oder default_model)
     tool_models: Dict[str, str] = {}
     # Phase-spezifische Temperature: Tool-Phase deterministisch (0.0), Analyse-Phase präzise (0.1)

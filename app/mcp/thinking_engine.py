@@ -195,8 +195,12 @@ class ThinkingEngine:
         return self._sequential.should_auto_activate(query, is_error)
 
     def estimate_complexity(self, query: str) -> float:
-        """Schätzt die Komplexität einer Anfrage (0.0-1.0)."""
+        """Schätzt die Komplexität synchron (Keyword-basiert, schnell)."""
         return self._sequential.estimate_complexity(query)
+
+    async def estimate_complexity_async(self, query: str) -> float:
+        """Schätzt die Komplexität mit LLM (robust gegen Tippfehler)."""
+        return await self._sequential.estimate_complexity_async(query)
 
     async def think(
         self,
@@ -219,8 +223,8 @@ class ThinkingEngine:
         """
         start_time = time.monotonic()
 
-        # Komplexität berechnen
-        complexity = self.estimate_complexity(query)
+        # Komplexität berechnen (LLM-basiert für bessere Erkennung)
+        complexity = await self.estimate_complexity_async(query)
 
         # Mode bestimmen
         if mode is None:
