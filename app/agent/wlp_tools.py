@@ -1149,5 +1149,278 @@ def register_wlp_tools(registry: ToolRegistry) -> int:
     ))
     count += 1
 
+    # ══════════════════════════════════════════════════════════════════════════
+    # DEPLOYMENT TOOLS
+    # ══════════════════════════════════════════════════════════════════════════
+
+    # ── wlp_deploy_artifact ───────────────────────────────────────────────────
+    async def wlp_deploy_artifact(**kwargs: Any) -> ToolResult:
+        """
+        Deployed ein WAR/EAR Artefakt auf einen WLP Server.
+
+        Unterstützt zwei Methoden:
+        - dropins: Hot-Deploy ohne Restart (Standard)
+        - apps: Deployment in apps-Ordner (erfordert meist Restart)
+        """
+        import shutil
+        from datetime import datetime
+
+        server_id: str = kwargs.get("server_id", "")
+        artifact_path: str = kwargs.get("artifact_path", "")
+        method: str = kwargs.get("method", "dropins").lower()
+        backup: bool = kwargs.get("backup", True)
+
+        srv = next((s for s in settings.wlp.servers if s.id == server_id), None)
+        if not srv:
+            return ToolResult(success=False, error=f"Server '{server_id}' nicht gefunden")
+
+        if not artifact_path:
+            # Versuche Artefakt aus Maven target/ zu finden
+            repo_path = settings.wlp.repo_path or settings.java.get_active_path()
+            if repo_path:
+                for pattern in ["**/target/*.war", "**/target/*.ear"]:
+                    matches = list(Path(repo_path).glob(pattern))
+                    if matches:
+                        # Neuestes Artefakt
+                        artifact_path = str(max(matches, key=lambda p: p.stat().st_mtime))
+                        break
+
+        if not artifact_path:
+            return ToolResult(
+                success=False,
+                error="Kein artifact_path angegeben und kein Artefakt in target/ gefunden"
+            )
+
+        artifact = Path(artifact_path)
+        if not artifact.exists():
+            return ToolResult(success=False, error=f"Artefakt nicht gefunden: {artifact_path}")
+
+        # Zielverzeichnis
+        server_dir = Path(srv.wlp_path) / "usr" / "servers" / srv.server_name
+        if method == "dropins":
+            target_dir = server_dir / "dropins"
+        elif method == "apps":
+            target_dir = server_dir / "apps"
+        else:
+            return ToolResult(success=False, error=f"Unbekannte Methode: {method}. Erlaubt: dropins, apps")
+
+        target_dir.mkdir(parents=True, exist_ok=True)
+        target_file = target_dir / artifact.name
+
+        # Backup falls vorhanden
+        backup_path = None
+        if backup and target_file.exists():
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            backup_path = target_dir / f"{artifact.stem}_{timestamp}{artifact.suffix}.bak"
+            try:
+                shutil.copy2(target_file, backup_path)
+            except Exception as e:
+                logger.warning(f"Backup fehlgeschlagen: {e}")
+                backup_path = None
+
+        # Kopieren
+        try:
+            shutil.copy2(artifact, target_file)
+        except Exception as e:
+            return ToolResult(success=False, error=f"Kopieren fehlgeschlagen: {e}")
+
+        result_data = {
+            "deployed": True,
+            "artifact": artifact.name,
+            "source": str(artifact),
+            "target": str(target_file),
+            "method": method,
+            "backup": str(backup_path) if backup_path else None,
+            "size_kb": round(artifact.stat().st_size / 1024, 1),
+        }
+
+        if method == "dropins":
+            result_data["hint"] = (
+                "Hot-Deploy in dropins/: WLP erkennt das Artefakt automatisch. "
+                "Prüfe mit wlp_log_errors ob das Deployment erfolgreich war."
+            )
+        else:
+            result_data["hint"] = (
+                "Deployment in apps/: Server-Restart empfohlen für sauberes Deployment. "
+                "Nutze wlp_server_stop + wlp_server_start."
+            )
+
+        return ToolResult(success=True, data=result_data)
+
+    registry.register(Tool(
+        name="wlp_deploy_artifact",
+        description=(
+            "Deployed ein WAR/EAR Artefakt auf einen WLP Server. "
+            "Methoden: 'dropins' (Hot-Deploy, Standard) oder 'apps' (erfordert Restart). "
+            "Findet automatisch das neueste Artefakt aus target/ wenn kein Pfad angegeben."
+        ),
+        category=ToolCategory.FILE,
+        is_write_operation=True,
+        parameters=[
+            ToolParameter(
+                name="server_id",
+                type="string",
+                description="ID des WLP-Servers",
+                required=True,
+            ),
+            ToolParameter(
+                name="artifact_path",
+                type="string",
+                description="Pfad zum WAR/EAR (optional - findet automatisch aus target/)",
+                required=False,
+            ),
+            ToolParameter(
+                name="method",
+                type="string",
+                description="Deployment-Methode: 'dropins' (Hot-Deploy) oder 'apps' (Restart nötig)",
+                required=False,
+                enum=["dropins", "apps"],
+                default="dropins",
+            ),
+            ToolParameter(
+                name="backup",
+                type="boolean",
+                description="Backup des vorherigen Artefakts erstellen (Standard: true)",
+                required=False,
+                default=True,
+            ),
+        ],
+        handler=wlp_deploy_artifact,
+    ))
+    count += 1
+
+    # ── wlp_redeploy ──────────────────────────────────────────────────────────
+    async def wlp_redeploy(**kwargs: Any) -> ToolResult:
+        """
+        Redeployment mit optionalem Server-Restart und Log-Check.
+        Kombiniert: Deploy + optional Restart + Log-Prüfung auf Fehler.
+        """
+        server_id: str = kwargs.get("server_id", "")
+        artifact_path: str = kwargs.get("artifact_path", "")
+        restart: bool = kwargs.get("restart", False)
+        check_logs: bool = kwargs.get("check_logs", True)
+
+        srv = next((s for s in settings.wlp.servers if s.id == server_id), None)
+        if not srv:
+            return ToolResult(success=False, error=f"Server '{server_id}' nicht gefunden")
+
+        steps = []
+        errors = []
+
+        # 1. Deploy
+        deploy_result = await wlp_deploy_artifact(
+            server_id=server_id,
+            artifact_path=artifact_path,
+            method="dropins" if not restart else "apps",
+            backup=True,
+        )
+
+        if not deploy_result.success:
+            return ToolResult(
+                success=False,
+                error=f"Deployment fehlgeschlagen: {deploy_result.error}"
+            )
+
+        steps.append({
+            "step": "deploy",
+            "success": True,
+            "artifact": deploy_result.data.get("artifact"),
+            "target": deploy_result.data.get("target"),
+        })
+
+        # 2. Optional: Server Restart
+        if restart:
+            # Stop
+            stop_result = await _run_server_command(srv.wlp_path, srv.server_name, "stop", timeout=60)
+            steps.append({"step": "stop", "success": stop_result.get("success", False)})
+
+            # Kurz warten
+            import asyncio
+            await asyncio.sleep(2)
+
+            # Start
+            start_result = await _run_server_command(srv.wlp_path, srv.server_name, "start", timeout=srv.start_timeout_seconds)
+            steps.append({"step": "start", "success": start_result.get("success", False)})
+
+            if not start_result.get("success"):
+                errors.append("Server-Start fehlgeschlagen")
+
+        # 3. Log-Check
+        deployment_errors = []
+        if check_logs:
+            # Warte kurz damit Logs geschrieben werden
+            import asyncio
+            await asyncio.sleep(3)
+
+            log_result = await wlp_log_errors(server_id=server_id, lines=100, severity="ERROR")
+            if log_result.success and log_result.data:
+                deployment_errors = log_result.data.get("errors", [])
+                # Filtere auf Deployment-relevante Fehler
+                deployment_errors = [
+                    e for e in deployment_errors
+                    if any(code in e.get("code", "") for code in ["CWWKZ", "CWWKF", "CWWKE"])
+                ]
+
+            steps.append({
+                "step": "log_check",
+                "errors_found": len(deployment_errors),
+            })
+
+        overall_success = len(errors) == 0 and len(deployment_errors) == 0
+
+        return ToolResult(
+            success=overall_success,
+            data={
+                "success": overall_success,
+                "steps": steps,
+                "deployment_errors": deployment_errors[:5],  # Max 5 Fehler
+                "hint": (
+                    "Deployment erfolgreich!" if overall_success
+                    else "Deployment mit Fehlern - prüfe deployment_errors"
+                ),
+            },
+            error=None if overall_success else "Deployment-Fehler erkannt",
+        )
+
+    registry.register(Tool(
+        name="wlp_redeploy",
+        description=(
+            "Vollständiges Redeployment: Artefakt deployen + optional Server neu starten + Logs prüfen. "
+            "Nutze dies nach einem Code-Fix um das neue Artefakt zu testen."
+        ),
+        category=ToolCategory.DEVOPS,
+        is_write_operation=True,
+        parameters=[
+            ToolParameter(
+                name="server_id",
+                type="string",
+                description="ID des WLP-Servers",
+                required=True,
+            ),
+            ToolParameter(
+                name="artifact_path",
+                type="string",
+                description="Pfad zum WAR/EAR (optional - findet automatisch aus target/)",
+                required=False,
+            ),
+            ToolParameter(
+                name="restart",
+                type="boolean",
+                description="Server neu starten (Standard: false = Hot-Deploy)",
+                required=False,
+                default=False,
+            ),
+            ToolParameter(
+                name="check_logs",
+                type="boolean",
+                description="Logs auf Deployment-Fehler prüfen (Standard: true)",
+                required=False,
+                default=True,
+            ),
+        ],
+        handler=wlp_redeploy,
+    ))
+    count += 1
+
     logger.info(f"[wlp_tools] {count} WLP-Tools registriert")
     return count
