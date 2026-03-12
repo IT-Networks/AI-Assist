@@ -407,11 +407,10 @@ def register_internal_fetch_tools(registry: ToolRegistry) -> int:
     registry.register(Tool(
         name="internal_fetch",
         description=(
-            "Ruft eine URL ab und gibt den Inhalt zurück. "
-            "HTML wird automatisch geparst und in lesbaren Text umgewandelt. "
-            "Für große Seiten wird Chunking verwendet - nutze chunk_index für weitere Inhalte. "
-            "Unterstützt HTTP/HTTPS, HTML, JSON und Text. "
-            "Ideal für: Interne APIs, Intranet-Seiten, Wikis, Dokumentationen."
+            "⚠️ NUR FÜR INTERNE/INTRANET URLs - NICHT für öffentliche Webseiten! "
+            "Ruft INTERNE Firmen-URLs ab (Confluence, Jira, interne APIs, Intranet). "
+            "Für ÖFFENTLICHE Webseiten (nach web_search) nutze stattdessen: fetch_webpage. "
+            "HTML wird automatisch geparst. Für große Seiten: chunk_index Parameter."
         ),
         category=ToolCategory.SEARCH,
         parameters=[
@@ -595,10 +594,9 @@ def register_internal_fetch_tools(registry: ToolRegistry) -> int:
     registry.register(Tool(
         name="internal_search",
         description=(
-            "Ruft eine URL ab und durchsucht den Inhalt nach einem Regex-Pattern. "
-            "HTML wird vor der Suche geparst (nur Text, keine Tags). "
-            "Gibt passende Zeilen mit Kontext zurück. "
-            "Ideal zum Suchen von Informationen in Webseiten und Dokumentationen."
+            "⚠️ NUR FÜR INTERNE URLs - durchsucht INTRANET-Seiten nach Pattern. "
+            "Für öffentliche Webseiten: erst web_search, dann fetch_webpage. "
+            "HTML wird geparst, gibt Treffer mit Kontext zurück."
         ),
         category=ToolCategory.SEARCH,
         parameters=[
@@ -743,10 +741,9 @@ def register_internal_fetch_tools(registry: ToolRegistry) -> int:
     registry.register(Tool(
         name="internal_fetch_section",
         description=(
-            "Extrahiert einen bestimmten Abschnitt aus einer HTML-Seite. "
-            "Kann nach CSS-Selektor (#id, .class), Heading-Text oder Element-ID suchen. "
-            "Bei Headings werden alle Inhalte bis zum nächsten gleichen/höheren Heading extrahiert. "
-            "Ideal für: Spezifische Dokumentations-Abschnitte, Artikel-Inhalte."
+            "⚠️ NUR FÜR INTERNE URLs - extrahiert Abschnitt aus INTRANET-Seite. "
+            "Für öffentliche Webseiten: fetch_webpage verwenden. "
+            "Kann nach CSS-Selektor (#id, .class) oder Heading-Text suchen."
         ),
         category=ToolCategory.SEARCH,
         parameters=[
@@ -891,13 +888,10 @@ def register_internal_fetch_tools(registry: ToolRegistry) -> int:
     registry.register(Tool(
         name="http_request",
         description=(
-            "Führt HTTP-Requests aus (vollwertiger curl-Ersatz). "
-            "Unterstützt ALLE HTTP-Methoden: GET, POST, PUT, DELETE, PATCH, HEAD, OPTIONS. "
-            "WICHTIG: Custom HTTP-Headers werden vollständig unterstützt! "
-            "Verwende den 'headers' Parameter für Authorization, API-Keys, Accept, "
-            "X-Custom-Header oder beliebige andere HTTP-Header. "
-            "Beispiel: headers='{\"Authorization\": \"Bearer token123\", \"X-API-Key\": \"abc\"}' "
-            "Ideal für: REST-APIs, authentifizierte Endpoints, Webhooks, Service-Tests."
+            "⚠️ NUR FÜR INTERNE APIs - NICHT für öffentliche Webseiten! "
+            "Führt HTTP-Requests gegen INTERNE Endpoints aus (REST-APIs, Services). "
+            "Für ÖFFENTLICHE Webseiten nutze: fetch_webpage. "
+            "Unterstützt: GET, POST, PUT, DELETE, PATCH mit Custom Headers."
         ),
         category=ToolCategory.SEARCH,
         parameters=[
@@ -940,6 +934,158 @@ def register_internal_fetch_tools(registry: ToolRegistry) -> int:
             ),
         ],
         handler=http_request,
+    ))
+    count += 1
+
+    # ── fetch_webpage (für öffentliche Webseiten) ─────────────────────────────
+
+    async def fetch_webpage(**kwargs: Any) -> ToolResult:
+        """
+        Ruft eine ÖFFENTLICHE Webseite ab und extrahiert den Textinhalt.
+
+        Ideal für: Dokumentationen, Artikel, Blog-Posts aus web_search Ergebnissen.
+        NICHT für interne URLs - dafür internal_fetch verwenden.
+        """
+        url: str = kwargs.get("url", "").strip()
+        max_length: int = int(kwargs.get("max_length", 15000))
+        extract_mode: str = kwargs.get("extract_mode", "text").strip()
+
+        if not url:
+            return ToolResult(
+                success=False,
+                error="URL ist erforderlich. Beispiel: fetch_webpage(url=\"https://docs.python.org/...\")",
+            )
+
+        # Validieren dass es eine öffentliche URL ist
+        parsed = urlparse(url)
+        if not parsed.scheme in ("http", "https"):
+            return ToolResult(
+                success=False,
+                error="Nur HTTP/HTTPS URLs erlaubt.",
+            )
+
+        # Interne URLs blockieren - dafür gibt es internal_fetch
+        internal_indicators = [".internal", ".local", ".corp", ".lan", "localhost", "127.0.0.1", "192.168.", "10."]
+        if any(ind in url.lower() for ind in internal_indicators):
+            return ToolResult(
+                success=False,
+                error="Das sieht nach einer internen URL aus. Nutze 'internal_fetch' für Intranet-Seiten.",
+            )
+
+        try:
+            # Standard Browser-Headers für öffentliche Seiten
+            headers = {
+                "User-Agent": (
+                    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+                    "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+                ),
+                "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+                "Accept-Language": "de-DE,de;q=0.9,en;q=0.8",
+            }
+
+            async with httpx.AsyncClient(
+                timeout=30,
+                follow_redirects=True,
+                verify=True,
+            ) as client:
+                response = await client.get(url, headers=headers)
+
+            if response.status_code >= 400:
+                return ToolResult(
+                    success=False,
+                    error=f"HTTP {response.status_code}: Seite konnte nicht geladen werden.",
+                )
+
+            content = response.text
+            content_type = response.headers.get("content-type", "")
+
+            # HTML parsen
+            is_html = "text/html" in content_type or content.strip().startswith("<")
+
+            output = f"=== Webpage: {url} ===\n"
+            output += f"Status: {response.status_code}\n\n"
+
+            if is_html:
+                try:
+                    parsed_html = parse_html(
+                        content,
+                        extract_mode=extract_mode,
+                        remove_navigation=True,
+                        remove_selectors=["nav", "footer", "aside", ".sidebar", ".menu", ".ads", ".cookie"],
+                    )
+
+                    # Formatieren
+                    formatted, remaining = format_parsed_output(
+                        parsed_html,
+                        max_length=max_length,
+                        include_toc=(extract_mode != "text"),
+                        include_links=(extract_mode == "structured"),
+                    )
+                    output += formatted
+
+                    if remaining > 0:
+                        output += f"\n\n[... +{remaining} Zeichen abgeschnitten]"
+
+                    output += f"\n\n[{parsed_html.char_count:,} Zeichen, {parsed_html.word_count:,} Wörter]"
+
+                except Exception as e:
+                    logger.warning(f"HTML-Parsing fehlgeschlagen: {e}")
+                    # Fallback: Roher Text
+                    if len(content) > max_length:
+                        output += content[:max_length]
+                        output += f"\n\n[... +{len(content) - max_length} Zeichen abgeschnitten]"
+                    else:
+                        output += content
+            else:
+                # Kein HTML (JSON, Text, etc.)
+                if len(content) > max_length:
+                    output += content[:max_length]
+                    output += f"\n\n[... +{len(content) - max_length} Zeichen abgeschnitten]"
+                else:
+                    output += content
+
+            return ToolResult(success=True, data=output)
+
+        except httpx.TimeoutException:
+            return ToolResult(success=False, error="Timeout: Seite antwortet nicht innerhalb von 30 Sekunden.")
+        except httpx.ConnectError as e:
+            return ToolResult(success=False, error=f"Verbindungsfehler: {e}")
+        except Exception as e:
+            return ToolResult(success=False, error=f"Fehler beim Abrufen: {e}")
+
+    registry.register(Tool(
+        name="fetch_webpage",
+        description=(
+            "Ruft eine ÖFFENTLICHE Webseite ab und extrahiert den Textinhalt. "
+            "Nutze dies nach web_search um Artikel, Dokumentationen oder Blog-Posts zu lesen. "
+            "HTML wird automatisch geparst, Navigation/Werbung entfernt. "
+            "⚠️ NUR für öffentliche URLs - für Intranet/Firmen-Seiten nutze: internal_fetch"
+        ),
+        category=ToolCategory.SEARCH,
+        parameters=[
+            ToolParameter(
+                name="url",
+                type="string",
+                description="Öffentliche URL (aus web_search Ergebnissen)",
+                required=True,
+            ),
+            ToolParameter(
+                name="max_length",
+                type="integer",
+                description="Max. Zeichen im Output (default: 15000)",
+                required=False,
+                default=15000,
+            ),
+            ToolParameter(
+                name="extract_mode",
+                type="string",
+                description="text = nur Text | structured = mit Überschriften und Links",
+                required=False,
+                default="text",
+                enum=["text", "structured"],
+            ),
+        ],
+        handler=fetch_webpage,
     ))
     count += 1
 
