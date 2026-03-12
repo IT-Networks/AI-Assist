@@ -418,7 +418,8 @@ docker_sandbox:
   podman_machine:
     enabled: true
     name: podman-machine-default
-    image_path: ''           # Pfad für interne Image-Bereitstellung (z.B. Netzlaufwerk)
+    image_url: ''            # Remote Image URL (z.B. docker://registry.example.com/podman/machine-os:5.0)
+    image_path: ''           # Lokaler Image-Pfad (Alternative zu image_url)
     cpus: 2
     memory_mb: 2048
     disk_size_gb: 20

@@ -871,11 +871,16 @@ class PodmanMachineConfig(BaseModel):
     """Konfiguration für Podman Machine (Windows VM).
 
     Ermöglicht die Initialisierung einer Podman-VM mit benutzerdefinierten
-    Ressourcen und optionalem Image-Pfad für interne Registries.
+    Ressourcen und optionalem Image aus interner Registry.
+
+    image_url: Remote Image URL für --image Parameter
+               z.B. "docker://registry.example.com/podman/machine-os:5.0"
+    image_path: Lokaler Pfad für --image-path Parameter (Alternative zu image_url)
     """
     enabled: bool = True
-    name: str = "podman-machine-default"  # Name der Machine
-    image_path: str = ""                   # Custom Image-Pfad (für interne Registries)
+    name: str = "podman-machine-default"   # Name der Machine
+    image_url: str = ""                    # Remote Image URL (z.B. docker://registry/image:tag)
+    image_path: str = ""                   # Lokaler Image-Pfad (Alternative)
     cpus: int = 2                          # Anzahl CPUs für die VM
     memory_mb: int = 2048                  # RAM in MB
     disk_size_gb: int = 20                 # Disk-Größe in GB

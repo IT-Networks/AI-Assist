@@ -139,6 +139,7 @@ class PodmanMachineManager:
         cpus: int = 2,
         memory_mb: int = 2048,
         disk_size_gb: int = 20,
+        image_url: Optional[str] = None,
         image_path: Optional[str] = None,
     ) -> ContainerResult:
         """
@@ -148,10 +149,18 @@ class PodmanMachineManager:
             cpus: Number of CPUs
             memory_mb: Memory in MB
             disk_size_gb: Disk size in GB
-            image_path: Custom image path for internal registry/provisioning
+            image_url: Remote image URL for --image (e.g., docker://registry/image:tag)
+            image_path: Local image path for --image-path (alternative to image_url)
 
         Returns:
             ContainerResult with init output
+
+        Example:
+            await manager.init(
+                cpus=2,
+                memory_mb=2048,
+                image_url="docker://registry.example.com/podman/machine-os:5.0"
+            )
         """
         args = [self.podman_path, "machine", "init"]
 
@@ -163,8 +172,12 @@ class PodmanMachineManager:
         args.extend(["--memory", str(memory_mb)])
         args.extend(["--disk-size", str(disk_size_gb)])
 
-        # Custom image path (for internal registry)
-        if image_path:
+        # Custom image URL (for internal registry) - takes precedence
+        if image_url:
+            args.extend(["--image", image_url])
+            logger.info("Using custom image URL: %s", image_url)
+        # Fallback to local image path
+        elif image_path:
             path = Path(image_path)
             if not path.exists():
                 return ContainerResult(

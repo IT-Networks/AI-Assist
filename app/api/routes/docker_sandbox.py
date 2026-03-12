@@ -50,10 +50,31 @@ class SessionCloseRequest(BaseModel):
     session_id: str
 
 
+class PodmanMachineConfigUpdate(BaseModel):
+    """Podman Machine Konfiguration."""
+    enabled: Optional[bool] = None
+    name: Optional[str] = None
+    image_url: Optional[str] = None         # Remote Image URL (docker://...)
+    image_path: Optional[str] = None        # Lokaler Image-Pfad
+    cpus: Optional[int] = None
+    memory_mb: Optional[int] = None
+    disk_size_gb: Optional[int] = None
+    auto_start: Optional[bool] = None
+
+
+class WSLIntegrationConfigUpdate(BaseModel):
+    """WSL Integration Konfiguration."""
+    enabled: Optional[bool] = None
+    mode: Optional[str] = None              # auto | native | wsl-distro
+    distro_name: Optional[str] = None
+    podman_path_in_wsl: Optional[str] = None
+    auto_detect: Optional[bool] = None
+
+
 class ConfigUpdateRequest(BaseModel):
     """Request für Config-Update."""
     enabled: Optional[bool] = None
-    backend: Optional[str] = None           # "auto" | "docker" | "podman"
+    backend: Optional[str] = None           # "auto" | "docker" | "podman" | "wsl-podman"
     docker_path: Optional[str] = None       # Pfad zu docker.exe
     podman_path: Optional[str] = None       # Pfad zu podman.exe
     image: Optional[str] = None
@@ -71,6 +92,9 @@ class ConfigUpdateRequest(BaseModel):
     preinstalled_packages: Optional[List[str]] = None
     read_only_filesystem: Optional[bool] = None
     drop_capabilities: Optional[bool] = None
+    # Nested configs
+    podman_machine: Optional[PodmanMachineConfigUpdate] = None
+    wsl_integration: Optional[WSLIntegrationConfigUpdate] = None
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -102,6 +126,25 @@ async def get_config() -> Dict[str, Any]:
         "preinstalled_packages": cfg.preinstalled_packages,
         "read_only_filesystem": cfg.read_only_filesystem,
         "drop_capabilities": cfg.drop_capabilities,
+        # Podman Machine settings
+        "podman_machine": {
+            "enabled": cfg.podman_machine.enabled,
+            "name": cfg.podman_machine.name,
+            "image_url": cfg.podman_machine.image_url,
+            "image_path": cfg.podman_machine.image_path,
+            "cpus": cfg.podman_machine.cpus,
+            "memory_mb": cfg.podman_machine.memory_mb,
+            "disk_size_gb": cfg.podman_machine.disk_size_gb,
+            "auto_start": cfg.podman_machine.auto_start,
+        },
+        # WSL Integration settings
+        "wsl_integration": {
+            "enabled": cfg.wsl_integration.enabled,
+            "mode": cfg.wsl_integration.mode,
+            "distro_name": cfg.wsl_integration.distro_name,
+            "podman_path_in_wsl": cfg.wsl_integration.podman_path_in_wsl,
+            "auto_detect": cfg.wsl_integration.auto_detect,
+        },
     }
 
 
@@ -155,12 +198,52 @@ async def update_config(request: ConfigUpdateRequest) -> Dict[str, Any]:
     if request.drop_capabilities is not None:
         cfg.drop_capabilities = request.drop_capabilities
 
+    # Podman Machine settings
+    if request.podman_machine is not None:
+        pm = request.podman_machine
+        if pm.enabled is not None:
+            cfg.podman_machine.enabled = pm.enabled
+        if pm.name is not None:
+            cfg.podman_machine.name = pm.name
+        if pm.image_url is not None:
+            cfg.podman_machine.image_url = pm.image_url
+        if pm.image_path is not None:
+            cfg.podman_machine.image_path = pm.image_path
+        if pm.cpus is not None:
+            cfg.podman_machine.cpus = pm.cpus
+        if pm.memory_mb is not None:
+            cfg.podman_machine.memory_mb = pm.memory_mb
+        if pm.disk_size_gb is not None:
+            cfg.podman_machine.disk_size_gb = pm.disk_size_gb
+        if pm.auto_start is not None:
+            cfg.podman_machine.auto_start = pm.auto_start
+
+    # WSL Integration settings
+    if request.wsl_integration is not None:
+        wsl = request.wsl_integration
+        if wsl.enabled is not None:
+            cfg.wsl_integration.enabled = wsl.enabled
+        if wsl.mode is not None:
+            cfg.wsl_integration.mode = wsl.mode
+        if wsl.distro_name is not None:
+            cfg.wsl_integration.distro_name = wsl.distro_name
+        if wsl.podman_path_in_wsl is not None:
+            cfg.wsl_integration.podman_path_in_wsl = wsl.podman_path_in_wsl
+        if wsl.auto_detect is not None:
+            cfg.wsl_integration.auto_detect = wsl.auto_detect
+
     # Bei Pfad-Änderung: Runtime-Cache invalidieren
     if paths_changed:
         from app.agent.docker_tools import _container_runtime, _runtime_version
         import app.agent.docker_tools as docker_tools
         docker_tools._container_runtime = None
         docker_tools._runtime_version = None
+        # Clear backend factory cache
+        try:
+            from app.agent.backends import ContainerBackendFactory
+            ContainerBackendFactory.clear_cache()
+        except ImportError:
+            pass
 
     # Config speichern
     from app.api.routes.settings import _save_config
@@ -407,3 +490,135 @@ async def list_packages() -> Dict[str, Any]:
 
     from app.agent.docker_tools import docker_list_packages
     return await docker_list_packages()
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Podman Machine Endpoints
+# ══════════════════════════════════════════════════════════════════════════════
+
+@router.get("/machine/status")
+async def get_machine_status() -> Dict[str, Any]:
+    """
+    Gibt den Status der Podman Machine zurück.
+    """
+    from app.agent.backends.podman_machine import PodmanMachineManager
+
+    cfg = settings.docker_sandbox
+    manager = PodmanMachineManager(
+        name=cfg.podman_machine.name,
+        podman_path=cfg.podman_path or "podman"
+    )
+
+    status = await manager.status()
+    return {
+        "name": status.name,
+        "running": status.running,
+        "cpus": status.cpus,
+        "memory_mb": status.memory_mb,
+        "disk_size_gb": status.disk_size_gb,
+        "last_up": status.last_up,
+        "error": status.error,
+    }
+
+
+@router.post("/machine/init")
+async def init_machine() -> Dict[str, Any]:
+    """
+    Initialisiert eine neue Podman Machine mit den konfigurierten Einstellungen.
+
+    Verwendet image_url oder image_path aus der Konfiguration.
+    """
+    from app.agent.backends.podman_machine import PodmanMachineManager
+
+    cfg = settings.docker_sandbox
+    pm_cfg = cfg.podman_machine
+
+    manager = PodmanMachineManager(
+        name=pm_cfg.name,
+        podman_path=cfg.podman_path or "podman"
+    )
+
+    # Check if already exists
+    status = await manager.status()
+    if status.error is None or "does not exist" not in (status.error or ""):
+        raise HTTPException(
+            status_code=400,
+            detail=f"Machine '{pm_cfg.name}' existiert bereits. Nutze DELETE /machine um sie zu entfernen."
+        )
+
+    result = await manager.init(
+        cpus=pm_cfg.cpus,
+        memory_mb=pm_cfg.memory_mb,
+        disk_size_gb=pm_cfg.disk_size_gb,
+        image_url=pm_cfg.image_url or None,
+        image_path=pm_cfg.image_path or None,
+    )
+
+    if not result.success:
+        raise HTTPException(status_code=500, detail=result.error or "Machine init failed")
+
+    return {
+        "status": "initialized",
+        "name": pm_cfg.name,
+        "image_url": pm_cfg.image_url or "(default)",
+        "output": result.stdout[:2000] if result.stdout else None,
+    }
+
+
+@router.post("/machine/start")
+async def start_machine() -> Dict[str, Any]:
+    """Startet die Podman Machine."""
+    from app.agent.backends.podman_machine import PodmanMachineManager
+
+    cfg = settings.docker_sandbox
+    manager = PodmanMachineManager(
+        name=cfg.podman_machine.name,
+        podman_path=cfg.podman_path or "podman"
+    )
+
+    result = await manager.start()
+    if not result.success:
+        raise HTTPException(status_code=500, detail=result.error or "Machine start failed")
+
+    return {"status": "started", "name": cfg.podman_machine.name}
+
+
+@router.post("/machine/stop")
+async def stop_machine() -> Dict[str, Any]:
+    """Stoppt die Podman Machine."""
+    from app.agent.backends.podman_machine import PodmanMachineManager
+
+    cfg = settings.docker_sandbox
+    manager = PodmanMachineManager(
+        name=cfg.podman_machine.name,
+        podman_path=cfg.podman_path or "podman"
+    )
+
+    result = await manager.stop()
+    if not result.success:
+        raise HTTPException(status_code=500, detail=result.error or "Machine stop failed")
+
+    return {"status": "stopped", "name": cfg.podman_machine.name}
+
+
+@router.delete("/machine")
+async def remove_machine(force: bool = False) -> Dict[str, Any]:
+    """
+    Entfernt die Podman Machine.
+
+    Args:
+        force: Erzwingt das Entfernen auch wenn die Machine läuft
+    """
+    from app.agent.backends.podman_machine import PodmanMachineManager
+
+    cfg = settings.docker_sandbox
+    manager = PodmanMachineManager(
+        name=cfg.podman_machine.name,
+        podman_path=cfg.podman_path or "podman"
+    )
+
+    result = await manager.remove(force=force)
+    if not result.success:
+        raise HTTPException(status_code=500, detail=result.error or "Machine remove failed")
+
+    return {"status": "removed", "name": cfg.podman_machine.name}
