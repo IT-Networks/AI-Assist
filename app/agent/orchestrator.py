@@ -901,7 +901,7 @@ class AgentOrchestrator:
         if settings.mcp.sequential_thinking_enabled or settings.mcp.enabled:
             try:
                 if self._mcp_bridge is None:
-                    self._mcp_bridge = get_tool_bridge()
+                    self._mcp_bridge = get_tool_bridge(event_callback=self._emit_mcp_event)
                 mcp_tools = self._mcp_bridge.get_tool_definitions()
                 tool_schemas.extend(mcp_tools)
                 if mcp_tools:
@@ -1115,7 +1115,7 @@ class AgentOrchestrator:
             logger.debug("[agent] Executing forced capability: {forced_capability}")
 
             if self._mcp_bridge is None:
-                self._mcp_bridge = get_tool_bridge()
+                self._mcp_bridge = get_tool_bridge(event_callback=self._emit_mcp_event)
 
             # TOOL_START Event
             yield AgentEvent(AgentEventType.TOOL_START, {
@@ -1580,11 +1580,16 @@ class AgentOrchestrator:
                     if tool_call.name.startswith("mcp_") or tool_call.name in MCP_CAPABILITY_TOOLS:
                         # MCP-Tool über Bridge ausführen
                         if self._mcp_bridge is None:
-                            self._mcp_bridge = get_tool_bridge()
+                            self._mcp_bridge = get_tool_bridge(event_callback=self._emit_mcp_event)
                         mcp_result = await self._mcp_bridge.call_tool(
                             tool_call.name,
                             tool_call.arguments
                         )
+
+                        # MCP-Events zum Frontend streamen (Thinking-Schritte, etc.)
+                        async for mcp_event in self._drain_mcp_events():
+                            yield mcp_event
+
                         result = ToolResult(
                             success=mcp_result.get("success", False),
                             data=mcp_result.get("result") or mcp_result.get("formatted_output") or mcp_result,

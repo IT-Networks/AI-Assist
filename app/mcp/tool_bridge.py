@@ -32,14 +32,20 @@ class MCPToolBridge:
     - Unified Interface für alle MCP-Funktionen
     """
 
-    def __init__(self, llm_callback: Optional[Callable] = None):
+    def __init__(
+        self,
+        llm_callback: Optional[Callable] = None,
+        event_callback: Optional[Callable] = None
+    ):
         """
         Args:
             llm_callback: Callback für LLM-Aufrufe (für Sequential Thinking und Capabilities)
+            event_callback: Callback für Event-Emission (MCP_START, MCP_STEP, etc.)
         """
         self.llm_callback = llm_callback
+        self.event_callback = event_callback
         self.mcp_manager = get_mcp_manager()
-        self.sequential_thinking = get_sequential_thinking(llm_callback)
+        self.sequential_thinking = get_sequential_thinking(llm_callback, event_callback)
         self.capability_registry = get_capability_registry(llm_callback)
         self._tool_handlers: Dict[str, Callable] = {}
 
@@ -399,18 +405,24 @@ class MCPToolBridge:
 _tool_bridge: Optional[MCPToolBridge] = None
 
 
-def get_tool_bridge(llm_callback: Optional[Callable] = None) -> MCPToolBridge:
+def get_tool_bridge(
+    llm_callback: Optional[Callable] = None,
+    event_callback: Optional[Callable] = None
+) -> MCPToolBridge:
     """Gibt die Singleton-Instanz der Tool Bridge zurück."""
     global _tool_bridge
     if _tool_bridge is None:
-        _tool_bridge = MCPToolBridge(llm_callback)
-    elif llm_callback:
+        _tool_bridge = MCPToolBridge(llm_callback, event_callback)
+    else:
         # Update callbacks if provided
-        if _tool_bridge.sequential_thinking.llm_callback is None:
-            _tool_bridge.sequential_thinking.llm_callback = llm_callback
-        if _tool_bridge.capability_registry.llm_callback is None:
-            _tool_bridge.capability_registry.llm_callback = llm_callback
-            # Re-register capabilities with the new callback
-            register_default_capabilities(_tool_bridge.capability_registry)
-        _tool_bridge.llm_callback = llm_callback
+        if llm_callback:
+            if _tool_bridge.sequential_thinking.llm_callback is None:
+                _tool_bridge.sequential_thinking.llm_callback = llm_callback
+            if _tool_bridge.capability_registry.llm_callback is None:
+                _tool_bridge.capability_registry.llm_callback = llm_callback
+                register_default_capabilities(_tool_bridge.capability_registry)
+            _tool_bridge.llm_callback = llm_callback
+        if event_callback:
+            _tool_bridge.event_callback = event_callback
+            _tool_bridge.sequential_thinking.event_callback = event_callback
     return _tool_bridge
