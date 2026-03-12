@@ -79,13 +79,19 @@ _BLOCKED_PATTERNS = [
 # LOCAL_ONLY_SAFE - Sichere System-Befehle die lokal ohne Bestätigung laufen
 # NUR read-only Operationen wie Versionsabfragen und Status-Checks
 _LOCAL_ONLY_SAFE_PATTERNS = [
-    # Podman - nur sichere read-only Befehle
+    # Podman - sichere Befehle
     re.compile(r"^podman\s+(--version|-v|version)$", re.IGNORECASE),
     re.compile(r"^podman\s+(ps|images|info|system\s+info)(\s|$)", re.IGNORECASE),
     re.compile(r"^podman\s+machine\s+(list|ls|info|inspect)(\s|$)", re.IGNORECASE),
-    # Docker - nur sichere read-only Befehle
+    re.compile(r"^podman\s+exec\s+", re.IGNORECASE),  # Befehl in Container ausführen
+    re.compile(r"^podman\s+logs\s+", re.IGNORECASE),  # Container-Logs anzeigen
+    re.compile(r"^podman\s+inspect\s+", re.IGNORECASE),  # Container/Image inspizieren
+    # Docker - sichere Befehle
     re.compile(r"^docker\s+(--version|-v|version)$", re.IGNORECASE),
     re.compile(r"^docker\s+(ps|images|info|system\s+info)(\s|$)", re.IGNORECASE),
+    re.compile(r"^docker\s+exec\s+", re.IGNORECASE),  # Befehl in Container ausführen
+    re.compile(r"^docker\s+logs\s+", re.IGNORECASE),  # Container-Logs anzeigen
+    re.compile(r"^docker\s+inspect\s+", re.IGNORECASE),  # Container/Image inspizieren
     # WSL - nur sichere read-only Befehle
     re.compile(r"^wsl\s+(--list|--status|-l)(\s|$)", re.IGNORECASE),
     re.compile(r"^wsl\s+--version$", re.IGNORECASE),
