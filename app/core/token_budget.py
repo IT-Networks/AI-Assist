@@ -45,6 +45,19 @@ class TokenBudget:
     # Compaction Threshold (80% = Compaction starten)
     compaction_threshold: float = 0.8
 
+    # PERFORMANCE: Kategorie-Mapping für schnellen Lookup (vermeidet getattr/setattr)
+    # Wird in __post_init__ initialisiert
+    _category_map: Dict[str, tuple] = field(default_factory=dict, repr=False)
+
+    def __post_init__(self):
+        """Initialisiert das Kategorie-Mapping für schnellen Lookup."""
+        self._category_map = {
+            "system": ("system_reserved", "used_system"),
+            "memory": ("memory_limit", "used_memory"),
+            "context": ("context_limit", "used_context"),
+            "conversation": ("conversation_limit", "used_conversation"),
+        }
+
     @property
     def available_total(self) -> int:
         """Verfügbares Budget (abzüglich Reservierungen)."""
@@ -73,18 +86,17 @@ class TokenBudget:
 
     def can_add(self, category: str, tokens: int) -> bool:
         """Prüft ob Tokens zur Kategorie hinzugefügt werden können."""
-        limit = getattr(self, f"{category}_limit", 0)
-        used = getattr(self, f"used_{category}", 0)
-
-        # Prüfe Kategorie-Limit
-        if used + tokens > limit:
+        # PERFORMANCE: Dict-Lookup statt String-Interpolation + getattr
+        mapping = self._category_map.get(category)
+        if not mapping:
             return False
 
-        # Prüfe Gesamt-Limit
-        if self.used_total + tokens > self.available_total:
-            return False
+        limit_attr, used_attr = mapping
+        limit = getattr(self, limit_attr)
+        used = getattr(self, used_attr)
 
-        return True
+        # Prüfe Kategorie-Limit und Gesamt-Limit in einem Schritt
+        return (used + tokens <= limit) and (self.used_total + tokens <= self.available_total)
 
     def add(self, category: str, tokens: int) -> bool:
         """
@@ -92,19 +104,23 @@ class TokenBudget:
 
         Returns: True wenn erfolgreich, False wenn Limit überschritten.
         """
-        attr_name = f"used_{category}"
-        if not hasattr(self, attr_name):
+        # PERFORMANCE: Dict-Lookup statt String-Interpolation
+        mapping = self._category_map.get(category)
+        if not mapping:
             return False
 
-        current = getattr(self, attr_name)
-        setattr(self, attr_name, current + tokens)
+        _, used_attr = mapping
+        current = getattr(self, used_attr)
+        setattr(self, used_attr, current + tokens)
         return True
 
     def set(self, category: str, tokens: int) -> None:
         """Setzt die Token-Nutzung einer Kategorie."""
-        attr_name = f"used_{category}"
-        if hasattr(self, attr_name):
-            setattr(self, attr_name, tokens)
+        # PERFORMANCE: Dict-Lookup statt String-Interpolation
+        mapping = self._category_map.get(category)
+        if mapping:
+            _, used_attr = mapping
+            setattr(self, used_attr, tokens)
 
     def get_status(self) -> Dict:
         """Gibt Status-Dict für Debugging/UI zurück."""

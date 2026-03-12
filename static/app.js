@@ -2993,6 +2993,11 @@ function renderSettingsSection() {
     return;
   }
 
+  if (section === 'servicenow') {
+    renderServiceNowSection();
+    return;
+  }
+
   if (section === 'github') {
     renderGitHubSection();
     return;
@@ -3084,6 +3089,203 @@ async function testDatabaseConnection() {
       resultEl.textContent = `✗ ${data.error}`;
       resultEl.className = 'test-result error';
     }
+  } catch (e) {
+    resultEl.textContent = `✗ Fehler: ${e.message}`;
+    resultEl.className = 'test-result error';
+  }
+}
+
+// ============================================================================
+// ServiceNow Section
+// ============================================================================
+
+function renderServiceNowSection() {
+  const values = settingsState.settings.servicenow || {};
+
+  let html = `
+    <div class="settings-section">
+      <h3 class="settings-section-title">SERVICENOW</h3>
+      <p class="settings-section-desc">
+        ServiceNow Service Portal Integration. Ermoeglicht Abfragen von Anwendungen,
+        Changes, Incidents und Knowledge Base Artikeln.
+      </p>
+    </div>
+  `;
+
+  // Status-Anzeige
+  html += `
+    <div class="settings-field">
+      <label>Status</label>
+      <div id="servicenow-status" class="status-indicator">
+        <span class="status-icon">⏳</span>
+        <span class="status-text">Lade Status...</span>
+      </div>
+    </div>
+  `;
+
+  // Enabled Toggle
+  html += `
+    <div class="settings-field">
+      <label for="setting-servicenow-enabled">Aktiviert</label>
+      <label class="checkbox-label">
+        <input type="checkbox" id="setting-servicenow-enabled"
+          data-section="servicenow" data-key="enabled"
+          ${values.enabled ? 'checked' : ''} onchange="markSettingsModified()">
+        ${values.enabled ? 'Aktiviert' : 'Deaktiviert'}
+      </label>
+    </div>
+  `;
+
+  // Instance URL
+  html += `
+    <div class="settings-field">
+      <label for="setting-servicenow-instance_url">Instance URL</label>
+      <input type="text" id="setting-servicenow-instance_url"
+        data-section="servicenow" data-key="instance_url"
+        value="${escapeHtml(values.instance_url || '')}"
+        placeholder="http://localhost:8080"
+        onchange="markSettingsModified()"
+        style="font-family: var(--font-mono);">
+    </div>
+  `;
+
+  // Auth Type
+  html += `
+    <div class="settings-field">
+      <label for="setting-servicenow-auth_type">Auth Type</label>
+      <select id="setting-servicenow-auth_type"
+        data-section="servicenow" data-key="auth_type"
+        onchange="markSettingsModified()">
+        <option value="basic" ${values.auth_type === 'basic' ? 'selected' : ''}>Basic Auth</option>
+        <option value="oauth2" ${values.auth_type === 'oauth2' ? 'selected' : ''}>OAuth2</option>
+      </select>
+    </div>
+  `;
+
+  // Username
+  html += `
+    <div class="settings-field">
+      <label for="setting-servicenow-username">Username</label>
+      <input type="text" id="setting-servicenow-username"
+        data-section="servicenow" data-key="username"
+        value="${escapeHtml(values.username || '')}"
+        placeholder="admin"
+        onchange="markSettingsModified()">
+    </div>
+  `;
+
+  // Password
+  html += `
+    <div class="settings-field">
+      <label for="setting-servicenow-password">Password</label>
+      <input type="password" id="setting-servicenow-password"
+        data-section="servicenow" data-key="password"
+        value="${escapeHtml(values.password || '')}"
+        onchange="markSettingsModified()" autocomplete="off">
+    </div>
+  `;
+
+  // Cache TTL
+  html += `
+    <div class="settings-field">
+      <label for="setting-servicenow-cache_ttl_seconds">Cache TTL (Sekunden)</label>
+      <input type="number" id="setting-servicenow-cache_ttl_seconds"
+        data-section="servicenow" data-key="cache_ttl_seconds"
+        value="${values.cache_ttl_seconds || 300}"
+        onchange="markSettingsModified()">
+    </div>
+  `;
+
+  // Max Results
+  html += `
+    <div class="settings-field">
+      <label for="setting-servicenow-max_results_default">Max Results</label>
+      <input type="number" id="setting-servicenow-max_results_default"
+        data-section="servicenow" data-key="max_results_default"
+        value="${values.max_results_default || 20}"
+        onchange="markSettingsModified()">
+    </div>
+  `;
+
+  // Test Connection Button
+  html += `
+    <div class="settings-actions-section">
+      <button class="btn btn-secondary" onclick="testServiceNowConnection()">
+        🔌 Verbindung testen
+      </button>
+      <button class="btn btn-secondary" onclick="clearServiceNowCache()">
+        🗑️ Cache leeren
+      </button>
+      <span id="servicenow-test-result" class="test-result"></span>
+    </div>
+  `;
+
+  document.getElementById('settings-form').innerHTML = html;
+
+  // Status laden
+  loadServiceNowStatus();
+}
+
+async function loadServiceNowStatus() {
+  const statusEl = document.getElementById('servicenow-status');
+  if (!statusEl) return;
+
+  try {
+    const res = await fetch('/api/servicenow/status');
+    const data = await res.json();
+
+    if (data.enabled) {
+      statusEl.innerHTML = `
+        <span class="status-icon status-enabled">✓</span>
+        <span class="status-text">Aktiviert - ${data.instance_url || 'Keine URL'}</span>
+      `;
+    } else {
+      statusEl.innerHTML = `
+        <span class="status-icon status-disabled">○</span>
+        <span class="status-text">Deaktiviert</span>
+      `;
+    }
+  } catch (e) {
+    statusEl.innerHTML = `
+      <span class="status-icon status-error">✗</span>
+      <span class="status-text">Fehler beim Laden</span>
+    `;
+  }
+}
+
+async function testServiceNowConnection() {
+  const resultEl = document.getElementById('servicenow-test-result');
+  resultEl.textContent = '⏳ Teste Verbindung...';
+  resultEl.className = 'test-result testing';
+
+  try {
+    const res = await fetch('/api/servicenow/test-connection', { method: 'POST' });
+    const data = await res.json();
+
+    if (data.success) {
+      resultEl.textContent = `✓ ${data.message} (${data.response_time_ms}ms)`;
+      resultEl.className = 'test-result success';
+    } else {
+      resultEl.textContent = `✗ ${data.message || data.error}`;
+      resultEl.className = 'test-result error';
+    }
+  } catch (e) {
+    resultEl.textContent = `✗ Fehler: ${e.message}`;
+    resultEl.className = 'test-result error';
+  }
+}
+
+async function clearServiceNowCache() {
+  const resultEl = document.getElementById('servicenow-test-result');
+  resultEl.textContent = '⏳ Leere Cache...';
+  resultEl.className = 'test-result testing';
+
+  try {
+    const res = await fetch('/api/servicenow/clear-cache', { method: 'POST' });
+    const data = await res.json();
+
+    resultEl.textContent = `✓ ${data.message}`;
+    resultEl.className = 'test-result success';
   } catch (e) {
     resultEl.textContent = `✗ Fehler: ${e.message}`;
     resultEl.className = 'test-result error';

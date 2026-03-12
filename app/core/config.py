@@ -953,6 +953,44 @@ class AccessLoggingConfig(BaseModel):
     exclude_hosts: List[str] = []      # Hosts die nicht geloggt werden
 
 
+class ServiceNowConfig(BaseModel):
+    """ServiceNow Service Portal Konfiguration."""
+    enabled: bool = False
+    instance_url: str = ""             # z.B. "http://localhost:8080" oder "https://company.service-now.com"
+
+    # Authentifizierung
+    auth_type: str = "basic"           # "basic" oder "oauth2"
+    username: str = ""
+    password: str = ""
+    # OAuth2 (optional)
+    client_id: str = ""
+    client_secret: str = ""
+
+    # Performance
+    cache_ttl_seconds: int = 300       # 5 Minuten Cache-TTL
+    max_results_default: int = 20      # Standard-Limit für Abfragen
+    request_timeout_seconds: int = 30  # Request-Timeout
+
+    # Rate Limiting (konservativ für lokale Instanz)
+    max_requests_per_minute: int = 60
+
+    # Custom Tables für kundenspezifische Anwendungen
+    custom_app_tables: List[str] = []  # z.B. ["u_custom_apps", "x_myco_applications"]
+
+    # Standard-Tabellen (können überschrieben werden)
+    business_app_table: str = "cmdb_ci_business_app"
+    incident_table: str = "incident"
+    change_table: str = "change_request"
+    knowledge_table: str = "kb_knowledge"
+
+    def get_api_url(self, endpoint: str = "") -> str:
+        """Gibt die vollständige API-URL zurück."""
+        base = self.instance_url.rstrip("/")
+        if endpoint:
+            return f"{base}/api/now/{endpoint.lstrip('/')}"
+        return f"{base}/api/now"
+
+
 class Settings(BaseModel):
     llm: LLMConfig = LLMConfig()
     models: List[ModelEntry] = []
@@ -987,6 +1025,7 @@ class Settings(BaseModel):
     junit_tool: JUnitToolConfig = Field(default_factory=JUnitToolConfig)
     prompt_templates: PromptTemplatesConfig = Field(default_factory=PromptTemplatesConfig)
     access_logging: AccessLoggingConfig = Field(default_factory=AccessLoggingConfig)
+    servicenow: ServiceNowConfig = Field(default_factory=ServiceNowConfig)
 
     def apply_env_overrides(self) -> "Settings":
         if os.getenv("LLM_BASE_URL"):
@@ -1010,6 +1049,14 @@ class Settings(BaseModel):
             self.handbook.enabled = True
         if os.getenv("SKILLS_DIRECTORY"):
             self.skills.directory = os.getenv("SKILLS_DIRECTORY")
+        # ServiceNow Env-Overrides
+        if os.getenv("SERVICENOW_URL"):
+            self.servicenow.instance_url = os.getenv("SERVICENOW_URL")
+            self.servicenow.enabled = True
+        if os.getenv("SERVICENOW_USERNAME"):
+            self.servicenow.username = os.getenv("SERVICENOW_USERNAME")
+        if os.getenv("SERVICENOW_PASSWORD"):
+            self.servicenow.password = os.getenv("SERVICENOW_PASSWORD")
         return self
 
 

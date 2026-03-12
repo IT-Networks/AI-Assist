@@ -78,21 +78,28 @@ class MCPEventBridge:
 
         logger.debug(f"[EventBridge] Emitting {event_type}: {str(data)[:100]}...")
 
-        # Alle Subscriber benachrichtigen (non-blocking)
-        async with self._lock:
-            dead_subscribers = []
-            for queue in self._subscribers:
-                try:
-                    queue.put_nowait(event)
-                except asyncio.QueueFull:
-                    logger.warning("[EventBridge] Subscriber queue full, dropping event")
-                except Exception as e:
-                    logger.warning(f"[EventBridge] Error pushing to subscriber: {e}")
-                    dead_subscribers.append(queue)
+        # PERFORMANCE: Snapshot ohne Lock, dann fire-and-forget
+        # Lock nur für Subscriber-Modifikation, nicht für jeden Event
+        subscribers_snapshot = list(self._subscribers)
 
-            # Tote Subscriber entfernen
-            for queue in dead_subscribers:
-                self._subscribers.discard(queue)
+        if not subscribers_snapshot:
+            return
+
+        dead_subscribers = []
+        for queue in subscribers_snapshot:
+            try:
+                queue.put_nowait(event)
+            except asyncio.QueueFull:
+                logger.warning("[EventBridge] Subscriber queue full, dropping event")
+            except Exception as e:
+                logger.warning(f"[EventBridge] Error pushing to subscriber: {e}")
+                dead_subscribers.append(queue)
+
+        # Tote Subscriber async entfernen (nur wenn nötig)
+        if dead_subscribers:
+            async with self._lock:
+                for queue in dead_subscribers:
+                    self._subscribers.discard(queue)
 
     def emit_sync(self, event_type: str, data: Dict[str, Any]) -> None:
         """
@@ -114,9 +121,22 @@ class MCPEventBridge:
             self._event_history.append(event)
             logger.debug(f"[EventBridge] Buffered {event_type} (no event loop)")
 
+    async def subscribe_async(self) -> asyncio.Queue:
+        """
+        Erstellt eine neue Subscription für Events (async, thread-safe).
+
+        Returns:
+            Queue die Events empfängt
+        """
+        queue: asyncio.Queue = asyncio.Queue(maxsize=self._max_buffer)
+        async with self._lock:
+            self._subscribers.add(queue)
+        logger.debug(f"[EventBridge] New subscriber (total: {len(self._subscribers)})")
+        return queue
+
     def subscribe(self) -> asyncio.Queue:
         """
-        Erstellt eine neue Subscription für Events.
+        Erstellt eine neue Subscription für Events (sync, für Rückwärtskompatibilität).
 
         Returns:
             Queue die Events empfängt
@@ -126,8 +146,14 @@ class MCPEventBridge:
         logger.debug(f"[EventBridge] New subscriber (total: {len(self._subscribers)})")
         return queue
 
+    async def unsubscribe_async(self, queue: asyncio.Queue) -> None:
+        """Entfernt eine Subscription (async, thread-safe)."""
+        async with self._lock:
+            self._subscribers.discard(queue)
+        logger.debug(f"[EventBridge] Subscriber removed (total: {len(self._subscribers)})")
+
     def unsubscribe(self, queue: asyncio.Queue) -> None:
-        """Entfernt eine Subscription."""
+        """Entfernt eine Subscription (sync, für Rückwärtskompatibilität)."""
         self._subscribers.discard(queue)
         logger.debug(f"[EventBridge] Subscriber removed (total: {len(self._subscribers)})")
 

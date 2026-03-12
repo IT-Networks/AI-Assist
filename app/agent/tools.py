@@ -2393,6 +2393,14 @@ def create_default_registry() -> ToolRegistry:
     from app.agent.junit_tools import register_junit_tools
     register_junit_tools(registry)
 
+    # ServiceNow Service Portal Tools
+    try:
+        from app.agent.servicenow_tools import register_servicenow_tools
+        register_servicenow_tools(registry)
+    except ImportError as e:
+        import logging
+        logging.getLogger(__name__).debug(f"ServiceNow tools not available: {e}")
+
     return registry
 
 

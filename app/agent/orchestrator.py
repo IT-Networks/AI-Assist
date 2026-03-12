@@ -322,6 +322,20 @@ def _parse_text_tool_calls(content: str, available_tools: List[Dict]) -> List[Di
     if not content:
         return []
 
+    # PERFORMANCE: Schneller Check ob überhaupt Tool-Call-Marker vorhanden sind
+    # Vermeidet teure Regex-Operationen wenn Content keine Tools enthält
+    _HAS_TOOL_MARKERS = (
+        "[TOOL_CALLS]" in content or
+        "<tool_call>" in content or
+        "<functioncall>" in content or
+        "<function_calls>" in content or
+        "<invoke>" in content or
+        ('"name"' in content and ("arguments" in content or "parameters" in content)) or
+        ("```" in content and '"tool"' in content)
+    )
+    if not _HAS_TOOL_MARKERS:
+        return []
+
     tool_names = {t["function"]["name"] for t in available_tools} if available_tools else set()
     parsed_calls = []
 

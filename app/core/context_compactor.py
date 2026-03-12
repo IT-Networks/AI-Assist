@@ -66,20 +66,24 @@ class ContextCompactor:
         r"'[^']{1,50}'",                      # Kurze Strings
     ]
 
-    def _compute_relevance(self, item: ContextItem, recent_texts: List[str]) -> float:
+    def _compute_relevance(self, item: ContextItem, recent_texts: List[str], _cached_text: str = None) -> float:
         """
         Berechnet wie relevant ein Item für die letzten N Nachrichten ist.
 
         Zählt wie viele Wörter aus dem Item-Inhalt in den letzten Messages vorkommen.
         Items die gerade diskutiert werden, erhalten einen höheren Relevanz-Score
         und werden bei der Kompaktierung bevorzugt behalten.
+
+        Args:
+            _cached_text: PERFORMANCE - vorberechneter recent_text (vermeidet wiederholtes join)
         """
-        if not recent_texts:
+        if not recent_texts and not _cached_text:
             return 0.0
         item_words = {w for w in item.content.lower().split() if len(w) > 4}
         if not item_words:
             return 0.0
-        recent_text = " ".join(recent_texts).lower()
+        # PERFORMANCE: Nutze gecachten Text wenn verfügbar
+        recent_text = _cached_text if _cached_text else " ".join(recent_texts).lower()
         hits = sum(1 for w in item_words if w in recent_text)
         return hits / len(item_words)
 
@@ -107,30 +111,41 @@ class ContextCompactor:
         if current_tokens <= target_tokens:
             return items
 
-        # Relevanz-Scores berechnen (letzten 4 Nachrichten)
+        # PERFORMANCE: recent_text einmal berechnen und cachen
         recent_texts = (recent_messages or [])[-4:]
+        cached_recent_text = " ".join(recent_texts).lower() if recent_texts else ""
+
+        # Relevanz-Scores berechnen mit gecachtem Text
         relevance_scores = {
-            id(item): self._compute_relevance(item, recent_texts)
+            id(item): self._compute_relevance(item, recent_texts, cached_recent_text)
             for item in items
         }
 
+        # PERFORMANCE: Sort-Keys einmal berechnen und cachen
+        for item in items:
+            item._sort_key = (item.priority, -relevance_scores[id(item)], -item.age)
+            item._remove_key = (item.priority, item.age, -relevance_scores[id(item)])
+
         # Sortiere nach Priorität (höhere Prio = niedrigere Zahl = wichtiger)
-        # Bei gleicher Priorität: relevante Items zuletzt entfernen
-        sorted_items = sorted(
-            items,
-            key=lambda x: (x.priority, -relevance_scores[id(x)], -x.age)
-        )
+        sorted_items = sorted(items, key=lambda x: x._sort_key)
 
         # Phase 1: Alte, niedrig-priorisierte Items komplett entfernen
-        # Items mit hoher Relevanz zur aktuellen Konversation werden bevorzugt behalten
-        while current_tokens > target_tokens and len(sorted_items) > preserve_recent:
-            # Entferne Item mit niedrigster Priorität (höchste Zahl) und geringster Relevanz
-            to_remove = max(
-                sorted_items[:-preserve_recent],
-                key=lambda x: (x.priority, x.age, -relevance_scores[id(x)])
-            )
-            current_tokens -= to_remove.tokens
-            sorted_items.remove(to_remove)
+        # PERFORMANCE: Sortiere einmal nach remove_key, dann iterativ entfernen (O(n log n) statt O(n²))
+        if current_tokens > target_tokens and len(sorted_items) > preserve_recent:
+            # Kandidaten für Entfernung (alle außer preserve_recent)
+            candidates = sorted_items[:-preserve_recent] if preserve_recent else sorted_items[:]
+            # Sortiere Kandidaten nach Entfernungs-Priorität (höchste zuerst)
+            candidates_sorted = sorted(candidates, key=lambda x: x._remove_key, reverse=True)
+
+            removed_set = set()
+            for item in candidates_sorted:
+                if current_tokens <= target_tokens:
+                    break
+                current_tokens -= item.tokens
+                removed_set.add(id(item))
+
+            # Rebuild sorted_items ohne entfernte
+            sorted_items = [item for item in sorted_items if id(item) not in removed_set]
 
         if current_tokens <= target_tokens:
             return sorted_items

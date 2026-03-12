@@ -94,6 +94,7 @@ def get_section_schema(section: str) -> Dict[str, Any]:
         "github": "GitHubConfig",
         "internal_fetch": "InternalFetchConfig",
         "docker_sandbox": "DockerSandboxConfig",
+        "servicenow": "ServiceNowConfig",
     }
 
     if section not in section_classes:

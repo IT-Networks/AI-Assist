@@ -12,7 +12,7 @@ from pathlib import Path
 if sys.platform == 'win32':
     asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())
 
-from app.api.routes import chat, java, logs, pdf, confluence, models, python_routes, handbook, skills, agent, settings, database, datasources, mq, testtool, log_servers, wlp, maven, search, jenkins, github, internal_fetch, docker_sandbox, access_logs
+from app.api.routes import chat, java, logs, pdf, confluence, models, python_routes, handbook, skills, agent, settings, database, datasources, mq, testtool, log_servers, wlp, maven, search, jenkins, github, internal_fetch, docker_sandbox, access_logs, servicenow
 
 
 @asynccontextmanager
@@ -320,9 +320,10 @@ app.include_router(github.router)
 app.include_router(internal_fetch.router)
 app.include_router(docker_sandbox.router)
 app.include_router(access_logs.router)
+app.include_router(servicenow.router)
 
 
-# ══════════════════════════════════════════════════════════════════════════════
+# ============================================================================
 # Health Endpoint
 # ══════════════════════════════════════════════════════════════════════════════
 
