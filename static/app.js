@@ -4989,8 +4989,47 @@ async function renderTestToolSection() {
 
     <div class="settings-subsection" style="margin-top:16px">
       <h4>Services & Templates</h4>
-      <p class="settings-hint">SOAP-Services mit XML-Templates. Die KI kann Templates anpassen oder neue erstellen.</p>
+      <p class="settings-hint">SOAP-Services mit XML-Templates.</p>
       <div id="soap-services-list"><div class="spinner-inline"></div></div>
+      <div class="settings-add-form">
+        <h5 style="margin:0 0 8px">Service hinzufügen</h5>
+        <div class="settings-field-row">
+          <input id="soap-svc-name" type="text" class="settings-input" placeholder="Service-Name (z.B. Kundenverwaltung)">
+          <input id="soap-svc-desc" type="text" class="settings-input" placeholder="Beschreibung">
+        </div>
+        <button class="btn btn-primary" onclick="soapAddService()">+ Service</button>
+      </div>
+    </div>
+
+    <div id="soap-template-modal" class="modal" style="display:none">
+      <div class="modal-content" style="max-width:800px">
+        <div class="modal-header">
+          <h3 id="soap-template-title">Template bearbeiten</h3>
+          <button class="modal-close" onclick="soapCloseTemplateModal()">&times;</button>
+        </div>
+        <div class="modal-body">
+          <div class="settings-field">
+            <label>XML-Template:</label>
+            <textarea id="soap-template-content" class="settings-input" rows="20" style="font-family:monospace;font-size:12px" placeholder="<?xml version='1.0'?>
+<soap:Envelope xmlns:soap='http://schemas.xmlsoap.org/soap/envelope/'>
+  <soap:Header>
+    <AuthHeader>
+      <SessionToken>{{session_token}}</SessionToken>
+    </AuthHeader>
+  </soap:Header>
+  <soap:Body>
+    <!-- Operation content -->
+  </soap:Body>
+</soap:Envelope>"></textarea>
+          </div>
+          <p class="settings-hint">Platzhalter: <code>{{session_token}}</code>, <code>{{institut}}</code>, <code>{{param_name}}</code>, <code>{{param:default}}</code></p>
+          <div id="soap-template-params" style="margin-top:8px"></div>
+        </div>
+        <div class="modal-footer">
+          <button class="btn btn-secondary" onclick="soapCloseTemplateModal()">Abbrechen</button>
+          <button class="btn btn-primary" onclick="soapSaveTemplate()">Speichern</button>
+        </div>
+      </div>
     </div>
   `;
   await soapLoadAll();
@@ -5161,7 +5200,7 @@ async function ttDeleteService(id) {
 async function soapLoadAll() {
   // Config laden
   try {
-    const cfgRes = await fetch('/api/soap/config');
+    const cfgRes = await fetch('/api/testtool/config');
     if (cfgRes.ok) {
       const cfg = await cfgRes.json();
       const urlEl = document.getElementById('soap-service-url');
@@ -5189,7 +5228,7 @@ async function soapSaveConfig() {
     login_url: document.getElementById('soap-login-url').value.trim(),
     verify_ssl: document.getElementById('soap-verify-ssl').checked,
   };
-  const res = await fetch('/api/soap/config', {
+  const res = await fetch('/api/testtool/config', {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body)
@@ -5206,7 +5245,7 @@ async function soapLoadInstitute() {
   if (!list) return;
 
   try {
-    const res = await fetch('/api/soap/institute');
+    const res = await fetch('/api/testtool/institute');
     const data = await res.json();
 
     if (!data.institute?.length) {
@@ -5246,7 +5285,7 @@ async function soapAddInstitut() {
     return;
   }
 
-  const res = await fetch('/api/soap/institute', {
+  const res = await fetch('/api/testtool/institute', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
@@ -5282,12 +5321,12 @@ async function soapEditInstitut(nr) {
   if (pass === null) return;
 
   // Aktuelle Daten laden
-  const res = await fetch('/api/soap/institute');
+  const res = await fetch('/api/testtool/institute');
   const data = await res.json();
   const inst = data.institute?.find(i => i.institut_nr === nr);
   if (!inst) return;
 
-  await fetch(`/api/soap/institute/${encodeURIComponent(nr)}`, {
+  await fetch(`/api/testtool/institute/${encodeURIComponent(nr)}`, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
@@ -5303,7 +5342,7 @@ async function soapEditInstitut(nr) {
 
 async function soapDeleteInstitut(nr) {
   if (!confirm(`Institut ${nr} wirklich löschen?`)) return;
-  await fetch(`/api/soap/institute/${encodeURIComponent(nr)}`, { method: 'DELETE' });
+  await fetch(`/api/testtool/institute/${encodeURIComponent(nr)}`, { method: 'DELETE' });
   updateSettingsStatus('Institut gelöscht', 'success');
   await soapLoadInstitute();
   await soapLoadSessions();
@@ -5314,7 +5353,7 @@ async function soapLoadSessions() {
   if (!list) return;
 
   try {
-    const res = await fetch('/api/soap/sessions');
+    const res = await fetch('/api/testtool/sessions');
     const data = await res.json();
 
     const sessions = Object.entries(data.sessions || {});
@@ -5347,7 +5386,7 @@ async function soapLoadSessions() {
 
 async function soapRefreshSession(nr) {
   try {
-    const res = await fetch(`/api/soap/session/${encodeURIComponent(nr)}/login`, { method: 'POST' });
+    const res = await fetch(`/api/testtool/session/${encodeURIComponent(nr)}/login`, { method: 'POST' });
     if (res.ok) {
       updateSettingsStatus('Login erfolgreich ✓', 'success');
     } else {
@@ -5361,7 +5400,7 @@ async function soapRefreshSession(nr) {
 }
 
 async function soapDeleteSession(nr) {
-  await fetch(`/api/soap/session/${encodeURIComponent(nr)}`, { method: 'DELETE' });
+  await fetch(`/api/testtool/session/${encodeURIComponent(nr)}`, { method: 'DELETE' });
   updateSettingsStatus('Session gelöscht', 'success');
   await soapLoadSessions();
 }
@@ -5371,37 +5410,189 @@ async function soapLoadServices() {
   if (!list) return;
 
   try {
-    const res = await fetch('/api/soap/services');
+    const res = await fetch('/api/testtool/services');
     const data = await res.json();
 
     if (!data.services?.length) {
-      list.innerHTML = '<p class="empty-hint">Keine Services konfiguriert. Services werden über YAML-Config oder durch die KI angelegt.</p>';
+      list.innerHTML = '<p class="empty-hint">Keine Services konfiguriert.</p>';
       return;
     }
 
     list.innerHTML = data.services.map(svc => `
-      <div class="ds-item">
+      <div class="ds-item" data-svc-id="${svc.id}">
         <div class="ds-item-header">
           <span class="ds-item-name">${svc.enabled ? '📡' : '⏸️'} ${escapeHtml(svc.name)}</span>
-          <span class="ds-item-badge">${svc.operation_count} Operationen</span>
+          <div style="display:flex;gap:4px;align-items:center">
+            <span class="ds-item-badge">${svc.operation_count} Ops</span>
+            <button class="btn btn-xs btn-secondary" onclick="soapToggleAddOp('${svc.id}')" title="Operation hinzufügen">+Op</button>
+            <button class="btn btn-xs btn-danger" onclick="soapDeleteService('${svc.id}')" title="Service löschen">&#128465;</button>
+          </div>
         </div>
-        <div class="ds-item-details">
-          ${escapeHtml(svc.description || 'Keine Beschreibung')}
+        <div class="ds-item-details">${escapeHtml(svc.description || 'Keine Beschreibung')}</div>
+        <div id="soap-add-op-${svc.id}" class="settings-add-form" style="display:none;margin:8px 0">
+          <div class="settings-field-row">
+            <input id="soap-op-name-${svc.id}" type="text" class="settings-input" placeholder="Operation-Name">
+            <input id="soap-op-desc-${svc.id}" type="text" class="settings-input" placeholder="Beschreibung">
+            <button class="btn btn-primary btn-sm" onclick="soapAddOperation('${svc.id}')">Hinzufügen</button>
+          </div>
         </div>
         ${svc.operations?.length ? `
           <div class="soap-operations-list">
             ${svc.operations.map(op => `
-              <div class="soap-op-item">
-                <span class="soap-op-name">▸ ${escapeHtml(op.name)}</span>
-                <span class="soap-op-desc">${escapeHtml(op.description || '')}</span>
+              <div class="soap-op-item" style="display:flex;justify-content:space-between;align-items:center">
+                <div>
+                  <span class="soap-op-name">▸ ${escapeHtml(op.name)}</span>
+                  <span class="soap-op-desc">${escapeHtml(op.description || '')}</span>
+                </div>
+                <div style="display:flex;gap:4px">
+                  <button class="btn btn-xs btn-secondary" onclick="soapEditTemplate('${svc.id}','${op.id}','${escapeHtml(op.name)}')" title="Template bearbeiten">XML</button>
+                  <button class="btn btn-xs btn-danger" onclick="soapDeleteOperation('${svc.id}','${op.id}')" title="Löschen">&#128465;</button>
+                </div>
               </div>
             `).join('')}
           </div>
-        ` : ''}
+        ` : '<div class="empty-hint" style="padding:4px 8px;font-size:12px">Keine Operationen</div>'}
       </div>
     `).join('');
   } catch (e) {
     list.innerHTML = '<p class="error-hint">Fehler beim Laden der Services</p>';
+  }
+}
+
+async function soapAddService() {
+  const name = document.getElementById('soap-svc-name').value.trim();
+  const desc = document.getElementById('soap-svc-desc').value.trim();
+  if (!name) { updateSettingsStatus('Service-Name erforderlich', 'error'); return; }
+
+  const res = await fetch('/api/testtool/services', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name, description: desc, operations: [] })
+  });
+
+  if (res.ok) {
+    document.getElementById('soap-svc-name').value = '';
+    document.getElementById('soap-svc-desc').value = '';
+    updateSettingsStatus('Service hinzugefügt', 'success');
+    await soapLoadServices();
+  } else {
+    const err = await res.json();
+    updateSettingsStatus(err.detail || 'Fehler', 'error');
+  }
+}
+
+async function soapDeleteService(svcId) {
+  if (!confirm('Service wirklich löschen?')) return;
+  const res = await fetch(`/api/testtool/services/${svcId}`, { method: 'DELETE' });
+  if (res.ok) {
+    updateSettingsStatus('Service gelöscht', 'success');
+    await soapLoadServices();
+  }
+}
+
+function soapToggleAddOp(svcId) {
+  const el = document.getElementById(`soap-add-op-${svcId}`);
+  if (el) el.style.display = el.style.display === 'none' ? 'block' : 'none';
+}
+
+async function soapAddOperation(svcId) {
+  const name = document.getElementById(`soap-op-name-${svcId}`).value.trim();
+  const desc = document.getElementById(`soap-op-desc-${svcId}`).value.trim();
+  if (!name) { updateSettingsStatus('Operation-Name erforderlich', 'error'); return; }
+
+  const res = await fetch(`/api/testtool/services/${svcId}/operations`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name, description: desc })
+  });
+
+  if (res.ok) {
+    updateSettingsStatus('Operation hinzugefügt', 'success');
+    await soapLoadServices();
+  } else {
+    const err = await res.json();
+    updateSettingsStatus(err.detail || 'Fehler', 'error');
+  }
+}
+
+async function soapDeleteOperation(svcId, opId) {
+  if (!confirm('Operation wirklich löschen?')) return;
+  const res = await fetch(`/api/testtool/services/${svcId}/operations/${opId}`, { method: 'DELETE' });
+  if (res.ok) {
+    updateSettingsStatus('Operation gelöscht', 'success');
+    await soapLoadServices();
+  }
+}
+
+let _currentTemplateEdit = { svcId: '', opId: '' };
+
+async function soapEditTemplate(svcId, opId, opName) {
+  _currentTemplateEdit = { svcId, opId };
+  document.getElementById('soap-template-title').textContent = `Template: ${opName}`;
+
+  // Template laden
+  try {
+    const res = await fetch(`/api/testtool/templates/${svcId}/${opId}`);
+    if (res.ok) {
+      const data = await res.json();
+      document.getElementById('soap-template-content').value = data.content || '';
+      const paramsDiv = document.getElementById('soap-template-params');
+      if (data.parameters?.length) {
+        paramsDiv.innerHTML = '<strong>Erkannte Parameter:</strong> ' + data.parameters.map(p =>
+          `<code>${p.name}${p.required ? '*' : ''}</code>`
+        ).join(', ');
+      } else {
+        paramsDiv.innerHTML = '';
+      }
+    } else {
+      // Template existiert noch nicht
+      document.getElementById('soap-template-content').value = `<?xml version="1.0" encoding="UTF-8"?>
+<soap:Envelope xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/">
+  <soap:Header>
+    <AuthHeader>
+      <SessionToken>{{session_token}}</SessionToken>
+    </AuthHeader>
+  </soap:Header>
+  <soap:Body>
+    <!-- TODO: ${opName} Request Body -->
+  </soap:Body>
+</soap:Envelope>`;
+      document.getElementById('soap-template-params').innerHTML = '<em>Neues Template</em>';
+    }
+  } catch (e) {
+    document.getElementById('soap-template-content').value = '';
+    document.getElementById('soap-template-params').innerHTML = '<span class="error-hint">Fehler beim Laden</span>';
+  }
+
+  document.getElementById('soap-template-modal').style.display = 'flex';
+}
+
+function soapCloseTemplateModal() {
+  document.getElementById('soap-template-modal').style.display = 'none';
+  _currentTemplateEdit = { svcId: '', opId: '' };
+}
+
+async function soapSaveTemplate() {
+  const { svcId, opId } = _currentTemplateEdit;
+  const content = document.getElementById('soap-template-content').value;
+
+  if (!content.trim()) {
+    updateSettingsStatus('Template darf nicht leer sein', 'error');
+    return;
+  }
+
+  const res = await fetch(`/api/testtool/templates/${svcId}/${opId}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ content })
+  });
+
+  if (res.ok) {
+    updateSettingsStatus('Template gespeichert', 'success');
+    soapCloseTemplateModal();
+  } else {
+    const err = await res.json();
+    updateSettingsStatus(err.detail || 'Fehler beim Speichern', 'error');
   }
 }
 
@@ -6078,164 +6269,180 @@ async function mqPanelPut(queueId, body) {
   }
 }
 
-// ── Test-Tool Panel ───────────────────────────────────────────────────────────
+// ── Test-Tool Panel (SOAP) ────────────────────────────────────────────────────
+
+let _ttCurrentInstitut = null;
 
 async function loadTestToolPanel() {
   try {
-    const [stRes, svRes, wlpRes] = await Promise.all([
-      fetch('/api/testtool/stages'),
+    const [instRes, svcRes, sessRes] = await Promise.all([
+      fetch('/api/testtool/institute'),
       fetch('/api/testtool/services'),
-      fetch('/api/testtool/local-wlp'),
+      fetch('/api/testtool/sessions'),
     ]);
-    const stData = await stRes.json();
-    const svData = await svRes.json();
-    const wlpData = wlpRes.ok ? await wlpRes.json() : { local_wlp_url: '' };
+    const instData = await instRes.json();
+    const svcData = await svcRes.json();
+    const sessData = sessRes.ok ? await sessRes.json() : { sessions: {} };
 
-    // Lokaler WLP Status
-    const wlpStatus = document.getElementById('testtool-local-wlp-status');
-    if (wlpStatus) {
-      if (wlpData.local_wlp_url) {
-        wlpStatus.innerHTML = `<span class="badge badge-success">Lokal WLP: ${escapeHtml(wlpData.local_wlp_url)}</span>`;
-        wlpStatus.style.display = 'block';
+    // Institut-Dropdown
+    const instSelect = document.getElementById('testtool-institut-select');
+    if (instSelect) {
+      const institutes = instData.institute || [];
+      if (institutes.length === 0) {
+        instSelect.innerHTML = '<option value="">Keine Institute konfiguriert</option>';
+        _ttCurrentInstitut = null;
       } else {
-        wlpStatus.style.display = 'none';
+        instSelect.innerHTML = institutes.map(i =>
+          `<option value="${i.institut_nr}">${escapeHtml(i.name || i.institut_nr)}</option>`
+        ).join('');
+        _ttCurrentInstitut = institutes[0]?.institut_nr || null;
       }
     }
 
-    const stageSelect = document.getElementById('testtool-stage-select');
-    const urlSelect = document.getElementById('testtool-url-select');
-    if (stageSelect) {
-      stageSelect.innerHTML = stData.stages?.map(s =>
-        `<option value="${s.id}" ${s.id===stData.active_stage?'selected':''}>${escapeHtml(s.name)}</option>`
-      ).join('') || '<option>Keine Stages</option>';
-      // URLs für aktive Stage laden
-      const active = stData.stages?.find(s => s.id === stData.active_stage);
-      if (active && urlSelect) {
-        urlSelect.innerHTML = active.urls.map(u => `<option value="${u.url}">${escapeHtml(u.url)} ${u.description?'('+escapeHtml(u.description)+')':''}</option>`).join('');
-      }
-    }
+    // Session-Status aktualisieren
+    updateInstitutSessionStatus(sessData.sessions || {});
 
+    // Services anzeigen
     const content = document.getElementById('testtool-services-content');
     if (!content) return;
-    if (!svData.services?.length) {
-      content.innerHTML = '<div class="empty-state"><span>&#128296;</span><p>Keine Services konfiguriert</p></div>';
+
+    const services = svcData.services || [];
+    if (services.length === 0) {
+      content.innerHTML = '<div class="empty-state"><span>&#128296;</span><p>Konfiguriere Services in den Einstellungen</p></div>';
       return;
     }
-    content.innerHTML = svData.services.map(s => `
-      <div class="tool-card">
-        <div class="tool-card-header">
-          <span class="tool-card-name">${escapeHtml(s.name)}</span>
-          <span class="tool-card-badge">${s.method}</span>
-          ${s.has_local ? '<span class="tool-card-badge badge-info">lokal</span>' : ''}
-        </div>
-        ${s.description ? `<div class="tool-card-desc">${escapeHtml(s.description)}</div>` : ''}
-        ${s.parameters?.length ? `
-          <div class="tool-params" id="params-${s.id}">
-            ${s.parameters.map(p => `
-              <div class="param-row">
-                <label class="param-label">${escapeHtml(p.name)}${p.required?'*':''}</label>
-                <input type="text" class="param-input" id="p-${s.id}-${p.name}" placeholder="${escapeHtml(p.type)}" data-svc="${s.id}" data-param="${p.name}">
-              </div>
-            `).join('')}
+
+    content.innerHTML = services.map(svc => {
+      const operations = svc.operations || [];
+      return `
+        <div class="tool-card">
+          <div class="tool-card-header">
+            <span class="tool-card-name">${escapeHtml(svc.name)}</span>
+            <span class="tool-card-badge">SOAP</span>
           </div>
-        ` : ''}
-        <div class="tool-card-actions">
-          <button class="btn btn-xs btn-primary" onclick="ttPanelExecute('${s.id}')">&#9654; Ausführen</button>
-          ${s.has_local ? `<button class="btn btn-xs btn-secondary" onclick="ttPanelLocal('${s.id}')">&#128196; Lokal</button>` : ''}
+          ${svc.description ? `<div class="tool-card-desc">${escapeHtml(svc.description)}</div>` : ''}
+          ${operations.length ? operations.map(op => `
+            <div class="tool-operation" style="margin:6px 0;padding:6px;background:var(--bg-tertiary);border-radius:4px">
+              <div style="display:flex;justify-content:space-between;align-items:center">
+                <span style="font-size:12px;font-weight:500">${escapeHtml(op.name)}</span>
+                <button class="btn btn-xs btn-primary" onclick="ttSoapExecute('${svc.id}','${op.id}')">&#9654;</button>
+              </div>
+              ${op.parameters?.length ? `
+                <div class="tool-params" style="margin-top:6px">
+                  ${op.parameters.map(p => `
+                    <div class="param-row">
+                      <label class="param-label" style="font-size:11px">${escapeHtml(p.name)}${p.required?'*':''}</label>
+                      <input type="text" class="param-input" id="p-${svc.id}-${op.id}-${p.name}"
+                             placeholder="${escapeHtml(p.default_value || p.type || '')}"
+                             data-svc="${svc.id}" data-op="${op.id}" data-param="${p.name}"
+                             style="font-size:11px;padding:4px">
+                    </div>
+                  `).join('')}
+                </div>
+              ` : ''}
+            </div>
+          `).join('') : '<div style="font-size:11px;color:var(--text-muted);padding:4px">Keine Operationen</div>'}
         </div>
-      </div>
-    `).join('');
+      `;
+    }).join('');
   } catch (e) {
     const content = document.getElementById('testtool-services-content');
     if (content) content.innerHTML = `<p class="error-hint">Fehler: ${e.message}</p>`;
   }
 }
 
-function ttToggleLocalWlp(checked) {
-  const stageSection = document.getElementById('testtool-stage-section');
-  if (stageSection) stageSection.style.display = checked ? 'none' : 'block';
+function updateInstitutSessionStatus(sessions) {
+  const statusDiv = document.getElementById('testtool-session-status');
+  if (!statusDiv || !_ttCurrentInstitut) {
+    if (statusDiv) statusDiv.innerHTML = '<span class="badge">Kein Institut</span>';
+    return;
+  }
+  const session = sessions[_ttCurrentInstitut];
+  if (session?.has_token) {
+    statusDiv.innerHTML = `<span class="badge badge-success">&#10003; Session aktiv</span>`;
+  } else {
+    statusDiv.innerHTML = `<span class="badge badge-warning">&#9888; Keine Session</span>
+      <button class="btn btn-xs btn-secondary" style="margin-left:8px" onclick="ttSoapLogin()">Login</button>`;
+  }
 }
 
-function onTestStageChange(stageId) {
-  fetch('/api/testtool/stages').then(r => r.json()).then(data => {
-    const stage = data.stages?.find(s => s.id === stageId);
-    const sel = document.getElementById('testtool-url-select');
-    if (sel && stage) {
-      sel.innerHTML = stage.urls.map(u => `<option value="${u.url}">${escapeHtml(u.url)}</option>`).join('');
+function onInstitutChange(institutNr) {
+  _ttCurrentInstitut = institutNr;
+  fetch('/api/testtool/sessions').then(r => r.json()).then(data => {
+    updateInstitutSessionStatus(data.sessions || {});
+  }).catch(() => {});
+}
+
+async function ttSoapLogin() {
+  if (!_ttCurrentInstitut) return;
+  const statusDiv = document.getElementById('testtool-session-status');
+  if (statusDiv) statusDiv.innerHTML = '<span class="badge">&#8987; Login...</span>';
+  try {
+    const res = await fetch(`/api/testtool/session/${_ttCurrentInstitut}/login`, { method: 'POST' });
+    const data = await res.json();
+    if (data.success) {
+      statusDiv.innerHTML = '<span class="badge badge-success">&#10003; Session aktiv</span>';
+    } else {
+      statusDiv.innerHTML = `<span class="badge badge-error">&#10007; ${escapeHtml(data.error || 'Login fehlgeschlagen')}</span>`;
     }
-  });
+  } catch (e) {
+    statusDiv.innerHTML = `<span class="badge badge-error">&#10007; ${escapeHtml(e.message)}</span>`;
+  }
 }
 
-function _collectParams(svcId) {
+function _collectSoapParams(svcId, opId) {
   const params = {};
-  document.querySelectorAll(`[data-svc="${svcId}"]`).forEach(el => {
+  document.querySelectorAll(`[data-svc="${svcId}"][data-op="${opId}"]`).forEach(el => {
     if (el.value) params[el.dataset.param] = el.value;
   });
   return params;
 }
 
-async function ttPanelExecute(svcId) {
-  const useLocalWlp = document.getElementById('testtool-use-local-wlp')?.checked || false;
-  const stageUrl = useLocalWlp ? '' : (document.getElementById('testtool-url-select')?.value || '');
-  const params = _collectParams(svcId);
+async function ttSoapExecute(svcId, opId) {
+  const params = _collectSoapParams(svcId, opId);
   const resultArea = document.getElementById('testtool-result-area');
   const resultPre = document.getElementById('testtool-result-pre');
   const badge = document.getElementById('testtool-status-badge');
 
   resultArea.style.display = 'block';
-  resultPre.textContent = useLocalWlp ? '⏳ Ausführung (lokaler WLP)...' : '⏳ Ausführung...';
+  resultPre.textContent = '⏳ SOAP-Aufruf...';
   badge.textContent = '';
+  badge.className = 'badge';
 
   try {
-    const res = await fetch(`/api/testtool/execute/${svcId}`, {
+    const res = await fetch(`/api/testtool/execute/${svcId}/${opId}`, {
       method: 'POST',
-      headers: {'Content-Type':'application/json'},
-      body: JSON.stringify({ params, stage_url: stageUrl || undefined, use_local_wlp: useLocalWlp }),
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        institut_nr: _ttCurrentInstitut,
+        params: params
+      }),
     });
     const data = await res.json();
-    badge.textContent = `HTTP ${data.status_code}${data.via_local_wlp ? ' [lokal]' : ''}`;
-    badge.className = `badge ${data.success ? 'badge-success' : 'badge-error'}`;
-    resultPre.textContent = JSON.stringify(data.response, null, 2).substring(0, 3000);
-    if (data.elapsed_ms) resultPre.textContent += `\n\n[${data.elapsed_ms}ms | ${data.url}]`;
-  } catch (e) {
-    resultPre.textContent = `Fehler: ${e.message}`;
-  }
-}
 
-async function ttPanelLocal(svcId) {
-  const params = _collectParams(svcId);
-  const resultArea = document.getElementById('testtool-result-area');
-  const resultPre = document.getElementById('testtool-result-pre');
-  resultArea.style.display = 'block';
-  resultPre.textContent = '⏳ Lokale Ausführung...';
-
-  try {
-    const res = await fetch(`/api/testtool/local/${svcId}`, {
-      method: 'POST',
-      headers: {'Content-Type':'application/json'},
-      body: JSON.stringify({ params }),
-    });
-    const reader = res.body.getReader();
-    const decoder = new TextDecoder();
-    let buffer = '';
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      buffer += decoder.decode(value, { stream: true });
-      const lines = buffer.split('\n');
-      buffer = lines.pop();
-      for (const line of lines) {
-        if (!line.startsWith('data:')) continue;
-        try {
-          const ev = JSON.parse(line.slice(5).trim());
-          if (ev.type === 'output') resultPre.textContent += ev.line + '\n';
-          else if (ev.type === 'done') resultPre.textContent += `\n[Exit: ${ev.exit_code}]`;
-          else if (ev.type === 'error') resultPre.textContent += `\nFehler: ${ev.message}`;
-        } catch (_) {}
+    if (data.success) {
+      badge.textContent = `HTTP ${data.status_code || 200}`;
+      badge.className = 'badge badge-success';
+      // Zeige Response-Data
+      const dataStr = typeof data.data === 'string' ? data.data : JSON.stringify(data.data, null, 2);
+      resultPre.textContent = dataStr.substring(0, 5000);
+      if (data.elapsed_ms) {
+        resultPre.textContent += `\n\n[${data.elapsed_ms}ms | Institut: ${data.institut_nr}]`;
+      }
+    } else {
+      badge.textContent = data.status_code ? `HTTP ${data.status_code}` : 'Fehler';
+      badge.className = 'badge badge-error';
+      let errText = data.error || data.fault_message || 'Unbekannter Fehler';
+      if (data.fault_code) errText = `[${data.fault_code}] ${errText}`;
+      resultPre.textContent = errText;
+      if (data.response_xml) {
+        resultPre.textContent += '\n\n--- Response XML ---\n' + data.response_xml;
       }
     }
   } catch (e) {
-    resultPre.textContent += `\nFehler: ${e.message}`;
+    badge.textContent = 'Fehler';
+    badge.className = 'badge badge-error';
+    resultPre.textContent = `Fehler: ${e.message}`;
   }
 }
 

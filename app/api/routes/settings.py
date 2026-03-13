@@ -95,7 +95,7 @@ def get_section_schema(section: str) -> Dict[str, Any]:
         "internal_fetch": "InternalFetchConfig",
         "docker_sandbox": "DockerSandboxConfig",
         "servicenow": "ServiceNowConfig",
-        "soap_tool": "SoapToolConfig",
+        "test_tool": "TestToolConfig",
     }
 
     if section not in section_classes:

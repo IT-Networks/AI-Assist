@@ -2349,13 +2349,9 @@ def create_default_registry() -> ToolRegistry:
     from app.agent.jenkins_tools import register_jenkins_tools
     register_jenkins_tools(registry)
 
-    # Test-Tool (HTTP Service Execution)
-    from app.agent.testtool_tools import register_testtool_tools
-    register_testtool_tools(registry)
-
-    # SOAP Test-Tool v2 (SOAP Services mit Session-Management)
-    from app.agent.soap_tools import register_soap_tools
-    register_soap_tools(registry)
+    # Test-Tool (SOAP Services mit Session-Management)
+    from app.agent.test_tools import register_test_tools
+    register_test_tools(registry)
 
     # Log Server Tools
     from app.agent.log_tools import register_log_tools

@@ -1,5 +1,5 @@
 """
-SOAP Template Engine - Verarbeitet XML-Templates mit Platzhaltern.
+Test Template Engine - Verarbeitet XML-Templates mit Platzhaltern.
 
 Platzhalter-Format:
 - {{name}}           - Required, kein Default
@@ -16,7 +16,7 @@ from xml.etree import ElementTree as ET
 logger = logging.getLogger(__name__)
 
 
-class SoapTemplateEngine:
+class TestTemplateEngine:
     """
     Verarbeitet SOAP-XML-Templates mit Platzhalter-Ersetzung.
 
@@ -33,7 +33,7 @@ class SoapTemplateEngine:
     # Auto-injizierte Parameter (werden nicht als User-Input erwartet)
     AUTO_INJECT_PARAMS = {'session_token', 'user', 'password'}
 
-    def __init__(self, templates_path: str = "data/soap/templates"):
+    def __init__(self, templates_path: str = "data/test_tool/templates"):
         """
         Args:
             templates_path: Basis-Pfad für Template-Dateien
@@ -329,13 +329,13 @@ class SoapTemplateEngine:
 # Singleton
 # ══════════════════════════════════════════════════════════════════════════════
 
-_template_engine: Optional[SoapTemplateEngine] = None
+_template_engine: Optional[TestTemplateEngine] = None
 
 
-def get_template_engine() -> SoapTemplateEngine:
+def get_template_engine() -> TestTemplateEngine:
     """Gibt Singleton-Instanz des Template-Engines zurück."""
     global _template_engine
     if _template_engine is None:
         from app.core.config import settings
-        _template_engine = SoapTemplateEngine(settings.soap_tool.templates_path)
+        _template_engine = TestTemplateEngine(settings.test_tool.templates_path)
     return _template_engine

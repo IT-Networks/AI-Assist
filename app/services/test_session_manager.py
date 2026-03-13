@@ -1,5 +1,5 @@
 """
-SOAP Session Manager - Verwaltet Session-Tokens pro Institut.
+Test Session Manager - Verwaltet Session-Tokens pro Institut.
 
 Features:
 - Token-Speicherung pro Institut
@@ -71,7 +71,7 @@ class SessionStatus:
     token_preview: str = ""
 
 
-class SoapSessionManager:
+class TestSessionManager:
     """
     Verwaltet Session-Tokens pro Institut.
 
@@ -83,7 +83,7 @@ class SoapSessionManager:
 
     def __init__(
         self,
-        storage_path: str = "data/soap/sessions.json",
+        storage_path: str = "data/test_tool/sessions.json",
         refresh_before_expiry_seconds: int = 300
     ):
         self.storage_path = Path(storage_path)
@@ -169,11 +169,11 @@ class SoapSessionManager:
 
         # Institut finden
         institut = next(
-            (i for i in settings.soap_tool.institute if i.institut_nr == institut_nr and i.enabled),
+            (i for i in settings.test_tool.institute if i.institut_nr == institut_nr and i.enabled),
             None
         )
         if not institut:
-            available = [i.institut_nr for i in settings.soap_tool.institute if i.enabled]
+            available = [i.institut_nr for i in settings.test_tool.institute if i.enabled]
             raise ValueError(
                 f"Institut '{institut_nr}' nicht gefunden oder deaktiviert. "
                 f"Verfügbar: {available}"
@@ -189,16 +189,16 @@ class SoapSessionManager:
         logger.info(f"Login für Institut {institut_nr} als '{user}'...")
 
         # Login-URL prüfen
-        if not settings.soap_tool.login_url:
-            raise ValueError("login_url nicht konfiguriert in soap_tool")
+        if not settings.test_tool.login_url:
+            raise ValueError("login_url nicht konfiguriert in test_tool")
 
         # Ersten Service mit Login-Template finden
-        service = next((s for s in settings.soap_tool.services if s.enabled), None)
+        service = next((s for s in settings.test_tool.services if s.enabled), None)
         if not service:
             raise ValueError("Kein aktiver Service konfiguriert")
 
         # Template laden
-        from app.services.soap_template_engine import get_template_engine
+        from app.services.test_template_engine import get_template_engine
         engine = get_template_engine()
 
         try:
@@ -229,10 +229,10 @@ class SoapSessionManager:
         try:
             async with httpx.AsyncClient(
                 timeout=60,
-                verify=settings.soap_tool.verify_ssl
+                verify=settings.test_tool.verify_ssl
             ) as client:
                 response = await client.post(
-                    settings.soap_tool.login_url,
+                    settings.test_tool.login_url,
                     content=envelope.encode('utf-8'),
                     headers=headers
                 )
@@ -367,7 +367,7 @@ class SoapSessionManager:
         from app.core.config import settings
 
         institut = next(
-            (i for i in settings.soap_tool.institute if i.institut_nr == institut_nr),
+            (i for i in settings.test_tool.institute if i.institut_nr == institut_nr),
             None
         )
         if not institut:
@@ -384,16 +384,16 @@ class SoapSessionManager:
 # Singleton
 # ══════════════════════════════════════════════════════════════════════════════
 
-_session_manager: Optional[SoapSessionManager] = None
+_session_manager: Optional[TestSessionManager] = None
 
 
-def get_session_manager() -> SoapSessionManager:
+def get_session_manager() -> TestSessionManager:
     """Gibt Singleton-Instanz des Session-Managers zurück."""
     global _session_manager
     if _session_manager is None:
         from app.core.config import settings
-        _session_manager = SoapSessionManager(
-            storage_path=settings.soap_tool.session_storage_file,
-            refresh_before_expiry_seconds=settings.soap_tool.session_refresh_before_expiry_seconds
+        _session_manager = TestSessionManager(
+            storage_path=settings.test_tool.session_storage_file,
+            refresh_before_expiry_seconds=settings.test_tool.session_refresh_before_expiry_seconds
         )
     return _session_manager

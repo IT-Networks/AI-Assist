@@ -499,25 +499,16 @@
       </div>
     </div>
 
-    <!-- Test-Tool Panel -->
+    <!-- Test-Tool Panel (SOAP) -->
     <div class="sidebar-panel" id="testtool-panel">
       <div class="panel-header">
         <span>&#128296; Test-Tool</span>
         <button class="icon-btn" onclick="loadTestToolPanel()" title="Aktualisieren">&#8635;</button>
       </div>
       <div class="tool-section">
-        <div id="testtool-local-wlp-status" style="display:none;margin-bottom:6px"></div>
-        <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px">
-          <label class="tool-label" style="margin:0">Lokal WLP:</label>
-          <input type="checkbox" id="testtool-use-local-wlp" onchange="ttToggleLocalWlp(this.checked)">
-          <label for="testtool-use-local-wlp" style="font-size:12px;cursor:pointer">Direkt auf lokalem Server testen</label>
-        </div>
-        <div id="testtool-stage-section">
-          <label class="tool-label">Stage:</label>
-          <select id="testtool-stage-select" onchange="onTestStageChange(this.value)" style="width:100%;margin-bottom:6px"></select>
-          <label class="tool-label">URL:</label>
-          <select id="testtool-url-select" style="width:100%;margin-bottom:6px"></select>
-        </div>
+        <label class="tool-label">Institut:</label>
+        <select id="testtool-institut-select" onchange="onInstitutChange(this.value)" style="width:100%;margin-bottom:8px"></select>
+        <div id="testtool-session-status" style="margin-bottom:8px"></div>
       </div>
       <div class="panel-content" id="testtool-services-content">
         <div class="empty-state"><span>&#128296;</span><p>Konfiguriere Services in den Einstellungen</p></div>

@@ -1,5 +1,5 @@
 """
-SOAP Test-Tool v2 Agent Tools (Multi-Institut).
+Test-Tool Agent Tools (Multi-Institut).
 
 Ermöglicht der KI:
 - Services, Operationen und Institute auflisten
@@ -17,29 +17,29 @@ from app.agent.tools import Tool, ToolCategory, ToolParameter, ToolResult, ToolR
 logger = logging.getLogger(__name__)
 
 
-def register_soap_tools(registry: ToolRegistry) -> int:
+def register_test_tools(registry: ToolRegistry) -> int:
     """
-    Registriert SOAP Test-Tool v2 Agent-Tools.
+    Registriert Test-Tool Agent-Tools.
 
     Returns:
         Anzahl registrierter Tools
     """
     from app.core.config import settings
 
-    if not settings.soap_tool.enabled:
+    if not settings.test_tool.enabled:
         return 0
 
     count = 0
 
     # ══════════════════════════════════════════════════════════════════════════
-    # soap_list_services
+    # test_list_services
     # ══════════════════════════════════════════════════════════════════════════
 
-    async def soap_list_services(**kwargs: Any) -> ToolResult:
-        """Listet alle SOAP-Services und Institute auf."""
+    async def test_list_services(**kwargs: Any) -> ToolResult:
+        """Listet alle Services und Institute auf."""
         services = []
 
-        for svc in settings.soap_tool.services:
+        for svc in settings.test_tool.services:
             if not svc.enabled:
                 continue
 
@@ -72,7 +72,7 @@ def register_soap_tools(registry: ToolRegistry) -> int:
 
         institute = [
             {'institut_nr': i.institut_nr, 'name': i.name}
-            for i in settings.soap_tool.institute
+            for i in settings.test_tool.institute
             if i.enabled
         ]
 
@@ -81,37 +81,37 @@ def register_soap_tools(registry: ToolRegistry) -> int:
             data={
                 'services': services,
                 'institute': institute,
-                'service_url': settings.soap_tool.service_url,
-                'login_url': settings.soap_tool.login_url,
+                'service_url': settings.test_tool.service_url,
+                'login_url': settings.test_tool.login_url,
             }
         )
 
     registry.register(Tool(
-        name="soap_list_services",
+        name="test_list_services",
         description=(
-            "Listet alle verfügbaren SOAP-Services, ihre Operationen und konfigurierte Institute auf. "
+            "Listet alle verfügbaren Test-Services, ihre Operationen und konfigurierte Institute auf. "
             "Zeigt Service-Namen, Beschreibungen und benötigte Parameter. "
             "WICHTIG: Jeder Service-Aufruf benötigt eine Institut-Nummer."
         ),
         category=ToolCategory.SEARCH,
         parameters=[],
-        handler=soap_list_services,
+        handler=test_list_services,
     ))
     count += 1
 
     # ══════════════════════════════════════════════════════════════════════════
-    # soap_execute
+    # test_execute
     # ══════════════════════════════════════════════════════════════════════════
 
-    async def soap_execute(**kwargs: Any) -> ToolResult:
-        """Führt eine SOAP-Operation für ein Institut aus."""
+    async def test_execute(**kwargs: Any) -> ToolResult:
+        """Führt eine Test-Operation für ein Institut aus."""
         service_id: str = kwargs.get('service_id', '')
         operation_id: str = kwargs.get('operation_id', '')
         institut_nr: str = kwargs.get('institut_nr', '')
         params_str: str = kwargs.get('params', '{}')
 
         if not institut_nr:
-            available = [i.institut_nr for i in settings.soap_tool.institute if i.enabled]
+            available = [i.institut_nr for i in settings.test_tool.institute if i.enabled]
             return ToolResult(
                 success=False,
                 error=f"institut_nr ist erforderlich. Verfügbare Institute: {available}"
@@ -119,11 +119,11 @@ def register_soap_tools(registry: ToolRegistry) -> int:
 
         # Service finden
         service = next(
-            (s for s in settings.soap_tool.services if s.id == service_id and s.enabled),
+            (s for s in settings.test_tool.services if s.id == service_id and s.enabled),
             None
         )
         if not service:
-            available = [s.id for s in settings.soap_tool.services if s.enabled]
+            available = [s.id for s in settings.test_tool.services if s.enabled]
             return ToolResult(
                 success=False,
                 error=f"Service '{service_id}' nicht gefunden. Verfügbar: {available}"
@@ -143,11 +143,11 @@ def register_soap_tools(registry: ToolRegistry) -> int:
 
         # Institut prüfen
         institut = next(
-            (i for i in settings.soap_tool.institute if i.institut_nr == institut_nr and i.enabled),
+            (i for i in settings.test_tool.institute if i.institut_nr == institut_nr and i.enabled),
             None
         )
         if not institut:
-            available = [i.institut_nr for i in settings.soap_tool.institute if i.enabled]
+            available = [i.institut_nr for i in settings.test_tool.institute if i.enabled]
             return ToolResult(
                 success=False,
                 error=f"Institut '{institut_nr}' nicht verfügbar. Verfügbar: {available}"
@@ -160,13 +160,13 @@ def register_soap_tools(registry: ToolRegistry) -> int:
             return ToolResult(success=False, error=f"Ungültige JSON-Parameter: {e}")
 
         # Ausführen
-        from app.services.soap_executor import get_soap_executor
-        executor = get_soap_executor()
+        from app.services.test_executor import get_test_executor
+        executor = get_test_executor()
 
         try:
             result = await executor.execute(service, operation, institut_nr, params)
         except Exception as e:
-            logger.exception(f"SOAP-Ausführung fehlgeschlagen: {e}")
+            logger.exception(f"Test-Ausführung fehlgeschlagen: {e}")
             return ToolResult(success=False, error=f"Ausführung fehlgeschlagen: {e}")
 
         if result.success:
@@ -194,13 +194,13 @@ def register_soap_tools(registry: ToolRegistry) -> int:
             )
 
     registry.register(Tool(
-        name="soap_execute",
+        name="test_execute",
         description=(
-            "Führt eine SOAP-Operation für ein bestimmtes Institut aus. "
+            "Führt eine Test-Operation für ein bestimmtes Institut aus. "
             "WICHTIG: institut_nr ist immer erforderlich - sie bestimmt welches Institut "
             "(und damit welche Credentials/Session) verwendet wird. "
             "Das Session-Management erfolgt automatisch (Login bei fehlendem Token, Re-Login bei Auth-Fehlern). "
-            "Nutze zuerst soap_list_services um verfügbare Services, Operationen und Institute zu sehen."
+            "Nutze zuerst test_list_services um verfügbare Services, Operationen und Institute zu sehen."
         ),
         category=ToolCategory.FILE,
         is_write_operation=True,
@@ -230,21 +230,21 @@ def register_soap_tools(registry: ToolRegistry) -> int:
                 required=False
             ),
         ],
-        handler=soap_execute,
+        handler=test_execute,
     ))
     count += 1
 
     # ══════════════════════════════════════════════════════════════════════════
-    # soap_get_session_status
+    # test_get_session_status
     # ══════════════════════════════════════════════════════════════════════════
 
-    async def soap_get_session_status(**kwargs: Any) -> ToolResult:
+    async def test_get_session_status(**kwargs: Any) -> ToolResult:
         """Prüft Session-Status für ein Institut."""
         institut_nr: str = kwargs.get('institut_nr', '')
 
         if not institut_nr:
             # Alle Sessions zurückgeben
-            from app.services.soap_session_manager import get_session_manager
+            from app.services.test_session_manager import get_session_manager
             manager = get_session_manager()
             sessions = manager.get_all_sessions()
 
@@ -262,13 +262,13 @@ def register_soap_tools(registry: ToolRegistry) -> int:
                 }
             )
 
-        from app.services.soap_session_manager import get_session_manager
+        from app.services.test_session_manager import get_session_manager
         manager = get_session_manager()
         status = manager.get_status(institut_nr)
 
         # Institut-Name
         institut = next(
-            (i for i in settings.soap_tool.institute if i.institut_nr == institut_nr),
+            (i for i in settings.test_tool.institute if i.institut_nr == institut_nr),
             None
         )
 
@@ -290,7 +290,7 @@ def register_soap_tools(registry: ToolRegistry) -> int:
         )
 
     registry.register(Tool(
-        name="soap_get_session_status",
+        name="test_get_session_status",
         description=(
             "Prüft ob ein gültiger Session-Token für ein Institut existiert. "
             "Zeigt Token-Status, Ablaufzeit und Benutzer. "
@@ -305,15 +305,15 @@ def register_soap_tools(registry: ToolRegistry) -> int:
                 required=False
             ),
         ],
-        handler=soap_get_session_status,
+        handler=test_get_session_status,
     ))
     count += 1
 
     # ══════════════════════════════════════════════════════════════════════════
-    # soap_get_template
+    # test_get_template
     # ══════════════════════════════════════════════════════════════════════════
 
-    async def soap_get_template(**kwargs: Any) -> ToolResult:
+    async def test_get_template(**kwargs: Any) -> ToolResult:
         """Lädt ein SOAP-Template."""
         service_id: str = kwargs.get('service_id', '')
         template_file: str = kwargs.get('template_file', '')
@@ -321,7 +321,7 @@ def register_soap_tools(registry: ToolRegistry) -> int:
         if not template_file:
             return ToolResult(success=False, error="template_file ist erforderlich")
 
-        from app.services.soap_template_engine import get_template_engine
+        from app.services.test_template_engine import get_template_engine
         engine = get_template_engine()
 
         try:
@@ -344,7 +344,7 @@ def register_soap_tools(registry: ToolRegistry) -> int:
             )
 
     registry.register(Tool(
-        name="soap_get_template",
+        name="test_get_template",
         description=(
             "Lädt ein SOAP-XML-Template. "
             "Zeigt das Template mit allen Platzhaltern ({{param}}) und deren Definitionen."
@@ -364,15 +364,15 @@ def register_soap_tools(registry: ToolRegistry) -> int:
                 required=True
             ),
         ],
-        handler=soap_get_template,
+        handler=test_get_template,
     ))
     count += 1
 
     # ══════════════════════════════════════════════════════════════════════════
-    # soap_save_template
+    # test_save_template
     # ══════════════════════════════════════════════════════════════════════════
 
-    async def soap_save_template(**kwargs: Any) -> ToolResult:
+    async def test_save_template(**kwargs: Any) -> ToolResult:
         """Speichert ein SOAP-Template."""
         service_id: str = kwargs.get('service_id', '')
         template_file: str = kwargs.get('template_file', '')
@@ -383,7 +383,7 @@ def register_soap_tools(registry: ToolRegistry) -> int:
         if not content:
             return ToolResult(success=False, error="content (Template-XML) ist erforderlich")
 
-        from app.services.soap_template_engine import get_template_engine
+        from app.services.test_template_engine import get_template_engine
         engine = get_template_engine()
 
         validation = engine.validate_template(content)
@@ -407,7 +407,7 @@ def register_soap_tools(registry: ToolRegistry) -> int:
         )
 
     registry.register(Tool(
-        name="soap_save_template",
+        name="test_save_template",
         description=(
             "Speichert oder erstellt ein SOAP-XML-Template. "
             "Das Template wird vor dem Speichern validiert. "
@@ -435,9 +435,9 @@ def register_soap_tools(registry: ToolRegistry) -> int:
                 required=True
             ),
         ],
-        handler=soap_save_template,
+        handler=test_save_template,
     ))
     count += 1
 
-    logger.info(f"[soap_tools] {count} SOAP-Tools registriert")
+    logger.info(f"[test_tools] {count} Test-Tools registriert")
     return count

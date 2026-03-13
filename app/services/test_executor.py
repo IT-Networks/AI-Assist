@@ -1,5 +1,5 @@
 """
-SOAP Executor - Führt SOAP-Requests aus mit automatischem Session-Management.
+Test Executor - Führt SOAP-Requests aus mit automatischem Session-Management.
 
 Features:
 - Institut-basiertes Session-Management
@@ -17,8 +17,8 @@ from xml.etree import ElementTree as ET
 import httpx
 
 from app.core.config import SoapService, SoapOperation
-from app.services.soap_session_manager import SoapSessionManager, get_session_manager
-from app.services.soap_template_engine import SoapTemplateEngine, get_template_engine
+from app.services.test_session_manager import TestSessionManager, get_session_manager
+from app.services.test_template_engine import TestTemplateEngine, get_template_engine
 
 logger = logging.getLogger(__name__)
 
@@ -54,7 +54,7 @@ class SoapExecutionResult:
         }
 
 
-class SoapExecutor:
+class TestExecutor:
     """
     Führt SOAP-Requests aus mit automatischem Session-Management pro Institut.
 
@@ -68,20 +68,20 @@ class SoapExecutor:
 
     def __init__(
         self,
-        session_manager: Optional[SoapSessionManager] = None,
-        template_engine: Optional[SoapTemplateEngine] = None
+        session_manager: Optional[TestSessionManager] = None,
+        template_engine: Optional[TestTemplateEngine] = None
     ):
         self._session_manager = session_manager
         self._template_engine = template_engine
 
     @property
-    def sessions(self) -> SoapSessionManager:
+    def sessions(self) -> TestSessionManager:
         if self._session_manager is None:
             self._session_manager = get_session_manager()
         return self._session_manager
 
     @property
-    def templates(self) -> SoapTemplateEngine:
+    def templates(self) -> TestTemplateEngine:
         if self._template_engine is None:
             self._template_engine = get_template_engine()
         return self._template_engine
@@ -113,7 +113,7 @@ class SoapExecutor:
 
         try:
             # 1. Service-URL prüfen
-            if not settings.soap_tool.service_url:
+            if not settings.test_tool.service_url:
                 return SoapExecutionResult(
                     success=False,
                     error="service_url nicht konfiguriert",
@@ -172,10 +172,10 @@ class SoapExecutor:
             try:
                 async with httpx.AsyncClient(
                     timeout=operation.timeout_seconds,
-                    verify=settings.soap_tool.verify_ssl
+                    verify=settings.test_tool.verify_ssl
                 ) as client:
                     response = await client.post(
-                        settings.soap_tool.service_url,
+                        settings.test_tool.service_url,
                         content=envelope.encode('utf-8'),
                         headers=headers
                     )
@@ -420,12 +420,12 @@ class SoapExecutor:
 # Singleton
 # ══════════════════════════════════════════════════════════════════════════════
 
-_executor: Optional[SoapExecutor] = None
+_executor: Optional[TestExecutor] = None
 
 
-def get_soap_executor() -> SoapExecutor:
+def get_test_executor() -> TestExecutor:
     """Gibt Singleton-Instanz des Executors zurück."""
     global _executor
     if _executor is None:
-        _executor = SoapExecutor()
+        _executor = TestExecutor()
     return _executor

@@ -354,56 +354,8 @@ class MQConfig(BaseModel):
 # Test Tool
 # ══════════════════════════════════════════════════════════════════════════════
 
-class TestStageUrl(BaseModel):
-    """Eine URL innerhalb einer Stage."""
-    url: str = ""
-    description: str = ""
-
-
-class TestStage(BaseModel):
-    """Eine Deployment-Stage (Dev, Test, Prod …)."""
-    id: str = ""
-    name: str = ""
-    urls: List[TestStageUrl] = []
-
-
-class TestServiceParam(BaseModel):
-    """Ein Parameter eines Services."""
-    name: str = ""
-    type: str = "string"           # string | number | boolean | object | array
-    description: str = ""
-    required: bool = False
-    default: str = ""
-    location: str = "body"         # body | query | path | header
-
-
-class TestService(BaseModel):
-    """Definition eines testbaren Services."""
-    id: str = ""
-    name: str = ""
-    description: str = ""
-    endpoint: str = ""             # z.B. /api/orders
-    method: str = "POST"
-    content_type: str = "application/json"
-    parameters: List[TestServiceParam] = []
-    headers: Dict[str, str] = {}
-    # Lokale Ausführung (Python/Java im Repo)
-    local_script: str = ""         # Relativer Pfad zum Skript im aktiven Repo
-    local_interpreter: str = ""    # python | java | mvn | …
-
-
-class TestToolConfig(BaseModel):
-    """Test-Tool Konfiguration."""
-    enabled: bool = False
-    stages: List[TestStage] = []
-    services: List[TestService] = []
-    active_stage: str = ""         # ID der aktiven Stage
-    default_timeout_seconds: int = 60
-    local_wlp_url: str = ""        # Lokaler WLP-Server für direkte Testweiterleitung
-
-
 # ══════════════════════════════════════════════════════════════════════════════
-# SOAP Test-Tool v2 (Multi-Institut)
+# Test-Tool (SOAP Multi-Institut)
 # ══════════════════════════════════════════════════════════════════════════════
 
 class SoapInstitut(BaseModel):
@@ -456,8 +408,8 @@ class SoapService(BaseModel):
     enabled: bool = True
 
 
-class SoapToolConfig(BaseModel):
-    """SOAP Test-Tool v2 Konfiguration (Multi-Institut)."""
+class TestToolConfig(BaseModel):
+    """Test-Tool Konfiguration (SOAP Multi-Institut)."""
     enabled: bool = False
     # EIN Endpunkt für alle Services
     service_url: str = ""             # z.B. "https://soap.example.com/services"
@@ -467,9 +419,9 @@ class SoapToolConfig(BaseModel):
     institute: List[SoapInstitut] = []
     # Services
     services: List[SoapService] = []
-    templates_path: str = "data/soap/templates"
+    templates_path: str = "data/test_tool/templates"
     # Session-Management (pro Institut)
-    session_storage_file: str = "data/soap/sessions.json"
+    session_storage_file: str = "data/test_tool/sessions.json"
     session_refresh_before_expiry_seconds: int = 300
 
 
@@ -1087,7 +1039,6 @@ class Settings(BaseModel):
     sub_agents: SubAgentsConfig = Field(default_factory=SubAgentsConfig)
     mq: MQConfig = Field(default_factory=MQConfig)
     test_tool: TestToolConfig = Field(default_factory=TestToolConfig)
-    soap_tool: SoapToolConfig = Field(default_factory=SoapToolConfig)
     log_servers: LogServersConfig = Field(default_factory=LogServersConfig)
     wlp: WLPConfig = Field(default_factory=WLPConfig)
     maven: MavenConfig = Field(default_factory=MavenConfig)

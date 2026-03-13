@@ -1643,10 +1643,12 @@ body {
   flex-shrink: 0;
 }
 
-.modal-header h2 {
+.modal-header h2,
+.modal-header h3 {
   font-size: 1.1rem;
   font-weight: 600;
   color: var(--text);
+  margin: 0;
 }
 
 .modal-close {
@@ -1667,13 +1669,15 @@ body {
 
 .modal-body {
   flex: 1;
-  overflow: hidden;
+  overflow: auto;
+  padding: 16px 20px;
 }
 
 .modal-footer {
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  justify-content: flex-end;
+  gap: 8px;
   padding: 12px 20px;
   border-top: 1px solid var(--border);
   flex-shrink: 0;
