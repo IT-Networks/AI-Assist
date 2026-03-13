@@ -4946,6 +4946,9 @@ async function renderTestToolSection() {
 
     <div class="settings-subsection">
       <h4>Endpoints</h4>
+      <div id="soap-config-status" class="config-status-box" style="margin-bottom:12px;padding:8px;border-radius:4px;font-size:12px;background:var(--bg-tertiary)">
+        <span class="spinner-inline"></span> Prüfe Konfiguration...
+      </div>
       <div class="settings-field">
         <label>Service-URL:</label>
         <input id="soap-service-url" type="text" class="settings-input" placeholder="https://example.com/soap/services">
@@ -4953,6 +4956,7 @@ async function renderTestToolSection() {
       <div class="settings-field">
         <label>Login-URL:</label>
         <input id="soap-login-url" type="text" class="settings-input" placeholder="https://example.com/soap/auth">
+        <small style="color:var(--text-muted);display:block;margin-top:4px">Wird für automatisches Session-Management verwendet</small>
       </div>
       <div class="settings-field">
         <label style="display:flex;align-items:center;gap:8px">
@@ -5198,28 +5202,87 @@ async function ttDeleteService(id) {
 // ══════════════════════════════════════════════════════════════════════════════
 
 async function soapLoadAll() {
+  let configData = null;
+  let instituteData = null;
+  let servicesData = null;
+
   // Config laden
   try {
     const cfgRes = await fetch('/api/testtool/config');
     if (cfgRes.ok) {
-      const cfg = await cfgRes.json();
+      configData = await cfgRes.json();
       const urlEl = document.getElementById('soap-service-url');
       const loginEl = document.getElementById('soap-login-url');
       const sslEl = document.getElementById('soap-verify-ssl');
-      if (urlEl) urlEl.value = cfg.service_url || '';
-      if (loginEl) loginEl.value = cfg.login_url || '';
-      if (sslEl) sslEl.checked = cfg.verify_ssl !== false;
+      if (urlEl) urlEl.value = configData.service_url || '';
+      if (loginEl) loginEl.value = configData.login_url || '';
+      if (sslEl) sslEl.checked = configData.verify_ssl !== false;
     }
   } catch (e) { console.error('SOAP config load error:', e); }
 
   // Institute laden
-  await soapLoadInstitute();
+  instituteData = await soapLoadInstitute();
 
   // Sessions laden
   await soapLoadSessions();
 
   // Services laden
-  await soapLoadServices();
+  servicesData = await soapLoadServices();
+
+  // Konfigurations-Status aktualisieren
+  soapUpdateConfigStatus(configData, instituteData, servicesData);
+}
+
+function soapUpdateConfigStatus(config, institutes, services) {
+  const statusEl = document.getElementById('soap-config-status');
+  if (!statusEl) return;
+
+  const issues = [];
+  const ok = [];
+
+  // Login-URL prüfen
+  if (!config?.login_url) {
+    issues.push('Login-URL nicht konfiguriert');
+  } else {
+    ok.push('Login-URL');
+  }
+
+  // Service-URL prüfen
+  if (!config?.service_url) {
+    issues.push('Service-URL nicht konfiguriert');
+  } else {
+    ok.push('Service-URL');
+  }
+
+  // Institute prüfen
+  const instCount = institutes?.institute?.length || 0;
+  const enabledInst = institutes?.institute?.filter(i => i.enabled)?.length || 0;
+  if (instCount === 0) {
+    issues.push('Keine Institute konfiguriert');
+  } else if (enabledInst === 0) {
+    issues.push('Kein Institut aktiviert');
+  } else {
+    ok.push(`${enabledInst} Institut(e)`);
+  }
+
+  // Services prüfen
+  const svcCount = services?.services?.length || 0;
+  const enabledSvc = services?.services?.filter(s => s.enabled)?.length || 0;
+  if (svcCount === 0) {
+    issues.push('Keine Services konfiguriert (Login-Template benötigt Service)');
+  } else if (enabledSvc === 0) {
+    issues.push('Kein Service aktiviert');
+  } else {
+    ok.push(`${enabledSvc} Service(s)`);
+  }
+
+  if (issues.length === 0) {
+    statusEl.innerHTML = `<span style="color:var(--success)">&#10003; Login bereit:</span> ${ok.join(', ')}`;
+    statusEl.style.borderLeft = '3px solid var(--success)';
+  } else {
+    statusEl.innerHTML = `<span style="color:var(--warning)">&#9888; Login nicht möglich:</span><ul style="margin:4px 0 0 16px;padding:0">${issues.map(i => `<li>${escapeHtml(i)}</li>`).join('')}</ul>`;
+    statusEl.style.borderLeft = '3px solid var(--warning)';
+  }
 }
 
 async function soapSaveConfig() {
@@ -5242,15 +5305,17 @@ async function soapSaveConfig() {
 
 async function soapLoadInstitute() {
   const list = document.getElementById('soap-institute-list');
-  if (!list) return;
+  let data = null;
 
   try {
     const res = await fetch('/api/testtool/institute');
-    const data = await res.json();
+    data = await res.json();
+
+    if (!list) return data;
 
     if (!data.institute?.length) {
       list.innerHTML = '<p class="empty-hint">Keine Institute konfiguriert.</p>';
-      return;
+      return data;
     }
 
     list.innerHTML = data.institute.map(inst => `
@@ -5270,8 +5335,9 @@ async function soapLoadInstitute() {
       </div>
     `).join('');
   } catch (e) {
-    list.innerHTML = '<p class="error-hint">Fehler beim Laden der Institute</p>';
+    if (list) list.innerHTML = '<p class="error-hint">Fehler beim Laden der Institute</p>';
   }
+  return data;
 }
 
 async function soapAddInstitut() {
@@ -5385,17 +5451,20 @@ async function soapLoadSessions() {
 }
 
 async function soapRefreshSession(nr) {
+  updateSettingsStatus('Login wird durchgeführt...', 'info');
   try {
     const res = await fetch(`/api/testtool/session/${encodeURIComponent(nr)}/login`, { method: 'POST' });
-    if (res.ok) {
-      updateSettingsStatus('Login erfolgreich ✓', 'success');
+    const data = await res.json().catch(() => ({}));
+    if (res.ok && data.success) {
+      updateSettingsStatus(`Login erfolgreich für Institut ${nr} ✓`, 'success');
     } else {
-      const err = await res.json().catch(() => ({}));
-      updateSettingsStatus(err.detail || 'Login fehlgeschlagen', 'error');
+      // Show actual error from backend
+      const errorMsg = data.detail || data.error || 'Login fehlgeschlagen';
+      updateSettingsStatus(`Login fehlgeschlagen: ${errorMsg}`, 'error');
     }
     await soapLoadSessions();
   } catch (e) {
-    updateSettingsStatus('Verbindungsfehler', 'error');
+    updateSettingsStatus(`Verbindungsfehler: ${e.message}`, 'error');
   }
 }
 
@@ -5407,15 +5476,17 @@ async function soapDeleteSession(nr) {
 
 async function soapLoadServices() {
   const list = document.getElementById('soap-services-list');
-  if (!list) return;
+  let data = null;
 
   try {
     const res = await fetch('/api/testtool/services');
-    const data = await res.json();
+    data = await res.json();
+
+    if (!list) return data;
 
     if (!data.services?.length) {
       list.innerHTML = '<p class="empty-hint">Keine Services konfiguriert.</p>';
-      return;
+      return data;
     }
 
     list.innerHTML = data.services.map(svc => `
@@ -5455,8 +5526,9 @@ async function soapLoadServices() {
       </div>
     `).join('');
   } catch (e) {
-    list.innerHTML = '<p class="error-hint">Fehler beim Laden der Services</p>';
+    if (list) list.innerHTML = '<p class="error-hint">Fehler beim Laden der Services</p>';
   }
+  return data;
 }
 
 async function soapAddService() {
@@ -6275,19 +6347,21 @@ let _ttCurrentInstitut = null;
 
 async function loadTestToolPanel() {
   try {
-    const [instRes, svcRes, sessRes] = await Promise.all([
+    const [instRes, svcRes, sessRes, cfgRes] = await Promise.all([
       fetch('/api/testtool/institute'),
       fetch('/api/testtool/services'),
       fetch('/api/testtool/sessions'),
+      fetch('/api/testtool/config'),
     ]);
     const instData = await instRes.json();
     const svcData = await svcRes.json();
     const sessData = sessRes.ok ? await sessRes.json() : { sessions: {} };
+    const cfgData = cfgRes.ok ? await cfgRes.json() : {};
 
     // Institut-Dropdown
     const instSelect = document.getElementById('testtool-institut-select');
     if (instSelect) {
-      const institutes = instData.institute || [];
+      const institutes = (instData.institute || []).filter(i => i.enabled);
       if (institutes.length === 0) {
         instSelect.innerHTML = '<option value="">Keine Institute konfiguriert</option>';
         _ttCurrentInstitut = null;
@@ -6299,8 +6373,8 @@ async function loadTestToolPanel() {
       }
     }
 
-    // Session-Status aktualisieren
-    updateInstitutSessionStatus(sessData.sessions || {});
+    // Session-Status aktualisieren (mit Config-Info)
+    updateInstitutSessionStatus(sessData.sessions || {}, cfgData);
 
     // Services anzeigen
     const content = document.getElementById('testtool-services-content');
@@ -6351,26 +6425,48 @@ async function loadTestToolPanel() {
   }
 }
 
-function updateInstitutSessionStatus(sessions) {
+function updateInstitutSessionStatus(sessions, config = null) {
   const statusDiv = document.getElementById('testtool-session-status');
-  if (!statusDiv || !_ttCurrentInstitut) {
-    if (statusDiv) statusDiv.innerHTML = '<span class="badge">Kein Institut</span>';
+  if (!statusDiv) return;
+
+  if (!_ttCurrentInstitut) {
+    statusDiv.innerHTML = '<span class="badge">Kein Institut</span>';
     return;
   }
+
+  // Prüfe ob Login möglich ist
+  if (config && !config.login_url) {
+    statusDiv.innerHTML = `<span class="badge badge-error">&#9888; Login-URL fehlt</span>
+      <small style="display:block;margin-top:4px;color:var(--text-muted)">Konfiguriere die Login-URL in Einstellungen > Test-Tool</small>`;
+    return;
+  }
+
   const session = sessions[_ttCurrentInstitut];
-  if (session?.has_token) {
-    statusDiv.innerHTML = `<span class="badge badge-success">&#10003; Session aktiv</span>`;
+  if (session?.has_token && !session.is_expired) {
+    statusDiv.innerHTML = `<span class="badge badge-success">&#10003; Session aktiv</span>
+      <small style="display:block;margin-top:4px;color:var(--text-muted)">User: ${escapeHtml(session.user || '-')}</small>`;
+  } else if (session?.has_token && session.is_expired) {
+    statusDiv.innerHTML = `<span class="badge badge-warning">&#9888; Session abgelaufen</span>
+      <button class="btn btn-xs btn-secondary" style="margin-left:8px" onclick="ttSoapLogin()">Erneuern</button>`;
   } else {
     statusDiv.innerHTML = `<span class="badge badge-warning">&#9888; Keine Session</span>
       <button class="btn btn-xs btn-secondary" style="margin-left:8px" onclick="ttSoapLogin()">Login</button>`;
   }
 }
 
-function onInstitutChange(institutNr) {
+async function onInstitutChange(institutNr) {
   _ttCurrentInstitut = institutNr;
-  fetch('/api/testtool/sessions').then(r => r.json()).then(data => {
-    updateInstitutSessionStatus(data.sessions || {});
-  }).catch(() => {});
+  try {
+    const [sessRes, cfgRes] = await Promise.all([
+      fetch('/api/testtool/sessions'),
+      fetch('/api/testtool/config'),
+    ]);
+    const sessData = await sessRes.json();
+    const cfgData = cfgRes.ok ? await cfgRes.json() : {};
+    updateInstitutSessionStatus(sessData.sessions || {}, cfgData);
+  } catch (e) {
+    updateInstitutSessionStatus({});
+  }
 }
 
 async function ttSoapLogin() {
@@ -6380,13 +6476,17 @@ async function ttSoapLogin() {
   try {
     const res = await fetch(`/api/testtool/session/${_ttCurrentInstitut}/login`, { method: 'POST' });
     const data = await res.json();
-    if (data.success) {
+    if (res.ok && data.success) {
       statusDiv.innerHTML = '<span class="badge badge-success">&#10003; Session aktiv</span>';
     } else {
-      statusDiv.innerHTML = `<span class="badge badge-error">&#10007; ${escapeHtml(data.error || 'Login fehlgeschlagen')}</span>`;
+      // Handle both error formats: {error: "..."} and {detail: "..."} (FastAPI HTTPException)
+      const errorMsg = data.detail || data.error || 'Login fehlgeschlagen';
+      statusDiv.innerHTML = `<span class="badge badge-error">&#10007; ${escapeHtml(errorMsg)}</span>
+        <button class="btn btn-xs btn-secondary" style="margin-left:8px" onclick="ttSoapLogin()">Retry</button>`;
     }
   } catch (e) {
-    statusDiv.innerHTML = `<span class="badge badge-error">&#10007; ${escapeHtml(e.message)}</span>`;
+    statusDiv.innerHTML = `<span class="badge badge-error">&#10007; ${escapeHtml(e.message)}</span>
+      <button class="btn btn-xs btn-secondary" style="margin-left:8px" onclick="ttSoapLogin()">Retry</button>`;
   }
 }
 
