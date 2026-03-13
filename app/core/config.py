@@ -147,6 +147,11 @@ class LLMConfig(BaseModel):
     # Phase-spezifische Temperature: Tool-Phase deterministisch (0.0), Analyse-Phase präzise (0.1)
     tool_temperature: float = 0.0       # Temperature für Tool-Call-Phase (deterministisch)
     analysis_temperature: float = 0.1   # Temperature für Analyse-Phase (niedrig für präzise Faktenextraktion)
+    # Reasoning-Support für GPT-OSS und ähnliche Modelle (o1, o3-mini)
+    # Werte: "" (aus), "low", "medium", "high"
+    reasoning_effort: str = ""          # Default-Reasoning für alle Calls (leer = aus)
+    analysis_reasoning: str = "high"    # Reasoning für Analyse-Phase (komplexe Aufgaben)
+    tool_reasoning: str = ""            # Reasoning für Tool-Phase (normalerweise aus)
     # LLM-spezifische Kontext-Limits in Tokens (für automatisches Trimmen)
     # z.B. {"mistral-678b": 32000, "qwen-7b": 8000, "gptoss120b": 64000}
     llm_context_limits: Dict[str, int] = {}

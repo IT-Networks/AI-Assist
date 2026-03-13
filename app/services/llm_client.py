@@ -246,6 +246,53 @@ class LLMClient:
         except Exception:
             return []
 
+    def _inject_reasoning(
+        self,
+        messages: List[Dict],
+        reasoning: Optional[str],
+    ) -> List[Dict]:
+        """
+        Injiziert reasoning-Direktive in die System-Message.
+
+        GPT-OSS und ähnliche Modelle unterstützen 'reasoning: high/medium/low'
+        als Präfix in der System-Message für erweitertes Reasoning.
+
+        Args:
+            messages: Original-Nachrichten
+            reasoning: "low", "medium", "high" oder None/""
+
+        Returns:
+            Messages mit injizierter reasoning-Direktive (Kopie)
+        """
+        if not reasoning or reasoning not in ("low", "medium", "high"):
+            return messages
+
+        # Kopie erstellen um Original nicht zu verändern
+        messages = [dict(m) for m in messages]
+
+        # System-Message finden oder erstellen
+        system_idx = next(
+            (i for i, m in enumerate(messages) if m.get("role") == "system"),
+            None
+        )
+
+        reasoning_prefix = f"reasoning: {reasoning}\n\n"
+
+        if system_idx is not None:
+            # Reasoning-Präfix zur bestehenden System-Message hinzufügen
+            current_content = messages[system_idx].get("content", "")
+            # Nicht doppelt hinzufügen
+            if not current_content.startswith("reasoning:"):
+                messages[system_idx]["content"] = reasoning_prefix + current_content
+        else:
+            # Neue System-Message am Anfang einfügen
+            messages.insert(0, {
+                "role": "system",
+                "content": reasoning_prefix.strip()
+            })
+
+        return messages
+
     async def chat_with_tools(
         self,
         messages: List[Dict],
@@ -255,6 +302,7 @@ class LLMClient:
         max_tokens: Optional[int] = None,
         timeout: Optional[float] = None,
         tool_choice: str = "auto",
+        reasoning: Optional[str] = None,
     ) -> LLMResponse:
         """
         Zentraler LLM-Call mit Tool-Support.
@@ -270,6 +318,7 @@ class LLMClient:
             max_tokens: Max Tokens (default: settings.llm.max_tokens)
             timeout: Request-Timeout in Sekunden (default: TIMEOUT_TOOL)
             tool_choice: "auto", "none", oder {"type": "function", "function": {"name": "..."}}
+            reasoning: Reasoning-Effort für GPT-OSS: "low", "medium", "high" (None = aus)
 
         Returns:
             LLMResponse mit content, tool_calls, finish_reason, usage
@@ -278,6 +327,11 @@ class LLMClient:
         temperature = temperature if temperature is not None else self.temperature
         max_tokens = max_tokens or self.max_tokens
         timeout = timeout or TIMEOUT_TOOL
+
+        # Reasoning in System-Message injizieren falls aktiviert
+        if reasoning:
+            messages = self._inject_reasoning(messages, reasoning)
+            logger.debug(f"[llm] Reasoning aktiviert: {reasoning}")
 
         payload = {
             "model": model,

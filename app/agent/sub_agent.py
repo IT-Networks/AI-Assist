@@ -408,6 +408,9 @@ class SubAgent:
         # Sub-Agenten nutzen tool_temperature (deterministischer)
         temperature = settings.llm.tool_temperature if settings.llm.tool_temperature >= 0 else 0.0
 
+        # Reasoning für Sub-Agenten (normalerweise aus, da tool-fokussiert)
+        reasoning = settings.llm.tool_reasoning or None
+
         response = await default_llm_client.chat_with_tools(
             messages=messages,
             tools=tool_schemas,
@@ -415,6 +418,7 @@ class SubAgent:
             temperature=temperature,
             max_tokens=min(settings.llm.max_tokens, 2048),  # Sub-Agenten brauchen weniger
             timeout=TIMEOUT_TOOL,
+            reasoning=reasoning,
         )
 
         # Debug-Log bei unerwarteten Situationen

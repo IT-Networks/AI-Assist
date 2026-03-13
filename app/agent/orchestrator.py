@@ -1956,9 +1956,16 @@ Sei präzise und gib detaillierte Analyse-Schritte."""
         if settings.llm.api_key and settings.llm.api_key != "none":
             headers["Authorization"] = f"Bearer {settings.llm.api_key}"
 
+        # Reasoning für Analyse-Phase (Streaming = finale Antwort)
+        reasoning = settings.llm.analysis_reasoning
+        stream_messages = messages
+        if reasoning and reasoning in ("low", "medium", "high"):
+            stream_messages = central_llm_client._inject_reasoning(messages, reasoning)
+            logger.debug(f"[stream] Reasoning aktiviert: {reasoning}")
+
         payload = {
             "model": selected_model,
-            "messages": messages,
+            "messages": stream_messages,
             "temperature": settings.llm.temperature,
             "max_tokens": settings.llm.max_tokens,
             "stream": True,
@@ -2155,6 +2162,9 @@ Sei präzise und gib detaillierte Analyse-Schritte."""
         # Timeout basierend auf Phase
         timeout = TIMEOUT_TOOL if is_tool_phase else TIMEOUT_ANALYSIS
 
+        # Reasoning basierend auf Phase (GPT-OSS, o1, o3-mini Support)
+        reasoning = settings.llm.tool_reasoning if is_tool_phase else settings.llm.analysis_reasoning
+
         # Zentraler LLM-Call mit Retry-Logik
         try:
             response: LLMResponse = await central_llm_client.chat_with_tools(
@@ -2164,6 +2174,7 @@ Sei präzise und gib detaillierte Analyse-Schritte."""
                 temperature=effective_temperature,
                 max_tokens=settings.llm.max_tokens,
                 timeout=timeout,
+                reasoning=reasoning or None,
             )
         except Exception as e:
             # Kontext-Info für bessere Fehlermeldungen hinzufügen
