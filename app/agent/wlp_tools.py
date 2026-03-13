@@ -439,8 +439,14 @@ def register_wlp_tools(registry: ToolRegistry) -> int:
 
     # ── wlp_server_start ──────────────────────────────────────────────────────
     async def wlp_server_start(**kwargs: Any) -> ToolResult:
-        """Startet einen WLP-Server."""
+        """
+        Startet einen WLP-Server.
+
+        Verwendet 'server run' im Hintergrund damit der Prozess in
+        _running_processes registriert wird und das Frontend den Status sieht.
+        """
         from app.api.routes.wlp import _running_processes
+        import os
 
         server_id: str = kwargs.get("server_id", "")
 
@@ -457,27 +463,106 @@ def register_wlp_tools(registry: ToolRegistry) -> int:
                     data={"message": f"Server '{srv.name}' läuft bereits", "already_running": True}
                 )
 
-        result = await _run_server_command(
-            srv.wlp_path, srv.server_name, "start", timeout=srv.start_timeout_seconds
-        )
+        # Server via 'server run' starten (Vordergrund, wie die API)
+        # So wird der Prozess in _running_processes registriert
+        is_windows = os.name == 'nt'
 
-        if result["success"]:
+        if is_windows:
+            server_script = Path(srv.wlp_path) / "bin" / "server.bat"
+            cmd = ["cmd.exe", "/c", str(server_script), "run", srv.server_name]
+        else:
+            server_script = Path(srv.wlp_path) / "bin" / "server"
+            cmd = [str(server_script), "run", srv.server_name]
+
+        if not server_script.exists():
+            return ToolResult(
+                success=False,
+                error=f"WLP server-Skript nicht gefunden: {server_script}"
+            )
+
+        # Environment vorbereiten
+        env = os.environ.copy()
+        if srv.extra_jvm_args:
+            env["JVM_ARGS"] = srv.extra_jvm_args
+        java_home = settings.wlp.java_home or settings.maven.java_home
+        if java_home:
+            env["JAVA_HOME"] = java_home
+
+        try:
+            # Prozess starten (im Hintergrund, aber wir warten nicht auf Ende)
+            proc = await asyncio.create_subprocess_exec(
+                *cmd,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.STDOUT,
+                env=env,
+                cwd=str(Path(srv.wlp_path)),
+            )
+
+            # In _running_processes registrieren (wichtig für Frontend-Status!)
+            _running_processes[server_id] = proc
+            logger.info(f"[wlp_server_start] Server {server_id} gestartet, PID: {proc.pid}")
+
+            # Kurz warten und ersten Output lesen (max 5 Sekunden)
+            initial_output = []
+            server_ready = False
+            try:
+                ready_pattern = re.compile(r"CWWKF0011I|is ready to run a smarter planet", re.IGNORECASE)
+                error_pattern = re.compile(r"CWWKE0701E|Exception|ERROR|FAILED", re.IGNORECASE)
+
+                async def read_initial_output():
+                    nonlocal server_ready
+                    async for raw_line in proc.stdout:
+                        line = raw_line.decode(errors="replace").rstrip()
+                        initial_output.append(line)
+                        if ready_pattern.search(line):
+                            server_ready = True
+                            break
+                        if error_pattern.search(line):
+                            break
+                        if len(initial_output) > 50:  # Max 50 Zeilen
+                            break
+
+                await asyncio.wait_for(read_initial_output(), timeout=10.0)
+            except asyncio.TimeoutError:
+                pass  # Timeout ist OK, Server startet im Hintergrund weiter
+
+            # Prüfe ob Prozess noch läuft
+            if proc.returncode is not None:
+                # Prozess ist bereits beendet (Fehler!)
+                _running_processes.pop(server_id, None)
+                return ToolResult(
+                    success=False,
+                    error=f"Server-Prozess beendet mit Code {proc.returncode}",
+                    data={"output": "\n".join(initial_output[-20:])}
+                )
+
             return ToolResult(
                 success=True,
                 data={
-                    "message": f"Server '{srv.name}' wird gestartet",
-                    "output": result.get("output", ""),
-                    "hint": "Nutze wlp_server_status um den Startstatus zu prüfen",
+                    "message": f"Server '{srv.name}' wird gestartet" + (" ✓ bereit!" if server_ready else ""),
+                    "server_id": server_id,
+                    "pid": proc.pid,
+                    "is_ready": server_ready,
+                    "initial_output": "\n".join(initial_output[-10:]),
+                    "hint": "Der Server läuft im Hintergrund. Nutze wlp_server_status für Details oder wlp_get_logs für vollständige Logs.",
                 }
             )
-        else:
-            return ToolResult(success=False, error=result.get("error", "Start fehlgeschlagen"))
+
+        except FileNotFoundError as e:
+            return ToolResult(success=False, error=f"Skript nicht gefunden: {e}")
+        except PermissionError as e:
+            return ToolResult(success=False, error=f"Keine Ausführungsrechte: {e}")
+        except Exception as e:
+            logger.exception(f"[wlp_server_start] Fehler: {e}")
+            return ToolResult(success=False, error=str(e))
 
     registry.register(Tool(
         name="wlp_server_start",
         description=(
-            "Startet einen WLP-Server. Der Start erfolgt im Hintergrund. "
-            "Nutze wlp_server_status um zu prüfen ob der Server bereit ist."
+            "Startet einen WLP-Server. Der Server wird im Hintergrund gestartet "
+            "und läuft weiter. Die Funktion wartet kurz auf initiale Logs und "
+            "gibt zurück ob der Server bereit ist ('is_ready': true). "
+            "Das Frontend-Panel wird automatisch aktualisiert."
         ),
         category=ToolCategory.DEVOPS,
         parameters=[
@@ -495,6 +580,8 @@ def register_wlp_tools(registry: ToolRegistry) -> int:
     # ── wlp_server_stop ───────────────────────────────────────────────────────
     async def wlp_server_stop(**kwargs: Any) -> ToolResult:
         """Stoppt einen WLP-Server."""
+        from app.api.routes.wlp import _running_processes
+
         server_id: str = kwargs.get("server_id", "")
 
         srv = next((s for s in settings.wlp.servers if s.id == server_id), None)
@@ -502,6 +589,16 @@ def register_wlp_tools(registry: ToolRegistry) -> int:
             return ToolResult(success=False, error=f"Server '{server_id}' nicht gefunden")
 
         result = await _run_server_command(srv.wlp_path, srv.server_name, "stop", timeout=60)
+
+        # Prozess aus _running_processes entfernen (wichtig für Frontend-Status!)
+        running_proc = _running_processes.pop(server_id, None)
+        if running_proc and running_proc.returncode is None:
+            try:
+                running_proc.terminate()
+                await asyncio.wait_for(running_proc.wait(), timeout=5.0)
+            except Exception:
+                running_proc.kill()
+        logger.info(f"[wlp_server_stop] Server {server_id} gestoppt")
 
         if result["success"]:
             return ToolResult(

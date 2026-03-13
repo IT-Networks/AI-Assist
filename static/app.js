@@ -5952,6 +5952,51 @@ async function ttPanelLocal(svcId) {
 
 // ── WLP Panel ─────────────────────────────────────────────────────────────────
 
+// Polling für WLP-Status (aktualisiert Panel automatisch wenn Server gestartet wird)
+let _wlpPollInterval = null;
+let _wlpLastRunningState = null;
+
+function startWLPPolling() {
+  if (_wlpPollInterval) return; // Bereits aktiv
+  console.log('[WLP] Starting status polling');
+
+  _wlpPollInterval = setInterval(async () => {
+    // Nur pollen wenn WLP-Panel sichtbar ist
+    const panel = document.getElementById('wlp-panel');
+    if (!panel || !panel.classList.contains('active')) {
+      return;
+    }
+
+    try {
+      const res = await fetch('/api/wlp/servers');
+      const data = await res.json();
+      const currentRunning = JSON.stringify(data.running || []);
+
+      // Nur aktualisieren wenn sich Status geändert hat
+      if (_wlpLastRunningState !== currentRunning) {
+        console.log('[WLP] Status changed, refreshing panel');
+        _wlpLastRunningState = currentRunning;
+        await loadWLPPanel();
+      }
+    } catch (e) {
+      console.warn('[WLP] Poll error:', e);
+    }
+  }, 3000); // Alle 3 Sekunden prüfen
+}
+
+function stopWLPPolling() {
+  if (_wlpPollInterval) {
+    clearInterval(_wlpPollInterval);
+    _wlpPollInterval = null;
+    console.log('[WLP] Stopped status polling');
+  }
+}
+
+// Polling starten wenn App lädt (stoppt automatisch wenn Panel nicht sichtbar)
+document.addEventListener('DOMContentLoaded', () => {
+  startWLPPolling();
+});
+
 async function loadWLPPanel() {
   const content = document.getElementById('wlp-servers-content');
   if (!content) return;
