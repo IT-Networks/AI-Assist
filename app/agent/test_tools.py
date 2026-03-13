@@ -235,6 +235,87 @@ def register_test_tools(registry: ToolRegistry) -> int:
     count += 1
 
     # ══════════════════════════════════════════════════════════════════════════
+    # test_login
+    # ══════════════════════════════════════════════════════════════════════════
+
+    async def test_login(**kwargs: Any) -> ToolResult:
+        """Führt Login für ein Institut durch und gibt Session-Token zurück."""
+        institut_nr: str = kwargs.get('institut_nr', '')
+        force: bool = kwargs.get('force', False)
+
+        if not institut_nr:
+            available = [i.institut_nr for i in settings.test_tool.institute if i.enabled]
+            return ToolResult(
+                success=False,
+                error=f"institut_nr ist erforderlich. Verfügbare Institute: {available}"
+            )
+
+        # Institut prüfen
+        institut = next(
+            (i for i in settings.test_tool.institute if i.institut_nr == institut_nr and i.enabled),
+            None
+        )
+        if not institut:
+            available = [i.institut_nr for i in settings.test_tool.institute if i.enabled]
+            return ToolResult(
+                success=False,
+                error=f"Institut '{institut_nr}' nicht verfügbar. Verfügbar: {available}"
+            )
+
+        from app.services.test_session_manager import get_session_manager
+        manager = get_session_manager()
+
+        try:
+            token = await manager.get_token(institut_nr, force_refresh=force)
+            status = manager.get_status(institut_nr)
+
+            return ToolResult(
+                success=True,
+                data={
+                    'institut_nr': institut_nr,
+                    'institut_name': institut.name,
+                    'user': status.user,
+                    'has_token': True,
+                    'expires_at': status.expires_at.isoformat() if status.expires_at else None,
+                    'token_preview': token[:8] + '...' if len(token) > 8 else token,
+                    'message': 'Login erfolgreich' if force else 'Token gültig (oder neu geholt)',
+                }
+            )
+        except ValueError as e:
+            return ToolResult(
+                success=False,
+                error=f"Login fehlgeschlagen für Institut {institut_nr}: {str(e)}"
+            )
+
+    registry.register(Tool(
+        name="test_login",
+        description=(
+            "Führt Login für ein Institut durch und holt einen Session-Token. "
+            "Bei force=true wird ein neuer Token geholt, auch wenn noch einer gültig ist. "
+            "Das Login-Template aus der globalen Config wird verwendet. "
+            "WICHTIG: Login-URL und Login-Template müssen konfiguriert sein."
+        ),
+        category=ToolCategory.FILE,
+        is_write_operation=True,
+        parameters=[
+            ToolParameter(
+                name="institut_nr",
+                type="string",
+                description="Institut-Nummer (z.B. '001'). ERFORDERLICH!",
+                required=True
+            ),
+            ToolParameter(
+                name="force",
+                type="boolean",
+                description="Bei true wird neuer Token geholt, auch wenn aktueller noch gültig",
+                required=False
+            ),
+        ],
+        handler=test_login,
+    ))
+    count += 1
+
+    # ══════════════════════════════════════════════════════════════════════════
     # test_get_session_status
     # ══════════════════════════════════════════════════════════════════════════
 
