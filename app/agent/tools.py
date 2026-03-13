@@ -2401,6 +2401,10 @@ def create_default_registry() -> ToolRegistry:
         import logging
         logging.getLogger(__name__).debug(f"ServiceNow tools not available: {e}")
 
+    # Meta-Tools (kombinierte Operationen für effizientere Tool-Nutzung)
+    from app.agent.meta_tools import register_meta_tools
+    register_meta_tools(registry)
+
     return registry
 
 

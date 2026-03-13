@@ -46,6 +46,8 @@ _RE_HINT_NAME = re.compile(r'"name"\s*:')
 _RE_HINT_TOOL_KEY = re.compile(r'"tool"\s*:')
 
 from app.agent.tools import ToolRegistry, ToolResult, get_tool_registry
+from app.agent.tool_cache import ToolResultCache, get_tool_cache
+from app.agent.tool_budget import ToolBudget, BudgetLevel, create_budget
 from app.core.config import settings
 from app.mcp.tool_bridge import get_tool_bridge, MCPToolBridge
 from app.mcp.capabilities.research import get_research_capability, ResearchCapability
@@ -304,6 +306,8 @@ class AgentState:
     # Planungsphase (PLAN_THEN_EXECUTE-Modus)
     pending_plan: Optional[str] = None    # Erstellter Plan, wartet auf Genehmigung
     plan_approved: bool = False           # True wenn User den Plan genehmigt hat
+    # Tool-Budget-Tracking (fuer Effizienz-Optimierung)
+    tool_budget: Optional["ToolBudget"] = None
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -528,6 +532,11 @@ class AgentOrchestrator:
         self._research_capability: Optional[ResearchCapability] = None
         # Event Bridge für Live-Streaming von MCP-Events
         self._event_bridge: MCPEventBridge = get_event_bridge()
+        # Tool Result Cache (reduziert redundante Tool-Aufrufe)
+        self._tool_cache: ToolResultCache = get_tool_cache(
+            ttl_seconds=120,  # 2 Minuten TTL
+            max_entries=100
+        )
 
     async def _llm_callback_for_mcp(self, prompt: str, context: Optional[str] = None) -> str:
         """
@@ -562,6 +571,11 @@ Sei präzise und gib detaillierte Analyse-Schritte."""
         """Holt oder erstellt den State für eine Session. Stellt bei Bedarf vom Disk wieder her."""
         if session_id not in self._states:
             state = AgentState(session_id=session_id)
+            # Tool-Budget initialisieren
+            state.tool_budget = create_budget(
+                max_iterations=self.max_iterations,
+                max_tools_per_iteration=self.max_tool_calls_per_iter
+            )
             # Gespeicherten Chat vom Disk laden (Server-Neustart)
             try:
                 from app.services.chat_store import load_chat
@@ -1039,6 +1053,13 @@ Sei präzise und gib detaillierte Analyse-Schritte."""
             messages.append({"role": "system", "content": entity_hint})
             budget.set("memory", budget.used_memory + estimate_tokens(entity_hint))
 
+        # Tool-Budget-Hinweis: Optimierungstipps bei niedrigem Budget
+        if state.tool_budget:
+            budget_hint = state.tool_budget.get_budget_hint()
+            if budget_hint:
+                messages.append({"role": "system", "content": budget_hint})
+                logger.debug(f"[agent] Budget-Hint injiziert (Level: {state.tool_budget.level.value})")
+
         # Manuell vom Nutzer ausgewählte Kontext-Elemente (Explorer-Chips)
         if context_selection:
             hint_parts = []
@@ -1291,6 +1312,10 @@ Sei präzise und gib detaillierte Analyse-Schritte."""
                     yield AgentEvent(AgentEventType.CANCELLED, {"message": "Anfrage wurde abgebrochen"})
                     return
 
+                # Tool-Budget: Neue Iteration starten
+                if state.tool_budget and iteration > 0:
+                    state.tool_budget.next_iteration()
+
                 # === Kontext-Status prüfen und Summarizer aktivieren ===
                 current_model = model or settings.llm.default_model
                 model_limit = _get_model_context_limit(current_model)
@@ -1309,7 +1334,7 @@ Sei präzise und gib detaillierte Analyse-Schritte."""
 
                 # Kontext-Status an Frontend senden (non-blocking)
                 try:
-                    yield AgentEvent(AgentEventType.CONTEXT_STATUS, {
+                    context_status_data = {
                         "current_tokens": context_tokens,
                         "limit_tokens": model_limit,
                         "percent": context_percent,
@@ -1317,7 +1342,18 @@ Sei präzise und gib detaillierte Analyse-Schritte."""
                         "max_iterations": self.max_iterations,
                         "warning": context_percent > 80,
                         "critical": context_percent > 95
-                    })
+                    }
+                    # Tool-Budget-Info hinzufuegen
+                    if state.tool_budget:
+                        tb = state.tool_budget
+                        context_status_data["tool_budget"] = {
+                            "level": tb.level.value,
+                            "remaining_iterations": tb.remaining_iterations,
+                            "total_tools_used": tb.total_tools_used,
+                            "cache_hits": tb.cache_hits,
+                            "efficiency_score": round(tb.get_efficiency_score(), 1)
+                        }
+                    yield AgentEvent(AgentEventType.CONTEXT_STATUS, context_status_data)
                 except Exception as e:
                     logger.debug(f"[agent] Context status event failed: {e}")
 
@@ -1761,11 +1797,40 @@ Sei präzise und gib detaillierte Analyse-Schritte."""
                             error=mcp_result.get("error")
                         )
                     else:
-                        # Standard-Tool über ToolRegistry ausführen
-                        result = await self.tools.execute(
+                        # Standard-Tool über ToolRegistry ausführen (mit Caching)
+                        # Prüfe zuerst den Cache
+                        cached_result = self._tool_cache.get(
                             tool_call.name,
-                            **tool_call.arguments
+                            tool_call.arguments
                         )
+                        if cached_result is not None:
+                            result = cached_result
+                            logger.debug(f"[agent] Cache HIT: {tool_call.name}")
+                            # Budget-Tracking: Cache-Hit
+                            if state.tool_budget:
+                                state.tool_budget.record_tool_call(
+                                    tool_call.name, duration_ms=0, cached=True
+                                )
+                        else:
+                            # Nicht im Cache - Tool ausführen
+                            import time as _time
+                            _start = _time.time()
+                            result = await self.tools.execute(
+                                tool_call.name,
+                                **tool_call.arguments
+                            )
+                            _duration_ms = (_time.time() - _start) * 1000
+                            # Erfolgreiches Ergebnis cachen
+                            self._tool_cache.set(
+                                tool_call.name,
+                                tool_call.arguments,
+                                result
+                            )
+                            # Budget-Tracking: Tool-Aufruf
+                            if state.tool_budget:
+                                state.tool_budget.record_tool_call(
+                                    tool_call.name, duration_ms=_duration_ms, cached=False
+                                )
                     tool_call.result = result
                     has_used_tools = True
                     current_tool_calls_for_messages.append(tc)
