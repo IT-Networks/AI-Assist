@@ -286,7 +286,7 @@ async def _safe_read_file(read_func, **kwargs) -> ToolResult:
 
 
 async def batch_write_files(
-    files: str,
+    files: Any,
     **kwargs
 ) -> ToolResult:
     """
@@ -295,64 +295,77 @@ async def batch_write_files(
     Ersetzt: write_file × N (mit N einzelnen Bestätigungen)
 
     Args:
-        files: JSON-Array von Objekten mit 'path' und 'content'.
+        files: JSON-Array (als String oder bereits geparst) mit 'path' und 'content'.
                Format: [{"path": "src/file1.py", "content": "..."}, ...]
                ODER: Komma-getrennte Pfade wenn alle leer erstellt werden sollen.
     """
     from app.services.file_manager import get_file_manager
 
-    if not files or not files.strip():
-        return ToolResult(
-            success=False,
-            error="Keine Dateien angegeben. Format: [{\"path\": \"...\", \"content\": \"...\"}]"
-        )
-
-    # Versuche JSON zu parsen (mit Fallbacks für verschiedene Formate)
+    # Prüfe ob files bereits als Liste/Dict ankommt (bei manchen LLMs)
     file_list: List[Dict[str, str]] = []
-    files_clean = files.strip()
 
-    # Mehrere Parse-Versuche mit zunehmender Bereinigung
-    parse_attempts = [
-        files_clean,  # Original
-        files_clean.replace('\\"', '"'),  # Escaped quotes
-        files_clean.replace("'", '"'),  # Single quotes zu double quotes
-    ]
+    if isinstance(files, list):
+        # Bereits eine Liste - direkt verwenden
+        file_list = files
+    elif isinstance(files, dict):
+        # Einzelnes Dict - in Liste wrappen
+        file_list = [files]
+    elif isinstance(files, str):
+        # String - JSON parsen
+        if not files.strip():
+            return ToolResult(
+                success=False,
+                error="Keine Dateien angegeben. Format: [{\"path\": \"...\", \"content\": \"...\"}]"
+            )
 
-    parsed = None
-    last_error = None
+        files_clean = files.strip()
 
-    for attempt in parse_attempts:
-        try:
-            parsed = json.loads(attempt)
-            break
-        except json.JSONDecodeError as e:
-            last_error = e
-            continue
+        # Mehrere Parse-Versuche mit zunehmender Bereinigung
+        parse_attempts = [
+            files_clean,  # Original
+            files_clean.replace('\\"', '"'),  # Escaped quotes
+            files_clean.replace("'", '"'),  # Single quotes zu double quotes
+        ]
 
-    if parsed is None:
-        # Letzter Versuch: Suche nach JSON-Array im String
-        json_match = re.search(r'\[.*\]', files_clean, re.DOTALL)
-        if json_match:
+        parsed = None
+        last_error = None
+
+        for attempt in parse_attempts:
             try:
-                parsed = json.loads(json_match.group())
-            except json.JSONDecodeError:
-                pass
+                parsed = json.loads(attempt)
+                break
+            except json.JSONDecodeError as e:
+                last_error = e
+                continue
 
-    if parsed is None:
-        return ToolResult(
-            success=False,
-            error=f"Ungültiges JSON: {last_error}. Format: [{{\"path\": \"...\", \"content\": \"...\"}}]"
-        )
+        if parsed is None:
+            # Letzter Versuch: Suche nach JSON-Array im String
+            json_match = re.search(r'\[.*\]', files_clean, re.DOTALL)
+            if json_match:
+                try:
+                    parsed = json.loads(json_match.group())
+                except json.JSONDecodeError:
+                    pass
 
-    if isinstance(parsed, list):
-        file_list = parsed
-    elif isinstance(parsed, dict) and "path" in parsed:
-        # Einzelnes Objekt statt Array
-        file_list = [parsed]
+        if parsed is None:
+            return ToolResult(
+                success=False,
+                error=f"Ungültiges JSON: {last_error}. Format: [{{\"path\": \"...\", \"content\": \"...\"}}]"
+            )
+
+        if isinstance(parsed, list):
+            file_list = parsed
+        elif isinstance(parsed, dict) and "path" in parsed:
+            file_list = [parsed]
+        else:
+            return ToolResult(
+                success=False,
+                error="files muss ein JSON-Array sein: [{\"path\": \"...\", \"content\": \"...\"}]"
+            )
     else:
         return ToolResult(
             success=False,
-            error="files muss ein JSON-Array sein: [{\"path\": \"...\", \"content\": \"...\"}]"
+            error=f"Unerwarteter Typ für files: {type(files).__name__}"
         )
 
     # Validierung
