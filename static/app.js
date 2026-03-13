@@ -2800,8 +2800,7 @@ const settingsState = {
     docker_sandbox: 'Container-Sandbox (Docker/Podman)',
     data_sources: 'Interne HTTP-Systeme (Jenkins, GitHub, APIs)',
     mq: 'IBM MQ Series Messaging',
-    test_tool: 'Test-Automatisierung',
-    soap_tool: 'SOAP Services (Multi-Institut)',
+    test_tool: 'Test-Tool (SOAP Services)',
     log_servers: 'Log-Server für Analyse',
     wlp: 'WebSphere Liberty Profile Server',
     maven: 'Maven Build-Konfigurationen',
@@ -3002,11 +3001,6 @@ function renderSettingsSection() {
 
   if (section === 'test_tool') {
     renderTestToolSection();
-    return;
-  }
-
-  if (section === 'soap_tool') {
-    renderSoapToolSection();
     return;
   }
 
@@ -4947,57 +4941,59 @@ async function renderTestToolSection() {
   form.innerHTML = `
     <div class="settings-section">
       <h3 class="settings-section-title">TEST-TOOL</h3>
-      <p class="settings-section-desc">Services per HTTP aufrufen, Parameter übergeben und Ergebnisse lesen. Lokale Services aus dem Repo können ebenfalls ausgeführt werden.</p>
+      <p class="settings-section-desc">SOAP-basierte Service-Aufrufe mit XML-Templates und automatischem Session-Management. Jedes Institut hat eigene Credentials.</p>
     </div>
+
     <div class="settings-subsection">
-      <h4>Stages (Deployment-Umgebungen)</h4>
-      <div id="tt-stages-list"><div class="spinner-inline"></div></div>
+      <h4>Endpoints</h4>
+      <div class="settings-field">
+        <label>Service-URL:</label>
+        <input id="soap-service-url" type="text" class="settings-input" placeholder="https://example.com/soap/services">
+      </div>
+      <div class="settings-field">
+        <label>Login-URL:</label>
+        <input id="soap-login-url" type="text" class="settings-input" placeholder="https://example.com/soap/auth">
+      </div>
+      <div class="settings-field">
+        <label style="display:flex;align-items:center;gap:8px">
+          <input id="soap-verify-ssl" type="checkbox" checked>
+          SSL-Zertifikate verifizieren
+        </label>
+      </div>
+      <button class="btn btn-primary" onclick="soapSaveConfig()">Endpoints speichern</button>
+    </div>
+
+    <div class="settings-subsection" style="margin-top:16px">
+      <h4>Institute</h4>
+      <p class="settings-hint">Jedes Institut hat eigene Zugangsdaten. Passwörter können Umgebungsvariablen referenzieren: <code>{{env:VAR_NAME}}</code></p>
+      <div id="soap-institute-list"><div class="spinner-inline"></div></div>
       <div class="settings-add-form">
+        <h5 style="margin:0 0 8px">Institut hinzufügen</h5>
         <div class="settings-field-row">
-          <input id="tt-new-stage-name" type="text" class="settings-input" placeholder="Stage-Name (z.B. Dev)">
-          <button class="btn btn-primary btn-sm" onclick="ttAddStage()">+ Stage</button>
+          <input id="soap-inst-nr" type="text" class="settings-input" placeholder="Institut-Nr (z.B. 001)" style="max-width:120px">
+          <input id="soap-inst-name" type="text" class="settings-input" placeholder="Name (z.B. Hauptfiliale)">
         </div>
         <div class="settings-field-row" style="margin-top:4px">
-          <input id="tt-new-url" type="text" class="settings-input" placeholder="URL (z.B. http://dev:8080)">
-          <input id="tt-new-url-desc" type="text" class="settings-input" placeholder="Beschreibung" style="max-width:180px">
-          <button class="btn btn-secondary btn-sm" onclick="ttAddUrlToStage()">+ URL</button>
+          <input id="soap-inst-user" type="text" class="settings-input" placeholder="Benutzername">
+          <input id="soap-inst-pass" type="password" class="settings-input" placeholder="Passwort oder {{env:VAR}}">
         </div>
-        <div class="settings-field" style="margin-top:4px">
-          <label>Aktive Stage:</label>
-          <select id="tt-active-stage-select" onchange="ttSetActiveStage(this.value)" class="settings-input" style="max-width:200px"></select>
-        </div>
+        <button class="btn btn-primary" onclick="soapAddInstitut()">+ Institut</button>
       </div>
     </div>
+
     <div class="settings-subsection" style="margin-top:16px">
-      <h4>Services</h4>
-      <div id="tt-services-list"><div class="spinner-inline"></div></div>
-      <div class="settings-add-form">
-        <h5 style="margin:0 0 8px">Service hinzufügen</h5>
-        <div class="settings-field-row">
-          <input id="tt-svc-name" type="text" class="settings-input" placeholder="Name">
-          <input id="tt-svc-endpoint" type="text" class="settings-input" placeholder="Endpoint (z.B. /api/orders)">
-          <select id="tt-svc-method" class="settings-input" style="max-width:90px">
-            <option>POST</option><option>GET</option><option>PUT</option><option>DELETE</option><option>PATCH</option>
-          </select>
-        </div>
-        <div class="settings-field-row" style="margin-top:4px">
-          <input id="tt-svc-desc" type="text" class="settings-input" placeholder="Beschreibung">
-          <input id="tt-svc-script" type="text" class="settings-input" placeholder="Lokales Skript (optional, relativ zum Repo)">
-        </div>
-        <div class="settings-field" style="margin-top:4px">
-          <label>Parameter (Name,Typ,Required je Zeile: <code>customerId,string,true</code>):</label>
-          <textarea id="tt-svc-params" class="settings-input" rows="3" placeholder="customerId,string,true&#10;amount,number,false"></textarea>
-        </div>
-        <button class="btn btn-primary" onclick="ttAddService()">+ Service</button>
-      </div>
+      <h4>Sessions</h4>
+      <p class="settings-hint">Aktive Session-Tokens. Sessions werden automatisch beim ersten Aufruf erstellt.</p>
+      <div id="soap-sessions-list"><div class="spinner-inline"></div></div>
     </div>
+
     <div class="settings-subsection" style="margin-top:16px">
-      <h4>Lokaler WLP-Server</h4>
-      <p class="settings-section-desc">Testaufrufe direkt an einen lokalen WLP-Server weiterleiten. Wenn gesetzt, wird <code>use_local_wlp=true</code> genutzt statt der Stage-URL.</p>
-      <div id="tt-local-wlp-section"><div class="spinner-inline"></div></div>
+      <h4>Services & Templates</h4>
+      <p class="settings-hint">SOAP-Services mit XML-Templates. Die KI kann Templates anpassen oder neue erstellen.</p>
+      <div id="soap-services-list"><div class="spinner-inline"></div></div>
     </div>
   `;
-  await ttLoadAll();
+  await soapLoadAll();
 }
 
 async function ttLoadAll() {
@@ -5159,68 +5155,8 @@ async function ttDeleteService(id) {
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
-// SOAP Tool Settings Section (Multi-Institut)
+// SOAP Helper Functions (used by Test-Tool)
 // ══════════════════════════════════════════════════════════════════════════════
-
-async function renderSoapToolSection() {
-  const form = document.getElementById('settings-form');
-  form.innerHTML = `
-    <div class="settings-section">
-      <h3 class="settings-section-title">SOAP SERVICES (Multi-Institut)</h3>
-      <p class="settings-section-desc">SOAP-basierte Service-Aufrufe mit automatischem Session-Management. Jedes Institut hat eigene Credentials und Session.</p>
-    </div>
-
-    <div class="settings-subsection">
-      <h4>Endpoints</h4>
-      <div class="settings-field">
-        <label>Service-URL:</label>
-        <input id="soap-service-url" type="text" class="settings-input" placeholder="https://example.com/soap/services">
-      </div>
-      <div class="settings-field">
-        <label>Login-URL:</label>
-        <input id="soap-login-url" type="text" class="settings-input" placeholder="https://example.com/soap/auth">
-      </div>
-      <div class="settings-field">
-        <label style="display:flex;align-items:center;gap:8px">
-          <input id="soap-verify-ssl" type="checkbox" checked>
-          SSL-Zertifikate verifizieren
-        </label>
-      </div>
-      <button class="btn btn-primary" onclick="soapSaveConfig()">Endpoints speichern</button>
-    </div>
-
-    <div class="settings-subsection" style="margin-top:16px">
-      <h4>Institute</h4>
-      <p class="settings-hint">Jedes Institut hat eigene Zugangsdaten. Passwörter können Umgebungsvariablen referenzieren: <code>{{env:VAR_NAME}}</code></p>
-      <div id="soap-institute-list"><div class="spinner-inline"></div></div>
-      <div class="settings-add-form">
-        <h5 style="margin:0 0 8px">Institut hinzufügen</h5>
-        <div class="settings-field-row">
-          <input id="soap-inst-nr" type="text" class="settings-input" placeholder="Institut-Nr (z.B. 001)" style="max-width:120px">
-          <input id="soap-inst-name" type="text" class="settings-input" placeholder="Name (z.B. Hauptfiliale)">
-        </div>
-        <div class="settings-field-row" style="margin-top:4px">
-          <input id="soap-inst-user" type="text" class="settings-input" placeholder="Benutzername">
-          <input id="soap-inst-pass" type="password" class="settings-input" placeholder="Passwort oder {{env:VAR}}">
-        </div>
-        <button class="btn btn-primary" onclick="soapAddInstitut()">+ Institut</button>
-      </div>
-    </div>
-
-    <div class="settings-subsection" style="margin-top:16px">
-      <h4>Sessions</h4>
-      <p class="settings-hint">Aktive Session-Tokens. Sessions werden automatisch beim ersten Aufruf erstellt.</p>
-      <div id="soap-sessions-list"><div class="spinner-inline"></div></div>
-    </div>
-
-    <div class="settings-subsection" style="margin-top:16px">
-      <h4>Services</h4>
-      <p class="settings-hint">SOAP-Services mit XML-Templates. Templates können Platzhalter enthalten.</p>
-      <div id="soap-services-list"><div class="spinner-inline"></div></div>
-    </div>
-  `;
-  await soapLoadAll();
-}
 
 async function soapLoadAll() {
   // Config laden
