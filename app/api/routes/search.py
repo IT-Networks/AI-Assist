@@ -301,6 +301,8 @@ async def _ddg_search_library(
         except Exception as e:
             error_msg = str(e).lower()
             error_short = str(e)[:200]  # Begrenze Fehlerausgabe
+
+            # Bekannte Fehler kategorisieren
             if "proxy" in error_msg:
                 print(f"[search] DDGS Proxy error: {error_short}")
             elif "ssl" in error_msg or "certificate" in error_msg:
@@ -309,6 +311,12 @@ async def _ddg_search_library(
                 print(f"[search] DDGS Timeout: {error_short}")
             elif "ratelimit" in error_msg or "rate" in error_msg:
                 print(f"[search] DDGS Rate-Limit: {error_short}")
+            elif "yahoo" in error_msg or "connection" in error_msg:
+                # DDGS Library verwendet intern DuckDuckGo, aber Fehlermeldungen
+                # können verwirrend sein - hier klären wir das
+                print(f"[search] DDGS Connection error (using DuckDuckGo backend): {error_short}")
+            elif "decode" in error_msg or "encoding" in error_msg or "utf" in error_msg:
+                print(f"[search] DDGS Encoding error: {error_short}")
             else:
                 print(f"[search] DDGS error: {error_short}")
             raise
@@ -339,7 +347,16 @@ async def _ddg_search_legacy(query: str, max_results: int, timeout: int) -> List
     try:
         client = _get_search_client()
         resp = await client.post(_DDG_URL, data={"q": query, "kl": "de-de"})
-        html = resp.text
+
+        # Encoding robust behandeln
+        try:
+            # Versuche erst die vom Server angegebene Kodierung
+            html = resp.text
+        except UnicodeDecodeError:
+            # Fallback: Bytes mit Ersetzung dekodieren
+            html = resp.content.decode('utf-8', errors='replace')
+            print(f"[search] WARNING: Response encoding issue, used fallback decoding")
+
     except httpx.TimeoutException:
         proxy_hint = f" (Proxy: {settings.search.proxy_url})" if settings.search.proxy_url else ""
         return [{"title": "Timeout", "snippet": f"Verbindung zu DuckDuckGo timed out nach {timeout}s.{proxy_hint}", "url": ""}]
@@ -356,7 +373,14 @@ async def _ddg_search_legacy(query: str, max_results: int, timeout: int) -> List
                           f"'SSL-Zertifikate verifizieren' deaktivieren und speichern.",
                 "url": ""
             }]
-        return [{"title": "Verbindungsfehler", "snippet": str(e), "url": ""}]
+        # Verbindungsfehler kann verwirrende Meldungen haben (z.B. "yahoo")
+        # Klare Meldung ausgeben
+        return [{
+            "title": "Verbindungsfehler",
+            "snippet": f"Verbindung zu DuckDuckGo fehlgeschlagen. Fehler: {str(e)[:150]}. "
+                      f"Mögliche Ursachen: Netzwerkprobleme, Proxy-Konfiguration, Firewall.",
+            "url": ""
+        }]
     except Exception as e:
         return [{"title": "Fehler", "snippet": str(e), "url": ""}]
 
@@ -395,8 +419,21 @@ async def _ddg_search_legacy(query: str, max_results: int, timeout: int) -> List
             if not raw_bytes or len(raw_bytes) < 2:
                 print(f"[search] JSON API returned empty response (status: {r.status_code})")
             else:
+                # Robust dekodieren - verschiedene Encodings versuchen
+                text = None
+                for encoding in ['utf-8', 'latin-1', 'cp1252']:
+                    try:
+                        text = raw_bytes.decode(encoding).strip()
+                        break
+                    except (UnicodeDecodeError, LookupError):
+                        continue
+
+                if text is None:
+                    # Letzter Fallback mit Replacement
+                    text = raw_bytes.decode('utf-8', errors='replace').strip()
+                    print(f"[search] WARNING: Response had encoding issues, used replacement characters")
+
                 # Prüfen ob es wirklich JSON ist (nicht HTML-Fehlerseite)
-                text = raw_bytes.decode('utf-8', errors='replace').strip()
                 if text.startswith('<') or text.startswith('<!'):
                     print(f"[search] JSON API returned HTML instead of JSON (blocked?)")
                 elif text:
@@ -417,7 +454,14 @@ async def _ddg_search_legacy(query: str, max_results: int, timeout: int) -> List
                                     "url": topic.get("FirstURL", ""),
                                 })
                     except json_module.JSONDecodeError as e:
-                        print(f"[search] JSON parse error: {e} | Response: {text[:100]}...")
+                        # Detaillierte Fehlermeldung für Debugging
+                        preview = text[:100] if text else "(empty)"
+                        # Prüfe auf nicht-druckbare Zeichen
+                        has_binary = any(ord(c) < 32 and c not in '\r\n\t' for c in preview)
+                        if has_binary:
+                            print(f"[search] JSON parse error: Response contains binary/non-printable characters (possibly wrong encoding or compressed response)")
+                        else:
+                            print(f"[search] JSON parse error: {e} | Response preview: {preview}...")
         except Exception as e:
             print(f"[search] JSON API fallback failed: {e}")
 

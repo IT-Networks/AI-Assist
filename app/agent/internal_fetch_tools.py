@@ -949,6 +949,12 @@ def register_internal_fetch_tools(registry: ToolRegistry) -> int:
         url: str = kwargs.get("url", "").strip()
         max_length: int = int(kwargs.get("max_length", 15000))
         extract_mode: str = kwargs.get("extract_mode", "text").strip()
+        # SSL-Verifizierung: Default aus Search-Config, kann überschrieben werden
+        verify_ssl_param = kwargs.get("verify_ssl")
+        if verify_ssl_param is not None:
+            verify_ssl = bool(verify_ssl_param)
+        else:
+            verify_ssl = settings.search.verify_ssl
 
         if not url:
             return ToolResult(
@@ -986,7 +992,7 @@ def register_internal_fetch_tools(registry: ToolRegistry) -> int:
             async with httpx.AsyncClient(
                 timeout=30,
                 follow_redirects=True,
-                verify=True,
+                verify=verify_ssl,
             ) as client:
                 response = await client.get(url, headers=headers)
 
@@ -1049,6 +1055,18 @@ def register_internal_fetch_tools(registry: ToolRegistry) -> int:
         except httpx.TimeoutException:
             return ToolResult(success=False, error="Timeout: Seite antwortet nicht innerhalb von 30 Sekunden.")
         except httpx.ConnectError as e:
+            error_str = str(e).lower()
+            if "ssl" in error_str or "certificate" in error_str:
+                ssl_status = "aktiviert" if verify_ssl else "deaktiviert"
+                return ToolResult(
+                    success=False,
+                    error=(
+                        f"SSL-Zertifikatsfehler beim Abrufen der URL. "
+                        f"SSL-Verifizierung ist aktuell {ssl_status}. "
+                        f"Nutze verify_ssl=false um SSL-Prüfung zu deaktivieren, "
+                        f"oder stelle in Settings → Web-Suche → SSL-Verifizierung ein."
+                    ),
+                )
             return ToolResult(success=False, error=f"Verbindungsfehler: {e}")
         except Exception as e:
             return ToolResult(success=False, error=f"Fehler beim Abrufen: {e}")
@@ -1083,6 +1101,15 @@ def register_internal_fetch_tools(registry: ToolRegistry) -> int:
                 required=False,
                 default="text",
                 enum=["text", "structured"],
+            ),
+            ToolParameter(
+                name="verify_ssl",
+                type="boolean",
+                description=(
+                    "SSL-Zertifikate verifizieren (default: aus Settings). "
+                    "False bei SSL-Fehlern durch Proxy oder selbstsignierte Zertifikate."
+                ),
+                required=False,
             ),
         ],
         handler=fetch_webpage,
