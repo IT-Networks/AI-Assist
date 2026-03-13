@@ -1875,25 +1875,39 @@ Sei präzise und gib detaillierte Analyse-Schritte."""
                                 result.confirmation_data
                             )
                             if exec_result.success:
+                                # Spezifische Meldung je nach Operation
+                                operation = result.confirmation_data.get("operation", "")
+                                if operation == "batch_write_files":
+                                    # Batch: Liste alle geschriebenen Dateien
+                                    files = result.confirmation_data.get("files", [])
+                                    file_paths = [f.get("path", "") for f in files]
+                                    confirm_msg = f"✓ {len(files)} Dateien geschrieben"
+                                    result_msg = exec_result.data  # Enthält bereits die Details
+                                    context_msg = f"[{tool_call.name}] {len(files)} Dateien erstellt: {', '.join(file_paths[:5])}" + ("..." if len(file_paths) > 5 else "")
+                                else:
+                                    # Einzelne Datei
+                                    path = result.confirmation_data.get('path', '')
+                                    confirm_msg = f"✓ Datei geschrieben: {path}"
+                                    result_msg = f"Datei erfolgreich geschrieben: {path}"
+                                    context_msg = f"[{tool_call.name}] Ausgeführt: {path}"
+
                                 yield AgentEvent(AgentEventType.CONFIRMED, {
                                     "id": tool_call.id,
-                                    "message": f"✓ Datei geschrieben: {result.confirmation_data.get('path', '')}"
+                                    "message": confirm_msg
                                 })
                                 # Tool-Result aktualisieren auf Erfolg
                                 result = ToolResult(
                                     success=True,
-                                    data=f"Datei erfolgreich geschrieben: {result.confirmation_data.get('path', '')}"
+                                    data=result_msg
                                 )
                                 tool_call.result = result
-                                state.context_items.append(
-                                    f"[{tool_call.name}] Ausgeführt: {result.confirmation_data.get('path', '')}"
-                                )
+                                state.context_items.append(context_msg)
                                 # WICHTIG: Finales TOOL_RESULT senden um UI zu aktualisieren
                                 yield AgentEvent(AgentEventType.TOOL_RESULT, {
                                     "id": tool_call.id,
                                     "name": tool_call.name,
                                     "success": True,
-                                    "data": f"✓ Datei geschrieben: {result.confirmation_data.get('path', '')}"
+                                    "data": confirm_msg
                                 })
                             else:
                                 yield AgentEvent(AgentEventType.ERROR, {
