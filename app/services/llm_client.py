@@ -1,6 +1,7 @@
 import asyncio
 import json
 import logging
+import re
 from dataclasses import dataclass
 from typing import Any, AsyncGenerator, Dict, List, Optional
 
@@ -10,6 +11,66 @@ from app.core.config import settings
 from app.core.exceptions import LLMError
 
 logger = logging.getLogger(__name__)
+
+
+def _parse_tool_calls_from_content(content: str) -> tuple[str, List[Dict]]:
+    """
+    Parst [TOOL_CALLS][{...}] Format aus dem Content (für Mistral/lokale Modelle).
+
+    Manche LLMs geben Tool-Calls nicht im strukturierten Format aus, sondern als:
+    - [TOOL_CALLS][{"name": "...", "arguments": {...}}]
+    - <tool_call>{"name": "...", "arguments": {...}}</tool_call>
+
+    Returns:
+        Tuple von (bereinigter Content, Liste von Tool-Calls im OpenAI-Format)
+    """
+    if not content:
+        return content, []
+
+    tool_calls = []
+    clean_content = content
+
+    # Pattern 1: [TOOL_CALLS][{...}] oder [TOOL_CALLS][{...}, {...}]
+    tool_calls_match = re.search(r'\[TOOL_CALLS\]\s*(\[.*\])', content, re.DOTALL)
+    if tool_calls_match:
+        try:
+            raw_calls = json.loads(tool_calls_match.group(1))
+            for i, call in enumerate(raw_calls if isinstance(raw_calls, list) else [raw_calls]):
+                tool_calls.append({
+                    "id": f"call_{i}",
+                    "type": "function",
+                    "function": {
+                        "name": call.get("name", ""),
+                        "arguments": json.dumps(call.get("arguments", call.get("parameters", {})))
+                    }
+                })
+            # Content bereinigen
+            clean_content = content[:tool_calls_match.start()].strip()
+            logger.debug(f"[llm] Parsed {len(tool_calls)} tool calls from [TOOL_CALLS] format")
+        except json.JSONDecodeError as e:
+            logger.warning(f"[llm] Could not parse [TOOL_CALLS]: {e}")
+
+    # Pattern 2: <tool_call>{...}</tool_call>
+    if not tool_calls:
+        tool_call_matches = re.findall(r'<tool_call>\s*(\{.*?\})\s*</tool_call>', content, re.DOTALL)
+        for i, match in enumerate(tool_call_matches):
+            try:
+                call = json.loads(match)
+                tool_calls.append({
+                    "id": f"call_{i}",
+                    "type": "function",
+                    "function": {
+                        "name": call.get("name", ""),
+                        "arguments": json.dumps(call.get("arguments", call.get("parameters", {})))
+                    }
+                })
+            except json.JSONDecodeError:
+                pass
+        if tool_calls:
+            clean_content = re.sub(r'<tool_call>.*?</tool_call>', '', content, flags=re.DOTALL).strip()
+            logger.debug(f"[llm] Parsed {len(tool_calls)} tool calls from <tool_call> format")
+
+    return clean_content, tool_calls
 
 # Shared HTTP Client für Connection-Pooling (Performance-Optimierung)
 # Vermeidet TCP/TLS-Handshake bei jedem Request (~200ms Ersparnis)
@@ -370,9 +431,16 @@ class LLMClient:
                 message = choice.get("message", {})
                 usage = data.get("usage", {})
 
+                content = message.get("content")
+                tool_calls = message.get("tool_calls") or []
+
+                # Fallback: Parse [TOOL_CALLS] aus Content wenn keine strukturierten tool_calls
+                if not tool_calls and content and ("[TOOL_CALLS]" in content or "<tool_call>" in content):
+                    content, tool_calls = _parse_tool_calls_from_content(content)
+
                 return LLMResponse(
-                    content=message.get("content"),
-                    tool_calls=message.get("tool_calls") or [],
+                    content=content,
+                    tool_calls=tool_calls,
                     finish_reason=choice.get("finish_reason", ""),
                     model=model,
                     prompt_tokens=usage.get("prompt_tokens", 0),
