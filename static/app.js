@@ -1316,6 +1316,10 @@ function createLiveStatusBar() {
       <span class="status-icon">📊</span>
       <span class="tokens-value">0 tokens</span>
     </div>
+    <div class="status-reasoning" style="display:none">
+      <span class="status-icon">🧠</span>
+      <span class="reasoning-level">Reasoning</span>
+    </div>
     <div class="status-indicator">
       <span class="pulse-dot"></span>
       <span>Verarbeite...</span>
@@ -1474,6 +1478,10 @@ async function processAgentEvent(event, bubble, msgDiv, chat) {
       updateContextIndicator(data, chat);
       break;
 
+    case 'reasoning_status':
+      updateReasoningIndicator(data, chat);
+      break;
+
     case 'compaction':
       showCompactionNotification(data);
       break;
@@ -1591,6 +1599,34 @@ function updateContextIndicator(data, chat) {
     iterSpan.style.display = '';
   } else if (iterSpan) {
     iterSpan.style.display = 'none';
+  }
+}
+
+// Reasoning-Indikator in der Status-Bar aktualisieren
+function updateReasoningIndicator(data, chat) {
+  const ss = chat?.streamingState;
+  if (!ss?.statusBar) return;
+
+  const reasoningDiv = ss.statusBar.querySelector('.status-reasoning');
+  if (!reasoningDiv) return;
+
+  if (data.active && data.level) {
+    // Reasoning aktiv - anzeigen
+    const levelSpan = reasoningDiv.querySelector('.reasoning-level');
+    const levelLabels = {
+      'low': 'Reasoning: Low',
+      'medium': 'Reasoning: Medium',
+      'high': 'Reasoning: High'
+    };
+    if (levelSpan) {
+      levelSpan.textContent = levelLabels[data.level] || `Reasoning: ${data.level}`;
+    }
+    reasoningDiv.style.display = 'flex';
+    reasoningDiv.classList.add('reasoning-active');
+  } else {
+    // Reasoning inaktiv - ausblenden
+    reasoningDiv.style.display = 'none';
+    reasoningDiv.classList.remove('reasoning-active');
   }
 }
 

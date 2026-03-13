@@ -229,6 +229,8 @@ class AgentEventType(str, Enum):
     MCP_BRANCH_END = "mcp_branch_end"      # Branch merged oder abandoned
     MCP_ASSUMPTION = "mcp_assumption_created"  # Neue Assumption erstellt
     MCP_TOOL_REC = "mcp_tool_recommendation"   # Tool-Empfehlung
+    # Reasoning Events (GPT-OSS, o1, o3)
+    REASONING_STATUS = "reasoning_status"  # Reasoning-Modus aktiv/inaktiv
 
 
 @dataclass
@@ -1355,6 +1357,15 @@ Sei präzise und gib detaillierte Analyse-Schritte."""
                 finish_reason = response.get("finish_reason", "")
                 native_tools = response.get("native_tools", True)
 
+                # Reasoning-Status Event senden (falls aktiv)
+                reasoning_used = response.get("reasoning")
+                if reasoning_used:
+                    yield AgentEvent(AgentEventType.REASONING_STATUS, {
+                        "active": True,
+                        "level": reasoning_used,
+                        "phase": "tool"
+                    })
+
                 logger.debug(
                     "[agent] LLM response: finish_reason=%r, tool_calls=%d, content_len=%d",
                     finish_reason, len(tool_calls), len(content or '')
@@ -1402,6 +1413,13 @@ Sei präzise und gib detaillierte Analyse-Schritte."""
                             )
                             plan_response = plan_resp.get("content", "")
                             extra_plan_usage = plan_resp.get("usage")  # Noch nicht gezählt
+                            # Reasoning-Status Event senden (falls aktiv)
+                            if plan_resp.get("reasoning"):
+                                yield AgentEvent(AgentEventType.REASONING_STATUS, {
+                                    "active": True,
+                                    "level": plan_resp.get("reasoning"),
+                                    "phase": "analysis"
+                                })
 
                         # Token-Nutzung für neuen Call akkumulieren (nur wenn neu)
                         if extra_plan_usage and isinstance(extra_plan_usage, TokenUsage):
@@ -1492,10 +1510,24 @@ Sei präzise und gib detaillierte Analyse-Schritte."""
                             )
                             assistant_response = analysis_response.get("content", "")
                             final_usage = analysis_response.get("usage")
+                            # Reasoning-Status Event senden (falls aktiv)
+                            if analysis_response.get("reasoning"):
+                                yield AgentEvent(AgentEventType.REASONING_STATUS, {
+                                    "active": True,
+                                    "level": analysis_response.get("reasoning"),
+                                    "phase": "analysis"
+                                })
                             if assistant_response:
                                 yield AgentEvent(AgentEventType.TOKEN, assistant_response)
                     elif should_stream and not existing_content:
                         # Keine Antwort vorhanden -> Stream anfordern
+                        # Reasoning-Status Event senden (falls aktiv - Streaming nutzt analysis_reasoning)
+                        if settings.llm.analysis_reasoning:
+                            yield AgentEvent(AgentEventType.REASONING_STATUS, {
+                                "active": True,
+                                "level": settings.llm.analysis_reasoning,
+                                "phase": "analysis"
+                            })
                         stream_result = await self._stream_final_response_with_usage(messages, model)
                         async for token in stream_result["tokens"]:
                             assistant_response += token
@@ -2205,7 +2237,8 @@ Sei präzise und gib detaillierte Analyse-Schritte."""
             "tool_calls": response.tool_calls,
             "native_tools": bool(response.tool_calls),
             "usage": usage,
-            "finish_reason": response.finish_reason
+            "finish_reason": response.finish_reason,
+            "reasoning": reasoning or None,  # Reasoning-Level falls aktiv
         }
 
     async def _enrich_from_entity_tracker(

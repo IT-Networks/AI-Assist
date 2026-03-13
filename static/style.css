@@ -4623,3 +4623,50 @@ a:visited {
   font-size: 0.85rem;
   padding: 8px 0;
 }
+
+/* ════════════════════════════════════════════════════════════════════════════
+   Reasoning Status Indicator
+   ════════════════════════════════════════════════════════════════════════════ */
+
+.status-reasoning {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  background: linear-gradient(135deg, var(--accent-bg) 0%, rgba(139, 92, 246, 0.15) 100%);
+  border: 1px solid var(--accent);
+  border-radius: 12px;
+  font-size: 0.72rem;
+  font-weight: 500;
+  color: var(--accent);
+  animation: reasoningPulse 2s ease-in-out infinite;
+}
+
+.status-reasoning.reasoning-active {
+  box-shadow: 0 0 8px rgba(139, 92, 246, 0.3);
+}
+
+.status-reasoning .status-icon {
+  font-size: 0.85rem;
+}
+
+.status-reasoning .reasoning-level {
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+@keyframes reasoningPulse {
+  0%, 100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.85;
+    transform: scale(1.02);
+  }
+}
+
+/* Live Status Bar - Reasoning spacing */
+.live-status-bar .status-reasoning {
+  margin-left: 8px;
+}
