@@ -320,11 +320,52 @@ async def batch_write_files(
 
         files_clean = files.strip()
 
+        def _fix_json_newlines(s: str) -> str:
+            """
+            Repariert JSON mit echten Newlines in Strings.
+            LLMs senden oft: {"content": "line1
+            line2"} statt {"content": "line1\\nline2"}
+            """
+            result = []
+            in_string = False
+            escape_next = False
+            i = 0
+
+            while i < len(s):
+                char = s[i]
+
+                if escape_next:
+                    result.append(char)
+                    escape_next = False
+                elif char == '\\':
+                    result.append(char)
+                    escape_next = True
+                elif char == '"':
+                    result.append(char)
+                    in_string = not in_string
+                elif char == '\n' and in_string:
+                    # Echter Newline in String -> escape
+                    result.append('\\n')
+                elif char == '\r' and in_string:
+                    # CR in String -> überspringen (wird mit \n behandelt)
+                    pass
+                elif char == '\t' and in_string:
+                    # Tab in String -> escape
+                    result.append('\\t')
+                else:
+                    result.append(char)
+
+                i += 1
+
+            return ''.join(result)
+
         # Mehrere Parse-Versuche mit zunehmender Bereinigung
         parse_attempts = [
             files_clean,  # Original
-            files_clean.replace('\\"', '"'),  # Escaped quotes
+            _fix_json_newlines(files_clean),  # Newlines in Strings escapen
+            files_clean.replace('\\"', '"'),  # Doppelt escaped quotes
             files_clean.replace("'", '"'),  # Single quotes zu double quotes
+            _fix_json_newlines(files_clean.replace("'", '"')),  # Kombination
         ]
 
         parsed = None
@@ -339,18 +380,25 @@ async def batch_write_files(
                 continue
 
         if parsed is None:
-            # Letzter Versuch: Suche nach JSON-Array im String
+            # Letzter Versuch: Suche nach JSON-Array im String und repariere
             json_match = re.search(r'\[.*\]', files_clean, re.DOTALL)
             if json_match:
                 try:
-                    parsed = json.loads(json_match.group())
+                    fixed = _fix_json_newlines(json_match.group())
+                    parsed = json.loads(fixed)
                 except json.JSONDecodeError:
                     pass
 
         if parsed is None:
+            # Debug-Info für bessere Fehlermeldung
+            error_pos = ""
+            if last_error and hasattr(last_error, 'pos'):
+                ctx_start = max(0, last_error.pos - 20)
+                ctx_end = min(len(files_clean), last_error.pos + 20)
+                error_pos = f" bei Position {last_error.pos}: ...{files_clean[ctx_start:ctx_end]}..."
             return ToolResult(
                 success=False,
-                error=f"Ungültiges JSON: {last_error}. Format: [{{\"path\": \"...\", \"content\": \"...\"}}]"
+                error=f"Ungültiges JSON{error_pos}. Tipp: Content mit Newlines muss als \\n escaped sein."
             )
 
         if isinstance(parsed, list):
