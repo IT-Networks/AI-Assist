@@ -155,6 +155,8 @@ class TestTemplateEngine:
         all_params = {**(auto_params or {}), **params}
         missing_params = []
 
+        logger.debug(f"[Template] fill_template aufgerufen mit {len(all_params)} Parametern: {list(all_params.keys())}")
+
         def replace_placeholder(match: re.Match) -> str:
             name = match.group(1)
             default = match.group(2)

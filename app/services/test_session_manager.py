@@ -183,8 +183,14 @@ class TestSessionManager:
         user = self._resolve_env(institut.user)
         password = self._resolve_env(institut.password)
 
+        logger.debug(f"[Login] Institut {institut_nr}: user_raw='{institut.user}', user_resolved='{user}'")
+        logger.debug(f"[Login] Institut {institut_nr}: password_raw='{institut.password[:3] if institut.password else ''}...', password_resolved={'***' if password else '(leer)'}")
+
         if not user or not password:
-            raise ValueError(f"Credentials für Institut {institut_nr} nicht vollständig")
+            raise ValueError(
+                f"Credentials für Institut {institut_nr} nicht vollständig. "
+                f"User: '{institut.user}' -> '{user}', Password: {'gesetzt' if institut.password else 'leer'} -> {'gesetzt' if password else 'leer'}"
+            )
 
         logger.info(f"Login für Institut {institut_nr} als '{user}'...")
 
@@ -208,11 +214,22 @@ class TestSessionManager:
             )
 
         # Template füllen
-        envelope = engine.fill_template(template, {}, auto_params={
+        auto_params = {
             'institut': institut_nr,
             'user': user,
             'password': password,
-        })
+        }
+        logger.debug(f"[Login] Template-Parameter: institut='{institut_nr}', user='{user}', password={'***' if password else '(leer)'}")
+
+        envelope = engine.fill_template(template, {}, auto_params=auto_params)
+
+        # Debug: Prüfen ob Platzhalter ersetzt wurden
+        if '{{user}}' in envelope or '{{password}}' in envelope or '{{institut}}' in envelope:
+            logger.error(f"[Login] FEHLER: Platzhalter nicht ersetzt! Template enthält noch: " +
+                        f"{{{{user}}}}={('{{user}}' in envelope)}, " +
+                        f"{{{{password}}}}={('{{password}}' in envelope)}, " +
+                        f"{{{{institut}}}}={('{{institut}}' in envelope)}")
+            logger.debug(f"[Login] Envelope (erste 500 Zeichen): {envelope[:500]}")
 
         # Headers (SOAP 1.1 Standard)
         headers = {
