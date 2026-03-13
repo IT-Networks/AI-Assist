@@ -7847,13 +7847,14 @@ document.addEventListener('keydown', (e) => {
 // MCP-Typen mit Icons und Farben
 const MCP_TYPES = {
   sequential_thinking: { icon: '🧠', label: 'Sequential Thinking', color: 'thinking' },
+  thinking: { icon: '🧠', label: 'Thinking', color: 'thinking' },  // ThinkingEngine verwendet "thinking"
   brainstorm: { icon: '💡', label: 'Brainstorm', color: 'brainstorm' },
   design: { icon: '📐', label: 'Design', color: 'design' },
   implement: { icon: '⚙️', label: 'Implement', color: 'implement' },
   analyze: { icon: '🔍', label: 'Analyze', color: 'analyze' },
   research: { icon: '🌐', label: 'Research', color: 'research' },
-  // Fallback
-  default: { icon: '🧠', label: 'MCP', color: 'thinking' }
+  // Fallback für unbekannte MCP-Typen
+  default: { icon: '⚡', label: 'MCP Tool', color: 'thinking' }
 };
 
 // Max. Anzahl Sessions im Panel
