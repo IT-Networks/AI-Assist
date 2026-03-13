@@ -398,6 +398,77 @@ class TestToolConfig(BaseModel):
 
 
 # ══════════════════════════════════════════════════════════════════════════════
+# SOAP Test-Tool v2 (Multi-Institut)
+# ══════════════════════════════════════════════════════════════════════════════
+
+class SoapInstitut(BaseModel):
+    """Ein Institut mit eigenen Credentials und Session."""
+    institut_nr: str = ""             # z.B. "001", "002", "100"
+    name: str = ""                    # z.B. "Sparkasse Musterstadt"
+    user: str = ""                    # Login-User für dieses Institut
+    password: str = ""                # Passwort (oder {{env:INST_001_PW}})
+    enabled: bool = True
+
+
+class SoapParameter(BaseModel):
+    """Parameter-Definition für eine SOAP-Operation."""
+    name: str = ""
+    type: str = "string"              # string | integer | boolean | date | enum
+    required: bool = False
+    default: str = ""
+    description: str = ""
+    sensitive: bool = False           # Maskiert in Logs
+    values: List[str] = []            # Erlaubte Werte für enum-Typ
+
+
+class SoapOperation(BaseModel):
+    """Eine Operation (Methode) eines SOAP-Services."""
+    id: str = ""                      # z.B. "get_customer"
+    name: str = ""                    # z.B. "GetCustomer"
+    description: str = ""
+    template_file: str = ""           # Relativer Pfad zum Template
+    soap_action: str = ""             # SOAPAction HTTP-Header
+    timeout_seconds: int = 60
+    parameters: List[SoapParameter] = []
+    # Response-Extraktion: XPath zu Feldern
+    response_xpath: Dict[str, str] = {}
+
+
+class SoapService(BaseModel):
+    """Ein SOAP-Service mit mehreren Operationen."""
+    id: str = ""                      # z.B. "customer"
+    name: str = ""                    # z.B. "Kundenverwaltung"
+    description: str = ""
+    namespace: str = ""               # Target-Namespace
+    soap_version: str = "1.1"         # 1.1 | 1.2
+    # Login-Konfiguration
+    login_template: str = "login.soap.xml"
+    session_token_xpath: str = "//SessionToken/text()"
+    session_expires_xpath: str = ""
+    error_codes_requiring_reauth: List[str] = ["SESSION_EXPIRED", "INVALID_TOKEN"]
+    # Operationen
+    operations: List[SoapOperation] = []
+    enabled: bool = True
+
+
+class SoapToolConfig(BaseModel):
+    """SOAP Test-Tool v2 Konfiguration (Multi-Institut)."""
+    enabled: bool = False
+    # EIN Endpunkt für alle Services
+    service_url: str = ""             # z.B. "https://soap.example.com/services"
+    login_url: str = ""               # z.B. "https://soap.example.com/auth/login"
+    verify_ssl: bool = True
+    # Institute (Multi-Tenant)
+    institute: List[SoapInstitut] = []
+    # Services
+    services: List[SoapService] = []
+    templates_path: str = "data/soap/templates"
+    # Session-Management (pro Institut)
+    session_storage_file: str = "data/soap/sessions.json"
+    session_refresh_before_expiry_seconds: int = 300
+
+
+# ══════════════════════════════════════════════════════════════════════════════
 # Log Servers
 # ══════════════════════════════════════════════════════════════════════════════
 
@@ -1011,6 +1082,7 @@ class Settings(BaseModel):
     sub_agents: SubAgentsConfig = Field(default_factory=SubAgentsConfig)
     mq: MQConfig = Field(default_factory=MQConfig)
     test_tool: TestToolConfig = Field(default_factory=TestToolConfig)
+    soap_tool: SoapToolConfig = Field(default_factory=SoapToolConfig)
     log_servers: LogServersConfig = Field(default_factory=LogServersConfig)
     wlp: WLPConfig = Field(default_factory=WLPConfig)
     maven: MavenConfig = Field(default_factory=MavenConfig)

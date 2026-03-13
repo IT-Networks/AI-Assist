@@ -1,0 +1,399 @@
+"""
+SOAP Session Manager - Verwaltet Session-Tokens pro Institut.
+
+Features:
+- Token-Speicherung pro Institut
+- Automatisches Login bei fehlendem/abgelaufenem Token
+- Sichere Credential-Auflösung ({{env:VAR}})
+- Persistente Session-Speicherung
+"""
+
+import json
+import logging
+import os
+import re
+from dataclasses import dataclass
+from datetime import datetime, timedelta
+from pathlib import Path
+from typing import Any, Dict, List, Optional
+from xml.etree import ElementTree as ET
+
+import httpx
+
+logger = logging.getLogger(__name__)
+
+
+@dataclass
+class SessionInfo:
+    """Informationen über eine aktive Session."""
+    token: str
+    created_at: datetime
+    institut_nr: str
+    user: str = ""
+    expires_at: Optional[datetime] = None
+
+    def is_expired(self, buffer_seconds: int = 0) -> bool:
+        """Prüft ob Session abgelaufen ist (mit optionalem Puffer)."""
+        if self.expires_at is None:
+            return False
+        return datetime.now() >= (self.expires_at - timedelta(seconds=buffer_seconds))
+
+    def to_dict(self) -> Dict[str, Any]:
+        """Serialisiert zu Dictionary."""
+        return {
+            'token': self.token,
+            'institut_nr': self.institut_nr,
+            'user': self.user,
+            'created_at': self.created_at.isoformat(),
+            'expires_at': self.expires_at.isoformat() if self.expires_at else None,
+        }
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> "SessionInfo":
+        """Deserialisiert aus Dictionary."""
+        return cls(
+            token=data['token'],
+            institut_nr=data.get('institut_nr', ''),
+            user=data.get('user', ''),
+            created_at=datetime.fromisoformat(data['created_at']),
+            expires_at=datetime.fromisoformat(data['expires_at']) if data.get('expires_at') else None,
+        )
+
+
+@dataclass
+class SessionStatus:
+    """Status einer Session für API-Response."""
+    institut_nr: str = ""
+    has_token: bool = False
+    is_expired: bool = False
+    expires_at: Optional[datetime] = None
+    user: str = ""
+    token_preview: str = ""
+
+
+class SoapSessionManager:
+    """
+    Verwaltet Session-Tokens pro Institut.
+
+    Session-Key: institut_nr (z.B. "001", "002")
+    """
+
+    # Pattern für Umgebungsvariablen: {{env:VAR_NAME}}
+    ENV_PATTERN = re.compile(r'\{\{env:(\w+)\}\}')
+
+    def __init__(
+        self,
+        storage_path: str = "data/soap/sessions.json",
+        refresh_before_expiry_seconds: int = 300
+    ):
+        self.storage_path = Path(storage_path)
+        self.refresh_buffer = refresh_before_expiry_seconds
+        self._sessions: Dict[str, SessionInfo] = {}
+        self._load()
+
+    def _load(self):
+        """Lädt Sessions aus Datei."""
+        if not self.storage_path.exists():
+            return
+
+        try:
+            data = json.loads(self.storage_path.read_text(encoding='utf-8'))
+            for key, session_data in data.items():
+                try:
+                    self._sessions[key] = SessionInfo.from_dict(session_data)
+                except (KeyError, ValueError) as e:
+                    logger.warning(f"Ungültige Session ignoriert ({key}): {e}")
+        except Exception as e:
+            logger.warning(f"Session-Datei konnte nicht geladen werden: {e}")
+
+    def _save(self):
+        """Speichert Sessions in Datei."""
+        self.storage_path.parent.mkdir(parents=True, exist_ok=True)
+
+        data = {
+            key: session.to_dict()
+            for key, session in self._sessions.items()
+        }
+
+        self.storage_path.write_text(
+            json.dumps(data, indent=2, ensure_ascii=False),
+            encoding='utf-8'
+        )
+
+    async def get_token(
+        self,
+        institut_nr: str,
+        force_refresh: bool = False
+    ) -> str:
+        """
+        Gibt gültigen Session-Token für ein Institut zurück.
+
+        Führt automatisch Login durch wenn nötig.
+
+        Args:
+            institut_nr: Institut-Nummer
+            force_refresh: Erzwingt neuen Login
+
+        Returns:
+            Session-Token
+
+        Raises:
+            ValueError: Login fehlgeschlagen oder Institut nicht konfiguriert
+        """
+        session = self._sessions.get(institut_nr)
+
+        # Token vorhanden und gültig?
+        if session and not force_refresh:
+            if not session.is_expired(self.refresh_buffer):
+                return session.token
+            else:
+                logger.info(f"Session abgelaufen für Institut {institut_nr}, erneuere...")
+
+        # Login durchführen
+        return await self._login(institut_nr)
+
+    async def _login(self, institut_nr: str) -> str:
+        """
+        Führt Login für ein Institut durch.
+
+        Args:
+            institut_nr: Institut-Nummer
+
+        Returns:
+            Neuer Session-Token
+
+        Raises:
+            ValueError: Institut nicht gefunden oder Login fehlgeschlagen
+        """
+        from app.core.config import settings
+
+        # Institut finden
+        institut = next(
+            (i for i in settings.soap_tool.institute if i.institut_nr == institut_nr and i.enabled),
+            None
+        )
+        if not institut:
+            available = [i.institut_nr for i in settings.soap_tool.institute if i.enabled]
+            raise ValueError(
+                f"Institut '{institut_nr}' nicht gefunden oder deaktiviert. "
+                f"Verfügbar: {available}"
+            )
+
+        # Credentials auflösen
+        user = self._resolve_env(institut.user)
+        password = self._resolve_env(institut.password)
+
+        if not user or not password:
+            raise ValueError(f"Credentials für Institut {institut_nr} nicht vollständig")
+
+        logger.info(f"Login für Institut {institut_nr} als '{user}'...")
+
+        # Login-URL prüfen
+        if not settings.soap_tool.login_url:
+            raise ValueError("login_url nicht konfiguriert in soap_tool")
+
+        # Ersten Service mit Login-Template finden
+        service = next((s for s in settings.soap_tool.services if s.enabled), None)
+        if not service:
+            raise ValueError("Kein aktiver Service konfiguriert")
+
+        # Template laden
+        from app.services.soap_template_engine import get_template_engine
+        engine = get_template_engine()
+
+        try:
+            # Login-Template ist pro Service oder global "login.soap.xml"
+            template = engine.load_template("", service.login_template)
+        except FileNotFoundError:
+            try:
+                template = engine.load_template("", "login.soap.xml")
+            except FileNotFoundError:
+                raise ValueError(
+                    f"Login-Template nicht gefunden: {service.login_template}"
+                )
+
+        # Template füllen
+        envelope = engine.fill_template(template, {}, auto_params={
+            'institut': institut_nr,
+            'user': user,
+            'password': password,
+        })
+
+        # Headers
+        headers = {
+            'Content-Type': 'text/xml; charset=utf-8' if service.soap_version == '1.1'
+                           else 'application/soap+xml; charset=utf-8',
+        }
+
+        # Request ausführen
+        try:
+            async with httpx.AsyncClient(
+                timeout=60,
+                verify=settings.soap_tool.verify_ssl
+            ) as client:
+                response = await client.post(
+                    settings.soap_tool.login_url,
+                    content=envelope.encode('utf-8'),
+                    headers=headers
+                )
+        except Exception as e:
+            raise ValueError(f"Login-Request fehlgeschlagen: {e}")
+
+        # Response prüfen
+        if response.status_code >= 400:
+            raise ValueError(
+                f"Login fehlgeschlagen: HTTP {response.status_code}\n"
+                f"{response.text[:500]}"
+            )
+
+        # Token extrahieren
+        token = self._extract_xpath(response.text, service.session_token_xpath)
+        if not token:
+            raise ValueError(
+                f"Session-Token konnte nicht extrahiert werden.\n"
+                f"XPath: {service.session_token_xpath}\n"
+                f"Response: {response.text[:500]}"
+            )
+
+        # Ablaufzeit extrahieren (optional)
+        expires_at = None
+        if service.session_expires_xpath:
+            expires_str = self._extract_xpath(response.text, service.session_expires_xpath)
+            if expires_str:
+                try:
+                    expires_at = datetime.fromisoformat(expires_str.replace('Z', '+00:00'))
+                except ValueError:
+                    logger.warning(f"Ungültiges Ablaufdatum: {expires_str}")
+
+        # Session speichern
+        self._sessions[institut_nr] = SessionInfo(
+            token=token,
+            institut_nr=institut_nr,
+            user=user,
+            created_at=datetime.now(),
+            expires_at=expires_at,
+        )
+        self._save()
+
+        logger.info(f"Login erfolgreich für Institut {institut_nr}")
+        return token
+
+    def _resolve_env(self, value: str) -> str:
+        """Löst {{env:VAR}} Platzhalter auf."""
+        if not value:
+            return value
+
+        match = self.ENV_PATTERN.match(value)
+        if match:
+            env_var = match.group(1)
+            env_value = os.environ.get(env_var, '')
+            if not env_value:
+                logger.warning(f"Umgebungsvariable {env_var} nicht gesetzt")
+            return env_value
+
+        return value
+
+    def _extract_xpath(self, xml_content: str, xpath: str) -> Optional[str]:
+        """Extrahiert Wert per XPath aus XML."""
+        if not xpath:
+            return None
+
+        try:
+            root = ET.fromstring(xml_content)
+
+            # Suche nach Tag-Namen (XPath vereinfacht)
+            import re
+            tag_match = re.search(r'//(\w+)', xpath)
+            if tag_match:
+                tag_name = tag_match.group(1)
+                for elem in root.iter():
+                    local_name = elem.tag.split('}')[-1] if '}' in elem.tag else elem.tag
+                    if local_name == tag_name:
+                        return elem.text
+
+        except ET.ParseError as e:
+            logger.error(f"XML-Parse-Fehler bei XPath-Extraktion: {e}")
+        except Exception as e:
+            logger.error(f"XPath-Extraktion fehlgeschlagen: {e}")
+
+        return None
+
+    def get_status(self, institut_nr: str) -> SessionStatus:
+        """Gibt Status einer Session zurück."""
+        session = self._sessions.get(institut_nr)
+
+        if not session:
+            return SessionStatus(institut_nr=institut_nr, has_token=False)
+
+        return SessionStatus(
+            institut_nr=institut_nr,
+            has_token=True,
+            is_expired=session.is_expired(),
+            expires_at=session.expires_at,
+            user=session.user,
+            token_preview=session.token[:8] + '...' if len(session.token) > 8 else session.token
+        )
+
+    def invalidate(self, institut_nr: str):
+        """Invalidiert eine Session."""
+        if institut_nr in self._sessions:
+            del self._sessions[institut_nr]
+            self._save()
+            logger.info(f"Session invalidiert: Institut {institut_nr}")
+
+    def invalidate_all(self):
+        """Invalidiert alle Sessions."""
+        count = len(self._sessions)
+        self._sessions.clear()
+        self._save()
+        logger.info(f"{count} Sessions invalidiert")
+
+    def get_all_sessions(self) -> Dict[str, SessionStatus]:
+        """Gibt Status aller Sessions zurück."""
+        return {
+            institut_nr: SessionStatus(
+                institut_nr=institut_nr,
+                has_token=True,
+                is_expired=session.is_expired(),
+                expires_at=session.expires_at,
+                user=session.user,
+                token_preview=session.token[:8] + '...' if len(session.token) > 8 else session.token
+            )
+            for institut_nr, session in self._sessions.items()
+        }
+
+    def get_institut_credentials(self, institut_nr: str) -> Dict[str, str]:
+        """Gibt aufgelöste Credentials für ein Institut zurück."""
+        from app.core.config import settings
+
+        institut = next(
+            (i for i in settings.soap_tool.institute if i.institut_nr == institut_nr),
+            None
+        )
+        if not institut:
+            raise ValueError(f"Institut {institut_nr} nicht gefunden")
+
+        return {
+            'institut': institut_nr,
+            'user': self._resolve_env(institut.user),
+            'password': self._resolve_env(institut.password),
+        }
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Singleton
+# ══════════════════════════════════════════════════════════════════════════════
+
+_session_manager: Optional[SoapSessionManager] = None
+
+
+def get_session_manager() -> SoapSessionManager:
+    """Gibt Singleton-Instanz des Session-Managers zurück."""
+    global _session_manager
+    if _session_manager is None:
+        from app.core.config import settings
+        _session_manager = SoapSessionManager(
+            storage_path=settings.soap_tool.session_storage_file,
+            refresh_before_expiry_seconds=settings.soap_tool.session_refresh_before_expiry_seconds
+        )
+    return _session_manager

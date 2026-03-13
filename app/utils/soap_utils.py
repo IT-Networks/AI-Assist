@@ -557,14 +557,22 @@ class SOAPResponseParser:
             "soap12": self.SOAP12_NS,
         }
 
-        # Fault prüfen
-        fault = root.find(".//soap:Fault", nsmap) or root.find(".//soap12:Fault", nsmap) or root.find(".//{*}Fault")
+        # Fault prüfen (explicit None checks to avoid FutureWarning)
+        fault = root.find(".//soap:Fault", nsmap)
+        if fault is None:
+            fault = root.find(".//soap12:Fault", nsmap)
+        if fault is None:
+            fault = root.find(".//{*}Fault")
 
         if fault is not None:
             return self._extract_fault(fault, xml_content, status_code)
 
-        # Body extrahieren
-        body = root.find(".//soap:Body", nsmap) or root.find(".//soap12:Body", nsmap) or root.find(".//{*}Body")
+        # Body extrahieren (explicit None checks to avoid FutureWarning)
+        body = root.find(".//soap:Body", nsmap)
+        if body is None:
+            body = root.find(".//soap12:Body", nsmap)
+        if body is None:
+            body = root.find(".//{*}Body")
 
         if body is None:
             return SOAPResponse(

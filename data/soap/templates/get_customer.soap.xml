@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  GetCustomer Template - Kundendaten abrufen
+
+  Platzhalter (auto-inject):
+    {{institut}}       - Institut-Nummer (bestimmt Routing)
+    {{session_token}}  - Session-Token aus Login
+
+  Platzhalter (user input):
+    {{customer_id}}    - Kunden-ID (required)
+-->
+<soap:Envelope
+    xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/"
+    xmlns:cust="http://example.com/customer">
+  <soap:Header>
+    <cust:AuthHeader>
+      <cust:InstitutNr>{{institut}}</cust:InstitutNr>
+      <cust:SessionToken>{{session_token}}</cust:SessionToken>
+    </cust:AuthHeader>
+  </soap:Header>
+  <soap:Body>
+    <cust:GetCustomer>
+      <cust:InstitutNr>{{institut}}</cust:InstitutNr>
+      <cust:CustomerId>{{customer_id}}</cust:CustomerId>
+    </cust:GetCustomer>
+  </soap:Body>
+</soap:Envelope>

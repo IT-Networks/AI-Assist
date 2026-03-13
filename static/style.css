@@ -4545,3 +4545,81 @@ a:visited {
     background: transparent;
   }
 }
+
+/* ════════════════════════════════════════════════════════════════════════════
+   SOAP Tool Settings
+   ════════════════════════════════════════════════════════════════════════════ */
+
+.soap-operations-list {
+  margin-top: 8px;
+  padding-left: 16px;
+  border-left: 2px solid var(--border);
+}
+
+.soap-op-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 0;
+  font-size: 0.82rem;
+}
+
+.soap-op-name {
+  font-weight: 500;
+  color: var(--accent);
+}
+
+.soap-op-desc {
+  color: var(--text-muted);
+  font-size: 0.78rem;
+}
+
+.settings-hint {
+  font-size: 0.78rem;
+  color: var(--text-muted);
+  margin-bottom: 12px;
+}
+
+.settings-hint code {
+  background: var(--surface);
+  padding: 1px 5px;
+  border-radius: 3px;
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+}
+
+.ds-item-badge {
+  display: inline-block;
+  padding: 2px 8px;
+  background: var(--accent-bg);
+  color: var(--accent);
+  border-radius: 10px;
+  font-size: 0.72rem;
+  font-weight: 500;
+  margin-left: 8px;
+}
+
+.ds-item-details {
+  margin-top: 6px;
+  font-size: 0.82rem;
+  color: var(--text-secondary);
+}
+
+.ds-detail-label {
+  color: var(--text-muted);
+  font-size: 0.75rem;
+  text-transform: uppercase;
+}
+
+.empty-hint {
+  color: var(--text-muted);
+  font-style: italic;
+  font-size: 0.85rem;
+  padding: 8px 0;
+}
+
+.error-hint {
+  color: var(--danger);
+  font-size: 0.85rem;
+  padding: 8px 0;
+}

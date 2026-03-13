@@ -19,6 +19,12 @@ def estimate_messages_tokens(messages: List[dict]) -> int:
         return 0
     total = 0
     for msg in messages:
+        if msg is None:
+            continue
+        if not isinstance(msg, dict):
+            # Handle unexpected message types gracefully
+            total += estimate_tokens(str(msg)) + 4
+            continue
         content = msg.get("content")
         # Handle various content types
         if content is None:

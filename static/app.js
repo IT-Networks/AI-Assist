@@ -2765,6 +2765,7 @@ const settingsState = {
     data_sources: 'Interne HTTP-Systeme (Jenkins, GitHub, APIs)',
     mq: 'IBM MQ Series Messaging',
     test_tool: 'Test-Automatisierung',
+    soap_tool: 'SOAP Services (Multi-Institut)',
     log_servers: 'Log-Server für Analyse',
     wlp: 'WebSphere Liberty Profile Server',
     maven: 'Maven Build-Konfigurationen',
@@ -2965,6 +2966,11 @@ function renderSettingsSection() {
 
   if (section === 'test_tool') {
     renderTestToolSection();
+    return;
+  }
+
+  if (section === 'soap_tool') {
+    renderSoapToolSection();
     return;
   }
 
@@ -5114,6 +5120,317 @@ async function ttDeleteService(id) {
   if (!confirm('Service löschen?')) return;
   await fetch(`/api/testtool/services/${id}`, { method: 'DELETE' });
   await ttLoadAll();
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// SOAP Tool Settings Section (Multi-Institut)
+// ══════════════════════════════════════════════════════════════════════════════
+
+async function renderSoapToolSection() {
+  const form = document.getElementById('settings-form');
+  form.innerHTML = `
+    <div class="settings-section">
+      <h3 class="settings-section-title">SOAP SERVICES (Multi-Institut)</h3>
+      <p class="settings-section-desc">SOAP-basierte Service-Aufrufe mit automatischem Session-Management. Jedes Institut hat eigene Credentials und Session.</p>
+    </div>
+
+    <div class="settings-subsection">
+      <h4>Endpoints</h4>
+      <div class="settings-field">
+        <label>Service-URL:</label>
+        <input id="soap-service-url" type="text" class="settings-input" placeholder="https://example.com/soap/services">
+      </div>
+      <div class="settings-field">
+        <label>Login-URL:</label>
+        <input id="soap-login-url" type="text" class="settings-input" placeholder="https://example.com/soap/auth">
+      </div>
+      <div class="settings-field">
+        <label style="display:flex;align-items:center;gap:8px">
+          <input id="soap-verify-ssl" type="checkbox" checked>
+          SSL-Zertifikate verifizieren
+        </label>
+      </div>
+      <button class="btn btn-primary" onclick="soapSaveConfig()">Endpoints speichern</button>
+    </div>
+
+    <div class="settings-subsection" style="margin-top:16px">
+      <h4>Institute</h4>
+      <p class="settings-hint">Jedes Institut hat eigene Zugangsdaten. Passwörter können Umgebungsvariablen referenzieren: <code>{{env:VAR_NAME}}</code></p>
+      <div id="soap-institute-list"><div class="spinner-inline"></div></div>
+      <div class="settings-add-form">
+        <h5 style="margin:0 0 8px">Institut hinzufügen</h5>
+        <div class="settings-field-row">
+          <input id="soap-inst-nr" type="text" class="settings-input" placeholder="Institut-Nr (z.B. 001)" style="max-width:120px">
+          <input id="soap-inst-name" type="text" class="settings-input" placeholder="Name (z.B. Hauptfiliale)">
+        </div>
+        <div class="settings-field-row" style="margin-top:4px">
+          <input id="soap-inst-user" type="text" class="settings-input" placeholder="Benutzername">
+          <input id="soap-inst-pass" type="password" class="settings-input" placeholder="Passwort oder {{env:VAR}}">
+        </div>
+        <button class="btn btn-primary" onclick="soapAddInstitut()">+ Institut</button>
+      </div>
+    </div>
+
+    <div class="settings-subsection" style="margin-top:16px">
+      <h4>Sessions</h4>
+      <p class="settings-hint">Aktive Session-Tokens. Sessions werden automatisch beim ersten Aufruf erstellt.</p>
+      <div id="soap-sessions-list"><div class="spinner-inline"></div></div>
+    </div>
+
+    <div class="settings-subsection" style="margin-top:16px">
+      <h4>Services</h4>
+      <p class="settings-hint">SOAP-Services mit XML-Templates. Templates können Platzhalter enthalten.</p>
+      <div id="soap-services-list"><div class="spinner-inline"></div></div>
+    </div>
+  `;
+  await soapLoadAll();
+}
+
+async function soapLoadAll() {
+  // Config laden
+  try {
+    const cfgRes = await fetch('/api/soap/config');
+    if (cfgRes.ok) {
+      const cfg = await cfgRes.json();
+      const urlEl = document.getElementById('soap-service-url');
+      const loginEl = document.getElementById('soap-login-url');
+      const sslEl = document.getElementById('soap-verify-ssl');
+      if (urlEl) urlEl.value = cfg.service_url || '';
+      if (loginEl) loginEl.value = cfg.login_url || '';
+      if (sslEl) sslEl.checked = cfg.verify_ssl !== false;
+    }
+  } catch (e) { console.error('SOAP config load error:', e); }
+
+  // Institute laden
+  await soapLoadInstitute();
+
+  // Sessions laden
+  await soapLoadSessions();
+
+  // Services laden
+  await soapLoadServices();
+}
+
+async function soapSaveConfig() {
+  const body = {
+    service_url: document.getElementById('soap-service-url').value.trim(),
+    login_url: document.getElementById('soap-login-url').value.trim(),
+    verify_ssl: document.getElementById('soap-verify-ssl').checked,
+  };
+  const res = await fetch('/api/soap/config', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body)
+  });
+  if (res.ok) {
+    updateSettingsStatus('Endpoints gespeichert ✓', 'success');
+  } else {
+    updateSettingsStatus('Fehler beim Speichern', 'error');
+  }
+}
+
+async function soapLoadInstitute() {
+  const list = document.getElementById('soap-institute-list');
+  if (!list) return;
+
+  try {
+    const res = await fetch('/api/soap/institute');
+    const data = await res.json();
+
+    if (!data.institute?.length) {
+      list.innerHTML = '<p class="empty-hint">Keine Institute konfiguriert.</p>';
+      return;
+    }
+
+    list.innerHTML = data.institute.map(inst => `
+      <div class="ds-item" data-institut="${escapeHtml(inst.institut_nr)}">
+        <div class="ds-item-header">
+          <span class="ds-item-name">${inst.enabled ? '🏢' : '⏸️'} ${escapeHtml(inst.name || inst.institut_nr)}</span>
+          <span class="ds-item-badge">${escapeHtml(inst.institut_nr)}</span>
+          <div class="ds-item-actions">
+            <button class="btn btn-xs btn-secondary" onclick="soapEditInstitut('${escapeHtml(inst.institut_nr)}')" title="Bearbeiten">✏️</button>
+            <button class="btn btn-xs btn-danger" onclick="soapDeleteInstitut('${escapeHtml(inst.institut_nr)}')" title="Löschen">🗑️</button>
+          </div>
+        </div>
+        <div class="ds-item-details">
+          <span class="ds-detail-label">User:</span> ${escapeHtml(inst.user)}
+          <span class="ds-detail-label" style="margin-left:12px">Passwort:</span> ${inst.password ? '••••••••' : '(leer)'}
+        </div>
+      </div>
+    `).join('');
+  } catch (e) {
+    list.innerHTML = '<p class="error-hint">Fehler beim Laden der Institute</p>';
+  }
+}
+
+async function soapAddInstitut() {
+  const nr = document.getElementById('soap-inst-nr').value.trim();
+  const name = document.getElementById('soap-inst-name').value.trim();
+  const user = document.getElementById('soap-inst-user').value.trim();
+  const pass = document.getElementById('soap-inst-pass').value;
+
+  if (!nr) {
+    updateSettingsStatus('Institut-Nr ist erforderlich', 'error');
+    return;
+  }
+
+  const res = await fetch('/api/soap/institute', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      institut_nr: nr,
+      name: name || nr,
+      user: user,
+      password: pass,
+      enabled: true
+    })
+  });
+
+  if (res.ok) {
+    updateSettingsStatus('Institut hinzugefügt ✓', 'success');
+    ['soap-inst-nr', 'soap-inst-name', 'soap-inst-user', 'soap-inst-pass'].forEach(id => {
+      document.getElementById(id).value = '';
+    });
+    await soapLoadInstitute();
+    await soapLoadSessions();
+  } else {
+    const err = await res.json().catch(() => ({}));
+    updateSettingsStatus(err.detail || 'Fehler', 'error');
+  }
+}
+
+async function soapEditInstitut(nr) {
+  const name = prompt('Neuer Name (leer = behalten):');
+  if (name === null) return;
+
+  const user = prompt('Neuer Benutzername (leer = behalten):');
+  if (user === null) return;
+
+  const pass = prompt('Neues Passwort (leer = behalten):');
+  if (pass === null) return;
+
+  // Aktuelle Daten laden
+  const res = await fetch('/api/soap/institute');
+  const data = await res.json();
+  const inst = data.institute?.find(i => i.institut_nr === nr);
+  if (!inst) return;
+
+  await fetch(`/api/soap/institute/${encodeURIComponent(nr)}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      institut_nr: nr,
+      name: name || inst.name,
+      user: user || inst.user,
+      password: pass || '********',
+      enabled: inst.enabled
+    })
+  });
+  await soapLoadInstitute();
+}
+
+async function soapDeleteInstitut(nr) {
+  if (!confirm(`Institut ${nr} wirklich löschen?`)) return;
+  await fetch(`/api/soap/institute/${encodeURIComponent(nr)}`, { method: 'DELETE' });
+  updateSettingsStatus('Institut gelöscht', 'success');
+  await soapLoadInstitute();
+  await soapLoadSessions();
+}
+
+async function soapLoadSessions() {
+  const list = document.getElementById('soap-sessions-list');
+  if (!list) return;
+
+  try {
+    const res = await fetch('/api/soap/sessions');
+    const data = await res.json();
+
+    const sessions = Object.entries(data.sessions || {});
+    if (!sessions.length) {
+      list.innerHTML = '<p class="empty-hint">Keine aktiven Sessions.</p>';
+      return;
+    }
+
+    list.innerHTML = sessions.map(([nr, s]) => `
+      <div class="ds-item">
+        <div class="ds-item-header">
+          <span class="ds-item-name">${s.has_token && !s.is_expired ? '🟢' : '🔴'} Institut ${escapeHtml(nr)}</span>
+          <div class="ds-item-actions">
+            <button class="btn btn-xs btn-secondary" onclick="soapRefreshSession('${escapeHtml(nr)}')" title="Neu einloggen">🔄</button>
+            <button class="btn btn-xs btn-danger" onclick="soapDeleteSession('${escapeHtml(nr)}')" title="Session löschen">🗑️</button>
+          </div>
+        </div>
+        <div class="ds-item-details">
+          <span class="ds-detail-label">User:</span> ${escapeHtml(s.user || '-')}
+          <span class="ds-detail-label" style="margin-left:12px">Status:</span>
+          ${s.has_token ? (s.is_expired ? 'Abgelaufen' : 'Aktiv') : 'Kein Token'}
+          ${s.expires_at ? `<span class="ds-detail-label" style="margin-left:12px">Läuft ab:</span> ${new Date(s.expires_at).toLocaleString()}` : ''}
+        </div>
+      </div>
+    `).join('');
+  } catch (e) {
+    list.innerHTML = '<p class="empty-hint">Sessions nicht verfügbar</p>';
+  }
+}
+
+async function soapRefreshSession(nr) {
+  try {
+    const res = await fetch(`/api/soap/session/${encodeURIComponent(nr)}/login`, { method: 'POST' });
+    if (res.ok) {
+      updateSettingsStatus('Login erfolgreich ✓', 'success');
+    } else {
+      const err = await res.json().catch(() => ({}));
+      updateSettingsStatus(err.detail || 'Login fehlgeschlagen', 'error');
+    }
+    await soapLoadSessions();
+  } catch (e) {
+    updateSettingsStatus('Verbindungsfehler', 'error');
+  }
+}
+
+async function soapDeleteSession(nr) {
+  await fetch(`/api/soap/session/${encodeURIComponent(nr)}`, { method: 'DELETE' });
+  updateSettingsStatus('Session gelöscht', 'success');
+  await soapLoadSessions();
+}
+
+async function soapLoadServices() {
+  const list = document.getElementById('soap-services-list');
+  if (!list) return;
+
+  try {
+    const res = await fetch('/api/soap/services');
+    const data = await res.json();
+
+    if (!data.services?.length) {
+      list.innerHTML = '<p class="empty-hint">Keine Services konfiguriert. Services werden über YAML-Config oder durch die KI angelegt.</p>';
+      return;
+    }
+
+    list.innerHTML = data.services.map(svc => `
+      <div class="ds-item">
+        <div class="ds-item-header">
+          <span class="ds-item-name">${svc.enabled ? '📡' : '⏸️'} ${escapeHtml(svc.name)}</span>
+          <span class="ds-item-badge">${svc.operation_count} Operationen</span>
+        </div>
+        <div class="ds-item-details">
+          ${escapeHtml(svc.description || 'Keine Beschreibung')}
+        </div>
+        ${svc.operations?.length ? `
+          <div class="soap-operations-list">
+            ${svc.operations.map(op => `
+              <div class="soap-op-item">
+                <span class="soap-op-name">▸ ${escapeHtml(op.name)}</span>
+                <span class="soap-op-desc">${escapeHtml(op.description || '')}</span>
+              </div>
+            `).join('')}
+          </div>
+        ` : ''}
+      </div>
+    `).join('');
+  } catch (e) {
+    list.innerHTML = '<p class="error-hint">Fehler beim Laden der Services</p>';
+  }
 }
 
 // ══════════════════════════════════════════════════════════════════════════════

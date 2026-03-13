@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  SearchOrders Template - Bestellungen suchen
+
+  Platzhalter (auto-inject):
+    {{institut}}       - Institut-Nummer
+    {{session_token}}  - Session-Token
+
+  Platzhalter (user input):
+    {{customer_id}}    - Kunden-ID (optional)
+    {{date_from}}      - Startdatum YYYY-MM-DD (optional)
+    {{date_to}}        - Enddatum YYYY-MM-DD (optional)
+    {{status}}         - Status: OPEN|CLOSED|PENDING (optional)
+    {{max_results}}    - Max. Ergebnisse (optional, default: 100)
+-->
+<soap:Envelope
+    xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/"
+    xmlns:order="http://example.com/order">
+  <soap:Header>
+    <order:AuthHeader>
+      <order:InstitutNr>{{institut}}</order:InstitutNr>
+      <order:SessionToken>{{session_token}}</order:SessionToken>
+    </order:AuthHeader>
+  </soap:Header>
+  <soap:Body>
+    <order:SearchOrders>
+      <order:InstitutNr>{{institut}}</order:InstitutNr>
+      <order:Filter>
+        <order:CustomerId>{{customer_id:}}</order:CustomerId>
+        <order:DateFrom>{{date_from:}}</order:DateFrom>
+        <order:DateTo>{{date_to:}}</order:DateTo>
+        <order:Status>{{status:}}</order:Status>
+      </order:Filter>
+      <order:MaxResults>{{max_results:100}}</order:MaxResults>
+    </order:SearchOrders>
+  </soap:Body>
+</soap:Envelope>

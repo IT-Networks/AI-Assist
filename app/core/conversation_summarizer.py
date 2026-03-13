@@ -80,9 +80,9 @@ ZUSAMMENFASSUNG:"""
         if len(messages) < self.MIN_MESSAGES_FOR_SUMMARY:
             return messages
 
-        # Finde System-Messages und trenne sie
-        system_messages = [m for m in messages if m.get("role") == "system"]
-        non_system = [m for m in messages if m.get("role") != "system"]
+        # Finde System-Messages und trenne sie (filter None entries)
+        system_messages = [m for m in messages if m is not None and isinstance(m, dict) and m.get("role") == "system"]
+        non_system = [m for m in messages if m is not None and isinstance(m, dict) and m.get("role") != "system"]
 
         # Prüfe ob genug non-system Messages
         if len(non_system) <= self.KEEP_RECENT_MESSAGES:
@@ -125,9 +125,11 @@ ZUSAMMENFASSUNG:"""
         # Konversation formatieren
         conversation_parts = []
         for msg in messages:
+            if msg is None or not isinstance(msg, dict):
+                continue
             role = msg.get("role", "unknown").upper()
-            content = msg.get("content", "")[:1500]  # Max 1500 Zeichen pro Message
-            conversation_parts.append(f"{role}: {content}")
+            content = msg.get("content", "") or ""
+            conversation_parts.append(f"{role}: {content[:1500]}")
 
         conversation_text = "\n\n".join(conversation_parts)
 
@@ -194,10 +196,12 @@ ZUSAMMENFASSUNG:"""
         """
         parts = ["Bisherige Konversation (gekürzt):"]
 
-        for i, msg in enumerate(messages[-5:]):  # Letzte 5
+        for msg in messages[-5:]:  # Letzte 5
+            if msg is None or not isinstance(msg, dict):
+                continue
             role = msg.get("role", "?")
-            content = msg.get("content", "")[:200]
-            parts.append(f"- {role}: {content}...")
+            content = msg.get("content", "") or ""
+            parts.append(f"- {role}: {content[:200]}...")
 
         return "\n".join(parts)
 
@@ -208,8 +212,8 @@ ZUSAMMENFASSUNG:"""
         Returns:
             Dict mit Statistiken
         """
-        system_messages = [m for m in messages if m.get("role") == "system"]
-        non_system = [m for m in messages if m.get("role") != "system"]
+        system_messages = [m for m in messages if m is not None and isinstance(m, dict) and m.get("role") == "system"]
+        non_system = [m for m in messages if m is not None and isinstance(m, dict) and m.get("role") != "system"]
 
         if len(non_system) <= self.KEEP_RECENT_MESSAGES:
             return {
