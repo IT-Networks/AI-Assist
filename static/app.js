@@ -7847,7 +7847,7 @@ document.addEventListener('keydown', (e) => {
 // MCP-Typen mit Icons und Farben
 const MCP_TYPES = {
   sequential_thinking: { icon: '🧠', label: 'Sequential Thinking', color: 'thinking' },
-  thinking: { icon: '🧠', label: 'Thinking', color: 'thinking' },  // ThinkingEngine verwendet "thinking"
+  thinking: { icon: '🧠', label: 'Sequential Thinking', color: 'thinking' },  // ThinkingEngine wrapper
   brainstorm: { icon: '💡', label: 'Brainstorm', color: 'brainstorm' },
   design: { icon: '📐', label: 'Design', color: 'design' },
   implement: { icon: '⚙️', label: 'Implement', color: 'implement' },
