@@ -57,6 +57,8 @@ class ConfigRequest(BaseModel):
     service_url: str = ""
     login_url: str = ""
     verify_ssl: bool = True
+    login_template: str = "login.soap.xml"
+    session_token_xpath: str = "//SessionToken/text()"
 
 
 class InstitutRequest(BaseModel):
@@ -122,6 +124,8 @@ async def get_config() -> Dict[str, Any]:
         "service_url": settings.test_tool.service_url,
         "login_url": settings.test_tool.login_url,
         "verify_ssl": settings.test_tool.verify_ssl,
+        "login_template": settings.test_tool.login_template,
+        "session_token_xpath": settings.test_tool.session_token_xpath,
         "templates_path": settings.test_tool.templates_path,
         "institut_count": len(settings.test_tool.institute),
         "service_count": len(settings.test_tool.services),
@@ -134,12 +138,42 @@ async def update_config(req: ConfigRequest) -> Dict[str, Any]:
     settings.test_tool.service_url = req.service_url
     settings.test_tool.login_url = req.login_url
     settings.test_tool.verify_ssl = req.verify_ssl
+    settings.test_tool.login_template = req.login_template
+    settings.test_tool.session_token_xpath = req.session_token_xpath
 
     return {
         "updated": True,
         "service_url": settings.test_tool.service_url,
         "login_url": settings.test_tool.login_url,
         "verify_ssl": settings.test_tool.verify_ssl,
+        "login_template": settings.test_tool.login_template,
+        "session_token_xpath": settings.test_tool.session_token_xpath,
+    }
+
+
+@router.get("/templates")
+async def list_templates() -> Dict[str, Any]:
+    """Listet alle verfügbaren Login-Templates auf."""
+    from pathlib import Path
+    templates_path = Path(settings.test_tool.templates_path)
+
+    templates = []
+    if templates_path.exists():
+        for f in templates_path.glob("*.xml"):
+            templates.append({
+                "name": f.name,
+                "path": str(f.relative_to(templates_path)),
+            })
+        # Auch in Unterverzeichnissen suchen
+        for f in templates_path.glob("*/*.xml"):
+            templates.append({
+                "name": f.name,
+                "path": str(f.relative_to(templates_path)),
+            })
+
+    return {
+        "templates": sorted(templates, key=lambda x: x["name"]),
+        "current": settings.test_tool.login_template,
     }
 
 

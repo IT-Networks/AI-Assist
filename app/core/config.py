@@ -415,6 +415,9 @@ class TestToolConfig(BaseModel):
     service_url: str = ""             # z.B. "https://soap.example.com/services"
     login_url: str = ""               # z.B. "https://soap.example.com/auth/login"
     verify_ssl: bool = True
+    # Globales Login-Template (für alle Institute)
+    login_template: str = "login.soap.xml"
+    session_token_xpath: str = "//SessionToken/text()"
     # Institute (Multi-Tenant)
     institute: List[SoapInstitut] = []
     # Services

@@ -4945,7 +4945,7 @@ async function renderTestToolSection() {
     </div>
 
     <div class="settings-subsection">
-      <h4>Endpoints</h4>
+      <h4>Endpoints & Login</h4>
       <div id="soap-config-status" class="config-status-box" style="margin-bottom:12px;padding:8px;border-radius:4px;font-size:12px;background:var(--bg-tertiary)">
         <span class="spinner-inline"></span> Prüfe Konfiguration...
       </div>
@@ -4959,12 +4959,24 @@ async function renderTestToolSection() {
         <small style="color:var(--text-muted);display:block;margin-top:4px">Wird für automatisches Session-Management verwendet</small>
       </div>
       <div class="settings-field">
+        <label>Login-Template:</label>
+        <select id="soap-login-template" class="settings-input">
+          <option value="">Lade Templates...</option>
+        </select>
+        <small style="color:var(--text-muted);display:block;margin-top:4px">XML-Template für SOAP-Login (global für alle Institute)</small>
+      </div>
+      <div class="settings-field">
+        <label>Session-Token XPath:</label>
+        <input id="soap-session-xpath" type="text" class="settings-input" placeholder="//SessionToken/text()">
+        <small style="color:var(--text-muted);display:block;margin-top:4px">XPath zum Extrahieren des Session-Tokens aus der Login-Response</small>
+      </div>
+      <div class="settings-field">
         <label style="display:flex;align-items:center;gap:8px">
           <input id="soap-verify-ssl" type="checkbox" checked>
           SSL-Zertifikate verifizieren
         </label>
       </div>
-      <button class="btn btn-primary" onclick="soapSaveConfig()">Endpoints speichern</button>
+      <button class="btn btn-primary" onclick="soapSaveConfig()">Konfiguration speichern</button>
     </div>
 
     <div class="settings-subsection" style="margin-top:16px">
@@ -5206,17 +5218,37 @@ async function soapLoadAll() {
   let instituteData = null;
   let servicesData = null;
 
-  // Config laden
+  // Config und Templates parallel laden
   try {
-    const cfgRes = await fetch('/api/testtool/config');
+    const [cfgRes, tplRes] = await Promise.all([
+      fetch('/api/testtool/config'),
+      fetch('/api/testtool/templates'),
+    ]);
+
     if (cfgRes.ok) {
       configData = await cfgRes.json();
       const urlEl = document.getElementById('soap-service-url');
       const loginEl = document.getElementById('soap-login-url');
       const sslEl = document.getElementById('soap-verify-ssl');
+      const xpathEl = document.getElementById('soap-session-xpath');
       if (urlEl) urlEl.value = configData.service_url || '';
       if (loginEl) loginEl.value = configData.login_url || '';
       if (sslEl) sslEl.checked = configData.verify_ssl !== false;
+      if (xpathEl) xpathEl.value = configData.session_token_xpath || '//SessionToken/text()';
+    }
+
+    // Templates-Dropdown befüllen
+    if (tplRes.ok) {
+      const tplData = await tplRes.json();
+      const tplSelect = document.getElementById('soap-login-template');
+      if (tplSelect && tplData.templates) {
+        tplSelect.innerHTML = tplData.templates.map(t =>
+          `<option value="${escapeHtml(t.name)}" ${t.name === configData?.login_template ? 'selected' : ''}>${escapeHtml(t.name)}</option>`
+        ).join('');
+        if (!tplData.templates.length) {
+          tplSelect.innerHTML = '<option value="">Keine Templates gefunden</option>';
+        }
+      }
     }
   } catch (e) { console.error('SOAP config load error:', e); }
 
@@ -5247,11 +5279,11 @@ function soapUpdateConfigStatus(config, institutes, services) {
     ok.push('Login-URL');
   }
 
-  // Service-URL prüfen
-  if (!config?.service_url) {
-    issues.push('Service-URL nicht konfiguriert');
+  // Login-Template prüfen
+  if (!config?.login_template) {
+    issues.push('Login-Template nicht ausgewählt');
   } else {
-    ok.push('Service-URL');
+    ok.push(`Template: ${config.login_template}`);
   }
 
   // Institute prüfen
@@ -5263,17 +5295,6 @@ function soapUpdateConfigStatus(config, institutes, services) {
     issues.push('Kein Institut aktiviert');
   } else {
     ok.push(`${enabledInst} Institut(e)`);
-  }
-
-  // Services prüfen
-  const svcCount = services?.services?.length || 0;
-  const enabledSvc = services?.services?.filter(s => s.enabled)?.length || 0;
-  if (svcCount === 0) {
-    issues.push('Keine Services konfiguriert (Login-Template benötigt Service)');
-  } else if (enabledSvc === 0) {
-    issues.push('Kein Service aktiviert');
-  } else {
-    ok.push(`${enabledSvc} Service(s)`);
   }
 
   if (issues.length === 0) {
@@ -5290,6 +5311,8 @@ async function soapSaveConfig() {
     service_url: document.getElementById('soap-service-url').value.trim(),
     login_url: document.getElementById('soap-login-url').value.trim(),
     verify_ssl: document.getElementById('soap-verify-ssl').checked,
+    login_template: document.getElementById('soap-login-template').value,
+    session_token_xpath: document.getElementById('soap-session-xpath').value.trim() || '//SessionToken/text()',
   };
   const res = await fetch('/api/testtool/config', {
     method: 'PUT',
@@ -5297,7 +5320,9 @@ async function soapSaveConfig() {
     body: JSON.stringify(body)
   });
   if (res.ok) {
-    updateSettingsStatus('Endpoints gespeichert ✓', 'success');
+    updateSettingsStatus('Konfiguration gespeichert ✓', 'success');
+    // Status aktualisieren
+    await soapLoadAll();
   } else {
     updateSettingsStatus('Fehler beim Speichern', 'error');
   }
@@ -5324,6 +5349,7 @@ async function soapLoadInstitute() {
           <span class="ds-item-name">${inst.enabled ? '🏢' : '⏸️'} ${escapeHtml(inst.name || inst.institut_nr)}</span>
           <span class="ds-item-badge">${escapeHtml(inst.institut_nr)}</span>
           <div class="ds-item-actions">
+            <button class="btn btn-xs btn-primary" onclick="soapTestLogin('${escapeHtml(inst.institut_nr)}')" title="Login testen" ${!inst.enabled ? 'disabled' : ''}>🔑 Login</button>
             <button class="btn btn-xs btn-secondary" onclick="soapEditInstitut('${escapeHtml(inst.institut_nr)}')" title="Bearbeiten">✏️</button>
             <button class="btn btn-xs btn-danger" onclick="soapDeleteInstitut('${escapeHtml(inst.institut_nr)}')" title="Löschen">🗑️</button>
           </div>
@@ -5332,6 +5358,7 @@ async function soapLoadInstitute() {
           <span class="ds-detail-label">User:</span> ${escapeHtml(inst.user)}
           <span class="ds-detail-label" style="margin-left:12px">Passwort:</span> ${inst.password ? '••••••••' : '(leer)'}
         </div>
+        <div id="soap-login-status-${escapeHtml(inst.institut_nr)}" class="ds-item-status" style="margin-top:4px;font-size:11px"></div>
       </div>
     `).join('');
   } catch (e) {
@@ -5412,6 +5439,40 @@ async function soapDeleteInstitut(nr) {
   updateSettingsStatus('Institut gelöscht', 'success');
   await soapLoadInstitute();
   await soapLoadSessions();
+}
+
+async function soapTestLogin(institutNr) {
+  const statusEl = document.getElementById(`soap-login-status-${institutNr}`);
+  if (statusEl) {
+    statusEl.innerHTML = '<span style="color:var(--text-muted)">⏳ Login wird durchgeführt...</span>';
+  }
+
+  try {
+    const res = await fetch(`/api/testtool/session/${encodeURIComponent(institutNr)}/login`, {
+      method: 'POST'
+    });
+    const data = await res.json();
+
+    if (res.ok && data.success) {
+      if (statusEl) {
+        statusEl.innerHTML = `<span style="color:var(--success)">✓ Login erfolgreich!</span>
+          <span style="margin-left:8px;color:var(--text-muted)">Token: ${escapeHtml(data.token_preview || '...')}</span>`;
+      }
+      updateSettingsStatus(`Login erfolgreich für Institut ${institutNr}`, 'success');
+      await soapLoadSessions();
+    } else {
+      const errorMsg = data.detail || data.error || 'Login fehlgeschlagen';
+      if (statusEl) {
+        statusEl.innerHTML = `<span style="color:var(--error)">✗ ${escapeHtml(errorMsg)}</span>`;
+      }
+      updateSettingsStatus(`Login fehlgeschlagen: ${errorMsg}`, 'error');
+    }
+  } catch (e) {
+    if (statusEl) {
+      statusEl.innerHTML = `<span style="color:var(--error)">✗ Verbindungsfehler: ${escapeHtml(e.message)}</span>`;
+    }
+    updateSettingsStatus(`Verbindungsfehler: ${e.message}`, 'error');
+  }
 }
 
 async function soapLoadSessions() {

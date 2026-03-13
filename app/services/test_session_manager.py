@@ -192,25 +192,20 @@ class TestSessionManager:
         if not settings.test_tool.login_url:
             raise ValueError("login_url nicht konfiguriert in test_tool")
 
-        # Ersten Service mit Login-Template finden
-        service = next((s for s in settings.test_tool.services if s.enabled), None)
-        if not service:
-            raise ValueError("Kein aktiver Service konfiguriert")
+        # Globales Login-Template aus Config verwenden
+        login_template = settings.test_tool.login_template or "login.soap.xml"
 
         # Template laden
         from app.services.test_template_engine import get_template_engine
         engine = get_template_engine()
 
         try:
-            # Login-Template ist pro Service oder global "login.soap.xml"
-            template = engine.load_template("", service.login_template)
+            template = engine.load_template("", login_template)
         except FileNotFoundError:
-            try:
-                template = engine.load_template("", "login.soap.xml")
-            except FileNotFoundError:
-                raise ValueError(
-                    f"Login-Template nicht gefunden: {service.login_template}"
-                )
+            raise ValueError(
+                f"Login-Template nicht gefunden: {login_template}\n"
+                f"Pfad: {settings.test_tool.templates_path}/{login_template}"
+            )
 
         # Template füllen
         envelope = engine.fill_template(template, {}, auto_params={
@@ -219,10 +214,9 @@ class TestSessionManager:
             'password': password,
         })
 
-        # Headers
+        # Headers (SOAP 1.1 Standard)
         headers = {
-            'Content-Type': 'text/xml; charset=utf-8' if service.soap_version == '1.1'
-                           else 'application/soap+xml; charset=utf-8',
+            'Content-Type': 'text/xml; charset=utf-8',
         }
 
         # Request ausführen
@@ -246,24 +240,18 @@ class TestSessionManager:
                 f"{response.text[:500]}"
             )
 
-        # Token extrahieren
-        token = self._extract_xpath(response.text, service.session_token_xpath)
+        # Token extrahieren mit globalem XPath
+        session_token_xpath = settings.test_tool.session_token_xpath or "//SessionToken/text()"
+        token = self._extract_xpath(response.text, session_token_xpath)
         if not token:
             raise ValueError(
                 f"Session-Token konnte nicht extrahiert werden.\n"
-                f"XPath: {service.session_token_xpath}\n"
+                f"XPath: {session_token_xpath}\n"
                 f"Response: {response.text[:500]}"
             )
 
-        # Ablaufzeit extrahieren (optional)
+        # Ablaufzeit (optional, derzeit nicht global konfiguriert)
         expires_at = None
-        if service.session_expires_xpath:
-            expires_str = self._extract_xpath(response.text, service.session_expires_xpath)
-            if expires_str:
-                try:
-                    expires_at = datetime.fromisoformat(expires_str.replace('Z', '+00:00'))
-                except ValueError:
-                    logger.warning(f"Ungültiges Ablaufdatum: {expires_str}")
 
         # Session speichern
         self._sessions[institut_nr] = SessionInfo(
