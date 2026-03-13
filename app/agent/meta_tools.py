@@ -7,11 +7,13 @@ mehrere Operationen parallel ausführen.
 Haupttools:
 - combined_search: Durchsucht mehrere Quellen parallel
 - batch_read_files: Liest mehrere Dateien in einem Aufruf
+- batch_write_files: Schreibt mehrere Dateien in einem Aufruf (EINE Bestätigung)
 """
 
 import asyncio
+import json
 import logging
-from typing import Any, List, Optional
+from typing import Any, Dict, List, Optional
 
 from app.agent.tools import Tool, ToolCategory, ToolParameter, ToolResult, ToolRegistry
 
@@ -282,6 +284,127 @@ async def _safe_read_file(read_func, **kwargs) -> ToolResult:
         return ToolResult(success=False, error=str(e))
 
 
+async def batch_write_files(
+    files: str,
+    **kwargs
+) -> ToolResult:
+    """
+    Schreibt mehrere Dateien in einem Aufruf mit EINER Bestätigung.
+
+    Ersetzt: write_file × N (mit N einzelnen Bestätigungen)
+
+    Args:
+        files: JSON-Array von Objekten mit 'path' und 'content'.
+               Format: [{"path": "src/file1.py", "content": "..."}, ...]
+               ODER: Komma-getrennte Pfade wenn alle leer erstellt werden sollen.
+    """
+    from app.services.file_manager import get_file_manager
+
+    if not files or not files.strip():
+        return ToolResult(
+            success=False,
+            error="Keine Dateien angegeben. Format: [{\"path\": \"...\", \"content\": \"...\"}]"
+        )
+
+    # Versuche JSON zu parsen
+    file_list: List[Dict[str, str]] = []
+    try:
+        parsed = json.loads(files)
+        if isinstance(parsed, list):
+            file_list = parsed
+        else:
+            return ToolResult(
+                success=False,
+                error="files muss ein JSON-Array sein: [{\"path\": \"...\", \"content\": \"...\"}]"
+            )
+    except json.JSONDecodeError as e:
+        return ToolResult(
+            success=False,
+            error=f"Ungültiges JSON: {e}. Format: [{{\"path\": \"...\", \"content\": \"...\"}}]"
+        )
+
+    # Validierung
+    if not file_list:
+        return ToolResult(success=False, error="Leere Datei-Liste")
+
+    max_files = 20
+    if len(file_list) > max_files:
+        return ToolResult(
+            success=False,
+            error=f"Maximal {max_files} Dateien pro Batch (angefordert: {len(file_list)})"
+        )
+
+    # Struktur validieren
+    for i, f in enumerate(file_list):
+        if not isinstance(f, dict):
+            return ToolResult(success=False, error=f"Element {i} ist kein Objekt")
+        if "path" not in f:
+            return ToolResult(success=False, error=f"Element {i} fehlt 'path'")
+        if "content" not in f:
+            return ToolResult(success=False, error=f"Element {i} fehlt 'content'")
+
+    logger.info(f"[batch_write_files] Bereite {len(file_list)} Dateien vor...")
+
+    # Previews generieren
+    manager = get_file_manager()
+    previews = []
+    combined_diff = []
+    errors = []
+
+    for file_spec in file_list:
+        path = file_spec["path"]
+        content = file_spec["content"]
+        try:
+            preview = await manager.write_file(path, content)
+            previews.append({
+                "path": path,
+                "content": content,
+                "is_new": preview.is_new,
+                "diff": preview.diff
+            })
+            # Kombiniertes Diff für Übersicht
+            status = "NEU" if preview.is_new else "ÄNDERUNG"
+            combined_diff.append(f"━━━ [{status}] {path} ━━━")
+            if preview.diff:
+                combined_diff.append(preview.diff)
+            else:
+                combined_diff.append(f"(Neue Datei mit {len(content)} Zeichen)")
+            combined_diff.append("")
+        except Exception as e:
+            errors.append(f"{path}: {e}")
+            logger.warning(f"[batch_write_files] Fehler bei {path}: {e}")
+
+    if errors and not previews:
+        return ToolResult(
+            success=False,
+            error=f"Alle Dateien fehlgeschlagen:\n" + "\n".join(errors)
+        )
+
+    # Summary
+    new_count = sum(1 for p in previews if p["is_new"])
+    update_count = len(previews) - new_count
+
+    summary = f"=== Batch-Write: {len(previews)} Dateien ===\n"
+    summary += f"Neu: {new_count} | Updates: {update_count}\n"
+    if errors:
+        summary += f"Fehler: {len(errors)}\n"
+    summary += "\n" + "\n".join(combined_diff)
+
+    return ToolResult(
+        success=True,
+        requires_confirmation=True,
+        data=summary,
+        confirmation_data={
+            "operation": "batch_write_files",
+            "files": previews,
+            "file_count": len(previews),
+            "new_count": new_count,
+            "update_count": update_count,
+            "errors": errors
+        }
+    )
+
+
 def register_meta_tools(registry: ToolRegistry) -> int:
     """
     Registriert alle Meta-Tools im Tool-Registry.
@@ -409,5 +532,39 @@ def register_meta_tools(registry: ToolRegistry) -> int:
     ))
     count += 1
     logger.info("[meta_tools] batch_read_files registriert")
+
+    # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    # Batch Write Files - Mehrere Dateien mit EINER Bestätigung schreiben
+    # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    registry.register(Tool(
+        name="batch_write_files",
+        description=(
+            "📝 EFFIZIENZ-TOOL: Schreibt MEHRERE Dateien mit EINER Bestätigung!\n"
+            "Ersetzt: write_file × N (ohne N einzelne Bestätigungen)\n\n"
+            "WICHTIG: Nutze dieses Tool wenn du mehrere Dateien erstellen/ändern musst!\n"
+            "Der User bestätigt EINMAL für alle Dateien.\n\n"
+            "Format: JSON-Array mit path und content pro Datei.\n"
+            "Beispiel: batch_write_files(files='[{\"path\": \"src/User.java\", \"content\": \"...\"}]')"
+        ),
+        category=ToolCategory.FILE,
+        is_write_operation=True,
+        parameters=[
+            ToolParameter(
+                name="files",
+                type="string",
+                description=(
+                    "JSON-Array von Dateien. Format:\n"
+                    "[{\"path\": \"pfad/datei.ext\", \"content\": \"Inhalt...\"}, ...]\n\n"
+                    "Max 20 Dateien pro Batch.\n"
+                    "Beispiel: '[{\"path\": \"src/A.java\", \"content\": \"class A {}\"}, "
+                    "{\"path\": \"src/B.java\", \"content\": \"class B {}\"}]'"
+                ),
+                required=True
+            )
+        ],
+        handler=batch_write_files
+    ))
+    count += 1
+    logger.info("[meta_tools] batch_write_files registriert")
 
     return count

@@ -2389,6 +2389,45 @@ Sei präzise und gib detaillierte Analyse-Schritte."""
             max_rows = confirmation_data.get("max_rows", 100)
             return await execute_confirmed_query(query, max_rows)
 
+        elif operation == "batch_write_files":
+            # Batch-Write: Alle Dateien auf einmal schreiben
+            files = confirmation_data.get("files", [])
+            manager = get_file_manager()
+
+            success_count = 0
+            errors = []
+            written_paths = []
+
+            for file_spec in files:
+                file_path = file_spec.get("path")
+                content = file_spec.get("content")
+                try:
+                    success = await manager.execute_write(file_path, content)
+                    if success:
+                        success_count += 1
+                        written_paths.append(file_path)
+                    else:
+                        errors.append(f"{file_path}: Schreiben fehlgeschlagen")
+                except Exception as e:
+                    errors.append(f"{file_path}: {e}")
+
+            total = len(files)
+            if success_count == total:
+                return ToolResult(
+                    success=True,
+                    data=f"Alle {total} Dateien erfolgreich geschrieben:\n" + "\n".join(f"  - {p}" for p in written_paths)
+                )
+            elif success_count > 0:
+                return ToolResult(
+                    success=True,
+                    data=f"{success_count}/{total} Dateien geschrieben.\nFehler:\n" + "\n".join(errors)
+                )
+            else:
+                return ToolResult(
+                    success=False,
+                    error=f"Alle Dateien fehlgeschlagen:\n" + "\n".join(errors)
+                )
+
         else:
             return ToolResult(success=False, error=f"Unbekannte Operation: {operation}")
 
@@ -2569,10 +2608,16 @@ Zusätzliche Tools:
 - write_file: Erstelle oder überschreibe eine DATEI (benötigt Bestätigung) - NUR für Dateien mit Endung!
 - edit_file: Bearbeite eine Datei (benötigt Bestätigung)
 - create_directory: Erstelle einen ORDNER (benötigt Bestätigung) - NUR für Verzeichnisse!
+- batch_write_files: WICHTIG! Schreibt MEHRERE Dateien mit EINER Bestätigung. Nutze wenn du 2+ Dateien erstellen musst!
+
+**MEHRERE DATEIEN ERSTELLEN:**
+Wenn du mehrere Dateien erstellen musst (z.B. bei einem Design-Konzept), nutze IMMER batch_write_files!
+Format: batch_write_files(files='[{"path": "src/A.java", "content": "..."}, {"path": "src/B.java", "content": "..."}]')
+→ User bestätigt EINMAL für alle Dateien
 
 **ORDNER vs DATEI:**
 - Pfad OHNE Dateiendung (z.B. `src/components`) → verwende create_directory
-- Pfad MIT Dateiendung (z.B. `src/app.py`) → verwende write_file
+- Pfad MIT Dateiendung (z.B. `src/app.py`) → verwende write_file oder batch_write_files
 
 Der User muss Datei-Operationen bestätigen bevor sie ausgeführt werden.
 Datenbank-Abfragen (SELECT) sind ohne Bestätigung erlaubt.
@@ -2610,20 +2655,25 @@ Schreibe NUR den [PLAN]-Block als deine finale Antwort. Führe keine Datei-Ände
 MODUS: Ausführungsphase (Plan genehmigt)
 Der User hat deinen Plan genehmigt.
 Zusätzliche Tools:
-- write_file: Erstelle oder überschreibe eine DATEI (benötigt Bestätigung) - NUR für Dateien mit Endung!
+- write_file: Erstelle eine einzelne DATEI (benötigt Bestätigung)
 - edit_file: Bearbeite eine Datei (benötigt Bestätigung)
-- create_directory: Erstelle einen ORDNER - NUR für Verzeichnisse ohne Dateiendung!
+- create_directory: Erstelle einen ORDNER
+- batch_write_files: BEVORZUGT! Schreibt MEHRERE Dateien mit EINER Bestätigung!
 
-**WICHTIG - VOLLSTÄNDIGE PLAN-AUSFÜHRUNG:**
-Du MUSST den gesamten Plan abarbeiten und ALLE Dateien erstellen/ändern, nicht nur eine!
-- Führe JEDEN Schritt des Plans aus, einen nach dem anderen
-- Nach jeder bestätigten Datei-Operation: Fahre SOFORT mit dem nächsten Schritt fort
-- Höre NICHT nach der ersten Datei auf - arbeite den kompletten Plan ab
-- Erst wenn ALLE Schritte erledigt sind, gib eine Zusammenfassung
+**WICHTIG - NUTZE BATCH_WRITE_FILES FÜR MEHRERE DATEIEN:**
+Wenn dein Plan mehrere Dateien erstellt/ändert, nutze batch_write_files um sie ALLE auf einmal zu schreiben!
+→ Statt 5x write_file (5 Bestätigungen) → 1x batch_write_files (1 Bestätigung)
+Format: batch_write_files(files='[{"path": "...", "content": "..."}, ...]')
+
+**VOLLSTÄNDIGE PLAN-AUSFÜHRUNG:**
+Du MUSST ALLE Dateien des Plans erstellen - nicht nach der ersten aufhören!
+- Sammle ALLE zu erstellenden Dateien
+- Nutze batch_write_files um sie in EINEM Aufruf zu schreiben
+- User bestätigt einmal, alle Dateien werden erstellt
 
 **ORDNER vs DATEI:**
 - Pfad OHNE Dateiendung (z.B. `src/components`) → verwende create_directory
-- Pfad MIT Dateiendung (z.B. `src/app.py`) → verwende write_file
+- Pfad MIT Dateiendung (z.B. `src/app.py`) → verwende batch_write_files (oder write_file für einzelne)
 """
 
         elif mode == AgentMode.DEBUG:
@@ -2656,13 +2706,18 @@ Verfügbare Diagnose-Tools: search_code, read_file, search_handbook, Log-Tools, 
             return base + """
 MODUS: Autonom
 Zusätzliche Tools:
-- write_file: Erstelle oder überschreibe eine DATEI - NUR für Dateien mit Endung!
+- write_file: Erstelle eine einzelne DATEI
 - edit_file: Bearbeite eine Datei
-- create_directory: Erstelle einen ORDNER - NUR für Verzeichnisse!
+- create_directory: Erstelle einen ORDNER
+- batch_write_files: Schreibt mehrere Dateien in einem Aufruf (effizienter!)
+
+**MEHRERE DATEIEN:**
+Bei mehreren Dateien nutze batch_write_files für bessere Performance.
+Format: batch_write_files(files='[{"path": "...", "content": "..."}, ...]')
 
 **ORDNER vs DATEI:**
 - Pfad OHNE Dateiendung (z.B. `src/components`) → verwende create_directory
-- Pfad MIT Dateiendung (z.B. `src/app.py`) → verwende write_file
+- Pfad MIT Dateiendung (z.B. `src/app.py`) → verwende write_file oder batch_write_files
 
 Du kannst Dateien ohne Bestätigung schreiben/bearbeiten.
 Sei vorsichtig und mache nur notwendige Änderungen.

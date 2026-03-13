@@ -205,7 +205,7 @@ Letzte Tools: {recent_str}
 Verbleibend: {self.remaining_iterations}/{self.max_iterations} Iterationen
 Verbraucht: {self.total_tools_used} Tool-Aufrufe
 
-**Tipp:** Nutze kombinierte Tools wie `combined_search` und `batch_read_files` fuer effizientere Ausfuehrung.
+**Tipp:** Nutze kombinierte Tools wie `combined_search`, `batch_read_files` und `batch_write_files` fuer effizientere Ausfuehrung.
 """
 
         return ""
@@ -237,6 +237,15 @@ Verbraucht: {self.total_tools_used} Tool-Aufrufe
             suggestions.append(
                 f"Du hast {read_count}x read_file ausgefuehrt. "
                 f"Nutze `batch_read_files(paths='file1,file2,file3')` um mehrere Dateien parallel zu lesen."
+            )
+
+        # 2b. Mehrfache write_file -> batch_write_files
+        write_count = counts.get("write_file", 0)
+        if write_count >= 2:
+            suggestions.append(
+                f"Du hast {write_count}x write_file ausgefuehrt. "
+                f"Nutze `batch_write_files(files='[{{\"path\": \"...\", \"content\": \"...\"}}]')` "
+                f"um mehrere Dateien mit EINER Bestaetigung zu schreiben."
             )
 
         # 3. search_code ohne read_files
@@ -286,7 +295,7 @@ Verbraucht: {self.total_tools_used} Tool-Aufrufe
             score -= (1 - hit_rate) * 30
 
         # Meta-Tool-Nutzung (max 20 Punkte Bonus)
-        meta_tools = ["combined_search", "batch_read_files"]
+        meta_tools = ["combined_search", "batch_read_files", "batch_write_files"]
         meta_usage = sum(counts.get(t, 0) for t in meta_tools)
         if meta_usage > 0 and self.total_tools_used > 0:
             meta_ratio = meta_usage / self.total_tools_used

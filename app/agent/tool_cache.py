@@ -128,6 +128,7 @@ class ToolResultCache:
         "write_file",
         "edit_file",
         "create_directory",
+        "batch_write_files",
 
         # Shell/Docker
         "shell_execute",
