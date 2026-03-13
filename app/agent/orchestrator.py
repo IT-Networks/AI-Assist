@@ -1349,6 +1349,17 @@ Sei präzise und gib detaillierte Analyse-Schritte."""
 
                 # LLM aufrufen (nicht-streamend für Tool-Calls)
                 logger.debug("[agent] Iteration {iteration + 1}: Calling LLM with {len(tool_schemas)} tools")
+
+                # Reasoning-Status Event VOR dem Call senden (zeigt User dass LLM arbeitet)
+                # Bei Tool-Phase: tool_reasoning, bei Analysis: analysis_reasoning
+                configured_reasoning = settings.llm.tool_reasoning or settings.llm.analysis_reasoning
+                if configured_reasoning:
+                    yield AgentEvent(AgentEventType.REASONING_STATUS, {
+                        "active": True,
+                        "level": configured_reasoning,
+                        "phase": "processing"
+                    })
+
                 response = await self._call_llm_with_tools(
                     messages, tool_schemas, model, is_tool_phase=True
                 )
@@ -1356,15 +1367,6 @@ Sei präzise und gib detaillierte Analyse-Schritte."""
                 content = response.get("content", "")
                 finish_reason = response.get("finish_reason", "")
                 native_tools = response.get("native_tools", True)
-
-                # Reasoning-Status Event senden (falls aktiv)
-                reasoning_used = response.get("reasoning")
-                if reasoning_used:
-                    yield AgentEvent(AgentEventType.REASONING_STATUS, {
-                        "active": True,
-                        "level": reasoning_used,
-                        "phase": "tool"
-                    })
 
                 logger.debug(
                     "[agent] LLM response: finish_reason=%r, tool_calls=%d, content_len=%d",
@@ -1535,6 +1537,14 @@ Sei präzise und gib detaillierte Analyse-Schritte."""
                         final_usage = stream_result["usage"].get("usage")
                     else:
                         # Vorhandene Antwort nutzen (LLM hat direkt geantwortet ohne Tools)
+                        # Bei direkten Antworten: Reasoning-Status senden falls konfiguriert
+                        # (Note: Der ursprüngliche Call war mit tool_reasoning, aber wir zeigen analysis_reasoning an)
+                        if settings.llm.analysis_reasoning and not has_used_tools:
+                            yield AgentEvent(AgentEventType.REASONING_STATUS, {
+                                "active": True,
+                                "level": settings.llm.analysis_reasoning,
+                                "phase": "direct"
+                            })
                         assistant_response = existing_content
                         final_usage = usage
                         if assistant_response:
