@@ -4109,9 +4109,10 @@ async function saveCurrentSection() {
     return;
   }
 
-  // WLP hat eigene Felder (java_home)
+  // WLP hat eigene Felder (enabled, java_home)
   if (section === 'wlp') {
     const config = {
+      enabled: document.getElementById('wlp-enabled')?.checked || false,
       java_home: document.getElementById('wlp-java-home')?.value || '',
     };
     try {
@@ -5231,6 +5232,16 @@ async function renderWLPSection() {
     <div class="settings-section">
       <h3 class="settings-section-title">WLP SERVER</h3>
       <p class="settings-section-desc">WebSphere Liberty Profile Server starten, server.xml prüfen und Artefakt validieren. Start wird per SSE-Stream überwacht.</p>
+    </div>
+
+    <!-- Aktivierung -->
+    <div class="settings-field">
+      <label for="wlp-enabled">Aktiviert</label>
+      <label class="checkbox-label">
+        <input type="checkbox" id="wlp-enabled" ${wlpConfig.enabled ? 'checked' : ''} onchange="markSettingsModified()">
+        ${wlpConfig.enabled ? 'Aktiviert - WLP-Tools sind für den Agent verfügbar' : 'Deaktiviert - WLP-Tools werden nicht geladen'}
+      </label>
+      <span style="font-size:11px;color:var(--text-muted)">Aktiviere dies um die WLP-Agent-Tools (Server starten, stoppen, Konfiguration prüfen) zu nutzen.</span>
     </div>
 
     <!-- Java-Konfiguration -->
