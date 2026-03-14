@@ -68,6 +68,7 @@ from app.services.memory_store import get_memory_store
 from app.services.context_manager import get_context_manager, ContextManager
 from app.services.transcript_logger import get_transcript_logger, TranscriptLogger, TranscriptEntry
 from app.services.auto_learner import get_auto_learner, AutoLearner
+from app.services.analytics_logger import get_analytics_logger, AnalyticsLogger
 from app.utils.token_counter import estimate_tokens, estimate_messages_tokens, truncate_text_to_tokens
 
 
@@ -537,6 +538,8 @@ class AgentOrchestrator:
             ttl_seconds=120,  # 2 Minuten TTL
             max_entries=100
         )
+        # Analytics Logger (anonymisiertes Tool-Tracking)
+        self._analytics: AnalyticsLogger = get_analytics_logger()
 
     async def _llm_callback_for_mcp(self, prompt: str, context: Optional[str] = None) -> str:
         """
@@ -1111,6 +1114,22 @@ Sei präzise und gib detaillierte Analyse-Schritte."""
         except Exception as e:
             logger.debug(f"[agent] Transcript logging failed: {e}")
 
+        # === ANALYTICS CHAIN START ===
+        if self._analytics.enabled:
+            try:
+                await self._analytics.start_chain(
+                    query=user_message,
+                    model=model or settings.llm.default_model,
+                    model_settings={
+                        "temperature": settings.llm.temperature,
+                        "max_tokens": settings.llm.max_tokens,
+                        "reasoning": settings.llm.reasoning_effort or None,
+                        "tool_model": settings.llm.tool_model or None,
+                    }
+                )
+            except Exception as e:
+                logger.debug(f"[agent] Analytics start failed: {e}")
+
         # === AUTO-LEARNING (User-Message) ===
         try:
             user_candidates = await self.auto_learner.analyze_user_message(
@@ -1633,6 +1652,16 @@ Sei präzise und gib detaillierte Analyse-Schritte."""
                     }
                     yield AgentEvent(AgentEventType.USAGE, usage_data)
 
+                    # Analytics: Chain beenden
+                    if self._analytics.enabled:
+                        try:
+                            await self._analytics.end_chain(
+                                status="resolved",
+                                response=assistant_response[:500] if assistant_response else ""
+                            )
+                        except Exception:
+                            pass
+
                     yield AgentEvent(AgentEventType.DONE, {
                         "response": assistant_response,
                         "tool_calls_count": len(state.tool_calls_history),
@@ -1819,7 +1848,7 @@ Sei präzise und gib detaillierte Analyse-Schritte."""
                                 tool_call.name,
                                 **tool_call.arguments
                             )
-                            _duration_ms = (_time.time() - _start) * 1000
+                            _duration_ms = int((_time.time() - _start) * 1000)
                             # Erfolgreiches Ergebnis cachen
                             self._tool_cache.set(
                                 tool_call.name,
@@ -1831,6 +1860,18 @@ Sei präzise und gib detaillierte Analyse-Schritte."""
                                 state.tool_budget.record_tool_call(
                                     tool_call.name, duration_ms=_duration_ms, cached=False
                                 )
+                            # Analytics: Tool-Ausführung loggen
+                            if self._analytics.enabled:
+                                try:
+                                    await self._analytics.log_tool_execution(
+                                        tool_name=tool_call.name,
+                                        success=result.success,
+                                        duration_ms=_duration_ms,
+                                        error=result.error,
+                                        result_size=len(str(result.data or "")),
+                                    )
+                                except Exception:
+                                    pass  # Analytics-Fehler nicht kritisch
                     tool_call.result = result
                     has_used_tools = True
                     current_tool_calls_for_messages.append(tc)
@@ -2025,10 +2066,22 @@ Sei präzise und gib detaillierte Analyse-Schritte."""
                             })
 
             except Exception as e:
+                # Analytics: Chain bei Fehler beenden
+                if self._analytics.enabled:
+                    try:
+                        await self._analytics.end_chain(status="failed", response=str(e))
+                    except Exception:
+                        pass
                 yield AgentEvent(AgentEventType.ERROR, {"error": str(e)})
                 return
 
         # Max iterations erreicht
+        # Analytics: Chain bei Timeout beenden
+        if self._analytics.enabled:
+            try:
+                await self._analytics.end_chain(status="timeout", response="Max iterations")
+            except Exception:
+                pass
         yield AgentEvent(AgentEventType.DONE, {
             "response": "Maximale Iterationen erreicht.",
             "tool_calls_count": len(state.tool_calls_history)

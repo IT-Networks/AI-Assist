@@ -1022,6 +1022,61 @@ class ServiceNowConfig(BaseModel):
         return f"{base}/api/now"
 
 
+# ══════════════════════════════════════════════════════════════════════════════
+# Analytics (User-Daten Analyse für Tool-Optimierung)
+# ══════════════════════════════════════════════════════════════════════════════
+
+class AnalyticsAnonymizeConfig(BaseModel):
+    """Anonymisierungs-Einstellungen für Analytics."""
+    enabled: bool = True
+    mask_ips: bool = True
+    mask_paths: bool = True
+    mask_credentials: bool = True
+    mask_emails: bool = True
+    mask_urls_with_auth: bool = True
+    mask_company_data: bool = True
+    # Zusätzliche Regex-Patterns für firmenspezifische Daten
+    company_patterns: List[str] = Field(default_factory=lambda: [
+        r"\b[A-Z]{2,6}-\d{3,6}\b",  # Ticket-IDs wie PROJ-1234
+    ])
+    # Pfad-Komponenten die NICHT maskiert werden
+    path_whitelist: List[str] = Field(default_factory=lambda: [
+        "src", "app", "lib", "test", "tests", "config", "docs",
+        "api", "services", "models", "utils", "core", "agent"
+    ])
+
+
+class AnalyticsIncludeConfig(BaseModel):
+    """Was soll geloggt werden?"""
+    tool_selection: bool = True       # Welches Tool wurde gewählt
+    tool_execution: bool = True       # Ausführungs-Ergebnis
+    tool_errors: bool = True          # Fehler bei Tool-Ausführung
+    model_settings: bool = True       # Modell + Temperature etc.
+    user_feedback: bool = True        # Inferiertes User-Feedback
+    decision_reasoning: bool = False  # Warum wurde Tool gewählt (verbose)
+
+
+class AnalyticsConfig(BaseModel):
+    """
+    Konfiguration für das Analytics-System.
+
+    Loggt anonymisierte Tool-Nutzung und KI-Entscheidungen
+    für spätere Analyse durch Claude zur Programmverbesserung.
+    """
+    enabled: bool = False             # Master-Switch
+    storage_path: str = "./data/analytics"
+    retention_days: int = 90          # Aufbewahrungsdauer
+    # Anonymisierung
+    anonymize: AnalyticsAnonymizeConfig = Field(default_factory=AnalyticsAnonymizeConfig)
+    # Was loggen
+    log_level: str = "standard"       # minimal | standard | detailed
+    include: AnalyticsIncludeConfig = Field(default_factory=AnalyticsIncludeConfig)
+    # Export/Storage
+    export_format: str = "jsonl"      # jsonl | sqlite
+    compress_after_days: int = 7      # GZIP nach X Tagen
+    max_storage_mb: int = 500         # Max Speicherplatz
+
+
 class Settings(BaseModel):
     llm: LLMConfig = LLMConfig()
     models: List[ModelEntry] = []
@@ -1057,6 +1112,7 @@ class Settings(BaseModel):
     prompt_templates: PromptTemplatesConfig = Field(default_factory=PromptTemplatesConfig)
     access_logging: AccessLoggingConfig = Field(default_factory=AccessLoggingConfig)
     servicenow: ServiceNowConfig = Field(default_factory=ServiceNowConfig)
+    analytics: AnalyticsConfig = Field(default_factory=AnalyticsConfig)
 
     def apply_env_overrides(self) -> "Settings":
         if os.getenv("LLM_BASE_URL"):
