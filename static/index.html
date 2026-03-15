@@ -52,6 +52,9 @@
         <span title="Plan &amp; Ausführen">&#128203;</span>
       </label>
     </div>
+    <button class="header-btn" id="workspace-btn" onclick="toggleWorkspace()" title="Workspace (Ctrl+B)">
+      &#128194;
+    </button>
     <button class="header-btn" id="settings-btn" onclick="openSettings()" title="Einstellungen">
       &#9881;
     </button>
@@ -359,6 +362,88 @@
       </div>
     </div>
   </main>
+
+  <!-- Workspace Panel -->
+  <aside id="workspace-panel" class="workspace-panel" style="display:none">
+    <div class="workspace-resize-handle" id="workspace-resize-handle"></div>
+    <div class="workspace-header">
+      <span class="workspace-title">Workspace</span>
+      <div class="workspace-controls">
+        <button class="icon-btn" onclick="clearWorkspace()" title="Workspace leeren">&#128465;</button>
+        <button class="icon-btn" onclick="toggleWorkspaceCollapse()" title="Minimieren" id="workspace-collapse-btn">&#9866;</button>
+        <button class="icon-btn" onclick="closeWorkspace()" title="Schließen">&times;</button>
+      </div>
+    </div>
+    <div class="workspace-tabs">
+      <button class="workspace-tab active" data-tab="code" onclick="switchWorkspaceTab('code')">
+        <span class="tab-icon">&#128196;</span>
+        <span class="tab-label">Code</span>
+        <span class="tab-badge" id="workspace-code-badge" style="display:none">0</span>
+      </button>
+      <button class="workspace-tab" data-tab="sql" onclick="switchWorkspaceTab('sql')">
+        <span class="tab-icon">&#128202;</span>
+        <span class="tab-label">SQL</span>
+        <span class="tab-badge" id="workspace-sql-badge" style="display:none">0</span>
+      </button>
+      <button class="workspace-tab" data-tab="research" onclick="switchWorkspaceTab('research')">
+        <span class="tab-icon">&#128269;</span>
+        <span class="tab-label">Research</span>
+        <span class="tab-badge" id="workspace-research-badge" style="display:none">0</span>
+      </button>
+      <button class="workspace-tab" data-tab="files" onclick="switchWorkspaceTab('files')">
+        <span class="tab-icon">&#128193;</span>
+        <span class="tab-label">Files</span>
+      </button>
+    </div>
+    <div class="workspace-content">
+      <!-- Code Tab -->
+      <div class="workspace-tab-content active" id="workspace-code-content">
+        <div class="workspace-empty" id="workspace-code-empty">
+          <span class="empty-icon">&#128196;</span>
+          <p>Keine Code-Änderungen</p>
+          <small>Änderungen von write_file und edit_file erscheinen hier</small>
+        </div>
+        <div class="workspace-items" id="workspace-code-items"></div>
+      </div>
+      <!-- SQL Tab -->
+      <div class="workspace-tab-content" id="workspace-sql-content">
+        <div class="workspace-empty" id="workspace-sql-empty">
+          <span class="empty-icon">&#128202;</span>
+          <p>Keine SQL-Queries</p>
+          <small>Ergebnisse von query_database erscheinen hier</small>
+        </div>
+        <div class="workspace-items" id="workspace-sql-items"></div>
+      </div>
+      <!-- Research Tab -->
+      <div class="workspace-tab-content" id="workspace-research-content">
+        <div class="workspace-empty" id="workspace-research-empty">
+          <span class="empty-icon">&#128269;</span>
+          <p>Keine Recherche-Ergebnisse</p>
+          <small>Ergebnisse von search_* Tools erscheinen hier</small>
+        </div>
+        <div class="workspace-items" id="workspace-research-items"></div>
+      </div>
+      <!-- Files Tab -->
+      <div class="workspace-tab-content" id="workspace-files-content">
+        <div class="workspace-empty" id="workspace-files-empty">
+          <span class="empty-icon">&#128193;</span>
+          <p>Keine Dateien in dieser Session</p>
+          <small>Gelesene und bearbeitete Dateien erscheinen hier</small>
+        </div>
+        <div class="workspace-items" id="workspace-files-items"></div>
+      </div>
+    </div>
+    <div class="workspace-footer">
+      <div class="workspace-actions">
+        <button class="btn btn-sm btn-secondary" onclick="exportWorkspace()" title="Session exportieren">
+          &#128190; Export
+        </button>
+      </div>
+      <div class="workspace-stats">
+        <span id="workspace-item-count">0 Items</span>
+      </div>
+    </div>
+  </aside>
 
   <!-- Right Sidebar - Context & Confirmation -->
   <aside id="sidebar-right" class="sidebar">

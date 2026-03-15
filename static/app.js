@@ -81,6 +81,525 @@ const chatManager = {
   },
 };
 
+// ══════════════════════════════════════════════════════════════════════════════
+// Workspace Panel State & Management
+// ══════════════════════════════════════════════════════════════════════════════
+
+const workspaceState = {
+  visible: false,
+  width: 500,
+  activeTab: 'code',
+  collapsed: false,
+  tabs: {
+    code: { items: [], selected: null },
+    sql: { items: [], selected: null },
+    research: { items: [], selected: null },
+    files: { items: [], selected: null }
+  }
+};
+
+// Workspace Panel Functions
+function toggleWorkspace() {
+  const panel = document.getElementById('workspace-panel');
+  const btn = document.getElementById('workspace-btn');
+
+  workspaceState.visible = !workspaceState.visible;
+
+  if (workspaceState.visible) {
+    panel.style.display = 'flex';
+    btn.classList.add('active');
+    // Restore width from state
+    panel.style.width = workspaceState.width + 'px';
+  } else {
+    panel.style.display = 'none';
+    btn.classList.remove('active');
+  }
+
+  // Adjust main layout
+  updateMainLayout();
+}
+
+function closeWorkspace() {
+  workspaceState.visible = false;
+  document.getElementById('workspace-panel').style.display = 'none';
+  document.getElementById('workspace-btn').classList.remove('active');
+  updateMainLayout();
+}
+
+function toggleWorkspaceCollapse() {
+  const panel = document.getElementById('workspace-panel');
+  const collapseBtn = document.getElementById('workspace-collapse-btn');
+
+  workspaceState.collapsed = !workspaceState.collapsed;
+
+  if (workspaceState.collapsed) {
+    panel.classList.add('collapsed');
+    collapseBtn.innerHTML = '&#9744;'; // Expand icon
+    collapseBtn.title = 'Maximieren';
+  } else {
+    panel.classList.remove('collapsed');
+    collapseBtn.innerHTML = '&#9866;'; // Minimize icon
+    collapseBtn.title = 'Minimieren';
+  }
+
+  updateMainLayout();
+}
+
+function switchWorkspaceTab(tabName) {
+  workspaceState.activeTab = tabName;
+
+  // Update tab buttons
+  document.querySelectorAll('.workspace-tab').forEach(tab => {
+    tab.classList.toggle('active', tab.dataset.tab === tabName);
+  });
+
+  // Update tab content
+  document.querySelectorAll('.workspace-tab-content').forEach(content => {
+    content.classList.toggle('active', content.id === `workspace-${tabName}-content`);
+  });
+}
+
+function updateWorkspaceBadges() {
+  const tabs = ['code', 'sql', 'research'];
+  tabs.forEach(tab => {
+    const count = workspaceState.tabs[tab].items.length;
+    const badge = document.getElementById(`workspace-${tab}-badge`);
+    if (badge) {
+      badge.textContent = count;
+      badge.style.display = count > 0 ? 'inline-block' : 'none';
+    }
+  });
+
+  // Update total item count
+  const totalItems = Object.values(workspaceState.tabs).reduce((sum, t) => sum + t.items.length, 0);
+  document.getElementById('workspace-item-count').textContent = `${totalItems} Items`;
+}
+
+function clearWorkspace() {
+  workspaceState.tabs = {
+    code: { items: [], selected: null },
+    sql: { items: [], selected: null },
+    research: { items: [], selected: null },
+    files: { items: [], selected: null }
+  };
+  renderWorkspaceTab('code');
+  renderWorkspaceTab('sql');
+  renderWorkspaceTab('research');
+  renderWorkspaceTab('files');
+  updateWorkspaceBadges();
+}
+
+function exportWorkspace() {
+  const exportData = {
+    timestamp: new Date().toISOString(),
+    sessionId: chatManager.getActive()?.sessionId,
+    tabs: workspaceState.tabs
+  };
+
+  const blob = new Blob([JSON.stringify(exportData, null, 2)], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `workspace_${Date.now()}.json`;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+function updateMainLayout() {
+  // This function can be extended to adjust the main chat area width
+  // when workspace panel is shown/hidden
+}
+
+// ── Workspace Resize Handle ──
+function setupWorkspaceResize() {
+  const handle = document.getElementById('workspace-resize-handle');
+  const panel = document.getElementById('workspace-panel');
+
+  if (!handle || !panel) return;
+
+  let isResizing = false;
+  let startX = 0;
+  let startWidth = 0;
+
+  handle.addEventListener('mousedown', (e) => {
+    isResizing = true;
+    startX = e.clientX;
+    startWidth = panel.offsetWidth;
+    handle.classList.add('active');
+    document.body.style.cursor = 'ew-resize';
+    document.body.style.userSelect = 'none';
+    e.preventDefault();
+  });
+
+  document.addEventListener('mousemove', (e) => {
+    if (!isResizing) return;
+
+    const deltaX = startX - e.clientX;
+    let newWidth = startWidth + deltaX;
+
+    // Enforce min/max constraints
+    const minWidth = parseInt(getComputedStyle(document.documentElement).getPropertyValue('--workspace-min-w')) || 400;
+    const maxWidth = window.innerWidth * 0.6;
+
+    newWidth = Math.max(minWidth, Math.min(maxWidth, newWidth));
+
+    panel.style.width = newWidth + 'px';
+    workspaceState.width = newWidth;
+  });
+
+  document.addEventListener('mouseup', () => {
+    if (isResizing) {
+      isResizing = false;
+      handle.classList.remove('active');
+      document.body.style.cursor = '';
+      document.body.style.userSelect = '';
+    }
+  });
+}
+
+// ── Workspace Content Rendering ──
+function renderWorkspaceTab(tabName) {
+  const items = workspaceState.tabs[tabName].items;
+  const container = document.getElementById(`workspace-${tabName}-items`);
+  const emptyState = document.getElementById(`workspace-${tabName}-empty`);
+
+  if (!container) return;
+
+  if (items.length === 0) {
+    container.innerHTML = '';
+    if (emptyState) emptyState.style.display = 'flex';
+    return;
+  }
+
+  if (emptyState) emptyState.style.display = 'none';
+
+  switch (tabName) {
+    case 'code':
+      container.innerHTML = items.map(item => renderCodeItem(item)).join('');
+      break;
+    case 'sql':
+      container.innerHTML = items.map(item => renderSqlItem(item)).join('');
+      break;
+    case 'research':
+      container.innerHTML = renderResearchItems(items);
+      break;
+    case 'files':
+      container.innerHTML = items.map(item => renderFileItem(item)).join('');
+      break;
+  }
+}
+
+function renderCodeItem(item) {
+  const statusClass = item.status || 'pending';
+  const statusLabels = { pending: 'Ausstehend', applied: 'Angewendet', rejected: 'Abgelehnt' };
+
+  return `
+    <div class="workspace-item ${item.id === workspaceState.tabs.code.selected ? 'selected' : ''}"
+         data-id="${item.id}" onclick="selectWorkspaceItem('code', '${item.id}')">
+      <div class="workspace-item-header">
+        <div class="workspace-item-title">
+          <span class="file-icon">&#128196;</span>
+          <span>${escapeHtml(item.fileName || item.filePath)}</span>
+        </div>
+        <span class="item-status ${statusClass}">${statusLabels[statusClass]}</span>
+      </div>
+      <div class="workspace-item-meta">
+        ${item.description ? escapeHtml(item.description.substring(0, 100)) : 'Code-Änderung'}
+      </div>
+      <div class="workspace-item-content">
+        <pre class="workspace-diff">${formatDiff(item.diff || '')}</pre>
+      </div>
+      <div class="workspace-item-actions" style="padding: 8px 12px; border-top: 1px solid var(--border);">
+        ${statusClass === 'pending' ? `
+          <button class="btn btn-sm btn-success" onclick="applyCodeChange('${item.id}'); event.stopPropagation();">
+            &#10003; Anwenden
+          </button>
+          <button class="btn btn-sm btn-danger" onclick="rejectCodeChange('${item.id}'); event.stopPropagation();">
+            &#10005; Ablehnen
+          </button>
+        ` : ''}
+      </div>
+    </div>
+  `;
+}
+
+function renderSqlItem(item) {
+  const hasError = !!item.error;
+  const rowCount = item.rows ? item.rows.length : 0;
+
+  return `
+    <div class="workspace-item ${item.id === workspaceState.tabs.sql.selected ? 'selected' : ''}"
+         data-id="${item.id}" onclick="selectWorkspaceItem('sql', '${item.id}')">
+      <div class="workspace-item-header">
+        <div class="workspace-item-title">
+          <span class="file-icon">&#128202;</span>
+          <span>Query ${item.id.substring(0, 8)}</span>
+        </div>
+        <span class="workspace-item-meta">
+          ${hasError ? `<span style="color:var(--danger)">Error</span>` : `${rowCount} Zeilen`}
+        </span>
+      </div>
+      <div class="workspace-item-content">
+        <pre style="margin-bottom: 8px; padding: 8px; background: var(--bg); border-radius: 4px;"><code>${escapeHtml(item.query)}</code></pre>
+        ${hasError
+          ? `<div style="color: var(--danger); padding: 8px;">${escapeHtml(item.error)}</div>`
+          : renderSqlResultPreview(item)
+        }
+      </div>
+    </div>
+  `;
+}
+
+function renderSqlResultPreview(item) {
+  if (!item.columns || !item.rows || item.rows.length === 0) {
+    return '<div style="color: var(--text-muted); padding: 8px;">Keine Ergebnisse</div>';
+  }
+
+  const previewRows = item.rows.slice(0, 5);
+
+  return `
+    <table class="workspace-sql-result">
+      <thead>
+        <tr>
+          ${item.columns.map(col => `<th>${escapeHtml(col.name || col)}</th>`).join('')}
+        </tr>
+      </thead>
+      <tbody>
+        ${previewRows.map(row => `
+          <tr>
+            ${(Array.isArray(row) ? row : Object.values(row)).map(cell => `
+              <td class="${cell === null ? 'cell-null' : typeof cell === 'number' ? 'cell-number' : ''}">
+                ${cell === null ? 'NULL' : escapeHtml(String(cell))}
+              </td>
+            `).join('')}
+          </tr>
+        `).join('')}
+      </tbody>
+    </table>
+    ${item.rows.length > 5 ? `<div style="color: var(--text-muted); padding: 8px; text-align: center;">... und ${item.rows.length - 5} weitere Zeilen</div>` : ''}
+  `;
+}
+
+function renderResearchItems(items) {
+  // Group by source type
+  const groups = {};
+  items.forEach(item => {
+    const source = item.source || 'other';
+    if (!groups[source]) groups[source] = [];
+    groups[source].push(item);
+  });
+
+  const sourceIcons = {
+    web: '&#127760;',
+    code: '&#128196;',
+    wiki: '&#128214;',
+    handbook: '&#128218;',
+    pdf: '&#128196;',
+    other: '&#128269;'
+  };
+
+  const sourceLabels = {
+    web: 'Web-Suche',
+    code: 'Code-Suche',
+    wiki: 'Wiki/Confluence',
+    handbook: 'Handbuch',
+    pdf: 'PDF-Dokumente',
+    other: 'Andere'
+  };
+
+  return Object.entries(groups).map(([source, sourceItems]) => `
+    <div class="workspace-research-group">
+      <div class="workspace-research-group-header" onclick="toggleResearchGroup('${source}')">
+        <span class="group-icon">${sourceIcons[source] || sourceIcons.other}</span>
+        <span>${sourceLabels[source] || source}</span>
+        <span class="group-count">${sourceItems.length} Ergebnisse</span>
+      </div>
+      <div class="workspace-research-items" id="research-group-${source}">
+        ${sourceItems.map(item => `
+          <div class="workspace-research-item">
+            <div class="workspace-research-item-title">${escapeHtml(item.title || 'Untitled')}</div>
+            <div class="workspace-research-item-snippet">${escapeHtml(item.snippet || item.content || '')}</div>
+            ${item.url ? `<div class="workspace-research-item-source"><a href="${item.url}" target="_blank">${escapeHtml(item.url)}</a></div>` : ''}
+            ${item.filePath ? `<div class="workspace-research-item-source">${escapeHtml(item.filePath)}${item.lineNumber ? ':' + item.lineNumber : ''}</div>` : ''}
+          </div>
+        `).join('')}
+      </div>
+    </div>
+  `).join('');
+}
+
+function renderFileItem(item) {
+  return `
+    <div class="workspace-item" data-id="${item.id}">
+      <div class="workspace-item-header">
+        <div class="workspace-item-title">
+          <span class="file-icon">&#128193;</span>
+          <span>${escapeHtml(item.filePath)}</span>
+        </div>
+        <span class="workspace-item-meta">${item.operation || 'read'}</span>
+      </div>
+    </div>
+  `;
+}
+
+function toggleResearchGroup(source) {
+  const group = document.getElementById(`research-group-${source}`);
+  if (group) {
+    group.style.display = group.style.display === 'none' ? 'block' : 'none';
+  }
+}
+
+function selectWorkspaceItem(tabName, itemId) {
+  workspaceState.tabs[tabName].selected = itemId;
+  renderWorkspaceTab(tabName);
+}
+
+function formatDiff(diff) {
+  if (!diff) return '';
+  return diff.split('\n').map(line => {
+    if (line.startsWith('+') && !line.startsWith('+++')) {
+      return `<span class="diff-add">${escapeHtml(line)}</span>`;
+    } else if (line.startsWith('-') && !line.startsWith('---')) {
+      return `<span class="diff-remove">${escapeHtml(line)}</span>`;
+    } else if (line.startsWith('@@')) {
+      return `<span class="diff-header">${escapeHtml(line)}</span>`;
+    }
+    return escapeHtml(line);
+  }).join('\n');
+}
+
+// ── Workspace Event Handlers ──
+function addCodeChangeToWorkspace(data) {
+  const item = {
+    id: data.id || crypto.randomUUID(),
+    timestamp: Date.now(),
+    filePath: data.filePath || data.path,
+    fileName: data.fileName || (data.filePath || data.path || '').split(/[/\\]/).pop(),
+    language: data.language || detectLanguage(data.filePath || data.path || ''),
+    originalContent: data.originalContent || '',
+    modifiedContent: data.modifiedContent || data.content || '',
+    diff: data.diff || '',
+    toolCall: data.toolCall || 'write_file',
+    description: data.description || '',
+    status: 'pending'
+  };
+
+  workspaceState.tabs.code.items.unshift(item);
+  renderWorkspaceTab('code');
+  updateWorkspaceBadges();
+
+  // Auto-show workspace if hidden
+  if (!workspaceState.visible) {
+    toggleWorkspace();
+  }
+  switchWorkspaceTab('code');
+}
+
+function addSqlResultToWorkspace(data) {
+  const item = {
+    id: data.id || crypto.randomUUID(),
+    timestamp: Date.now(),
+    query: data.query || '',
+    database: data.database || '',
+    columns: data.columns || [],
+    rows: data.rows || [],
+    rowCount: data.rowCount || (data.rows ? data.rows.length : 0),
+    executionTimeMs: data.executionTimeMs || 0,
+    error: data.error || null
+  };
+
+  workspaceState.tabs.sql.items.unshift(item);
+  renderWorkspaceTab('sql');
+  updateWorkspaceBadges();
+
+  if (!workspaceState.visible) {
+    toggleWorkspace();
+  }
+  switchWorkspaceTab('sql');
+}
+
+function addResearchResultToWorkspace(data) {
+  const item = {
+    id: data.id || crypto.randomUUID(),
+    timestamp: Date.now(),
+    source: data.source || 'other',
+    title: data.title || '',
+    snippet: data.snippet || data.content || '',
+    url: data.url || null,
+    filePath: data.filePath || null,
+    lineNumber: data.lineNumber || null,
+    relevance: data.relevance || 0
+  };
+
+  workspaceState.tabs.research.items.push(item);
+  renderWorkspaceTab('research');
+  updateWorkspaceBadges();
+}
+
+function addFileToWorkspace(data) {
+  // Check if file already exists
+  const existing = workspaceState.tabs.files.items.find(f => f.filePath === data.filePath);
+  if (existing) return;
+
+  const item = {
+    id: data.id || crypto.randomUUID(),
+    timestamp: Date.now(),
+    filePath: data.filePath || data.path,
+    operation: data.operation || 'read'
+  };
+
+  workspaceState.tabs.files.items.push(item);
+  renderWorkspaceTab('files');
+}
+
+async function applyCodeChange(itemId) {
+  const item = workspaceState.tabs.code.items.find(i => i.id === itemId);
+  if (!item) return;
+
+  try {
+    // Call API to apply the change
+    const response = await fetch(`/api/workspace/code/apply/${itemId}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        filePath: item.filePath,
+        content: item.modifiedContent
+      })
+    });
+
+    if (response.ok) {
+      item.status = 'applied';
+      item.appliedAt = Date.now();
+      renderWorkspaceTab('code');
+      showToast('Code-Änderung angewendet', 'success');
+    } else {
+      const err = await response.json();
+      showToast(`Fehler: ${err.detail || 'Unbekannt'}`, 'error');
+    }
+  } catch (e) {
+    console.error('Apply code change failed:', e);
+    showToast('Fehler beim Anwenden der Änderung', 'error');
+  }
+}
+
+function rejectCodeChange(itemId) {
+  const item = workspaceState.tabs.code.items.find(i => i.id === itemId);
+  if (!item) return;
+
+  item.status = 'rejected';
+  renderWorkspaceTab('code');
+}
+
+function detectLanguage(filePath) {
+  const ext = (filePath || '').split('.').pop().toLowerCase();
+  const langMap = {
+    java: 'java', py: 'python', js: 'javascript', ts: 'typescript',
+    sql: 'sql', xml: 'xml', json: 'json', yaml: 'yaml', yml: 'yaml',
+    html: 'html', css: 'css', md: 'markdown', sh: 'bash'
+  };
+  return langMap[ext] || 'text';
+}
+
 // ── Initialization ──
 document.addEventListener('DOMContentLoaded', async () => {
   // Marked.js konfigurieren - Links öffnen in neuem Tab
@@ -98,6 +617,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   setupModeSwitch();
   setupInputHandlers();
   setupKeyboardShortcuts();
+  setupWorkspaceResize();
 
   // KRITISCH: Nur Models und Chats blockieren - Rest im Hintergrund
   // Dies reduziert Initial Load von ~2s auf ~500ms
@@ -218,6 +738,13 @@ function setupKeyboardShortcuts() {
     if (e.ctrlKey && e.key === 'n' && !e.shiftKey && !e.altKey) {
       e.preventDefault();
       createNewChat();
+      return;
+    }
+
+    // Ctrl+B: Workspace Panel toggle
+    if (e.ctrlKey && e.key === 'b' && !e.shiftKey && !e.altKey) {
+      e.preventDefault();
+      toggleWorkspace();
       return;
     }
 
@@ -612,6 +1139,56 @@ function showErrorToast(message, duration = 5000) {
     setTimeout(() => {
       if (toast.parentNode) {
         toast.classList.add('fade-out');
+        setTimeout(() => toast.remove(), 300);
+      }
+    }, duration);
+  }
+}
+
+// Generic toast for success/error messages
+function showToast(message, type = 'info', duration = 3000) {
+  // Existierenden Toast entfernen
+  const existing = document.querySelector('.generic-toast');
+  if (existing) existing.remove();
+
+  const icons = { success: '✓', error: '✕', info: 'ℹ', warning: '⚠' };
+  const colors = {
+    success: 'var(--success)',
+    error: 'var(--danger)',
+    info: 'var(--accent)',
+    warning: 'var(--warning)'
+  };
+
+  const toast = document.createElement('div');
+  toast.className = 'generic-toast';
+  toast.style.cssText = `
+    position: fixed;
+    bottom: 20px;
+    left: 50%;
+    transform: translateX(-50%);
+    background: var(--surface);
+    border: 1px solid ${colors[type] || colors.info};
+    color: var(--text);
+    padding: 12px 20px;
+    border-radius: 8px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    z-index: 10000;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+    animation: toast-slide-up 0.3s ease-out;
+  `;
+  toast.innerHTML = `
+    <span style="color: ${colors[type] || colors.info}; font-size: 1.2em;">${icons[type] || icons.info}</span>
+    <span>${escapeHtml(message)}</span>
+  `;
+
+  document.body.appendChild(toast);
+
+  if (duration > 0) {
+    setTimeout(() => {
+      if (toast.parentNode) {
+        toast.style.animation = 'toast-fade-out 0.3s ease-in forwards';
         setTimeout(() => toast.remove(), 300);
       }
     }, duration);
@@ -1612,6 +2189,23 @@ async function processAgentEvent(event, bubble, msgDiv, chat) {
 
     case 'enhancement_rejected':
       handleEnhancementRejected(data, chat);
+      break;
+
+    // Workspace Events
+    case 'workspace_code_change':
+      addCodeChangeToWorkspace(data);
+      break;
+
+    case 'workspace_sql_result':
+      addSqlResultToWorkspace(data);
+      break;
+
+    case 'workspace_research':
+      addResearchResultToWorkspace(data);
+      break;
+
+    case 'workspace_file':
+      addFileToWorkspace(data);
       break;
 
     case 'compaction': {

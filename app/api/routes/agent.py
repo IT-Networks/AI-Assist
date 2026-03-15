@@ -1045,3 +1045,83 @@ async def confirm_enhancement(
             "message": "Enhancement-Kontext abgelehnt, fahre ohne Kontext fort",
             "continue": True
         }
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Workspace Endpoints
+# ══════════════════════════════════════════════════════════════════════════════
+
+class WorkspaceCodeApplyRequest(BaseModel):
+    """Anfrage zum Anwenden einer Code-Änderung."""
+    filePath: str = Field(..., description="Pfad zur Datei")
+    content: str = Field(..., description="Neuer Dateiinhalt")
+
+
+@router.post("/workspace/code/apply/{change_id}")
+async def apply_workspace_code_change(
+    change_id: str,
+    request: WorkspaceCodeApplyRequest
+) -> Dict[str, Any]:
+    """
+    Wendet eine Code-Änderung aus dem Workspace an.
+
+    Args:
+        change_id: ID der Code-Änderung
+        request: Datei-Pfad und neuer Inhalt
+
+    Returns:
+        Status der Operation
+    """
+    import os
+    from pathlib import Path
+
+    # Security: Validate path
+    file_path = request.filePath
+
+    # Check if file operations are enabled
+    if not settings.file_operations.enabled:
+        raise HTTPException(
+            status_code=403,
+            detail="Datei-Operationen sind deaktiviert"
+        )
+
+    # Check allowed paths
+    if settings.file_operations.allowed_paths:
+        path_allowed = False
+        for allowed in settings.file_operations.allowed_paths:
+            try:
+                if Path(file_path).resolve().is_relative_to(Path(allowed).resolve()):
+                    path_allowed = True
+                    break
+            except ValueError:
+                continue
+
+        if not path_allowed:
+            raise HTTPException(
+                status_code=403,
+                detail=f"Pfad nicht in erlaubten Verzeichnissen: {file_path}"
+            )
+
+    try:
+        # Write the file
+        os.makedirs(os.path.dirname(file_path), exist_ok=True)
+        with open(file_path, 'w', encoding='utf-8') as f:
+            f.write(request.content)
+
+        return {
+            "success": True,
+            "message": f"Datei gespeichert: {file_path}",
+            "filePath": file_path,
+            "changeId": change_id
+        }
+
+    except PermissionError:
+        raise HTTPException(
+            status_code=403,
+            detail=f"Keine Schreibrechte für: {file_path}"
+        )
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Fehler beim Speichern: {str(e)}"
+        )
