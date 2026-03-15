@@ -4,6 +4,9 @@ Enterprise AI-Assistent mit Claude-Code-ähnlicher Architektur. Spezialisiert au
 
 ## Highlights
 
+- **Workspace Panel** - Split-View mit Code-Diffs, SQL-Ergebnissen und Research-Tabs
+- **User Dashboard** - KPI-Charts, Tool-Usage, Activity-Heatmaps, Token-Tracking
+- **Error Pattern Learning** - Automatisches Lernen von Fehler-Lösungen mit Similarity-Matching
 - **MCP-Enhancement Pipeline** - Kontext-Sammlung vor Task-Verarbeitung mit User-Confirmation
 - **Task-Decomposition** - Komplexe Anfragen in parallele Sub-Tasks zerlegen
 - **40+ Agent Tools** - Code, Datenbanken, Confluence, Jira, Jenkins, GitHub, WLP, Maven
@@ -53,6 +56,33 @@ Response
 ```
 
 ## Features
+
+### Workspace Panel
+| Feature | Beschreibung |
+|---------|-------------|
+| **Code Split-View** | Side-by-Side Diffs mit diff2html, Syntax-Highlighting |
+| **SQL Split-View** | Query-Ergebnisse mit Sorting, Pagination, Export |
+| **Tabbed Interface** | Wechsel zwischen Code/SQL/Research Views |
+| **Live Updates** | SSE-Streaming für Echtzeit-Änderungen |
+
+### User Dashboard
+| Feature | Beschreibung |
+|---------|-------------|
+| KPI-Cards | Requests, Response-Time, Success-Rate mit Trends |
+| Tool-Usage Chart | Top 10 Tools mit Success-Rate |
+| Activity Heatmap | 7-Tage Aktivitäts-Übersicht |
+| Token-Ring | Input/Output Token-Verteilung |
+| Recent Errors | Fehler-Liste mit Pattern-Links |
+
+### Error Pattern Learning
+| Feature | Beschreibung |
+|---------|-------------|
+| Auto-Learning | Fehler-Lösungen werden automatisch gespeichert |
+| Similarity-Matching | Jaccard-basierte Keyword-Ähnlichkeit |
+| Confidence Score | Dynamische Bewertung mit Time-Decay |
+| User Feedback | Accept/Reject/Rating für Patterns |
+| Pattern-Vorschläge | Automatische Lösungs-Empfehlungen |
+| Export/Import | JSON-basierter Pattern-Austausch |
 
 ### Agent-System
 | Feature | Beschreibung |
@@ -152,12 +182,34 @@ Vollständige Optionen: siehe `config.yaml.example`
 
 ## API
 
+### Agent & Chat
 | Endpunkt | Beschreibung |
 |----------|-------------|
 | `POST /api/agent/chat` | Agent-Chat (SSE Streaming) |
 | `GET /api/agent/tools` | Verfügbare Tools |
 | `GET /api/enhancement/{session}` | Enhancement-Details |
 | `POST /api/enhancement/{session}/confirm` | Enhancement bestätigen |
+
+### Analytics & Dashboard
+| Endpunkt | Beschreibung |
+|----------|-------------|
+| `GET /api/analytics/dashboard` | Dashboard-Metriken (KPIs, Charts, Heatmaps) |
+| `GET /api/analytics/summary` | Analytics-Zusammenfassung |
+
+### Error Patterns
+| Endpunkt | Beschreibung |
+|----------|-------------|
+| `GET /api/patterns` | Pattern-Liste (Filter: minConfidence, errorType) |
+| `GET /api/patterns/{id}` | Einzelnes Pattern |
+| `POST /api/patterns/suggest` | Pattern-Vorschlag für Fehler |
+| `POST /api/patterns/learn` | Neues Pattern lernen |
+| `POST /api/patterns/{id}/feedback` | Feedback aufzeichnen |
+| `DELETE /api/patterns/{id}` | Pattern löschen |
+| `GET /api/patterns/export/json` | Alle Patterns exportieren |
+
+### System
+| Endpunkt | Beschreibung |
+|----------|-------------|
 | `GET /api/settings` | Konfiguration |
 | `GET /api/health` | System-Status |
 
@@ -172,8 +224,18 @@ python -m pytest tests/ -v
 # Mit Coverage
 python -m pytest tests/ --cov=app --cov-report=html
 
-# 442 Tests
+# 568 Tests, 33% Coverage
 ```
+
+### Test-Module
+| Modul | Tests | Beschreibung |
+|-------|-------|-------------|
+| `test_pattern_learner.py` | 54 | ErrorPattern, Similarity, Persistence |
+| `test_patterns_api.py` | 32 | Pattern REST API |
+| `test_dashboard_api.py` | 26 | Dashboard-Metriken |
+| `test_workspace_events.py` | 14 | Code/SQL Events |
+| `test_analytics*.py` | 200+ | Analytics-System |
+| `test_*.py` | 240+ | Weitere Module |
 
 ## Projektstruktur
 
@@ -181,7 +243,7 @@ python -m pytest tests/ --cov=app --cov-report=html
 AI-Assist/
 ├── app/
 │   ├── agent/           # Agent-System
-│   │   ├── orchestrator.py      # Haupt-Orchestration
+│   │   ├── orchestrator.py      # Haupt-Orchestration + Workspace Events
 │   │   ├── prompt_enhancer.py   # MCP-Enhancement Pipeline
 │   │   ├── task_*.py            # Task-Decomposition System
 │   │   ├── tools.py             # Tool-Definitionen
@@ -191,11 +253,21 @@ AI-Assist/
 │   │   ├── sequential_thinking.py
 │   │   └── capabilities/
 │   ├── api/routes/      # FastAPI Endpoints
+│   │   ├── analytics.py         # Dashboard API
+│   │   ├── patterns.py          # Error Pattern API
+│   │   └── ...
 │   └── services/        # Business Logic
+│       ├── pattern_learner.py   # Error Pattern Learning
+│       ├── analytics_logger.py  # Metrics & Tracking
+│       └── ...
 ├── static/              # Frontend (Vanilla JS)
-├── tests/               # pytest Tests
+│   ├── app.js           # Main App + Workspace Logic
+│   ├── index.html       # UI mit Dashboard Modal
+│   └── style.css        # Styling inkl. Charts
+├── tests/               # pytest Tests (568 Tests)
 ├── skills/              # YAML Skill-Definitionen
 └── docs/                # Design-Dokumente
+    └── design/          # Feature-Designs (WORKSPACE_FEATURES.md)
 ```
 
 ## Roadmap
