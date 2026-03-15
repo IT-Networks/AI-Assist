@@ -292,92 +292,485 @@ function renderWorkspaceTab(tabName) {
 function renderCodeItem(item) {
   const statusClass = item.status || 'pending';
   const statusLabels = { pending: 'Ausstehend', applied: 'Angewendet', rejected: 'Abgelehnt' };
+  const isExpanded = item.expanded || false;
+  const viewMode = item.viewMode || 'split'; // 'split' or 'unified'
+
+  // Calculate diff stats
+  const diffStats = calculateDiffStats(item.diff || '');
 
   return `
-    <div class="workspace-item ${item.id === workspaceState.tabs.code.selected ? 'selected' : ''}"
-         data-id="${item.id}" onclick="selectWorkspaceItem('code', '${item.id}')">
-      <div class="workspace-item-header">
+    <div class="workspace-item ${item.id === workspaceState.tabs.code.selected ? 'selected' : ''} ${isExpanded ? 'expanded' : ''}"
+         data-id="${item.id}">
+      <div class="workspace-item-header" onclick="selectWorkspaceItem('code', '${item.id}')">
         <div class="workspace-item-title">
-          <span class="file-icon">&#128196;</span>
+          <span class="file-icon">${getLanguageIcon(item.language)}</span>
           <span>${escapeHtml(item.fileName || item.filePath)}</span>
         </div>
         <span class="item-status ${statusClass}">${statusLabels[statusClass]}</span>
       </div>
-      <div class="workspace-item-meta">
-        ${item.description ? escapeHtml(item.description.substring(0, 100)) : 'Code-Änderung'}
+
+      <div class="code-diff-toolbar">
+        <div class="code-diff-toolbar-left">
+          <span class="workspace-item-meta">
+            ${item.description ? escapeHtml(item.description.substring(0, 60)) + (item.description.length > 60 ? '...' : '') : item.toolCall || 'edit_file'}
+          </span>
+        </div>
+        <div class="code-diff-toolbar-right">
+          <div class="diff-stats">
+            <span class="additions">+${diffStats.additions}</span>
+            <span class="deletions">-${diffStats.deletions}</span>
+          </div>
+          <div class="diff-view-toggle">
+            <button class="${viewMode === 'split' ? 'active' : ''}"
+                    onclick="setCodeDiffViewMode('${item.id}', 'split'); event.stopPropagation();"
+                    title="Side-by-Side">Split</button>
+            <button class="${viewMode === 'unified' ? 'active' : ''}"
+                    onclick="setCodeDiffViewMode('${item.id}', 'unified'); event.stopPropagation();"
+                    title="Unified">Unified</button>
+          </div>
+          <button class="btn btn-sm btn-secondary" onclick="copyDiffToClipboard('${item.id}'); event.stopPropagation();" title="Diff kopieren">
+            &#128203;
+          </button>
+          <button class="btn btn-sm btn-secondary" onclick="toggleCodeItemExpand('${item.id}'); event.stopPropagation();" title="${isExpanded ? 'Minimieren' : 'Expandieren'}">
+            ${isExpanded ? '&#9660;' : '&#9654;'}
+          </button>
+        </div>
       </div>
+
       <div class="workspace-item-content">
-        <pre class="workspace-diff">${formatDiff(item.diff || '')}</pre>
+        <div class="diff-container" id="diff-container-${item.id}">
+          ${renderDiff2Html(item.diff || '', item.fileName || item.filePath, viewMode)}
+        </div>
       </div>
-      <div class="workspace-item-actions" style="padding: 8px 12px; border-top: 1px solid var(--border);">
-        ${statusClass === 'pending' ? `
-          <button class="btn btn-sm btn-success" onclick="applyCodeChange('${item.id}'); event.stopPropagation();">
-            &#10003; Anwenden
-          </button>
-          <button class="btn btn-sm btn-danger" onclick="rejectCodeChange('${item.id}'); event.stopPropagation();">
-            &#10005; Ablehnen
-          </button>
-        ` : ''}
+
+      <div class="workspace-item-actions" style="padding: 8px 12px; border-top: 1px solid var(--border); display: flex; justify-content: space-between; align-items: center;">
+        <div>
+          ${statusClass === 'pending' ? `
+            <button class="btn btn-sm btn-success" onclick="applyCodeChange('${item.id}'); event.stopPropagation();">
+              &#10003; Anwenden
+            </button>
+            <button class="btn btn-sm btn-danger" onclick="rejectCodeChange('${item.id}'); event.stopPropagation();">
+              &#10005; Ablehnen
+            </button>
+          ` : `<span style="font-size: 0.75rem; color: var(--text-muted);">${statusClass === 'applied' ? 'Angewendet' : 'Abgelehnt'}</span>`}
+        </div>
+        <div style="font-size: 0.75rem; color: var(--text-muted);">
+          ${item.language ? item.language.toUpperCase() : ''}
+        </div>
       </div>
     </div>
   `;
 }
 
+// Render diff using diff2html library
+function renderDiff2Html(diffString, fileName, viewMode = 'split') {
+  if (!diffString) {
+    return '<div style="padding: 20px; text-align: center; color: var(--text-muted);">Kein Diff verfügbar</div>';
+  }
+
+  // Check if diff2html is available
+  if (typeof Diff2Html === 'undefined') {
+    console.warn('diff2html not loaded, falling back to simple diff');
+    return `<pre class="workspace-diff">${formatDiff(diffString)}</pre>`;
+  }
+
+  try {
+    const outputFormat = viewMode === 'split' ? 'side-by-side' : 'line-by-line';
+
+    const html = Diff2Html.html(diffString, {
+      outputFormat: outputFormat,
+      drawFileList: false,
+      matching: 'lines',
+      matchWordsThreshold: 0.25,
+      diffStyle: 'word',
+      renderNothingWhenEmpty: false,
+      rawTemplates: {}
+    });
+
+    return html;
+  } catch (e) {
+    console.error('diff2html rendering failed:', e);
+    return `<pre class="workspace-diff">${formatDiff(diffString)}</pre>`;
+  }
+}
+
+// Calculate additions and deletions from diff
+function calculateDiffStats(diffString) {
+  if (!diffString) return { additions: 0, deletions: 0 };
+
+  let additions = 0;
+  let deletions = 0;
+
+  const lines = diffString.split('\n');
+  for (const line of lines) {
+    if (line.startsWith('+') && !line.startsWith('+++')) {
+      additions++;
+    } else if (line.startsWith('-') && !line.startsWith('---')) {
+      deletions++;
+    }
+  }
+
+  return { additions, deletions };
+}
+
+// Get language icon
+function getLanguageIcon(language) {
+  const icons = {
+    java: '&#9749;',      // Coffee cup
+    python: '&#128013;',  // Snake
+    javascript: '&#128312;', // Yellow circle
+    typescript: '&#128309;', // Blue circle
+    sql: '&#128202;',     // Chart
+    xml: '&#128196;',     // Document
+    json: '&#123;&#125;', // Braces
+    yaml: '&#128203;',    // Clipboard
+    html: '&#127760;',    // Globe
+    css: '&#127912;',     // Palette
+    bash: '&#128187;',    // Computer
+    markdown: '&#128221;' // Memo
+  };
+  return icons[language] || '&#128196;';
+}
+
+// Set diff view mode (split/unified)
+function setCodeDiffViewMode(itemId, mode) {
+  const item = workspaceState.tabs.code.items.find(i => i.id === itemId);
+  if (!item) return;
+
+  item.viewMode = mode;
+  renderWorkspaceTab('code');
+}
+
+// Toggle code item expand
+function toggleCodeItemExpand(itemId) {
+  const item = workspaceState.tabs.code.items.find(i => i.id === itemId);
+  if (!item) return;
+
+  item.expanded = !item.expanded;
+  renderWorkspaceTab('code');
+}
+
+// Copy diff to clipboard
+function copyDiffToClipboard(itemId) {
+  const item = workspaceState.tabs.code.items.find(i => i.id === itemId);
+  if (!item || !item.diff) {
+    showToast('Kein Diff zum Kopieren', 'warning');
+    return;
+  }
+
+  navigator.clipboard.writeText(item.diff).then(() => {
+    showToast('Diff kopiert', 'success');
+  }).catch(err => {
+    console.error('Failed to copy diff:', err);
+    showToast('Kopieren fehlgeschlagen', 'error');
+  });
+}
+
 function renderSqlItem(item) {
   const hasError = !!item.error;
-  const rowCount = item.rows ? item.rows.length : 0;
+  const rowCount = item.rowCount || (item.rows ? item.rows.length : 0);
+  const execTime = item.executionTimeMs || 0;
+  const isExpanded = item.expanded || false;
+
+  // Initialize item state if needed
+  if (!item.sortColumn) item.sortColumn = null;
+  if (!item.sortDirection) item.sortDirection = 'asc';
+  if (!item.page) item.page = 1;
+  if (!item.pageSize) item.pageSize = 25;
+  if (!item.visibleColumns) {
+    item.visibleColumns = (item.columns || []).map(c => c.name || c);
+  }
 
   return `
-    <div class="workspace-item ${item.id === workspaceState.tabs.sql.selected ? 'selected' : ''}"
-         data-id="${item.id}" onclick="selectWorkspaceItem('sql', '${item.id}')">
-      <div class="workspace-item-header">
+    <div class="workspace-item sql-item ${item.id === workspaceState.tabs.sql.selected ? 'selected' : ''} ${isExpanded ? 'expanded' : ''}"
+         data-id="${item.id}">
+      <div class="workspace-item-header" onclick="selectWorkspaceItem('sql', '${item.id}')">
         <div class="workspace-item-title">
           <span class="file-icon">&#128202;</span>
-          <span>Query ${item.id.substring(0, 8)}</span>
+          <span>Query ${item.id ? item.id.substring(0, 8) : 'N/A'}</span>
         </div>
         <span class="workspace-item-meta">
-          ${hasError ? `<span style="color:var(--danger)">Error</span>` : `${rowCount} Zeilen`}
+          ${hasError
+            ? `<span style="color:var(--danger)">&#10005; Error</span>`
+            : `<span style="color:var(--success)">&#10003;</span> ${rowCount} Zeilen in ${execTime}ms`}
         </span>
       </div>
+
+      <div class="sql-query-toolbar">
+        <div class="sql-query-toolbar-left">
+          <span class="sql-db-badge">${escapeHtml(item.database || 'DB2')}</span>
+          ${item.schema ? `<span class="sql-schema-badge">${escapeHtml(item.schema)}</span>` : ''}
+          ${item.truncated ? `<span class="sql-truncated-badge" title="Ergebnis wurde abgeschnitten">&#9888; Truncated</span>` : ''}
+        </div>
+        <div class="sql-query-toolbar-right">
+          <button class="btn btn-sm btn-secondary" onclick="copySqlToClipboard('${item.id}'); event.stopPropagation();" title="SQL kopieren">
+            &#128203; Copy SQL
+          </button>
+          <button class="btn btn-sm btn-secondary" onclick="toggleSqlItemExpand('${item.id}'); event.stopPropagation();" title="${isExpanded ? 'Minimieren' : 'Expandieren'}">
+            ${isExpanded ? '&#9660;' : '&#9654;'}
+          </button>
+        </div>
+      </div>
+
+      <div class="sql-query-editor">
+        <pre><code class="language-sql">${escapeHtml(item.query || '')}</code></pre>
+      </div>
+
       <div class="workspace-item-content">
-        <pre style="margin-bottom: 8px; padding: 8px; background: var(--bg); border-radius: 4px;"><code>${escapeHtml(item.query)}</code></pre>
         ${hasError
-          ? `<div style="color: var(--danger); padding: 8px;">${escapeHtml(item.error)}</div>`
-          : renderSqlResultPreview(item)
+          ? `<div class="sql-error-message">&#10005; ${escapeHtml(item.error)}</div>`
+          : renderSqlResultTable(item)
         }
       </div>
     </div>
   `;
 }
 
-function renderSqlResultPreview(item) {
-  if (!item.columns || !item.rows || item.rows.length === 0) {
-    return '<div style="color: var(--text-muted); padding: 8px;">Keine Ergebnisse</div>';
+function renderSqlResultTable(item) {
+  if (!item.columns || item.columns.length === 0 || !item.rows || item.rows.length === 0) {
+    return '<div class="sql-no-results">Keine Ergebnisse</div>';
   }
 
-  const previewRows = item.rows.slice(0, 5);
+  const columns = item.columns.map(c => typeof c === 'string' ? { name: c, visible: true } : c);
+  const visibleCols = columns.filter(c => item.visibleColumns.includes(c.name));
+
+  // Sort rows if needed
+  let sortedRows = [...item.rows];
+  if (item.sortColumn !== null) {
+    const colIndex = columns.findIndex(c => c.name === item.sortColumn);
+    if (colIndex >= 0) {
+      sortedRows.sort((a, b) => {
+        const aVal = Array.isArray(a) ? a[colIndex] : a[item.sortColumn];
+        const bVal = Array.isArray(b) ? b[colIndex] : b[item.sortColumn];
+        if (aVal === null) return 1;
+        if (bVal === null) return -1;
+        if (typeof aVal === 'number' && typeof bVal === 'number') {
+          return item.sortDirection === 'asc' ? aVal - bVal : bVal - aVal;
+        }
+        const aStr = String(aVal).toLowerCase();
+        const bStr = String(bVal).toLowerCase();
+        return item.sortDirection === 'asc' ? aStr.localeCompare(bStr) : bStr.localeCompare(aStr);
+      });
+    }
+  }
+
+  // Pagination
+  const pageSize = item.pageSize || 25;
+  const page = item.page || 1;
+  const totalPages = Math.ceil(sortedRows.length / pageSize);
+  const startIdx = (page - 1) * pageSize;
+  const pageRows = sortedRows.slice(startIdx, startIdx + pageSize);
 
   return `
-    <table class="workspace-sql-result">
-      <thead>
-        <tr>
-          ${item.columns.map(col => `<th>${escapeHtml(col.name || col)}</th>`).join('')}
-        </tr>
-      </thead>
-      <tbody>
-        ${previewRows.map(row => `
+    <div class="sql-result-header">
+      <span class="sql-result-info">
+        ${item.rowCount || sortedRows.length} Zeilen${item.executionTimeMs ? ` in ${item.executionTimeMs}ms` : ''}
+      </span>
+      <div class="sql-result-actions">
+        <div class="sql-columns-dropdown">
+          <button class="btn btn-sm btn-secondary" onclick="toggleSqlColumnsDropdown('${item.id}'); event.stopPropagation();">
+            Spalten &#9660;
+          </button>
+          <div class="sql-columns-menu" id="sql-columns-menu-${item.id}" style="display: none;">
+            ${columns.map(col => `
+              <label onclick="event.stopPropagation();">
+                <input type="checkbox" ${item.visibleColumns.includes(col.name) ? 'checked' : ''}
+                       onchange="toggleSqlColumn('${item.id}', '${col.name}', this.checked)">
+                ${escapeHtml(col.name)}
+              </label>
+            `).join('')}
+          </div>
+        </div>
+        <button class="btn btn-sm btn-secondary" onclick="exportSqlResult('${item.id}', 'csv'); event.stopPropagation();">
+          &#128190; CSV
+        </button>
+        <button class="btn btn-sm btn-secondary" onclick="exportSqlResult('${item.id}', 'json'); event.stopPropagation();">
+          &#123;&#125; JSON
+        </button>
+      </div>
+    </div>
+    <div class="sql-result-table-wrapper">
+      <table class="sql-result-table">
+        <thead>
           <tr>
-            ${(Array.isArray(row) ? row : Object.values(row)).map(cell => `
-              <td class="${cell === null ? 'cell-null' : typeof cell === 'number' ? 'cell-number' : ''}">
-                ${cell === null ? 'NULL' : escapeHtml(String(cell))}
-              </td>
+            <th class="row-num">#</th>
+            ${visibleCols.map(col => `
+              <th class="sortable ${item.sortColumn === col.name ? item.sortDirection : ''}"
+                  onclick="sortSqlResult('${item.id}', '${col.name}'); event.stopPropagation();">
+                ${escapeHtml(col.name)}
+                <span class="sort-icon">${item.sortColumn === col.name ? (item.sortDirection === 'asc' ? '&#9650;' : '&#9660;') : ''}</span>
+              </th>
             `).join('')}
           </tr>
-        `).join('')}
-      </tbody>
-    </table>
-    ${item.rows.length > 5 ? `<div style="color: var(--text-muted); padding: 8px; text-align: center;">... und ${item.rows.length - 5} weitere Zeilen</div>` : ''}
+        </thead>
+        <tbody>
+          ${pageRows.map((row, idx) => {
+            const rowData = Array.isArray(row) ? row : Object.values(row);
+            const visibleColIndices = visibleCols.map(vc => columns.findIndex(c => c.name === vc.name));
+            return `
+              <tr>
+                <td class="row-num">${startIdx + idx + 1}</td>
+                ${visibleColIndices.map(colIdx => {
+                  const cell = rowData[colIdx];
+                  const cellClass = cell === null ? 'cell-null' : typeof cell === 'number' ? 'cell-number' : '';
+                  const cellValue = cell === null ? 'NULL' : escapeHtml(String(cell));
+                  return `<td class="${cellClass}">${cellValue}</td>`;
+                }).join('')}
+              </tr>
+            `;
+          }).join('')}
+        </tbody>
+      </table>
+    </div>
+    ${totalPages > 1 ? `
+      <div class="sql-pagination">
+        <button class="btn btn-sm" ${page <= 1 ? 'disabled' : ''} onclick="setSqlPage('${item.id}', ${page - 1}); event.stopPropagation();">
+          &#9664; Prev
+        </button>
+        <span class="sql-page-info">Seite ${page} von ${totalPages}</span>
+        <button class="btn btn-sm" ${page >= totalPages ? 'disabled' : ''} onclick="setSqlPage('${item.id}', ${page + 1}); event.stopPropagation();">
+          Next &#9654;
+        </button>
+        <select class="sql-page-size" onchange="setSqlPageSize('${item.id}', parseInt(this.value)); event.stopPropagation();">
+          <option value="10" ${pageSize === 10 ? 'selected' : ''}>10</option>
+          <option value="25" ${pageSize === 25 ? 'selected' : ''}>25</option>
+          <option value="50" ${pageSize === 50 ? 'selected' : ''}>50</option>
+          <option value="100" ${pageSize === 100 ? 'selected' : ''}>100</option>
+        </select>
+        <span>pro Seite</span>
+      </div>
+    ` : ''}
   `;
+}
+
+// SQL Table Helper Functions
+function sortSqlResult(itemId, columnName) {
+  const item = workspaceState.tabs.sql.items.find(i => i.id === itemId);
+  if (!item) return;
+
+  if (item.sortColumn === columnName) {
+    item.sortDirection = item.sortDirection === 'asc' ? 'desc' : 'asc';
+  } else {
+    item.sortColumn = columnName;
+    item.sortDirection = 'asc';
+  }
+  item.page = 1; // Reset to first page on sort
+  renderWorkspaceTab('sql');
+}
+
+function setSqlPage(itemId, page) {
+  const item = workspaceState.tabs.sql.items.find(i => i.id === itemId);
+  if (!item) return;
+  item.page = Math.max(1, page);
+  renderWorkspaceTab('sql');
+}
+
+function setSqlPageSize(itemId, pageSize) {
+  const item = workspaceState.tabs.sql.items.find(i => i.id === itemId);
+  if (!item) return;
+  item.pageSize = pageSize;
+  item.page = 1; // Reset to first page
+  renderWorkspaceTab('sql');
+}
+
+function toggleSqlColumn(itemId, columnName, visible) {
+  const item = workspaceState.tabs.sql.items.find(i => i.id === itemId);
+  if (!item) return;
+
+  if (!item.visibleColumns) {
+    item.visibleColumns = (item.columns || []).map(c => c.name || c);
+  }
+
+  if (visible) {
+    if (!item.visibleColumns.includes(columnName)) {
+      item.visibleColumns.push(columnName);
+    }
+  } else {
+    item.visibleColumns = item.visibleColumns.filter(c => c !== columnName);
+  }
+  renderWorkspaceTab('sql');
+}
+
+function toggleSqlColumnsDropdown(itemId) {
+  const menu = document.getElementById(`sql-columns-menu-${itemId}`);
+  if (menu) {
+    menu.style.display = menu.style.display === 'none' ? 'block' : 'none';
+  }
+}
+
+function exportSqlResult(itemId, format) {
+  const item = workspaceState.tabs.sql.items.find(i => i.id === itemId);
+  if (!item || !item.rows || item.rows.length === 0) {
+    showToast('Keine Daten zum Exportieren', 'warning');
+    return;
+  }
+
+  const columns = (item.columns || []).map(c => c.name || c);
+  let data;
+
+  if (format === 'csv') {
+    // CSV export
+    const header = columns.join(',');
+    const rows = item.rows.map(row => {
+      const rowData = Array.isArray(row) ? row : Object.values(row);
+      return rowData.map(cell => {
+        if (cell === null) return '';
+        const str = String(cell);
+        // Escape quotes and wrap in quotes if contains comma or quote
+        if (str.includes(',') || str.includes('"') || str.includes('\n')) {
+          return '"' + str.replace(/"/g, '""') + '"';
+        }
+        return str;
+      }).join(',');
+    });
+    data = header + '\n' + rows.join('\n');
+  } else {
+    // JSON export
+    const jsonRows = item.rows.map(row => {
+      const rowData = Array.isArray(row) ? row : Object.values(row);
+      const obj = {};
+      columns.forEach((col, idx) => {
+        obj[col] = rowData[idx];
+      });
+      return obj;
+    });
+    data = JSON.stringify(jsonRows, null, 2);
+  }
+
+  // Download
+  const blob = new Blob([data], { type: format === 'csv' ? 'text/csv' : 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `query_result_${itemId.substring(0, 8)}_${Date.now()}.${format}`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+
+  showToast(`${format.toUpperCase()} exportiert`, 'success');
+}
+
+function copySqlToClipboard(itemId) {
+  const item = workspaceState.tabs.sql.items.find(i => i.id === itemId);
+  if (!item || !item.query) {
+    showToast('Keine SQL-Abfrage zum Kopieren', 'warning');
+    return;
+  }
+
+  navigator.clipboard.writeText(item.query).then(() => {
+    showToast('SQL kopiert', 'success');
+  }).catch(err => {
+    console.error('Failed to copy SQL:', err);
+    showToast('Kopieren fehlgeschlagen', 'error');
+  });
+}
+
+function toggleSqlItemExpand(itemId) {
+  const item = workspaceState.tabs.sql.items.find(i => i.id === itemId);
+  if (!item) return;
+  item.expanded = !item.expanded;
+  renderWorkspaceTab('sql');
 }
 
 function renderResearchItems(items) {
@@ -472,7 +865,7 @@ function formatDiff(diff) {
 function addCodeChangeToWorkspace(data) {
   const item = {
     id: data.id || crypto.randomUUID(),
-    timestamp: Date.now(),
+    timestamp: data.timestamp || Date.now(),
     filePath: data.filePath || data.path,
     fileName: data.fileName || (data.filePath || data.path || '').split(/[/\\]/).pop(),
     language: data.language || detectLanguage(data.filePath || data.path || ''),
@@ -481,7 +874,9 @@ function addCodeChangeToWorkspace(data) {
     diff: data.diff || '',
     toolCall: data.toolCall || 'write_file',
     description: data.description || '',
-    status: 'pending'
+    status: data.status || 'applied',  // Files are already applied when user confirmed
+    appliedAt: data.appliedAt || Date.now(),
+    isNew: data.isNew || false
   };
 
   workspaceState.tabs.code.items.unshift(item);
@@ -4031,6 +4426,566 @@ function closeSettings() {
   if (searchInput) {
     searchInput.value = '';
     filterSettingsNav('');
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// Dashboard Functions - Phase 4 User Dashboard
+// ═══════════════════════════════════════════════════════════════════════════════
+
+let dashboardState = {
+  timeRange: 'week',
+  data: null,
+  loading: false
+};
+
+async function openDashboard() {
+  const modal = document.getElementById('dashboard-modal');
+  modal.style.display = 'flex';
+  document.body.style.overflow = 'hidden';
+  await loadDashboardData(dashboardState.timeRange);
+}
+
+function closeDashboard() {
+  const modal = document.getElementById('dashboard-modal');
+  modal.style.display = 'none';
+  document.body.style.overflow = '';
+}
+
+async function loadDashboardData(timeRange = 'week') {
+  dashboardState.timeRange = timeRange;
+  dashboardState.loading = true;
+
+  // Show loading state
+  document.querySelectorAll('.chart-body').forEach(el => {
+    el.innerHTML = '<div class="chart-loading">Lade Daten...</div>';
+  });
+
+  try {
+    const res = await fetch(`/api/analytics/dashboard?timeRange=${timeRange}`);
+    if (!res.ok) throw new Error('Dashboard data fetch failed');
+
+    const data = await res.json();
+    dashboardState.data = data;
+
+    renderDashboardKPIs(data);
+    renderToolUsageChart(data.toolUsage);
+    renderActivityHeatmap(data.activityHeatmap);
+    renderErrorsList(data.recentErrors);
+    renderTokenUsage(data.tokenUsage);
+
+  } catch (err) {
+    console.error('Dashboard load error:', err);
+    document.querySelectorAll('.chart-body').forEach(el => {
+      el.innerHTML = '<div class="chart-error">Fehler beim Laden der Daten</div>';
+    });
+  } finally {
+    dashboardState.loading = false;
+  }
+}
+
+async function refreshDashboard() {
+  await loadDashboardData(dashboardState.timeRange);
+  showToast('Dashboard aktualisiert', 'success');
+}
+
+function renderDashboardKPIs(data) {
+  // Total Requests
+  document.getElementById('kpi-requests').textContent = formatNumber(data.totalRequests);
+  renderKpiTrend('kpi-requests-trend', data.requestsTrend);
+
+  // Avg Response Time
+  document.getElementById('kpi-response-time').textContent = formatDuration(data.avgResponseTime);
+  renderKpiTrend('kpi-response-trend', data.responseTrend, true); // inverted - lower is better
+
+  // Success Rate
+  document.getElementById('kpi-success-rate').textContent = data.successRate.toFixed(1) + '%';
+  renderKpiTrend('kpi-success-trend', data.successTrend);
+
+  // Token Usage
+  const tokenPercent = data.tokenUsage.limit > 0
+    ? Math.round((data.tokenUsage.total / data.tokenUsage.limit) * 100)
+    : 0;
+  document.getElementById('kpi-tokens').textContent = formatNumber(data.tokenUsage.total);
+  document.getElementById('kpi-tokens-trend').innerHTML =
+    `<span class="token-limit">${tokenPercent}% von ${formatNumber(data.tokenUsage.limit)}</span>`;
+}
+
+function renderKpiTrend(elementId, trend, inverted = false) {
+  const el = document.getElementById(elementId);
+  if (!el) return;
+
+  const isPositive = inverted ? trend < 0 : trend > 0;
+  const arrow = trend > 0 ? '&#9650;' : trend < 0 ? '&#9660;' : '';
+  const trendClass = isPositive ? 'trend-positive' : trend < 0 ? 'trend-negative' : '';
+
+  el.innerHTML = `<span class="${trendClass}">${arrow} ${Math.abs(trend).toFixed(1)}%</span>`;
+}
+
+function formatNumber(num) {
+  if (num >= 1000000) return (num / 1000000).toFixed(1) + 'M';
+  if (num >= 1000) return (num / 1000).toFixed(1) + 'K';
+  return num.toString();
+}
+
+function formatDuration(ms) {
+  if (ms >= 60000) return (ms / 60000).toFixed(1) + 'm';
+  if (ms >= 1000) return (ms / 1000).toFixed(1) + 's';
+  return ms + 'ms';
+}
+
+function renderToolUsageChart(toolUsage) {
+  const container = document.getElementById('chart-tool-usage');
+  if (!container) return;
+
+  if (!toolUsage || toolUsage.length === 0) {
+    container.innerHTML = '<div class="chart-empty">Keine Tool-Nutzung im Zeitraum</div>';
+    return;
+  }
+
+  const maxCount = Math.max(...toolUsage.map(t => t.count));
+
+  const html = toolUsage.map(tool => {
+    const percent = maxCount > 0 ? (tool.count / maxCount) * 100 : 0;
+    const successColor = tool.successRate >= 90 ? 'var(--success)' :
+                         tool.successRate >= 70 ? 'var(--warning)' : 'var(--danger)';
+    return `
+      <div class="bar-row">
+        <span class="bar-label" title="${tool.tool}">${truncate(tool.tool, 20)}</span>
+        <div class="bar-track">
+          <div class="bar-fill" style="width: ${percent}%; background: ${successColor};"></div>
+        </div>
+        <span class="bar-value">${tool.count}</span>
+        <span class="bar-success" title="Success Rate">${tool.successRate.toFixed(0)}%</span>
+      </div>
+    `;
+  }).join('');
+
+  container.innerHTML = `<div class="bar-chart">${html}</div>`;
+}
+
+function renderActivityHeatmap(activity) {
+  const container = document.getElementById('chart-activity');
+  if (!container) return;
+
+  if (!activity || activity.length === 0) {
+    container.innerHTML = '<div class="chart-empty">Keine Aktivität im Zeitraum</div>';
+    return;
+  }
+
+  // Group by day and hour
+  const days = ['So', 'Mo', 'Di', 'Mi', 'Do', 'Fr', 'Sa'];
+  const hours = Array.from({length: 24}, (_, i) => i);
+  const maxCount = Math.max(...activity.map(a => a.count), 1);
+
+  // Build heatmap data structure
+  const heatmapData = {};
+  activity.forEach(entry => {
+    const date = new Date(entry.date);
+    const dayIdx = date.getDay();
+    const key = `${dayIdx}-${entry.hour}`;
+    heatmapData[key] = (heatmapData[key] || 0) + entry.count;
+  });
+
+  let html = '<div class="heatmap">';
+  html += '<div class="heatmap-header"><span></span>';
+  for (let h = 0; h < 24; h += 3) {
+    html += `<span class="heatmap-hour-label">${h}</span>`;
+  }
+  html += '</div>';
+
+  for (let d = 1; d <= 7; d++) {
+    const dayIdx = d % 7; // Start with Monday
+    html += `<div class="heatmap-row">`;
+    html += `<span class="heatmap-day">${days[dayIdx]}</span>`;
+    for (let h = 0; h < 24; h++) {
+      const key = `${dayIdx}-${h}`;
+      const count = heatmapData[key] || 0;
+      const intensity = count / maxCount;
+      const opacity = 0.1 + intensity * 0.9;
+      html += `<div class="heatmap-cell" style="opacity: ${opacity};" title="${days[dayIdx]} ${h}:00 - ${count} Aktivitäten"></div>`;
+    }
+    html += '</div>';
+  }
+  html += '</div>';
+
+  container.innerHTML = html;
+}
+
+function renderErrorsList(errors) {
+  const container = document.getElementById('chart-errors');
+  if (!container) return;
+
+  if (!errors || errors.length === 0) {
+    container.innerHTML = '<div class="chart-empty chart-success">&#10003; Keine Fehler im Zeitraum</div>';
+    return;
+  }
+
+  const html = errors.map(err => `
+    <div class="error-item">
+      <div class="error-header">
+        <span class="error-icon">&#9888;</span>
+        <span class="error-type">${escapeHtml(err.errorType)}</span>
+        <span class="error-count">${err.count}x</span>
+      </div>
+      <div class="error-message">${escapeHtml(err.message)}</div>
+      ${err.patternId ? `
+        <div class="error-pattern">
+          <span class="pattern-badge">Pattern Match</span>
+          <button class="btn btn-sm" onclick="viewErrorPattern('${err.patternId}')">Details</button>
+        </div>
+      ` : `
+        <div class="error-actions">
+          <button class="btn btn-sm btn-secondary" onclick="learnErrorPattern('${err.errorType}')">Pattern lernen</button>
+        </div>
+      `}
+    </div>
+  `).join('');
+
+  container.innerHTML = `<div class="errors-list">${html}</div>`;
+}
+
+function renderTokenUsage(tokenUsage) {
+  const container = document.getElementById('chart-tokens');
+  if (!container) return;
+
+  const total = tokenUsage.total || 0;
+  const limit = tokenUsage.limit || 100000;
+  const input = tokenUsage.input || 0;
+  const output = tokenUsage.output || 0;
+  const percent = Math.min((total / limit) * 100, 100);
+
+  const ringColor = percent >= 90 ? 'var(--danger)' :
+                    percent >= 70 ? 'var(--warning)' : 'var(--success)';
+
+  const html = `
+    <div class="token-usage-chart">
+      <div class="token-ring" style="--percent: ${percent}; --ring-color: ${ringColor};">
+        <div class="token-ring-inner">
+          <span class="token-percent">${percent.toFixed(0)}%</span>
+        </div>
+      </div>
+      <div class="token-details">
+        <div class="token-row">
+          <span class="token-label">Input:</span>
+          <span class="token-value">${formatNumber(input)}</span>
+        </div>
+        <div class="token-row">
+          <span class="token-label">Output:</span>
+          <span class="token-value">${formatNumber(output)}</span>
+        </div>
+        <div class="token-row token-total">
+          <span class="token-label">Total:</span>
+          <span class="token-value">${formatNumber(total)} / ${formatNumber(limit)}</span>
+        </div>
+      </div>
+    </div>
+  `;
+
+  container.innerHTML = html;
+}
+
+function truncate(str, maxLen) {
+  if (str.length <= maxLen) return str;
+  return str.substring(0, maxLen - 3) + '...';
+}
+
+async function exportDashboard() {
+  try {
+    const res = await fetch('/api/analytics/report?days=' + (dashboardState.timeRange === 'day' ? 1 : dashboardState.timeRange === 'week' ? 7 : 30));
+    if (!res.ok) throw new Error('Export failed');
+
+    const text = await res.text();
+    const blob = new Blob([text], { type: 'text/markdown' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `dashboard_report_${new Date().toISOString().split('T')[0]}.md`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+
+    showToast('Report exportiert', 'success');
+  } catch (err) {
+    console.error('Export error:', err);
+    showToast('Export fehlgeschlagen', 'error');
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// Pattern Learning Functions - Phase 5
+// ═══════════════════════════════════════════════════════════════════════════════
+
+let patternState = {
+  currentPattern: null,
+  currentError: null
+};
+
+async function viewErrorPattern(patternId) {
+  try {
+    const res = await fetch(`/api/patterns/${patternId}`);
+    if (!res.ok) throw new Error('Pattern nicht gefunden');
+
+    const pattern = await res.json();
+    showPatternModal(pattern);
+  } catch (err) {
+    console.error('Pattern load error:', err);
+    showToast('Pattern konnte nicht geladen werden', 'error');
+  }
+}
+
+function showPatternModal(pattern, confidence = null) {
+  patternState.currentPattern = pattern;
+
+  const modal = document.getElementById('pattern-modal');
+  const content = document.getElementById('pattern-modal-content');
+
+  const confidenceValue = confidence !== null ? confidence : pattern.confidence;
+  const confidencePercent = Math.round(confidenceValue * 100);
+  const confidenceClass = confidencePercent >= 80 ? 'high' : confidencePercent >= 50 ? 'medium' : 'low';
+
+  content.innerHTML = `
+    <div class="pattern-match-info">
+      <div class="pattern-type">${escapeHtml(pattern.error_type)}</div>
+      <div class="pattern-confidence ${confidenceClass}">
+        <div class="confidence-bar">
+          <div class="confidence-fill" style="width: ${confidencePercent}%"></div>
+        </div>
+        <span class="confidence-value">${confidencePercent}% Confidence</span>
+      </div>
+      <div class="pattern-stats">
+        <span>Gesehen: ${pattern.times_seen}x</span>
+        <span>Gelöst: ${pattern.times_solved}x</span>
+        <span>Akzeptiert: ${Math.round(pattern.acceptance_rate * 100)}%</span>
+        ${pattern.avg_rating > 0 ? `<span>Rating: ${'⭐'.repeat(Math.round(pattern.avg_rating))}</span>` : ''}
+      </div>
+    </div>
+
+    <div class="pattern-solution">
+      <h4>Lösungsvorschlag</h4>
+      <div class="solution-description">${escapeHtml(pattern.solution_description)}</div>
+
+      ${pattern.solution_steps && pattern.solution_steps.length > 0 ? `
+        <div class="solution-steps">
+          <h5>Schritte:</h5>
+          <ol>
+            ${pattern.solution_steps.map(step => `<li>${escapeHtml(step)}</li>`).join('')}
+          </ol>
+        </div>
+      ` : ''}
+
+      ${pattern.solution_code ? `
+        <div class="solution-code">
+          <h5>Code-Änderung:</h5>
+          <pre><code>${escapeHtml(pattern.solution_code)}</code></pre>
+        </div>
+      ` : ''}
+
+      ${pattern.tools_used && pattern.tools_used.length > 0 ? `
+        <div class="solution-tools">
+          <span class="tools-label">Tools:</span>
+          ${pattern.tools_used.map(t => `<span class="tool-badge">${escapeHtml(t)}</span>`).join('')}
+        </div>
+      ` : ''}
+    </div>
+
+    <div class="pattern-actions">
+      <div class="pattern-action-buttons">
+        <button class="btn btn-success" onclick="applyPattern('${pattern.id}')">
+          &#10003; Anwenden
+        </button>
+        <button class="btn btn-secondary" onclick="skipPattern('${pattern.id}')">
+          &#10005; Überspringen
+        </button>
+      </div>
+      <div class="pattern-rating">
+        <span>Bewerten:</span>
+        <div class="rating-stars">
+          ${[1, 2, 3, 4, 5].map(star => `
+            <button class="star-btn" onclick="ratePattern('${pattern.id}', ${star})" title="${star} Sterne">
+              &#9733;
+            </button>
+          `).join('')}
+        </div>
+      </div>
+    </div>
+  `;
+
+  modal.style.display = 'flex';
+  document.body.style.overflow = 'hidden';
+}
+
+function closePatternModal() {
+  const modal = document.getElementById('pattern-modal');
+  modal.style.display = 'none';
+  document.body.style.overflow = '';
+  patternState.currentPattern = null;
+}
+
+async function applyPattern(patternId) {
+  try {
+    // Record acceptance feedback
+    await fetch(`/api/patterns/${patternId}/feedback`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ accepted: true })
+    });
+
+    closePatternModal();
+    showToast('Pattern angewendet', 'success');
+
+    // Insert solution as assistant suggestion in chat
+    if (patternState.currentPattern) {
+      const pattern = patternState.currentPattern;
+      let message = `**Lösungsvorschlag basierend auf bekanntem Pattern:**\n\n`;
+      message += pattern.solution_description + '\n\n';
+
+      if (pattern.solution_steps && pattern.solution_steps.length > 0) {
+        message += '**Schritte:**\n';
+        pattern.solution_steps.forEach((step, i) => {
+          message += `${i + 1}. ${step}\n`;
+        });
+        message += '\n';
+      }
+
+      if (pattern.solution_code) {
+        message += '**Code:**\n```\n' + pattern.solution_code + '\n```\n';
+      }
+
+      // Add to current chat
+      const activeChat = state.chats.find(c => c.id === state.activeChat);
+      if (activeChat) {
+        appendMessageToPane(activeChat.pane, 'assistant', message);
+      }
+    }
+  } catch (err) {
+    console.error('Apply pattern error:', err);
+    showToast('Fehler beim Anwenden', 'error');
+  }
+}
+
+async function skipPattern(patternId) {
+  try {
+    await fetch(`/api/patterns/${patternId}/feedback`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ accepted: false })
+    });
+
+    closePatternModal();
+    showToast('Pattern übersprungen', 'info');
+  } catch (err) {
+    console.error('Skip pattern error:', err);
+  }
+}
+
+async function ratePattern(patternId, rating) {
+  try {
+    const res = await fetch(`/api/patterns/${patternId}/feedback`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ accepted: true, rating: rating })
+    });
+
+    if (res.ok) {
+      showToast(`Bewertung gespeichert: ${rating} Sterne`, 'success');
+      closePatternModal();
+    }
+  } catch (err) {
+    console.error('Rate pattern error:', err);
+    showToast('Bewertung fehlgeschlagen', 'error');
+  }
+}
+
+async function learnErrorPattern(errorType) {
+  // Open a learning dialog
+  const solution = prompt(`Lösung für "${errorType}" beschreiben:\n\n(Kurze Beschreibung der Lösung)`);
+
+  if (!solution) return;
+
+  try {
+    const res = await fetch('/api/patterns/learn', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        errorType: errorType,
+        errorText: patternState.currentError || errorType,
+        solutionDescription: solution,
+        solutionSteps: [],
+        toolsUsed: [],
+        filesChanged: []
+      })
+    });
+
+    if (res.ok) {
+      const data = await res.json();
+      showToast(data.isNew ? 'Neues Pattern gelernt' : 'Pattern aktualisiert', 'success');
+    } else {
+      throw new Error('Learning failed');
+    }
+  } catch (err) {
+    console.error('Learn pattern error:', err);
+    showToast('Pattern-Learning fehlgeschlagen', 'error');
+  }
+}
+
+async function suggestPatternForError(errorType, stackTrace = '', fileContext = '') {
+  try {
+    const res = await fetch('/api/patterns/suggest', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        errorType: errorType,
+        stackTrace: stackTrace,
+        fileContext: fileContext
+      })
+    });
+
+    if (!res.ok) return null;
+
+    const data = await res.json();
+
+    if (data.pattern && data.confidence >= 0.5) {
+      patternState.currentError = errorType;
+      showPatternModal(data.pattern, data.confidence);
+      return data.pattern;
+    }
+
+    return null;
+  } catch (err) {
+    console.error('Suggest pattern error:', err);
+    return null;
+  }
+}
+
+// Auto-detect errors and suggest patterns (hook into tool results)
+function checkForErrorPatterns(toolResult) {
+  if (!toolResult || !toolResult.error) return;
+
+  const errorText = toolResult.error;
+
+  // Extract error type
+  const errorTypes = [
+    /NullPointerException/,
+    /IllegalArgumentException/,
+    /SQLException/,
+    /IOException/,
+    /TypeError/,
+    /ValueError/,
+    /KeyError/,
+    /AttributeError/
+  ];
+
+  for (const regex of errorTypes) {
+    const match = errorText.match(regex);
+    if (match) {
+      // Delay to not interrupt flow
+      setTimeout(() => {
+        suggestPatternForError(match[0], errorText, '');
+      }, 500);
+      break;
+    }
   }
 }
 

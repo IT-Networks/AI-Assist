@@ -252,6 +252,9 @@ class AgentEventType(str, Enum):
     ENHANCEMENT_COMPLETE = "enhancement_complete"    # Kontext gesammelt, Bestätigung anfordern
     ENHANCEMENT_CONFIRMED = "enhancement_confirmed"  # User hat Kontext bestätigt
     ENHANCEMENT_REJECTED = "enhancement_rejected"    # User hat Kontext abgelehnt
+    # Workspace Events
+    WORKSPACE_CODE_CHANGE = "workspace_code_change"  # Code-Änderung für Workspace Panel
+    WORKSPACE_SQL_RESULT = "workspace_sql_result"    # SQL-Abfrage-Ergebnis für Workspace Panel
 
 
 @dataclass
@@ -657,6 +660,204 @@ Sei präzise und gib detaillierte Analyse-Schritte."""
         Emittiert Events über die Event Bridge für Live-Streaming.
         """
         await self._event_bridge.emit(event_type, data)
+
+    async def _emit_workspace_code_change(
+        self,
+        file_path: str,
+        original_content: str,
+        modified_content: str,
+        tool_call: str,
+        description: str = "",
+        is_new: bool = False
+    ) -> None:
+        """
+        Emittiert ein Workspace Code Change Event für das UI.
+
+        Args:
+            file_path: Pfad zur Datei
+            original_content: Ursprünglicher Dateiinhalt
+            modified_content: Neuer Dateiinhalt
+            tool_call: Name des Tools (write_file, edit_file, batch_write_files)
+            description: Beschreibung der Änderung
+            is_new: True wenn neue Datei erstellt wurde
+        """
+        import difflib
+        import uuid
+        from pathlib import Path
+        import time
+
+        # Generate unified diff
+        if is_new:
+            diff = f"--- /dev/null\n+++ b/{file_path}\n@@ -0,0 +1,{len(modified_content.splitlines())} @@\n"
+            for line in modified_content.splitlines():
+                diff += f"+{line}\n"
+        else:
+            diff_lines = difflib.unified_diff(
+                original_content.splitlines(keepends=True),
+                modified_content.splitlines(keepends=True),
+                fromfile=f"a/{file_path}",
+                tofile=f"b/{file_path}",
+                lineterm=""
+            )
+            diff = "".join(diff_lines)
+
+        # Detect language from file extension
+        path_obj = Path(file_path)
+        ext_to_lang = {
+            ".py": "python", ".java": "java", ".js": "javascript",
+            ".ts": "typescript", ".tsx": "tsx", ".jsx": "jsx",
+            ".sql": "sql", ".html": "html", ".css": "css",
+            ".json": "json", ".xml": "xml", ".yaml": "yaml",
+            ".yml": "yaml", ".md": "markdown", ".sh": "bash",
+            ".go": "go", ".rs": "rust", ".cpp": "cpp", ".c": "c",
+            ".h": "c", ".hpp": "cpp", ".cs": "csharp", ".rb": "ruby",
+            ".php": "php", ".swift": "swift", ".kt": "kotlin"
+        }
+        language = ext_to_lang.get(path_obj.suffix.lower(), "text")
+
+        # Build event payload matching the CodeChange interface from design doc
+        event_data = {
+            "id": str(uuid.uuid4()),
+            "timestamp": int(time.time() * 1000),
+            "filePath": str(file_path),
+            "fileName": path_obj.name,
+            "language": language,
+            "originalContent": original_content,
+            "modifiedContent": modified_content,
+            "diff": diff,
+            "toolCall": tool_call,
+            "description": description,
+            "status": "applied",  # Already applied when user confirmed
+            "appliedAt": int(time.time() * 1000),
+            "isNew": is_new
+        }
+
+        await self._event_bridge.emit(
+            AgentEventType.WORKSPACE_CODE_CHANGE,
+            event_data
+        )
+
+    async def _execute_and_emit_sql_result(self, query: str, max_rows: int = 100) -> ToolResult:
+        """
+        Führt eine SQL-Abfrage aus und emittiert ein Workspace SQL Result Event.
+
+        Args:
+            query: SQL-Abfrage
+            max_rows: Maximale Anzahl Zeilen
+
+        Returns:
+            ToolResult mit formatierter Ausgabe
+        """
+        from app.core.config import settings
+        import uuid
+        import time
+
+        start_time = time.time()
+
+        try:
+            from app.services.db_client import get_db_client
+            client = get_db_client()
+
+            if not client:
+                return ToolResult(success=False, error="DB-Client nicht verfügbar")
+
+            # Temporär max_rows überschreiben
+            original_max = client.max_rows
+            client.max_rows = min(max_rows, settings.database.max_rows)
+
+            result = await client.execute(query)
+
+            client.max_rows = original_max
+
+            execution_time_ms = int((time.time() - start_time) * 1000)
+
+            if not result.success:
+                # Emit error event
+                await self._event_bridge.emit(
+                    AgentEventType.WORKSPACE_SQL_RESULT,
+                    {
+                        "id": str(uuid.uuid4()),
+                        "timestamp": int(time.time() * 1000),
+                        "query": query,
+                        "database": settings.database.database or "DB2",
+                        "schema": client.schema if client else None,
+                        "columns": [],
+                        "rows": [],
+                        "rowCount": 0,
+                        "executionTimeMs": execution_time_ms,
+                        "toolCall": "query_database",
+                        "truncated": False,
+                        "error": result.error
+                    }
+                )
+                return ToolResult(success=False, error=result.error)
+
+            # Build column definitions
+            columns = []
+            if result.columns:
+                for col_name in result.columns:
+                    columns.append({
+                        "name": col_name,
+                        "type": "VARCHAR",  # DB2 doesn't provide type info in basic result
+                        "nullable": True,
+                        "visible": True
+                    })
+
+            # Emit success event
+            await self._event_bridge.emit(
+                AgentEventType.WORKSPACE_SQL_RESULT,
+                {
+                    "id": str(uuid.uuid4()),
+                    "timestamp": int(time.time() * 1000),
+                    "query": query,
+                    "database": settings.database.database or "DB2",
+                    "schema": client.schema if client else None,
+                    "columns": columns,
+                    "rows": result.rows or [],
+                    "rowCount": result.row_count,
+                    "executionTimeMs": execution_time_ms,
+                    "toolCall": "query_database",
+                    "truncated": result.truncated,
+                    "error": None
+                }
+            )
+
+            # Formatierte Ausgabe für Agent
+            output = f"=== Query-Ergebnis ===\n"
+            output += f"Zeilen: {result.row_count}"
+            if result.truncated:
+                output += f" (begrenzt auf {client.max_rows})"
+            output += "\n\n"
+
+            if result.columns and result.rows:
+                output += " | ".join(result.columns) + "\n"
+                output += "-" * (len(" | ".join(result.columns))) + "\n"
+                for row in result.rows:
+                    output += " | ".join(str(v) if v is not None else "NULL" for v in row) + "\n"
+
+            return ToolResult(success=True, data=output)
+
+        except Exception as e:
+            execution_time_ms = int((time.time() - start_time) * 1000)
+            # Emit error event
+            await self._event_bridge.emit(
+                AgentEventType.WORKSPACE_SQL_RESULT,
+                {
+                    "id": str(uuid.uuid4()),
+                    "timestamp": int(time.time() * 1000),
+                    "query": query,
+                    "database": "DB2",
+                    "schema": None,
+                    "columns": [],
+                    "rows": [],
+                    "rowCount": 0,
+                    "executionTimeMs": execution_time_ms,
+                    "toolCall": "query_database",
+                    "truncated": False,
+                    "error": str(e)
+                }
+            )
+            return ToolResult(success=False, error=str(e))
 
     def _get_mcp_event_type_mapping(self) -> Dict[str, AgentEventType]:
         """Mapping von MCP Event-Typen zu AgentEventType."""
@@ -2658,6 +2859,9 @@ Sei präzise und gib detaillierte Analyse-Schritte."""
     async def _execute_confirmed_operation(self, confirmation_data: Dict) -> ToolResult:
         """Führt eine bestätigte Operation aus."""
         from app.services.file_manager import get_file_manager
+        import difflib
+        import uuid
+        from pathlib import Path
 
         operation = confirmation_data.get("operation")
         path = confirmation_data.get("path")
@@ -2665,21 +2869,71 @@ Sei präzise und gib detaillierte Analyse-Schritte."""
         if operation == "write_file":
             content = confirmation_data.get("content")
             manager = get_file_manager()
+
+            # Read original content for diff
+            original_content = ""
+            is_new = True
+            try:
+                resolved_path = Path(path).resolve()
+                if resolved_path.exists():
+                    original_content = resolved_path.read_text(encoding="utf-8", errors="replace")
+                    is_new = False
+            except Exception:
+                pass
+
             success = await manager.execute_write(path, content)
+
+            # Emit workspace code change event
+            if success:
+                await self._emit_workspace_code_change(
+                    file_path=path,
+                    original_content=original_content,
+                    modified_content=content,
+                    tool_call="write_file",
+                    description=confirmation_data.get("description", "File written"),
+                    is_new=is_new
+                )
+
             return ToolResult(success=success, data=f"Datei geschrieben: {path}")
 
         elif operation == "edit_file":
             old_string = confirmation_data.get("old_string")
             new_string = confirmation_data.get("new_string")
             manager = get_file_manager()
+
+            # Read original content for diff
+            original_content = ""
+            try:
+                resolved_path = Path(path).resolve()
+                if resolved_path.exists():
+                    original_content = resolved_path.read_text(encoding="utf-8", errors="replace")
+            except Exception:
+                pass
+
             success = await manager.execute_edit(path, old_string, new_string)
+
+            # Emit workspace code change event
+            if success:
+                # Generate modified content
+                modified_content = original_content.replace(old_string, new_string, 1)
+                await self._emit_workspace_code_change(
+                    file_path=path,
+                    original_content=original_content,
+                    modified_content=modified_content,
+                    tool_call="edit_file",
+                    description=confirmation_data.get("description", "File edited"),
+                    is_new=False
+                )
+
             return ToolResult(success=success, data=f"Datei bearbeitet: {path}")
 
         elif operation == "query_database":
-            from app.agent.tools import execute_confirmed_query
             query = confirmation_data.get("query")
             max_rows = confirmation_data.get("max_rows", 100)
-            return await execute_confirmed_query(query, max_rows)
+
+            # Execute query and emit workspace event
+            result = await self._execute_and_emit_sql_result(query, max_rows)
+            return result
 
         elif operation == "batch_write_files":
             # Batch-Write: Alle Dateien auf einmal schreiben
@@ -2694,10 +2948,31 @@ Sei präzise und gib detaillierte Analyse-Schritte."""
                 file_path = file_spec.get("path")
                 content = file_spec.get("content")
                 try:
+                    # Read original content for diff
+                    original_content = ""
+                    is_new = True
+                    try:
+                        resolved_path = Path(file_path).resolve()
+                        if resolved_path.exists():
+                            original_content = resolved_path.read_text(encoding="utf-8", errors="replace")
+                            is_new = False
+                    except Exception:
+                        pass
+
                     success = await manager.execute_write(file_path, content)
                     if success:
                         success_count += 1
                         written_paths.append(file_path)
+
+                        # Emit workspace code change event
+                        await self._emit_workspace_code_change(
+                            file_path=file_path,
+                            original_content=original_content,
+                            modified_content=content,
+                            tool_call="batch_write_files",
+                            description=confirmation_data.get("description", "Batch file written"),
+                            is_new=is_new
+                        )
                     else:
                         errors.append(f"{file_path}: Schreiben fehlgeschlagen")
                 except Exception as e:

@@ -52,6 +52,9 @@
         <span title="Plan &amp; Ausführen">&#128203;</span>
       </label>
     </div>
+    <button class="header-btn" id="dashboard-btn" onclick="openDashboard()" title="Dashboard">
+      &#128202;
+    </button>
     <button class="header-btn" id="workspace-btn" onclick="toggleWorkspace()" title="Workspace (Ctrl+B)">
       &#128194;
     </button>
@@ -198,6 +201,117 @@
           &#128190; Speichern
         </button>
       </div>
+    </div>
+  </div>
+</div>
+
+<!-- Dashboard Modal -->
+<div id="dashboard-modal" class="modal" style="display:none">
+  <div class="modal-overlay" onclick="closeDashboard()"></div>
+  <div class="modal-content modal-fullscreen">
+    <div class="modal-header dashboard-header">
+      <h2>&#128202; Dashboard</h2>
+      <div class="dashboard-controls">
+        <select id="dashboard-time-range" onchange="loadDashboardData(this.value)">
+          <option value="day">Heute</option>
+          <option value="week" selected>Diese Woche</option>
+          <option value="month">Dieser Monat</option>
+        </select>
+        <button class="btn btn-secondary btn-sm" onclick="refreshDashboard()">&#128260; Aktualisieren</button>
+        <button class="btn btn-secondary btn-sm" onclick="exportDashboard()">&#128190; Export</button>
+      </div>
+      <button class="modal-close" onclick="closeDashboard()">&times;</button>
+    </div>
+    <div class="modal-body dashboard-body">
+      <!-- KPI Cards Row -->
+      <div class="dashboard-kpi-row">
+        <div class="kpi-card">
+          <div class="kpi-icon">&#128202;</div>
+          <div class="kpi-content">
+            <div class="kpi-value" id="kpi-requests">--</div>
+            <div class="kpi-label">Anfragen</div>
+            <div class="kpi-trend" id="kpi-requests-trend"></div>
+          </div>
+        </div>
+        <div class="kpi-card">
+          <div class="kpi-icon">&#9889;</div>
+          <div class="kpi-content">
+            <div class="kpi-value" id="kpi-response-time">--</div>
+            <div class="kpi-label">Avg Response</div>
+            <div class="kpi-trend" id="kpi-response-trend"></div>
+          </div>
+        </div>
+        <div class="kpi-card">
+          <div class="kpi-icon">&#10003;</div>
+          <div class="kpi-content">
+            <div class="kpi-value" id="kpi-success-rate">--</div>
+            <div class="kpi-label">Success Rate</div>
+            <div class="kpi-trend" id="kpi-success-trend"></div>
+          </div>
+        </div>
+        <div class="kpi-card">
+          <div class="kpi-icon">&#128176;</div>
+          <div class="kpi-content">
+            <div class="kpi-value" id="kpi-tokens">--</div>
+            <div class="kpi-label">Tokens</div>
+            <div class="kpi-trend" id="kpi-tokens-trend"></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Charts Row -->
+      <div class="dashboard-charts-row">
+        <div class="dashboard-chart-card">
+          <div class="chart-header">
+            <h3>Top Tools</h3>
+          </div>
+          <div class="chart-body" id="chart-tool-usage">
+            <div class="chart-loading">Lade Daten...</div>
+          </div>
+        </div>
+        <div class="dashboard-chart-card">
+          <div class="chart-header">
+            <h3>Aktivität</h3>
+          </div>
+          <div class="chart-body" id="chart-activity">
+            <div class="chart-loading">Lade Daten...</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Bottom Row -->
+      <div class="dashboard-bottom-row">
+        <div class="dashboard-chart-card">
+          <div class="chart-header">
+            <h3>Letzte Fehler</h3>
+          </div>
+          <div class="chart-body" id="chart-errors">
+            <div class="chart-loading">Lade Daten...</div>
+          </div>
+        </div>
+        <div class="dashboard-chart-card">
+          <div class="chart-header">
+            <h3>Token-Nutzung</h3>
+          </div>
+          <div class="chart-body" id="chart-tokens">
+            <div class="chart-loading">Lade Daten...</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Pattern Suggestion Modal - Phase 5 Error Pattern Learning -->
+<div id="pattern-modal" class="modal" style="display:none">
+  <div class="modal-overlay" onclick="closePatternModal()"></div>
+  <div class="modal-content modal-medium">
+    <div class="modal-header pattern-header">
+      <h2>&#128161; Bekanntes Fehler-Pattern erkannt</h2>
+      <button class="modal-close" onclick="closePatternModal()">&times;</button>
+    </div>
+    <div class="modal-body pattern-body" id="pattern-modal-content">
+      <!-- Content wird dynamisch generiert -->
     </div>
   </div>
 </div>
@@ -710,6 +824,10 @@
     </div>
   </div>
 </div>
+
+<!-- diff2html for Code Diff View -->
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/diff2html/bundles/css/diff2html.min.css">
+<script src="https://cdn.jsdelivr.net/npm/diff2html/bundles/js/diff2html.min.js"></script>
 
 <!-- Scripts -->
 <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
