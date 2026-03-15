@@ -15,7 +15,7 @@ import asyncio
 import re
 import uuid
 from datetime import datetime
-from typing import Any, Dict, List, Optional, TYPE_CHECKING
+from typing import Any, Dict, List, Optional
 from urllib.parse import unquote
 
 import httpx

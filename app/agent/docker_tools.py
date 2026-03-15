@@ -152,7 +152,7 @@ def get_container_runtime() -> str:
     """
     Gibt 'wsl-podman' zurück wenn verfügbar.
 
-    DEPRECATED: Nutze get_wsl_command_prefix() für Befehle.
+    Hinweis: Fuer direkte Befehlsausfuehrung nutze get_wsl_command_prefix().
     """
     if _detect_wsl_podman():
         return "wsl-podman"

@@ -100,7 +100,7 @@
               <span class="category-arrow">&#9656;</span>
             </button>
             <div class="settings-nav-category-items">
-              <button class="settings-nav-item" data-section="agent_tools">Agent Tools</button>
+              <button class="settings-nav-item" data-section="task_agents">Task-Agenten</button>
               <button class="settings-nav-item" data-section="skills">Skills</button>
               <button class="settings-nav-item" data-section="file_operations">Datei-Ops</button>
               <button class="settings-nav-item" data-section="prompt_templates">Templates</button>
@@ -455,6 +455,50 @@
             <button class="btn btn-danger" onclick="confirmOperation(false)">
               &#10005; Abbrechen
             </button>
+          </div>
+        </div>
+
+        <!-- Enhancement Confirmation Panel -->
+        <div id="pending-enhancement" style="display:none">
+          <div class="confirm-header enhancement-header">
+            <span class="confirm-icon enhancement-icon" id="enhancement-type-icon">&#128269;</span>
+            <span class="confirm-title" id="enhancement-type-label">Kontext-Sammlung</span>
+            <span class="enhancement-badge" id="enhancement-source-count">0 Quellen</span>
+          </div>
+          <div class="enhancement-query">
+            <label>Anfrage:</label>
+            <span id="enhancement-query-text">...</span>
+          </div>
+          <div class="enhancement-context-list" id="enhancement-context-list">
+            <!-- Dynamically populated -->
+          </div>
+          <div class="enhancement-summary" id="enhancement-summary">
+            <!-- Summary from EnrichedPrompt -->
+          </div>
+          <div class="confirm-actions enhancement-actions">
+            <button class="btn btn-success" onclick="confirmEnhancement(true)">
+              &#10003; Mit Kontext fortfahren
+            </button>
+            <button class="btn btn-secondary" onclick="confirmEnhancement(false)">
+              &#10005; Ohne Kontext
+            </button>
+            <button class="btn btn-link" onclick="toggleEnhancementDetails()">
+              Details
+            </button>
+          </div>
+        </div>
+
+        <!-- Enhancement Progress Indicator -->
+        <div id="enhancement-progress" style="display:none">
+          <div class="confirm-header">
+            <span class="confirm-icon spinner">&#8635;</span>
+            <span class="confirm-title">Sammle Kontext...</span>
+          </div>
+          <div class="enhancement-progress-details">
+            <span id="enhancement-progress-type">Recherche</span>
+            <div class="progress-bar">
+              <div class="progress-fill" id="enhancement-progress-fill"></div>
+            </div>
           </div>
         </div>
       </div>

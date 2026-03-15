@@ -209,14 +209,15 @@ class TestBatchReadFiles:
 class TestRegisterMetaTools:
     """Tests für Tool-Registrierung."""
 
-    def test_registers_both_tools(self):
-        """Beide Meta-Tools sollten registriert werden."""
+    def test_registers_all_tools(self):
+        """Alle Meta-Tools sollten registriert werden."""
         registry = ToolRegistry()
         count = register_meta_tools(registry)
 
-        assert count == 2
+        assert count == 3
         assert registry.get("combined_search") is not None
         assert registry.get("batch_read_files") is not None
+        assert registry.get("batch_write_files") is not None
 
     def test_tools_have_descriptions(self):
         """Tools sollten aussagekräftige Beschreibungen haben."""

@@ -79,6 +79,7 @@ def get_section_schema(section: str) -> Dict[str, Any]:
         "java": "JavaConfig",
         "python": "PythonConfig",
         "sub_agents": "SubAgentsConfig",
+        "task_agents": "TaskAgentConfig",
         "tools": "ToolsConfig",
         "confluence": "ConfluenceConfig",
         "context": "ContextConfig",
@@ -198,6 +199,7 @@ def _get_section_description(section: str) -> str:
         "database": "DB2-Datenbankverbindung für Abfragen",
         "jira": "Jira-Anbindung für Issue-Suche und -Abruf",
         "sub_agents": "Parallele Sub-Agenten für Datenquellen-Recherche",
+        "task_agents": "Task-Decomposition Agent System mit spezialisierten Agenten",
         "jenkins": "Jenkins CI/CD Server (intern gehostet)",
         "github": "GitHub Enterprise Server (intern gehostet)",
         "internal_fetch": "Intranet-URLs abrufen (internes HTTP-Fetch-Tool)",
@@ -423,12 +425,20 @@ async def reload_settings() -> Dict[str, Any]:
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# Agent Tools Management
+# Agent Tools Management (DEPRECATED - Use task_agents instead)
 # ══════════════════════════════════════════════════════════════════════════════
+# Diese Endpoints sind veraltet. Das neue Task-Decomposition Agent System
+# verwendet spezialisierte Agenten mit eigenen Modellen statt Pro-Tool-Zuweisungen.
+# Siehe: settings.task_agents
 
-@router.get("/agent-tools")
+@router.get("/agent-tools", deprecated=True)
 async def get_agent_tools() -> Dict[str, Any]:
-    """Gibt alle registrierten Agent-Tools mit ihren Modell-Zuweisungen zurück."""
+    """
+    [DEPRECATED] Gibt alle registrierten Agent-Tools zurueck.
+
+    Hinweis: Diese API ist veraltet. Verwende stattdessen das Task-Agent-System
+    unter settings.task_agents fuer spezialisierte Agent-Modelle.
+    """
     from app.agent.tools import get_tool_registry
 
     registry = get_tool_registry()
@@ -449,19 +459,28 @@ async def get_agent_tools() -> Dict[str, Any]:
         "available_models": [m.model_dump() for m in settings.models],
         "default_model": settings.llm.default_model,
         "tool_model": settings.llm.tool_model,
+        "_deprecated": True,
+        "_deprecated_message": "Use task_agents config instead. Per-tool models are no longer effective.",
     }
 
 
-@router.put("/agent-tools/models")
+@router.put("/agent-tools/models", deprecated=True)
 async def update_tool_models(tool_models: Dict[str, str]) -> Dict[str, Any]:
-    """Aktualisiert die Pro-Tool Modell-Zuweisungen."""
+    """
+    [DEPRECATED] Aktualisiert Pro-Tool Modell-Zuweisungen.
+
+    Hinweis: Diese API ist veraltet. Pro-Tool-Modelle haben keine Wirkung,
+    da Tools keine LLM-Calls machen. Verwende stattdessen task_agents.
+    """
     # Leere Werte entfernen (= Default verwenden)
     cleaned = {k: v for k, v in tool_models.items() if v}
     settings.llm.tool_models = cleaned
 
     return {
         "tool_models": settings.llm.tool_models,
-        "message": "Tool-Modelle aktualisiert. POST /save zum Persistieren."
+        "message": "Tool-Modelle aktualisiert (DEPRECATED - hat keine Wirkung).",
+        "_deprecated": True,
+        "_deprecated_message": "Use task_agents config instead.",
     }
 
 

@@ -922,3 +922,126 @@ async def clear_cache() -> Dict[str, str]:
     cache = await get_cache_manager()
     await cache.clear()
     return {"status": "ok", "message": "Cache cleared"}
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Enhancement Confirmation Endpoints
+# ══════════════════════════════════════════════════════════════════════════════
+
+class EnhancementConfirmRequest(BaseModel):
+    """Anfrage zur Bestätigung einer Enhancement-Operation."""
+    confirmed: bool = Field(..., description="True = Kontext verwenden, False = ohne Kontext fortfahren")
+
+
+@router.get("/enhancement/{session_id}")
+async def get_enhancement_details(session_id: str) -> Dict[str, Any]:
+    """
+    Holt Details des ausstehenden Enhancement-Kontexts.
+
+    Wird vom Frontend aufgerufen um die vollständigen Context-Items
+    für die Bestätigungsanzeige zu laden.
+
+    Args:
+        session_id: Session-ID
+
+    Returns:
+        Enhancement-Details mit Context-Items
+    """
+    from app.agent.orchestrator import get_agent_orchestrator
+
+    orchestrator = get_agent_orchestrator()
+    state = orchestrator._get_state(session_id)
+
+    if not state.pending_enhancement:
+        return {
+            "session_id": session_id,
+            "has_enhancement": False,
+            "message": "Kein ausstehendes Enhancement für diese Session"
+        }
+
+    enriched = state.pending_enhancement
+
+    return {
+        "session_id": session_id,
+        "has_enhancement": True,
+        "enhancement": {
+            "original_query": enriched.original_query,
+            "enhancement_type": enriched.enhancement_type.value,
+            "context_sources": enriched.context_sources,
+            "summary": enriched.summary,
+            "context_items": [
+                {
+                    "source": item.source,
+                    "title": item.title,
+                    "content": item.content,
+                    "content_preview": item.content[:300] + "..." if len(item.content) > 300 else item.content,
+                    "relevance": item.relevance,
+                    "file_path": item.file_path,
+                    "url": item.url
+                }
+                for item in enriched.context_items
+            ],
+            "confirmation_message": enriched.get_confirmation_message()
+        }
+    }
+
+
+@router.post("/enhancement/{session_id}/confirm")
+async def confirm_enhancement(
+    session_id: str,
+    request: EnhancementConfirmRequest
+) -> Dict[str, Any]:
+    """
+    Bestätigt oder lehnt einen Enhancement-Kontext ab.
+
+    Nach der Bestätigung setzt der Agent die Verarbeitung fort.
+
+    Args:
+        session_id: Session-ID
+        request: Bestätigung (True/False)
+
+    Returns:
+        Status der Operation
+    """
+    from app.agent.orchestrator import get_agent_orchestrator
+
+    orchestrator = get_agent_orchestrator()
+    state = orchestrator._get_state(session_id)
+
+    if not state.pending_enhancement:
+        raise HTTPException(
+            status_code=400,
+            detail="Kein ausstehendes Enhancement für diese Session"
+        )
+
+    enriched = state.pending_enhancement
+
+    if request.confirmed:
+        # Kontext wird verwendet
+        from app.agent.prompt_enhancer import get_prompt_enhancer
+        enhancer = get_prompt_enhancer()
+        enriched = enhancer.confirm(enriched, True)
+        context = enriched.get_context_for_planner()
+
+        # Store confirmed context for task processing when [CONTINUE_ENHANCED] arrives
+        state.confirmed_enhancement_context = context
+        state.enhancement_original_query = enriched.original_query
+        state.pending_enhancement = None
+
+        return {
+            "status": "confirmed",
+            "message": "Enhancement-Kontext bestätigt",
+            "context_length": len(context),
+            "continue": True
+        }
+    else:
+        # Kontext wird abgelehnt
+        state.confirmed_enhancement_context = None
+        state.enhancement_original_query = enriched.original_query
+        state.pending_enhancement = None
+
+        return {
+            "status": "rejected",
+            "message": "Enhancement-Kontext abgelehnt, fahre ohne Kontext fort",
+            "continue": True
+        }

@@ -47,6 +47,7 @@ const chatManager = {
       toolHistory: [],
       context: { javaFiles: [], pythonFiles: [], pdfIds: [], handbookServices: [] },
       pendingConfirmation: null,
+      pendingEnhancement: null,  // MCP context enhancement state
       contextStatus: null,  // Per-chat context/token status
       createdAt: Date.now(),
     };
@@ -1596,6 +1597,23 @@ async function processAgentEvent(event, bubble, msgDiv, chat) {
       break;
     }
 
+    // Enhancement Events
+    case 'enhancement_start':
+      handleEnhancementStart(data, chat);
+      break;
+
+    case 'enhancement_complete':
+      handleEnhancementComplete(data, chat);
+      break;
+
+    case 'enhancement_confirmed':
+      handleEnhancementConfirmed(data, chat);
+      break;
+
+    case 'enhancement_rejected':
+      handleEnhancementRejected(data, chat);
+      break;
+
     case 'compaction': {
       const saved = data.savings ? ` (−${data.savings} Tokens)` : '';
       appendMessageToPane(chat.pane, 'system', `♻ Konversation komprimiert${saved}`);
@@ -2133,6 +2151,338 @@ async function confirmOperation(confirmed) {
   } catch (e) {
     appendMessage('error', 'Bestätigung fehlgeschlagen: ' + e.message);
   }
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// Enhancement Confirmation Handling
+// ══════════════════════════════════════════════════════════════════════════════
+
+const ENHANCEMENT_ICONS = {
+  research: '🔍',
+  sequential: '🧠',
+  analyze: '📊',
+  brainstorm: '💡',
+  none: '➡️'
+};
+
+const ENHANCEMENT_LABELS = {
+  research: 'Recherche-Kontext',
+  sequential: 'Strukturierte Analyse',
+  analyze: 'Code-Analyse',
+  brainstorm: 'Requirements Discovery',
+  none: 'Direkte Verarbeitung'
+};
+
+/**
+ * Handle ENHANCEMENT_START event - show progress indicator
+ */
+function handleEnhancementStart(data, chat) {
+  const isActive = chat.id === chatManager.activeId;
+
+  chat.pendingEnhancement = {
+    type: data.detection_type,
+    query_preview: data.query_preview,
+    status: 'collecting'
+  };
+
+  if (isActive) {
+    showEnhancementProgress(data);
+    switchRightPanel('confirm-panel');
+  }
+}
+
+/**
+ * Show progress indicator during context collection
+ */
+function showEnhancementProgress(data) {
+  // Hide other confirmation types
+  document.getElementById('no-confirmation').style.display = 'none';
+  document.getElementById('pending-confirmation').style.display = 'none';
+  document.getElementById('pending-enhancement').style.display = 'none';
+
+  // Show progress
+  const progress = document.getElementById('enhancement-progress');
+  if (progress) {
+    progress.style.display = 'block';
+    const typeLabel = document.getElementById('enhancement-progress-type');
+    if (typeLabel) {
+      typeLabel.textContent = ENHANCEMENT_LABELS[data.detection_type] || data.detection_type;
+    }
+  }
+
+  // Show pending badge
+  const badge = document.getElementById('pending-count');
+  if (badge) badge.style.display = 'inline';
+}
+
+/**
+ * Handle ENHANCEMENT_COMPLETE event - show confirmation panel
+ */
+function handleEnhancementComplete(data, chat) {
+  const isActive = chat.id === chatManager.activeId;
+
+  chat.pendingEnhancement = {
+    ...chat.pendingEnhancement,
+    status: 'pending_confirmation',
+    context_count: data.context_count,
+    sources: data.sources,
+    summary: data.summary,
+    confirmation_message: data.confirmation_message,
+    context_items: data.context_items || []  // Store context items for inline display
+  };
+
+  if (isActive) {
+    showEnhancementConfirmation(chat.pendingEnhancement);
+  }
+}
+
+/**
+ * Show the enhancement confirmation panel with context items
+ */
+function showEnhancementConfirmation(enhancementData) {
+  // Hide progress
+  const progress = document.getElementById('enhancement-progress');
+  if (progress) progress.style.display = 'none';
+  document.getElementById('no-confirmation').style.display = 'none';
+  document.getElementById('pending-confirmation').style.display = 'none';
+
+  // Show enhancement panel
+  const panel = document.getElementById('pending-enhancement');
+  if (!panel) return;
+  panel.style.display = 'block';
+
+  // Set type icon and label
+  const type = enhancementData.type || 'research';
+  const iconEl = document.getElementById('enhancement-type-icon');
+  const labelEl = document.getElementById('enhancement-type-label');
+  if (iconEl) iconEl.textContent = ENHANCEMENT_ICONS[type] || '🔍';
+  if (labelEl) labelEl.textContent = ENHANCEMENT_LABELS[type] || 'Kontext-Sammlung';
+
+  // Set source count
+  const countEl = document.getElementById('enhancement-source-count');
+  if (countEl) countEl.textContent = `${enhancementData.context_count || 0} Elemente`;
+
+  // Set query preview
+  const queryEl = document.getElementById('enhancement-query-text');
+  if (queryEl && enhancementData.query_preview) {
+    queryEl.textContent = enhancementData.query_preview.substring(0, 100) + '...';
+  }
+
+  // Set summary
+  const summaryEl = document.getElementById('enhancement-summary');
+  if (summaryEl && enhancementData.summary) {
+    summaryEl.innerHTML = marked.parse(enhancementData.summary);
+  }
+
+  // Reset context list
+  const listEl = document.getElementById('enhancement-context-list');
+  if (listEl) {
+    listEl.innerHTML = '';
+    listEl.classList.remove('expanded');
+    delete listEl.dataset.loaded;
+  }
+
+  // Show pending badge
+  const badge = document.getElementById('pending-count');
+  if (badge) badge.style.display = 'inline';
+}
+
+/**
+ * Confirm or reject the enhancement context
+ */
+async function confirmEnhancement(confirmed) {
+  const chat = chatManager.getActive();
+  if (!chat?.pendingEnhancement) return;
+
+  try {
+    const res = await fetch(`/api/agent/enhancement/${chat.sessionId}/confirm`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ confirmed })
+    });
+
+    if (!res.ok) {
+      console.error('[enhancement] Confirmation failed:', await res.text());
+    }
+
+    const result = await res.json();
+
+    // Clear pending state
+    chat.pendingEnhancement = null;
+    hideEnhancementPanel();
+
+    // Show feedback
+    if (confirmed) {
+      const contextLen = result.context_length ? ` (${result.context_length} Zeichen)` : '';
+      appendMessageToPane(chat.pane, 'system', `✓ Kontext bestätigt${contextLen}`);
+    } else {
+      appendMessageToPane(chat.pane, 'system', '⚠ Ohne Kontext fortfahren...');
+    }
+
+    // Continue processing if backend signals continue
+    if (result.continue) {
+      // Resume the chat processing with the enriched context
+      sendChatMessage('[CONTINUE_ENHANCED]');
+    }
+
+  } catch (err) {
+    console.error('[enhancement] Confirmation error:', err);
+    appendMessageToPane(chat.pane, 'error', `Enhancement-Bestätigung fehlgeschlagen: ${err.message}`);
+  }
+}
+
+/**
+ * Hide the enhancement confirmation panel
+ */
+function hideEnhancementPanel() {
+  const progress = document.getElementById('enhancement-progress');
+  const pending = document.getElementById('pending-enhancement');
+  const noConfirm = document.getElementById('no-confirmation');
+  const badge = document.getElementById('pending-count');
+
+  if (progress) progress.style.display = 'none';
+  if (pending) pending.style.display = 'none';
+  if (noConfirm) noConfirm.style.display = 'block';
+  if (badge) badge.style.display = 'none';
+}
+
+/**
+ * Handle ENHANCEMENT_CONFIRMED event
+ */
+function handleEnhancementConfirmed(data, chat) {
+  const isActive = chat.id === chatManager.activeId;
+
+  chat.pendingEnhancement = null;
+
+  if (isActive) {
+    hideEnhancementPanel();
+  }
+}
+
+/**
+ * Handle ENHANCEMENT_REJECTED event
+ */
+function handleEnhancementRejected(data, chat) {
+  const isActive = chat.id === chatManager.activeId;
+
+  chat.pendingEnhancement = null;
+
+  if (isActive) {
+    hideEnhancementPanel();
+  }
+}
+
+/**
+ * Toggle detailed context view
+ */
+function toggleEnhancementDetails() {
+  const list = document.getElementById('enhancement-context-list');
+  if (!list) return;
+
+  list.classList.toggle('expanded');
+
+  // If expanded for first time, load full details
+  if (list.classList.contains('expanded') && !list.dataset.loaded) {
+    loadEnhancementDetails();
+    list.dataset.loaded = 'true';
+  }
+}
+
+/**
+ * Load full context details via API
+ */
+async function loadEnhancementDetails() {
+  const chat = chatManager.getActive();
+  if (!chat?.sessionId) return;
+
+  const list = document.getElementById('enhancement-context-list');
+  if (!list) return;
+
+  // Show loading state
+  list.innerHTML = '<div style="padding: 12px; color: #a0aec0;">Lade Details...</div>';
+
+  try {
+    const res = await fetch(`/api/agent/enhancement/${chat.sessionId}`);
+    if (!res.ok) throw new Error('Failed to load details');
+
+    const data = await res.json();
+    if (!data.has_enhancement) {
+      list.innerHTML = '<div style="padding: 12px; color: #a0aec0;">Kein Enhancement verfügbar</div>';
+      return;
+    }
+    renderContextItems(data.enhancement?.context_items || []);
+
+  } catch (err) {
+    console.error('[enhancement] Failed to load details:', err);
+    list.innerHTML = '<div style="padding: 12px; color: #f56565;">Details konnten nicht geladen werden</div>';
+  }
+}
+
+/**
+ * Render context items in the list
+ */
+function renderContextItems(items) {
+  const list = document.getElementById('enhancement-context-list');
+  if (!list) return;
+
+  if (items.length === 0) {
+    list.innerHTML = '<div style="padding: 12px; color: #a0aec0;">Keine Kontext-Elemente</div>';
+    return;
+  }
+
+  list.innerHTML = '';
+
+  items.forEach(item => {
+    const sourceClass = getEnhancementSourceClass(item.source);
+    const relevancePercent = Math.round((item.relevance || 0.5) * 100);
+    const displayContent = item.content_preview || item.content || '';
+
+    const el = document.createElement('div');
+    el.className = 'enhancement-context-item';
+    el.innerHTML = `
+      <div class="context-item-header">
+        <span class="context-source-badge ${sourceClass}">${escapeHtml(item.source || 'unknown')}</span>
+        <span class="context-item-title">${escapeHtml(item.title || 'Untitled')}</span>
+        <span class="context-relevance">${relevancePercent}%</span>
+      </div>
+      <div class="context-item-content">
+        ${escapeHtml(displayContent.substring(0, 300))}${displayContent.length > 300 ? '...' : ''}
+      </div>
+      ${item.url || item.file_path ? `
+        <div class="context-item-meta">
+          ${item.url ? `<a href="${escapeHtml(item.url)}" target="_blank" rel="noopener">Öffnen</a>` : ''}
+          ${item.file_path ? `<span>${escapeHtml(item.file_path)}</span>` : ''}
+        </div>
+      ` : ''}
+    `;
+
+    list.appendChild(el);
+  });
+}
+
+/**
+ * Get CSS class for source type
+ */
+function getEnhancementSourceClass(source) {
+  const mapping = {
+    'wiki': 'source-wiki',
+    'confluence': 'source-wiki',
+    'code': 'source-code',
+    'code_java': 'source-code',
+    'code_python': 'source-code',
+    'web': 'source-web',
+    'handbook': 'source-handbook',
+    'memory': 'source-memory',
+    'sequential': 'source-sequential',
+    'hypothesis': 'source-hypothesis',
+    'research_report': 'source-research',
+    'sequential_analysis': 'source-sequential',
+    'sequential_conclusion': 'source-sequential',
+    'brainstorm_exploration': 'source-hypothesis',
+    'code_analysis': 'source-code',
+    'analysis_insight': 'source-code'
+  };
+  return mapping[source] || 'source-web';
 }
 
 // ── Plan Card (Planungsphase) ──
@@ -2935,7 +3285,7 @@ const settingsState = {
     index: 'Such-Index-Einstellungen',
     server: 'Server-Konfiguration',
     tools: 'Pfade zu Entwickler-Tools',
-    agent_tools: 'Agent-Tools mit Modell-Zuweisungen',
+    task_agents: 'Task-Decomposition Agent System',
     jira: 'Jira-Anbindung für Issue-Suche',
     context: 'Kontext-Limits für LLM',
     uploads: 'Upload-Verzeichnis und Limits',
@@ -3202,8 +3552,8 @@ function renderSettingsSection() {
     return;
   }
 
-  if (section === 'agent_tools') {
-    renderAgentToolsSection();
+  if (section === 'task_agents') {
+    renderTaskAgentsSection();
     return;
   }
 
@@ -3663,172 +4013,181 @@ function removeArrayItem(fieldId, idx) {
   }
 }
 
-async function renderAgentToolsSection() {
+async function renderTaskAgentsSection() {
   const form = document.getElementById('settings-form');
-  form.innerHTML = `
+  const cfg = settingsState.settings.task_agents || {};
+  const models = settingsState.settings.models || [];
+  const llmCfg = settingsState.settings.llm || {};
+
+  // Agent-Typen mit Beschreibungen
+  const agentTypes = [
+    { key: 'research_model', label: 'Research Agent', desc: 'Sucht und sammelt Informationen', fallback: llmCfg.tool_model || llmCfg.default_model },
+    { key: 'code_model', label: 'Code Agent', desc: 'Schreibt und bearbeitet Code', fallback: llmCfg.default_model },
+    { key: 'analyst_model', label: 'Analyst Agent', desc: 'Analysiert und reviewed Code', fallback: llmCfg.analysis_model || llmCfg.default_model },
+    { key: 'devops_model', label: 'DevOps Agent', desc: 'CI/CD, Docker, Deployment', fallback: llmCfg.tool_model || llmCfg.default_model },
+    { key: 'docs_model', label: 'Docs Agent', desc: 'Erstellt Dokumentation', fallback: llmCfg.tool_model || llmCfg.default_model },
+    { key: 'debug_model', label: 'Debug Agent', desc: 'Debuggt und testet Code (lokal/remote)', fallback: llmCfg.analysis_model || llmCfg.default_model },
+  ];
+
+  let html = `
     <div class="settings-section">
-      <h3 class="settings-section-title">AGENT TOOLS</h3>
-      <p class="settings-section-desc">Übersicht aller Agent-Tools. Pro Tool kann ein eigenes LLM-Modell zugewiesen werden. Leeres Feld = Standard-Modell (tool_model oder default_model).</p>
+      <h3 class="settings-section-title">TASK-DECOMPOSITION AGENT SYSTEM</h3>
+      <p class="settings-section-desc">
+        Zerlegt komplexe Anfragen in spezialisierte Tasks, die von dedizierten Agenten
+        mit eigenen Models und System-Prompts ausgefuehrt werden.
+      </p>
     </div>
-    <div id="agent-tools-loading" style="text-align:center; padding:20px;">
-      <span class="spinner"></span> Lade Tools...
+
+    <!-- Master Switch -->
+    <div class="settings-field" style="background: var(--bg-secondary); padding: 12px; border-radius: 6px; margin-bottom: 16px;">
+      <div style="display: flex; align-items: center; gap: 12px;">
+        <label class="toggle-switch">
+          <input type="checkbox" id="task-agents-enabled"
+            data-section="task_agents" data-key="enabled"
+            ${cfg.enabled ? 'checked' : ''}
+            onchange="markSettingsModified()">
+          <span class="toggle-slider"></span>
+        </label>
+        <div>
+          <strong>Task-Decomposition aktivieren</strong>
+          <div style="font-size: 0.85em; color: var(--text-secondary);">
+            Komplexe Anfragen werden automatisch in spezialisierte Tasks zerlegt
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Agent Models -->
+    <div class="settings-section">
+      <h4 style="margin: 0 0 12px; color: var(--accent);">Agent-Modelle</h4>
+      <p style="font-size: 0.85em; color: var(--text-secondary); margin-bottom: 12px;">
+        Jeder Agent-Typ kann ein eigenes LLM-Modell verwenden. Leeres Feld = Fallback-Modell.
+      </p>
     </div>
   `;
 
-  try {
-    const [toolsRes, dsRes] = await Promise.all([
-      fetch('/api/settings/agent-tools'),
-      fetch('/api/datasources'),
-    ]);
-    const data = await toolsRes.json();
-    const dsData = dsRes.ok ? await dsRes.json() : { sources: [] };
-
-    // Build lookup: tool-name → datasource id
-    const dsById = {};
-    for (const src of (dsData.sources || [])) {
-      // replicate _slugify + get_datasource_tool_name logic
-      const slug = src.name.toLowerCase().replace(/[^a-z0-9_]/g, '_').replace(/_+/g, '_').replace(/^_|_$/g, '').slice(0, 40) || 'unnamed';
-      dsById[`ds_${slug}`] = src.id;
-    }
-
-    const tools = data.tools || [];
-    const availableModels = data.available_models || [];
-    const defaultModel = data.default_model || '';
-    const globalToolModel = data.tool_model || '';
-
-    // Kategorien gruppieren
-    const categories = {};
-    for (const tool of tools) {
-      const cat = tool.category || 'other';
-      if (!categories[cat]) categories[cat] = [];
-      categories[cat].push(tool);
-    }
-
-    const categoryLabels = {
-      search: 'Suche',
-      file: 'Dateien',
-      knowledge: 'Wissen',
-      analysis: 'Analyse',
-      other: 'Sonstige'
-    };
-
-    let html = `
-      <div class="settings-section">
-        <h3 class="settings-section-title">AGENT TOOLS</h3>
-        <p class="settings-section-desc">
-          Pro Tool kann ein eigenes LLM-Modell zugewiesen werden.<br>
-          <small>Standard-Modell: <strong>${escapeHtml(globalToolModel || defaultModel)}</strong></small>
-        </p>
-        <div style="margin-top: 12px;">
-          <input type="text" id="agent-tools-search" placeholder="Tools durchsuchen..."
-            oninput="filterAgentTools(this.value)"
-            style="width: 100%; padding: 8px; border: 1px solid var(--border); border-radius: 4px;">
-        </div>
+  // Agent-Modell-Selects
+  for (const agent of agentTypes) {
+    const currentVal = cfg[agent.key] || '';
+    html += `
+      <div class="settings-field" style="margin-bottom: 12px;">
+        <label for="ta-${agent.key}">
+          <strong>${escapeHtml(agent.label)}</strong>
+          <span style="color: var(--text-secondary); font-size: 0.85em;"> - ${escapeHtml(agent.desc)}</span>
+        </label>
+        <select id="ta-${agent.key}" data-section="task_agents" data-key="${agent.key}"
+          onchange="markSettingsModified()" style="width: 100%; margin-top: 4px;">
+          <option value="">Standard (${escapeHtml(agent.fallback || 'default_model')})</option>
+          ${models.map(m => `<option value="${escapeHtml(m.id)}" ${currentVal === m.id ? 'selected' : ''}>${escapeHtml(m.display_name || m.id)}</option>`).join('')}
+        </select>
       </div>
     `;
-
-    for (const [cat, catTools] of Object.entries(categories)) {
-      html += `<div class="settings-section" style="margin-top:12px;">
-        <h4 style="margin:0 0 8px; color: var(--accent);">${categoryLabels[cat] || cat}</h4>
-      </div>`;
-
-      for (const tool of catTools) {
-        const fieldId = `tool-model-${tool.name}`;
-        const currentModel = tool.model || '';
-        const writeIcon = tool.is_write_operation ? ' &#9888;' : '';
-        const isDsTool = tool.name.startsWith('ds_') && dsById[tool.name];
-        const dsEditBtn = isDsTool
-          ? `<button class="btn btn-xs btn-secondary" onclick="openDatasourceEdit('${dsById[tool.name]}')" title="Datenquelle bearbeiten">✏ Datenquelle</button>`
-          : '';
-
-        html += `
-          <div class="settings-field" style="border-bottom: 1px solid var(--border); padding-bottom: 8px; margin-bottom: 8px;">
-            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;">
-              <label for="${fieldId}" style="font-weight:600;">${escapeHtml(tool.name)}${writeIcon}</label>
-              ${dsEditBtn}
-            </div>
-            <div style="font-size:0.85em; color: var(--text-secondary); margin-bottom:6px;">
-              ${escapeHtml(tool.description)}
-            </div>
-            <select id="${fieldId}" data-tool-name="${tool.name}" onchange="markSettingsModified()" style="width:100%;">
-              <option value="">Standard (${escapeHtml(globalToolModel || defaultModel)})</option>
-              ${availableModels.map(m => `<option value="${escapeHtml(m.id)}" ${currentModel === m.id ? 'selected' : ''}>${escapeHtml(m.display_name || m.id)}</option>`).join('')}
-            </select>
-          </div>
-        `;
-      }
-    }
-
-    form.innerHTML = html;
-  } catch (err) {
-    form.innerHTML = `<p style="color:var(--error);">Fehler beim Laden der Tools: ${escapeHtml(err.message)}</p>`;
-  }
-}
-
-function openDatasourceEdit(sourceId) {
-  // Switch to data_sources settings section and open edit form
-  document.querySelectorAll('.settings-nav-item').forEach(btn => {
-    btn.classList.toggle('active', btn.dataset.section === 'data_sources');
-  });
-  settingsState.currentSection = 'data_sources';
-  renderDataSourcesSection().then(() => {
-    dsShowForm(sourceId);
-    // Scroll form into view
-    setTimeout(() => {
-      document.getElementById('ds-edit-form')?.scrollIntoView({ behavior: 'smooth' });
-    }, 100);
-  });
-}
-
-async function saveAgentToolModels() {
-  const toolModels = {};
-  document.querySelectorAll('[data-tool-name]').forEach(select => {
-    const toolName = select.dataset.toolName;
-    const modelId = select.value;
-    if (modelId) {
-      toolModels[toolName] = modelId;
-    }
-  });
-
-  const res = await fetch('/api/settings/agent-tools/models', {
-    method: 'PUT',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(toolModels)
-  });
-
-  if (!res.ok) {
-    throw new Error('Fehler beim Speichern der Tool-Modelle');
   }
 
-  return toolModels;
-}
+  // Fallback Model
+  html += `
+    <div class="settings-field" style="margin-bottom: 16px; padding-top: 8px; border-top: 1px solid var(--border);">
+      <label for="ta-fallback_model">
+        <strong>Fallback-Modell</strong>
+        <span style="color: var(--text-secondary); font-size: 0.85em;"> - Wenn Agent-Modell nicht verfuegbar</span>
+      </label>
+      <select id="ta-fallback_model" data-section="task_agents" data-key="fallback_model"
+        onchange="markSettingsModified()" style="width: 100%; margin-top: 4px;">
+        <option value="">Standard (${escapeHtml(llmCfg.default_model || '')})</option>
+        ${models.map(m => `<option value="${escapeHtml(m.id)}" ${cfg.fallback_model === m.id ? 'selected' : ''}>${escapeHtml(m.display_name || m.id)}</option>`).join('')}
+      </select>
+    </div>
+  `;
 
-function filterAgentTools(query) {
-  const q = query.toLowerCase().trim();
-  document.querySelectorAll('#settings-form .settings-field').forEach(field => {
-    // Finde tool name im label
-    const label = field.querySelector('label');
-    if (!label) return;
-    const toolName = label.textContent.toLowerCase();
-    const desc = field.querySelector('[style*="text-secondary"]')?.textContent?.toLowerCase() || '';
-    const matches = !q || toolName.includes(q) || desc.includes(q);
-    field.style.display = matches ? '' : 'none';
-  });
-  // Kategorie-Header verstecken wenn alle Tools darin versteckt
-  document.querySelectorAll('#settings-form .settings-section h4').forEach(h4 => {
-    const section = h4.closest('.settings-section');
-    if (!section) return;
-    let next = section.nextElementSibling;
-    let anyVisible = false;
-    while (next && !next.querySelector('h4')) {
-      if (next.classList.contains('settings-field') && next.style.display !== 'none') {
-        anyVisible = true;
-        break;
-      }
-      next = next.nextElementSibling;
-    }
-    section.style.display = anyVisible || !q ? '' : 'none';
-  });
+  // Execution Settings
+  html += `
+    <div class="settings-section" style="margin-top: 20px;">
+      <h4 style="margin: 0 0 12px; color: var(--accent);">Ausfuehrung</h4>
+    </div>
+
+    <div class="settings-field">
+      <label for="ta-max_parallel_tasks">Max. parallele Tasks</label>
+      <input type="number" id="ta-max_parallel_tasks" min="1" max="10"
+        value="${cfg.max_parallel_tasks || 3}"
+        data-section="task_agents" data-key="max_parallel_tasks"
+        onchange="markSettingsModified()" style="width: 100px;">
+      <span style="color: var(--text-secondary); font-size: 0.85em; margin-left: 8px;">
+        Unabhaengige Tasks werden parallel ausgefuehrt
+      </span>
+    </div>
+
+    <div class="settings-field">
+      <label for="ta-task_timeout_seconds">Task-Timeout (Sekunden)</label>
+      <input type="number" id="ta-task_timeout_seconds" min="30" max="600"
+        value="${cfg.task_timeout_seconds || 120}"
+        data-section="task_agents" data-key="task_timeout_seconds"
+        onchange="markSettingsModified()" style="width: 100px;">
+    </div>
+
+    <div class="settings-field">
+      <label for="ta-max_retries_per_task">Max. Retries pro Task</label>
+      <input type="number" id="ta-max_retries_per_task" min="0" max="5"
+        value="${cfg.max_retries_per_task || 3}"
+        data-section="task_agents" data-key="max_retries_per_task"
+        onchange="markSettingsModified()" style="width: 100px;">
+    </div>
+
+    <!-- Phase Synthesis -->
+    <div class="settings-section" style="margin-top: 20px;">
+      <h4 style="margin: 0 0 12px; color: var(--accent);">Phasen-Synthese</h4>
+    </div>
+
+    <div class="settings-field" style="display: flex; align-items: center; gap: 12px;">
+      <label class="toggle-switch">
+        <input type="checkbox" id="ta-enable_phase_synthesis"
+          data-section="task_agents" data-key="enable_phase_synthesis"
+          ${cfg.enable_phase_synthesis !== false ? 'checked' : ''}
+          onchange="markSettingsModified()">
+        <span class="toggle-slider"></span>
+      </label>
+      <div>
+        <strong>Zwischen-Synthese aktivieren</strong>
+        <div style="font-size: 0.85em; color: var(--text-secondary);">
+          Bei Phasenwechsel (z.B. Research -> Code) werden Ergebnisse zusammengefasst
+        </div>
+      </div>
+    </div>
+
+    <div class="settings-field">
+      <label for="ta-synthesis_max_tokens">Max. Tokens fuer Synthese</label>
+      <input type="number" id="ta-synthesis_max_tokens" min="100" max="2000"
+        value="${cfg.synthesis_max_tokens || 500}"
+        data-section="task_agents" data-key="synthesis_max_tokens"
+        onchange="markSettingsModified()" style="width: 100px;">
+    </div>
+
+    <!-- Planning -->
+    <div class="settings-section" style="margin-top: 20px;">
+      <h4 style="margin: 0 0 12px; color: var(--accent);">Planung</h4>
+    </div>
+
+    <div class="settings-field">
+      <label for="ta-min_tasks_for_decomposition">Min. Tasks fuer Zerlegung</label>
+      <input type="number" id="ta-min_tasks_for_decomposition" min="1" max="5"
+        value="${cfg.min_tasks_for_decomposition || 2}"
+        data-section="task_agents" data-key="min_tasks_for_decomposition"
+        onchange="markSettingsModified()" style="width: 100px;">
+      <span style="color: var(--text-secondary); font-size: 0.85em; margin-left: 8px;">
+        Unter diesem Threshold wird direkt verarbeitet
+      </span>
+    </div>
+
+    <div class="settings-field">
+      <label for="ta-planning_model">Planning-Modell</label>
+      <select id="ta-planning_model" data-section="task_agents" data-key="planning_model"
+        onchange="markSettingsModified()" style="width: 100%;">
+        <option value="">Standard (${escapeHtml(llmCfg.analysis_model || llmCfg.default_model || '')})</option>
+        ${models.map(m => `<option value="${escapeHtml(m.id)}" ${cfg.planning_model === m.id ? 'selected' : ''}>${escapeHtml(m.display_name || m.id)}</option>`).join('')}
+      </select>
+    </div>
+  `;
+
+  form.innerHTML = html;
 }
 
 function renderModelsSection() {
@@ -4253,17 +4612,6 @@ function collectSectionValues(section) {
 
 async function saveCurrentSection() {
   const section = settingsState.currentSection;
-
-  // Agent Tools hat eigenen Save-Endpunkt
-  if (section === 'agent_tools') {
-    try {
-      await saveAgentToolModels();
-      updateSettingsStatus('Tool-Modelle angewendet (nur im Speicher)', 'success');
-    } catch (err) {
-      updateSettingsStatus('Fehler: ' + err.message, 'error');
-    }
-    return;
-  }
 
   // Web-Suche hat eigene Felder
   if (section === 'search') {

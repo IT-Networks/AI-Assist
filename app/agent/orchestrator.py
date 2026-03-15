@@ -17,10 +17,14 @@ import re
 import uuid
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, AsyncGenerator, Dict, List, Optional, Set
+from typing import Any, AsyncGenerator, Dict, List, Optional, Set, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from app.agent.prompt_enhancer import EnrichedPrompt
 
 import httpx
 
+from app.agent.constants import ControlMarkers
 from app.agent.entity_tracker import EntityTracker
 
 logger = logging.getLogger(__name__)
@@ -234,6 +238,20 @@ class AgentEventType(str, Enum):
     MCP_TOOL_REC = "mcp_tool_recommendation"   # Tool-Empfehlung
     # Reasoning Events (GPT-OSS, o1, o3)
     REASONING_STATUS = "reasoning_status"  # Reasoning-Modus aktiv/inaktiv
+    # Task-Decomposition Events
+    TASK_PLAN_CREATED = "task_plan_created"          # TaskPlan erstellt
+    TASK_STARTED = "task_started"                    # Task-Ausfuehrung gestartet
+    TASK_PROGRESS = "task_progress"                  # Task-Fortschritt
+    TASK_COMPLETED = "task_completed"                # Task erfolgreich
+    TASK_FAILED = "task_failed"                      # Task fehlgeschlagen
+    TASK_CLARIFICATION = "task_clarification_needed" # Klaerungsfragen noetig
+    TASK_EXECUTION_DONE = "task_execution_complete"  # Alle Tasks fertig
+    # Prompt Enhancement Events
+    ENHANCEMENT_START = "enhancement_start"          # MCP-Kontext-Sammlung startet
+    ENHANCEMENT_PROGRESS = "enhancement_progress"    # Fortschritt bei Kontext-Sammlung
+    ENHANCEMENT_COMPLETE = "enhancement_complete"    # Kontext gesammelt, Bestätigung anfordern
+    ENHANCEMENT_CONFIRMED = "enhancement_confirmed"  # User hat Kontext bestätigt
+    ENHANCEMENT_REJECTED = "enhancement_rejected"    # User hat Kontext abgelehnt
 
 
 @dataclass
@@ -302,6 +320,12 @@ class AgentState:
     cancelled: bool = False
     # Entity Tracker: Verfolgt gefundene Entitäten und ihre Quellen (Java ↔ Handbuch ↔ PDF)
     entity_tracker: EntityTracker = field(default_factory=EntityTracker)
+    # Pending Enhancement: Wartet auf User-Bestätigung
+    pending_enhancement: Optional["EnrichedPrompt"] = None
+    # Confirmed Enhancement Context: Gesammelter Kontext nach Bestätigung
+    confirmed_enhancement_context: Optional[str] = None
+    # Original query für Enhancement (für Task-Decomposition nach Bestätigung)
+    enhancement_original_query: Optional[str] = None
     # Chat-Titel (wird aus erster User-Nachricht abgeleitet oder manuell gesetzt)
     title: str = ""
     # Planungsphase (PLAN_THEN_EXECUTE-Modus)
@@ -943,8 +967,8 @@ Sei präzise und gib detaillierte Analyse-Schritte."""
             logger.debug("[agent] Forced MCP capability: {forced_capability}")
 
         # ── Continue-Handling (nach Bestätigung) ───────────────────────────────
-        # [CONTINUE] wird nach Schreibbestätigung gesendet um weitere Tools auszuführen
-        is_continue = user_message.strip() == "[CONTINUE]"
+        # ControlMarkers.CONTINUE wird nach Schreibbestätigung gesendet
+        is_continue = user_message.strip() == ControlMarkers.CONTINUE
         if is_continue:
             logger.debug("[agent] Continue nach Bestätigung erkannt")
             # Ersetze durch System-Hinweis statt User-Message
@@ -952,6 +976,207 @@ Sei präzise und gib detaillierte Analyse-Schritte."""
                 "Die letzte Datei-Operation wurde bestätigt und ausgeführt. "
                 "Setze die Arbeit fort und führe die verbleibenden Schritte aus."
             )
+
+        # ControlMarkers.CONTINUE_ENHANCED wird nach Enhancement-Bestätigung gesendet
+        is_continue_enhanced = user_message.strip() == ControlMarkers.CONTINUE_ENHANCED
+        if is_continue_enhanced:
+            logger.debug("[agent] Continue after enhancement confirmation")
+            # Hole originale Query zurück
+            if state.enhancement_original_query:
+                user_message = state.enhancement_original_query
+                logger.info(f"[agent] Restored original query: {user_message[:50]}...")
+            else:
+                user_message = "Fahre mit der Anfrage fort."
+        # ─────────────────────────────────────────────────────────────────────
+
+        # ── MCP Prompt Enhancement Phase ────────────────────────────────────
+        # Sammelt Kontext via MCP vor Task-Decomposition
+        enriched_context: Optional[str] = None
+
+        # Check if we have already confirmed enhancement context (from [CONTINUE_ENHANCED])
+        if is_continue_enhanced and state.confirmed_enhancement_context:
+            enriched_context = state.confirmed_enhancement_context
+            logger.info(f"[agent] Using confirmed enhancement context: {len(enriched_context)} chars")
+            # Clear after use
+            state.confirmed_enhancement_context = None
+            state.enhancement_original_query = None
+
+        elif not is_continue and not is_continue_enhanced and settings.task_agents.enabled:
+            try:
+                from app.agent.prompt_enhancer import (
+                    get_prompt_enhancer,
+                    EnhancementType,
+                    ConfirmationStatus
+                )
+
+                enhancer = get_prompt_enhancer()
+
+                # Prüfen ob Enhancement sinnvoll
+                if enhancer.detector.should_enhance(user_message):
+                    logger.info("[agent] Starting MCP prompt enhancement")
+
+                    # Enhancement-Start Event
+                    yield AgentEvent(AgentEventType.ENHANCEMENT_START, {
+                        "query_preview": user_message[:100],
+                        "detection_type": enhancer.detector.detect(user_message).value
+                    })
+
+                    # Kontext sammeln
+                    enriched = await enhancer.enhance(user_message)
+
+                    if enriched.context_items:
+                        # Enhancement in State speichern für API-Zugriff
+                        state.pending_enhancement = enriched
+
+                        # Enhancement-Complete Event - User-Bestätigung anfordern
+                        yield AgentEvent(AgentEventType.ENHANCEMENT_COMPLETE, {
+                            "context_count": len(enriched.context_items),
+                            "sources": enriched.context_sources,
+                            "summary": enriched.summary,
+                            "confirmation_message": enriched.get_confirmation_message(),
+                            "context_items": [
+                                {
+                                    "source": item.source,
+                                    "title": item.title,
+                                    "content_preview": item.content[:200] + "..." if len(item.content) > 200 else item.content,
+                                    "relevance": item.relevance,
+                                    "file_path": item.file_path,
+                                    "url": item.url
+                                }
+                                for item in enriched.context_items
+                            ]
+                        })
+
+                        # Auf User-Bestätigung warten
+                        yield AgentEvent(AgentEventType.CONFIRM_REQUIRED, {
+                            "type": "enhancement",
+                            "message": enriched.get_confirmation_message()
+                        })
+
+                        # ────────────────────────────────────────────────────────
+                        # LEGACY YIELD PATTERN - NOT USED IN CURRENT FLOW
+                        # ────────────────────────────────────────────────────────
+                        # This yield/send pattern was designed for direct generator
+                        # confirmation but is NOT used in the actual flow.
+                        #
+                        # Actual confirmation flow:
+                        # 1. Frontend receives CONFIRM_REQUIRED event
+                        # 2. User clicks confirm/reject in UI
+                        # 3. API endpoint POST /enhancement/{session_id}/confirm
+                        #    stores the confirmed context
+                        # 4. Frontend sends [CONTINUE_ENHANCED] message
+                        # 5. Orchestrator detects is_continue_enhanced=True (line ~995)
+                        #    and retrieves stored context from state.pending_enhancement
+                        #
+                        # This yield pattern remains for potential future use with
+                        # direct generator-based confirmation (e.g., CLI mode).
+                        # ────────────────────────────────────────────────────────
+                        user_confirmed = yield
+                        if user_confirmed is None:
+                            user_confirmed = True  # Default: bestätigen
+
+                        if user_confirmed:
+                            enriched = enhancer.confirm(enriched, True)
+                            enriched_context = enriched.get_context_for_planner()
+                            state.pending_enhancement = None  # Clear after confirmation
+                            yield AgentEvent(AgentEventType.ENHANCEMENT_CONFIRMED, {
+                                "context_length": len(enriched_context)
+                            })
+                            logger.info(f"[agent] Enhancement confirmed, context: {len(enriched_context)} chars")
+                        else:
+                            enriched = enhancer.confirm(enriched, False)
+                            state.pending_enhancement = None  # Clear after rejection
+                            yield AgentEvent(AgentEventType.ENHANCEMENT_REJECTED, {})
+                            logger.info("[agent] Enhancement rejected by user")
+
+                    elif enriched.cache_hit:
+                        # Cache-Hit ohne neue Items
+                        enriched_context = enriched.get_context_for_planner()
+                        logger.debug("[agent] Using cached enhancement context")
+
+            except ImportError as e:
+                logger.debug(f"[agent] Prompt enhancement not available: {e}")
+            except Exception as e:
+                logger.warning(f"[agent] Prompt enhancement failed: {e}")
+                # Bei Fehler: Direkt zu Tasks (Fallback)
+        # ─────────────────────────────────────────────────────────────────────
+
+        # ── Task-Decomposition Check ─────────────────────────────────────────
+        # Bei komplexen Anfragen: Task-Decomposition-System verwenden
+        if not is_continue and settings.task_agents.enabled:
+            try:
+                from app.agent.task_integration import (
+                    should_use_task_decomposition,
+                    process_with_tasks,
+                    format_task_response_for_user,
+                    format_clarification_questions,
+                    TaskEventType
+                )
+
+                if await should_use_task_decomposition(user_message):
+                    logger.info("[agent] Using Task-Decomposition for complex query")
+
+                    # Task-Events zu Agent-Events mappen und yielden
+                    async for task_event in process_with_tasks(
+                        user_message=user_message,
+                        session_id=session_id,
+                        context=enriched_context,  # MCP-angereicherter Kontext
+                        project_id=state.project_id if hasattr(state, 'project_id') else None,
+                        project_path=state.project_path if hasattr(state, 'project_path') else None
+                    ):
+                        event_type = task_event.get("type", "")
+                        event_data = task_event.get("data", {})
+
+                        # Event-Mapping
+                        if event_type == TaskEventType.PLAN_CREATED:
+                            yield AgentEvent(AgentEventType.TASK_PLAN_CREATED, event_data)
+
+                        elif event_type == TaskEventType.TASK_STARTED:
+                            yield AgentEvent(AgentEventType.TASK_STARTED, event_data)
+
+                        elif event_type == TaskEventType.TASK_COMPLETED:
+                            yield AgentEvent(AgentEventType.TASK_COMPLETED, event_data)
+
+                        elif event_type == TaskEventType.TASK_FAILED:
+                            yield AgentEvent(AgentEventType.TASK_FAILED, event_data)
+
+                        elif event_type == TaskEventType.CLARIFICATION_NEEDED:
+                            # Klaerungsfragen als Token-Stream senden
+                            questions = event_data.get("questions", [])
+                            formatted = format_clarification_questions(questions)
+                            yield AgentEvent(AgentEventType.TOKEN, formatted)
+                            yield AgentEvent(AgentEventType.TASK_CLARIFICATION, event_data)
+                            yield AgentEvent(AgentEventType.DONE, None)
+                            return
+
+                        elif event_type == TaskEventType.EXECUTION_COMPLETE:
+                            # Finale Antwort als Token-Stream
+                            response = format_task_response_for_user(event_data)
+                            yield AgentEvent(AgentEventType.TOKEN, response)
+                            yield AgentEvent(AgentEventType.TASK_EXECUTION_DONE, event_data)
+                            # In Historie speichern
+                            state.messages_history.append({
+                                "role": "assistant",
+                                "content": response
+                            })
+                            yield AgentEvent(AgentEventType.DONE, None)
+                            return
+
+                        elif event_type == "use_direct_processing":
+                            # Unter Threshold -> normale Verarbeitung fortsetzen
+                            logger.debug("[agent] Task count below threshold, using direct processing")
+                            break
+
+                        elif event_type == "error":
+                            yield AgentEvent(AgentEventType.ERROR, event_data)
+                            yield AgentEvent(AgentEventType.DONE, None)
+                            return
+
+            except ImportError as e:
+                logger.warning(f"[agent] Task-Decomposition not available: {e}")
+            except Exception as e:
+                logger.error(f"[agent] Task-Decomposition failed: {e}")
+                # Bei Fehler normal fortfahren
         # ─────────────────────────────────────────────────────────────────────
 
         # Schreib-Ops: In Planungsphase nur erlaubt wenn Plan bereits genehmigt

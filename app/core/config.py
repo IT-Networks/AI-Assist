@@ -1077,6 +1077,40 @@ class AnalyticsConfig(BaseModel):
     max_storage_mb: int = 500         # Max Speicherplatz
 
 
+# ══════════════════════════════════════════════════════════════════════════════
+# Task-Decomposition Agent System
+# ══════════════════════════════════════════════════════════════════════════════
+
+class TaskAgentConfig(BaseModel):
+    """
+    Konfiguration fuer das Task-Decomposition Agent System.
+
+    Das System zerlegt komplexe User-Anfragen in spezialisierte Tasks,
+    die von dedizierten Agenten mit eigenen Models und Prompts ausgefuehrt werden.
+    """
+    enabled: bool = False                  # Master-Switch fuer Task-Decomposition
+    # Model-Zuweisung pro Agent-Typ
+    research_model: str = ""               # Fuer Research-Tasks (leer = tool_model)
+    code_model: str = ""                   # Fuer Code-Tasks (leer = default_model)
+    analyst_model: str = ""                # Fuer Analyse-Tasks (leer = analysis_model)
+    devops_model: str = ""                 # Fuer DevOps-Tasks (leer = tool_model)
+    docs_model: str = ""                   # Fuer Doku-Tasks (leer = tool_model)
+    debug_model: str = ""                  # Fuer Debug-Tasks (leer = analysis_model)
+    fallback_model: str = ""               # Fallback wenn Agent-Model nicht verfuegbar
+    # Execution Settings
+    max_parallel_tasks: int = 3            # Max. parallel ausfuehrbare Tasks
+    task_timeout_seconds: int = 120        # Timeout pro Task
+    max_retries_per_task: int = 3          # Max. Retry-Versuche pro Task
+    # Phase Synthesis (Zusammenfassung bei Phasenwechsel)
+    enable_phase_synthesis: bool = True    # Zwischen-Synthese aktivieren
+    synthesis_max_tokens: int = 500        # Max. Tokens fuer Synthese
+    # Complexity Threshold: Ab wann wird zerlegt?
+    min_tasks_for_decomposition: int = 2   # Mindestens 2 Tasks fuer Zerlegung
+    # Planning
+    planning_model: str = ""               # Model fuer TaskPlanner (leer = analysis_model)
+    planning_temperature: float = 0.1      # Temperature fuer Planung
+
+
 class Settings(BaseModel):
     llm: LLMConfig = LLMConfig()
     models: List[ModelEntry] = []
@@ -1095,6 +1129,7 @@ class Settings(BaseModel):
     file_operations: FileOperationsConfig = FileOperationsConfig()
     data_sources: DataSourcesConfig = Field(default_factory=DataSourcesConfig)
     sub_agents: SubAgentsConfig = Field(default_factory=SubAgentsConfig)
+    task_agents: TaskAgentConfig = Field(default_factory=TaskAgentConfig)
     mq: MQConfig = Field(default_factory=MQConfig)
     test_tool: TestToolConfig = Field(default_factory=TestToolConfig)
     log_servers: LogServersConfig = Field(default_factory=LogServersConfig)

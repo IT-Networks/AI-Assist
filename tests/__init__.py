@@ -1,1 +1,1 @@
-# AI-Assist Test Suite
+# Tests package
