@@ -594,6 +594,118 @@ class SkillManager:
         return None
 
     # ══════════════════════════════════════════════════════════════════════════
+    # MCP Command Integration (NEU)
+    # ══════════════════════════════════════════════════════════════════════════
+
+    def get_skills_for_command(
+        self,
+        command: str,
+        session_id: Optional[str] = None,
+        include_inactive: bool = False
+    ) -> List[Skill]:
+        """
+        Gibt Skills zurück, die für ein MCP-Command konfiguriert sind.
+
+        Args:
+            command: MCP-Command-Name (z.B. "brainstorm", "design")
+            session_id: Optional - wenn angegeben, nur aktivierte Skills
+            include_inactive: Wenn True, auch nicht-aktivierte Skills zurückgeben
+
+        Returns:
+            Liste von Skills mit trigger_commands = command
+        """
+        matching_skills = []
+
+        for skill in self._skills.values():
+            # Prüfe ob Command in trigger_commands ist
+            if command in skill.activation.trigger_commands:
+                # Wenn session_id angegeben, prüfe ob Skill aktiviert ist
+                if session_id and not include_inactive:
+                    active_ids = self._active_skills.get(session_id, set())
+                    # Skills mit command-trigger sind implizit aktiv wenn aktiviert
+                    if skill.id in active_ids or skill.activation.mode == ActivationMode.COMMAND_TRIGGER:
+                        matching_skills.append(skill)
+                else:
+                    matching_skills.append(skill)
+
+        return matching_skills
+
+    def get_command_skills_config(self, command: str) -> Dict:
+        """
+        Aggregiert die Research- und Output-Konfiguration aller Skills für ein Command.
+
+        Returns:
+            {
+                "skills": [...],
+                "combined_system_prompt": "...",
+                "research": {...},
+                "output": {...}
+            }
+        """
+        skills = self.get_skills_for_command(command, include_inactive=True)
+
+        if not skills:
+            return {
+                "skills": [],
+                "combined_system_prompt": "",
+                "research": None,
+                "output": None
+            }
+
+        # System-Prompts kombinieren
+        prompts = []
+        for skill in skills:
+            if skill.system_prompt:
+                prompts.append(f"=== {skill.name} ===\n{skill.system_prompt}")
+
+        # Research-Config: Erste gefundene verwenden (oder mergen)
+        research_config = None
+        for skill in skills:
+            if skill.research:
+                research_config = skill.research.model_dump()
+                break
+
+        # Output-Config: Templates und Diagrams aus allen Skills sammeln
+        output_config = {
+            "templates": [],
+            "diagrams": [],
+            "include_sources": True,
+            "enterprise_formatting": True
+        }
+        for skill in skills:
+            if skill.output:
+                output_config["templates"].extend(
+                    [t.model_dump() for t in skill.output.templates]
+                )
+                output_config["diagrams"].extend(
+                    [d.model_dump() for d in skill.output.diagrams]
+                )
+
+        return {
+            "skills": [s.id for s in skills],
+            "combined_system_prompt": "\n\n".join(prompts),
+            "research": research_config,
+            "output": output_config if output_config["templates"] or output_config["diagrams"] else None
+        }
+
+    def list_command_triggers(self) -> Dict[str, List[str]]:
+        """
+        Gibt eine Übersicht welche Commands welche Skills triggern.
+
+        Returns:
+            {"brainstorm": ["skill-1", "skill-2"], "design": ["skill-3"]}
+        """
+        triggers: Dict[str, List[str]] = {}
+
+        for skill in self._skills.values():
+            for cmd in skill.activation.trigger_commands:
+                if cmd not in triggers:
+                    triggers[cmd] = []
+                triggers[cmd].append(skill.id)
+
+        return triggers
+
+    # ══════════════════════════════════════════════════════════════════════════
     # System Prompt Building
     # ══════════════════════════════════════════════════════════════════════════
 

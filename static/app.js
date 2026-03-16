@@ -1023,6 +1023,730 @@ function rejectCodeChange(itemId) {
   renderWorkspaceTab('code');
 }
 
+// ══════════════════════════════════════════════════════════════════════════════
+// PR Review Workspace Tab
+// ══════════════════════════════════════════════════════════════════════════════
+
+const prReviewState = {
+  active: false,
+  reviewId: null,
+  prNumber: null,
+  repoOwner: null,
+  repoName: null,
+  title: '',
+  author: '',
+  baseBranch: '',
+  headBranch: '',
+  additions: 0,
+  deletions: 0,
+  filesChanged: 0,
+  comments: [],
+  summary: null,
+  userComments: {},  // Map of commentId -> user edited text
+  dismissedComments: new Set(),
+};
+
+// Detect PR links in messages
+const PR_LINK_REGEX = /https?:\/\/github\.com\/([^\/]+)\/([^\/]+)\/pull\/(\d+)/gi;
+const PR_MENTION_REGEX = /(?:PR|pull request)\s*#?(\d+)/gi;
+
+function detectPRInMessage(text) {
+  // Check for full GitHub URL
+  const urlMatch = PR_LINK_REGEX.exec(text);
+  if (urlMatch) {
+    return {
+      repoOwner: urlMatch[1],
+      repoName: urlMatch[2],
+      prNumber: parseInt(urlMatch[3]),
+    };
+  }
+
+  // Check for PR #123 mention (requires repo context)
+  const mentionMatch = PR_MENTION_REGEX.exec(text);
+  if (mentionMatch) {
+    // Would need repo context from settings or prior conversation
+    return {
+      prNumber: parseInt(mentionMatch[1]),
+      repoOwner: null,  // Need to resolve from context
+      repoName: null,
+    };
+  }
+
+  return null;
+}
+
+async function loadPRReview(repoOwner, repoName, prNumber) {
+  showToast('Lade PR-Daten...', 'info');
+
+  try {
+    // First, fetch PR info from GitHub (mock for now, would need GitHub API)
+    // For now, trigger a review with placeholder data
+    const res = await fetch('/api/reviews/trigger', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        repoOwner,
+        repoName,
+        prNumber,
+        headSha: 'HEAD',
+        baseSha: 'BASE',
+        files: {},  // Would be populated from GitHub diff
+        reviewTypes: ['security', 'quality', 'style'],
+      }),
+    });
+
+    if (!res.ok) {
+      const err = await res.json();
+      throw new Error(err.detail || 'Failed to load PR');
+    }
+
+    const review = await res.json();
+    openPRReviewTab(review);
+
+  } catch (e) {
+    log.error('Failed to load PR review:', e);
+    showToast(`PR-Review fehlgeschlagen: ${e.message}`, 'error');
+  }
+}
+
+function openPRReviewTab(review) {
+  // Store review data
+  prReviewState.active = true;
+  prReviewState.reviewId = review.id;
+  prReviewState.prNumber = review.prNumber;
+  prReviewState.repoOwner = review.repoOwner;
+  prReviewState.repoName = review.repoName;
+  prReviewState.comments = review.comments || [];
+  prReviewState.summary = review.summary;
+  prReviewState.userComments = {};
+  prReviewState.dismissedComments = new Set();
+
+  // Initialize user comments with AI suggestions
+  for (const c of prReviewState.comments) {
+    prReviewState.userComments[c.id] = c.body;
+  }
+
+  // Show PR tab
+  const prTab = document.getElementById('workspace-pr-tab');
+  const prLabel = document.getElementById('workspace-pr-label');
+  if (prTab) {
+    prTab.style.display = 'flex';
+    prLabel.textContent = `PR #${review.prNumber}`;
+  }
+
+  // Update badge with issue count
+  const badge = document.getElementById('workspace-pr-badge');
+  if (badge && review.summary) {
+    const total = review.summary.totalComments || 0;
+    badge.textContent = total;
+    badge.style.display = total > 0 ? 'inline' : 'none';
+  }
+
+  // Render panel content
+  renderPRReviewPanel();
+
+  // Switch to PR tab
+  if (!workspaceState.visible) {
+    toggleWorkspace();
+  }
+  switchWorkspaceTab('pr');
+}
+
+function renderPRReviewPanel() {
+  const state = prReviewState;
+
+  // Header
+  document.getElementById('pr-number').textContent = `#${state.prNumber}`;
+  document.getElementById('pr-title').textContent = state.title || `${state.repoOwner}/${state.repoName}`;
+  document.getElementById('pr-branches').textContent = `${state.baseBranch || 'main'} ← ${state.headBranch || 'feature'}`;
+  document.getElementById('pr-stats').textContent = `+${state.additions} -${state.deletions} | ${state.filesChanged} files`;
+  document.getElementById('pr-author').textContent = `@${state.author || 'unknown'}`;
+
+  // Summary
+  if (state.summary) {
+    const s = state.summary;
+    document.getElementById('pr-critical').textContent = s.bySeverity?.critical || 0;
+    document.getElementById('pr-high').textContent = s.bySeverity?.high || 0;
+    document.getElementById('pr-medium').textContent = s.bySeverity?.medium || 0;
+    document.getElementById('pr-low').textContent = s.bySeverity?.low || 0;
+    document.getElementById('pr-info').textContent = s.bySeverity?.info || 0;
+
+    const verdictEl = document.getElementById('pr-verdict');
+    const verdict = s.verdict || 'comment';
+    verdictEl.className = `pr-verdict ${verdict}`;
+    verdictEl.innerHTML = verdict === 'approve'
+      ? '<span class="verdict-icon">&#9989;</span><span class="verdict-text">APPROVE</span>'
+      : verdict === 'request_changes'
+        ? '<span class="verdict-icon">&#9888;</span><span class="verdict-text">REQUEST CHANGES</span>'
+        : '<span class="verdict-icon">&#128172;</span><span class="verdict-text">COMMENT</span>';
+  }
+
+  // Group comments by file
+  const fileComments = {};
+  for (const c of state.comments) {
+    if (!fileComments[c.filePath]) {
+      fileComments[c.filePath] = [];
+    }
+    fileComments[c.filePath].push(c);
+  }
+
+  // Render files
+  const filesContainer = document.getElementById('pr-files');
+  filesContainer.innerHTML = Object.entries(fileComments).map(([filePath, comments]) => `
+    <div class="pr-file">
+      <div class="pr-file-header" onclick="togglePRFile(this)">
+        <span class="pr-file-name">${escapeHtml(filePath)}</span>
+        <span class="pr-file-issues">${comments.length} issues</span>
+      </div>
+      <div class="pr-file-comments">
+        ${comments.map(c => renderPRComment(c)).join('')}
+      </div>
+    </div>
+  `).join('');
+}
+
+function renderPRComment(comment) {
+  const isDismissed = prReviewState.dismissedComments.has(comment.id);
+  const userText = prReviewState.userComments[comment.id] || comment.body;
+
+  return `
+    <div class="pr-comment ${comment.severity} ${isDismissed ? 'dismissed' : ''}" data-comment-id="${comment.id}">
+      <div class="pr-comment-header">
+        <span class="pr-comment-line">Line ${comment.line}</span>
+        <span class="pr-comment-severity" style="background: var(--${comment.severity === 'critical' ? 'danger' : comment.severity === 'high' ? 'warning' : 'accent'}-bg); color: var(--${comment.severity === 'critical' ? 'danger' : comment.severity === 'high' ? 'warning' : 'accent'});">${comment.severity.toUpperCase()}</span>
+        <span class="pr-comment-title">${escapeHtml(comment.title)}</span>
+      </div>
+      ${comment.suggestedFix ? `
+        <div class="pr-comment-code"><pre>${escapeHtml(comment.suggestedFix.originalCode)}</pre></div>
+        <div class="pr-comment-body">💡 ${escapeHtml(comment.suggestedFix.description)}</div>
+      ` : `
+        <div class="pr-comment-body">${escapeHtml(comment.body)}</div>
+      `}
+      <textarea class="pr-comment-input"
+                placeholder="Kommentar bearbeiten..."
+                onchange="updatePRComment('${comment.id}', this.value)">${escapeHtml(userText)}</textarea>
+      <div class="pr-comment-actions">
+        <button class="pr-comment-dismiss" onclick="dismissPRComment('${comment.id}')">
+          ${isDismissed ? 'Wiederherstellen' : 'Dismiss'}
+        </button>
+        ${comment.suggestedFix ? `
+          <button class="pr-comment-fix" onclick="applyPRFix('${comment.id}')">Fix anzeigen</button>
+        ` : ''}
+      </div>
+    </div>
+  `;
+}
+
+function togglePRFile(headerEl) {
+  const commentsEl = headerEl.nextElementSibling;
+  commentsEl.style.display = commentsEl.style.display === 'none' ? 'block' : 'none';
+}
+
+function updatePRComment(commentId, text) {
+  prReviewState.userComments[commentId] = text;
+}
+
+function dismissPRComment(commentId) {
+  if (prReviewState.dismissedComments.has(commentId)) {
+    prReviewState.dismissedComments.delete(commentId);
+  } else {
+    prReviewState.dismissedComments.add(commentId);
+  }
+  renderPRReviewPanel();
+}
+
+function applyPRFix(commentId) {
+  const comment = prReviewState.comments.find(c => c.id === commentId);
+  if (comment && comment.suggestedFix) {
+    // Add to code workspace tab
+    addCodeChangeToWorkspace({
+      filePath: comment.filePath,
+      originalContent: comment.suggestedFix.originalCode,
+      modifiedContent: comment.suggestedFix.fixedCode,
+      diff: comment.suggestedFix.diff,
+      description: `PR Fix: ${comment.title}`,
+    });
+    showToast('Fix zum Code-Tab hinzugefügt', 'success');
+  }
+}
+
+async function submitPRReview(verdict) {
+  const state = prReviewState;
+
+  // Collect non-dismissed comments with user edits
+  const comments = state.comments
+    .filter(c => !state.dismissedComments.has(c.id))
+    .map(c => ({
+      filePath: c.filePath,
+      line: c.line,
+      body: state.userComments[c.id] || c.body,
+    }));
+
+  const overallComment = document.getElementById('pr-overall-comment-input')?.value || '';
+
+  try {
+    const res = await fetch('/api/reviews/submit', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        reviewId: state.reviewId,
+        verdict,
+        overallComment,
+        comments,
+      }),
+    });
+
+    if (!res.ok) {
+      const err = await res.json();
+      throw new Error(err.detail || 'Submit failed');
+    }
+
+    const result = await res.json();
+    showToast(`Review submitted: ${verdict.replace('_', ' ')}`, 'success');
+    closePRReview();
+
+    // Add confirmation to chat
+    appendMessage('system', `PR #${state.prNumber} Review: **${verdict.toUpperCase().replace('_', ' ')}** (${comments.length} Kommentare)`);
+
+  } catch (e) {
+    log.error('Submit PR review failed:', e);
+    showToast(`Fehler: ${e.message}`, 'error');
+  }
+}
+
+function closePRReview() {
+  prReviewState.active = false;
+
+  // Hide PR tab
+  const prTab = document.getElementById('workspace-pr-tab');
+  if (prTab) {
+    prTab.style.display = 'none';
+  }
+
+  // Switch to another tab
+  switchWorkspaceTab('code');
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// ARENA MODE
+// ══════════════════════════════════════════════════════════════════════════════
+
+const arenaState = {
+  matchId: null,
+  status: 'idle',  // idle, waiting, voting, completed
+  prompt: '',
+  modelA: '',
+  modelB: '',
+  responseA: '',
+  responseB: '',
+};
+
+function openArenaModal() {
+  document.getElementById('arena-modal').style.display = 'block';
+  loadArenaLeaderboard();
+}
+
+function closeArenaModal() {
+  document.getElementById('arena-modal').style.display = 'none';
+}
+
+async function startArenaMatch() {
+  const prompt = document.getElementById('arena-prompt').value.trim();
+  if (!prompt) {
+    showToast('Bitte gib einen Prompt ein', 'warning');
+    return;
+  }
+
+  arenaState.status = 'waiting';
+  arenaState.prompt = prompt;
+  updateArenaStatus('Starte Match...');
+
+  // Show response panels
+  document.getElementById('arena-prompt-section').style.display = 'none';
+  document.getElementById('arena-responses').style.display = 'grid';
+  document.getElementById('arena-response-a').innerHTML = '<div class="arena-loading">Generiere Antwort...</div>';
+  document.getElementById('arena-response-b').innerHTML = '<div class="arena-loading">Generiere Antwort...</div>';
+
+  try {
+    const res = await fetch('/api/arena/start', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        prompt,
+        sessionId: state.sessionId || 'arena-session',
+      }),
+    });
+
+    if (!res.ok) {
+      const err = await res.json();
+      throw new Error(err.detail || 'Failed to start match');
+    }
+
+    const match = await res.json();
+    arenaState.matchId = match.id;
+    arenaState.modelA = match.modelA;
+    arenaState.modelB = match.modelB;
+
+    // Poll for responses
+    pollArenaResponses(match.id);
+
+  } catch (e) {
+    log.error('Arena start failed:', e);
+    showToast(`Arena Fehler: ${e.message}`, 'error');
+    resetArena();
+  }
+}
+
+async function pollArenaResponses(matchId) {
+  const maxAttempts = 60;
+  let attempts = 0;
+
+  const poll = async () => {
+    try {
+      const res = await fetch(`/api/arena/matches/${matchId}`);
+      if (!res.ok) throw new Error('Failed to fetch match');
+
+      const match = await res.json();
+
+      // Update responses
+      if (match.responseA) {
+        document.getElementById('arena-response-a').innerHTML = renderMarkdown(match.responseA);
+        document.getElementById('arena-meta-a').textContent = `${match.latencyA}ms | ${match.tokensA} tokens`;
+      }
+      if (match.responseB) {
+        document.getElementById('arena-response-b').innerHTML = renderMarkdown(match.responseB);
+        document.getElementById('arena-meta-b').textContent = `${match.latencyB}ms | ${match.tokensB} tokens`;
+      }
+
+      // Check if both responses are ready
+      if (match.responseA && match.responseB) {
+        arenaState.status = 'voting';
+        updateArenaStatus('Warte auf Bewertung');
+        document.getElementById('arena-voting').style.display = 'block';
+        return;
+      }
+
+      // Continue polling
+      attempts++;
+      if (attempts < maxAttempts) {
+        setTimeout(poll, 1000);
+      } else {
+        showToast('Timeout beim Warten auf Antworten', 'error');
+      }
+
+    } catch (e) {
+      log.error('Arena poll error:', e);
+    }
+  };
+
+  poll();
+}
+
+async function voteArena(vote) {
+  if (!arenaState.matchId) return;
+
+  const feedback = document.getElementById('arena-feedback').value.trim();
+
+  try {
+    const res = await fetch(`/api/arena/matches/${arenaState.matchId}/vote`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ vote, feedback }),
+    });
+
+    if (!res.ok) {
+      const err = await res.json();
+      throw new Error(err.detail || 'Vote failed');
+    }
+
+    const result = await res.json();
+
+    // Show result
+    arenaState.status = 'completed';
+    document.getElementById('arena-voting').style.display = 'none';
+    document.getElementById('arena-result').style.display = 'block';
+    document.getElementById('arena-model-a-reveal').textContent = result.modelA || arenaState.modelA;
+    document.getElementById('arena-model-b-reveal').textContent = result.modelB || arenaState.modelB;
+
+    const winnerText = vote === 'A' ? 'Modell A gewinnt!' :
+                       vote === 'B' ? 'Modell B gewinnt!' : 'Unentschieden!';
+    document.getElementById('arena-winner').textContent = winnerText;
+
+    updateArenaStatus('Abgeschlossen');
+    loadArenaLeaderboard();
+
+  } catch (e) {
+    log.error('Arena vote failed:', e);
+    showToast(`Fehler: ${e.message}`, 'error');
+  }
+}
+
+function resetArena() {
+  arenaState.matchId = null;
+  arenaState.status = 'idle';
+
+  document.getElementById('arena-prompt').value = '';
+  document.getElementById('arena-prompt-section').style.display = 'block';
+  document.getElementById('arena-responses').style.display = 'none';
+  document.getElementById('arena-voting').style.display = 'none';
+  document.getElementById('arena-result').style.display = 'none';
+  document.getElementById('arena-feedback').value = '';
+
+  updateArenaStatus('Bereit');
+}
+
+function updateArenaStatus(text) {
+  document.getElementById('arena-status-value').textContent = text;
+}
+
+async function loadArenaLeaderboard() {
+  try {
+    const res = await fetch('/api/arena/leaderboard');
+    if (!res.ok) return;
+
+    const data = await res.json();
+    const tbody = document.getElementById('arena-leaderboard-body');
+
+    if (!data.models || data.models.length === 0) {
+      tbody.innerHTML = '<tr><td colspan="5" class="arena-leaderboard-empty">Keine Daten</td></tr>';
+      return;
+    }
+
+    tbody.innerHTML = data.models.map(m => `
+      <tr>
+        <td>${escapeHtml(m.model)}</td>
+        <td>${Math.round(m.elo)}</td>
+        <td>${m.wins}</td>
+        <td>${m.total}</td>
+        <td>${m.total > 0 ? Math.round(m.wins / m.total * 100) : 0}%</td>
+      </tr>
+    `).join('');
+
+  } catch (e) {
+    log.error('Failed to load leaderboard:', e);
+  }
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// TOKEN USAGE MODAL
+// ══════════════════════════════════════════════════════════════════════════════
+
+function openTokensModal() {
+  document.getElementById('tokens-modal').style.display = 'block';
+  loadTokenUsage();
+}
+
+function closeTokensModal() {
+  document.getElementById('tokens-modal').style.display = 'none';
+}
+
+async function loadTokenUsage() {
+  const period = document.getElementById('tokens-period').value;
+
+  try {
+    const res = await fetch(`/api/tokens/usage?period=${period}`);
+    if (!res.ok) throw new Error('Failed to load token usage');
+
+    const data = await res.json();
+
+    // Update summary cards
+    document.getElementById('tokens-total').textContent = formatNumber(data.totalTokens);
+    document.getElementById('tokens-requests').textContent = formatNumber(data.totalRequests);
+    document.getElementById('tokens-cost').textContent = `$${data.estimatedCostUsd.toFixed(2)}`;
+
+    // Budget
+    if (data.budgetLimit) {
+      const pct = Math.min(100, (data.budgetUsed / data.budgetLimit) * 100);
+      document.getElementById('tokens-budget').textContent = `${Math.round(pct)}%`;
+      document.getElementById('tokens-budget-fill').style.width = `${pct}%`;
+    } else {
+      document.getElementById('tokens-budget').textContent = '-';
+      document.getElementById('tokens-budget-fill').style.width = '0%';
+    }
+
+    // By Model
+    const byModelContainer = document.getElementById('tokens-by-model');
+    if (data.byModel && Object.keys(data.byModel).length > 0) {
+      const maxTokens = Math.max(...Object.values(data.byModel).map(m => m.totalTokens));
+      byModelContainer.innerHTML = Object.entries(data.byModel).map(([model, stats]) => `
+        <div class="tokens-breakdown-item">
+          <div>
+            <span class="tokens-breakdown-label">${escapeHtml(model)}</span>
+            <div class="tokens-breakdown-bar">
+              <div class="tokens-breakdown-bar-fill" style="width: ${(stats.totalTokens / maxTokens) * 100}%"></div>
+            </div>
+          </div>
+          <span class="tokens-breakdown-value">${formatNumber(stats.totalTokens)}</span>
+        </div>
+      `).join('');
+    } else {
+      byModelContainer.innerHTML = '<div class="tokens-breakdown-empty">Keine Daten</div>';
+    }
+
+    // By Type
+    const byTypeContainer = document.getElementById('tokens-by-type');
+    if (data.byRequestType && Object.keys(data.byRequestType).length > 0) {
+      const maxTokens = Math.max(...Object.values(data.byRequestType).map(t => t.totalTokens));
+      byTypeContainer.innerHTML = Object.entries(data.byRequestType).map(([type, stats]) => `
+        <div class="tokens-breakdown-item">
+          <div>
+            <span class="tokens-breakdown-label">${escapeHtml(type)}</span>
+            <div class="tokens-breakdown-bar">
+              <div class="tokens-breakdown-bar-fill" style="width: ${(stats.totalTokens / maxTokens) * 100}%"></div>
+            </div>
+          </div>
+          <span class="tokens-breakdown-value">${formatNumber(stats.totalTokens)}</span>
+        </div>
+      `).join('');
+    } else {
+      byTypeContainer.innerHTML = '<div class="tokens-breakdown-empty">Keine Daten</div>';
+    }
+
+    // Hourly chart
+    const chartContainer = document.getElementById('tokens-hourly-chart');
+    if (data.byHour && data.byHour.length > 0) {
+      const maxHourly = Math.max(...data.byHour.map(h => h.tokens));
+      chartContainer.innerHTML = data.byHour.map(h => `
+        <div class="tokens-chart-bar"
+             style="height: ${maxHourly > 0 ? (h.tokens / maxHourly) * 100 : 0}%"
+             title="${h.hour}: ${formatNumber(h.tokens)} tokens">
+        </div>
+      `).join('');
+    } else {
+      chartContainer.innerHTML = '<div class="tokens-chart-placeholder">Keine Daten</div>';
+    }
+
+  } catch (e) {
+    log.error('Failed to load token usage:', e);
+    showToast('Token-Daten konnten nicht geladen werden', 'error');
+  }
+}
+
+function formatNumber(num) {
+  if (num >= 1000000) return (num / 1000000).toFixed(1) + 'M';
+  if (num >= 1000) return (num / 1000).toFixed(1) + 'K';
+  return String(num);
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// SELF-HEALING MODAL
+// ══════════════════════════════════════════════════════════════════════════════
+
+const healingState = {
+  attemptId: null,
+  fixId: null,
+  toolName: '',
+};
+
+function showHealingModal(attempt) {
+  healingState.attemptId = attempt.id;
+  healingState.fixId = attempt.suggestedFix?.id;
+  healingState.toolName = attempt.originalError?.tool || 'unknown';
+
+  // Populate modal
+  document.getElementById('healing-tool').textContent = healingState.toolName;
+  document.getElementById('healing-error-message').textContent = attempt.originalError?.errorMessage || 'Unbekannter Fehler';
+
+  if (attempt.suggestedFix) {
+    const fix = attempt.suggestedFix;
+    document.getElementById('healing-fix-description').textContent = fix.description;
+
+    // Show code diff
+    const codeEl = document.getElementById('healing-fix-code').querySelector('code');
+    if (fix.changes && fix.changes.length > 0) {
+      const change = fix.changes[0];
+      codeEl.textContent = `- ${change.oldContent || ''}\n+ ${change.newContent || ''}`;
+      codeEl.className = 'language-diff';
+      if (window.hljs) hljs.highlightElement(codeEl);
+    } else {
+      codeEl.textContent = fix.command || fix.description;
+    }
+
+    document.getElementById('healing-confidence').textContent = Math.round(fix.confidence * 100);
+
+    const safeEl = document.getElementById('healing-safe');
+    if (fix.safeToAutoApply) {
+      safeEl.textContent = '✓ Sicher für Auto-Apply';
+      safeEl.style.color = 'var(--success)';
+    } else {
+      safeEl.textContent = '⚠ Manuelle Prüfung empfohlen';
+      safeEl.style.color = 'var(--warning)';
+    }
+
+    document.getElementById('healing-fix').style.display = 'block';
+  } else {
+    document.getElementById('healing-fix').style.display = 'none';
+  }
+
+  // Pattern info
+  if (attempt.patternMatch) {
+    document.getElementById('healing-pattern-text').textContent =
+      `Pattern Match: "${attempt.patternMatch.name}" (${attempt.patternMatch.occurrences}x gesehen, ${Math.round(attempt.patternMatch.successRate * 100)}% Erfolg)`;
+    document.getElementById('healing-pattern').style.display = 'flex';
+  } else {
+    document.getElementById('healing-pattern').style.display = 'none';
+  }
+
+  document.getElementById('healing-modal').style.display = 'block';
+}
+
+function closeHealingModal() {
+  document.getElementById('healing-modal').style.display = 'none';
+  healingState.attemptId = null;
+  healingState.fixId = null;
+}
+
+async function applyHealing() {
+  if (!healingState.attemptId || !healingState.fixId) {
+    showToast('Keine Fix-ID vorhanden', 'error');
+    return;
+  }
+
+  try {
+    const res = await fetch(`/api/healing/attempts/${healingState.attemptId}/apply`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ fixId: healingState.fixId }),
+    });
+
+    if (!res.ok) {
+      const err = await res.json();
+      throw new Error(err.detail || 'Apply failed');
+    }
+
+    showToast('Fix erfolgreich angewendet', 'success');
+    closeHealingModal();
+
+  } catch (e) {
+    log.error('Apply healing failed:', e);
+    showToast(`Fehler: ${e.message}`, 'error');
+  }
+}
+
+function skipHealing() {
+  closeHealingModal();
+  showToast('Fix übersprungen', 'info');
+}
+
+async function alwaysAutoFix() {
+  // Update config to auto-apply this pattern
+  try {
+    await fetch('/api/healing/config', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ autoApplyLevel: 'safe' }),
+    });
+
+    showToast('Auto-Fix aktiviert für sichere Patterns', 'success');
+    await applyHealing();
+
+  } catch (e) {
+    log.error('Failed to enable auto-fix:', e);
+  }
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+
 function detectLanguage(filePath) {
   const ext = (filePath || '').split('.').pop().toLowerCase();
   const langMap = {
@@ -2272,6 +2996,14 @@ async function sendMessage() {
       input.style.height = 'auto';
       return;
     }
+  }
+  // ─────────────────────────────────────────────────────────────────────────
+
+  // ── PR Detection: Load PR Review Panel when PR link is sent ──────────────
+  const prInfo = detectPRInMessage(text);
+  if (prInfo && prInfo.repoOwner && prInfo.repoName) {
+    // Load PR review in background - don't block message sending
+    loadPRReview(prInfo.repoOwner, prInfo.repoName, prInfo.prNumber);
   }
   // ─────────────────────────────────────────────────────────────────────────
 

@@ -26,9 +26,10 @@ class SkillType(str, Enum):
 
 class ActivationMode(str, Enum):
     """Wann wird ein Skill aktiviert?"""
-    ALWAYS = "always"        # Immer aktiv
-    ON_DEMAND = "on-demand"  # Manuell aktiviert
-    AUTO = "auto"            # Automatisch bei Trigger-Wörtern
+    ALWAYS = "always"              # Immer aktiv
+    ON_DEMAND = "on-demand"        # Manuell aktiviert
+    AUTO = "auto"                  # Automatisch bei Trigger-Wörtern
+    COMMAND_TRIGGER = "command-trigger"  # Bei MCP-Commands (brainstorm, design, etc.)
 
 
 class KnowledgeSourceType(str, Enum):
@@ -58,6 +59,10 @@ class SkillActivation(BaseModel):
     """Aktivierungs-Einstellungen für einen Skill."""
     mode: ActivationMode = ActivationMode.ON_DEMAND
     trigger_words: List[str] = Field(default_factory=list)
+    trigger_commands: List[str] = Field(
+        default_factory=list,
+        description="MCP-Commands die diesen Skill aktivieren (z.B. 'brainstorm', 'design')"
+    )
     confidence_threshold: float = 0.8  # Für auto-Aktivierung
 
 
@@ -93,6 +98,79 @@ class SkillMetadata(BaseModel):
     source_file: Optional[str] = None  # Für PDF->Skill
 
 
+# ══════════════════════════════════════════════════════════════════════════════
+# MCP Enhancement Models (NEU)
+# ══════════════════════════════════════════════════════════════════════════════
+
+class ResearchScope(str, Enum):
+    """Definiert welche Quellen für Research genutzt werden dürfen."""
+    INTERNAL_ONLY = "internal-only"    # Nur Skills, Handbuch, Confluence
+    EXTERNAL_SAFE = "external-safe"    # Web mit Query-Sanitization
+    ALL = "all"                        # Alle Quellen ohne Einschränkung
+
+
+class ResearchConfig(BaseModel):
+    """Konfiguration für Research-Verhalten eines Skills."""
+    scope: ResearchScope = ResearchScope.INTERNAL_ONLY
+    allowed_sources: List[str] = Field(
+        default_factory=lambda: ["skills", "handbook", "confluence"],
+        description="Erlaubte Datenquellen: skills, handbook, confluence, web"
+    )
+    sanitize_queries: bool = Field(
+        default=True,
+        description="Entfernt sensible Daten aus Web-Queries"
+    )
+    max_web_results: int = Field(default=5, ge=1, le=20)
+    max_internal_results: int = Field(default=10, ge=1, le=50)
+
+
+class OutputTemplate(BaseModel):
+    """Template für strukturierte Ausgabe-Sektionen."""
+    name: str = Field(..., description="Name der Sektion (z.B. 'Use Cases')")
+    required: bool = Field(default=True, description="Muss diese Sektion enthalten sein?")
+    format: Optional[str] = Field(
+        default=None,
+        description="Format-Template mit Platzhaltern"
+    )
+    example: Optional[str] = Field(default=None, description="Beispiel für die Sektion")
+
+
+class DiagramConfig(BaseModel):
+    """Konfiguration für Diagramm-Generierung."""
+    type: str = Field(
+        ...,
+        description="Diagramm-Typ: sequence, class, component, erd, usecase, context"
+    )
+    format: str = Field(
+        default="mermaid",
+        description="Ausgabeformat: mermaid, plantuml, ascii"
+    )
+    template: Optional[str] = Field(
+        default=None,
+        description="ASCII/Mermaid Template"
+    )
+
+
+class OutputConfig(BaseModel):
+    """Konfiguration für Output-Formatierung eines Skills."""
+    templates: List[OutputTemplate] = Field(
+        default_factory=list,
+        description="Strukturierte Output-Sektionen"
+    )
+    diagrams: List[DiagramConfig] = Field(
+        default_factory=list,
+        description="Zu generierende Diagramme"
+    )
+    include_sources: bool = Field(
+        default=True,
+        description="Quellen-Referenzen am Ende einfügen"
+    )
+    enterprise_formatting: bool = Field(
+        default=True,
+        description="Enterprise-spezifische Formatierung anwenden"
+    )
+
+
 class Skill(BaseModel):
     """
     Vollständige Skill-Definition.
@@ -114,6 +192,16 @@ class Skill(BaseModel):
     knowledge_sources: List[KnowledgeSource] = Field(default_factory=list)
     tools: List[SkillTool] = Field(default_factory=list)
     metadata: SkillMetadata = Field(default_factory=SkillMetadata)
+
+    # MCP Enhancement Config (NEU)
+    research: Optional[ResearchConfig] = Field(
+        default=None,
+        description="Research-Konfiguration für MCP-Commands"
+    )
+    output: Optional[OutputConfig] = Field(
+        default=None,
+        description="Output-Formatierung für MCP-Commands"
+    )
 
     # Runtime-State (nicht in YAML gespeichert)
     _file_path: Optional[Path] = None

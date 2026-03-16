@@ -1,0 +1,178 @@
+# Enterprise Brainstorming Context Skill
+# Erweitert /brainstorm mit Unternehmens-spezifischen Templates,
+# Use Case Formaten und Multi-Source Recherche-Fähigkeiten.
+
+id: enterprise-brainstorm
+name: Enterprise Brainstorming Context
+description: |
+  Erweitert Brainstorming-Sessions mit Enterprise-Standards:
+  - Strukturierte Use Cases
+  - Stakeholder-Mapping
+  - Kontext-Diagramme
+  - Multi-Source Recherche (Web, Confluence, Handbuch)
+version: "1.0"
+type: hybrid
+
+activation:
+  mode: command-trigger
+  trigger_commands:
+    - brainstorm
+  trigger_words:
+    - brainstorm
+    - ideenfindung
+    - requirements
+
+research:
+  scope: external-safe
+  allowed_sources:
+    - skills
+    - handbook
+    - confluence
+    - web
+  sanitize_queries: true
+  max_web_results: 5
+  max_internal_results: 10
+
+output:
+  templates:
+    - name: "Executive Summary"
+      required: true
+      format: "2-3 Sätze Zusammenfassung des Brainstormings"
+      example: "Das Feature X ermöglicht... und adressiert die Anforderung Y."
+
+    - name: "Use Cases"
+      required: true
+      format: |
+        ### UC-{number}: {title}
+        **Akteur:** {actor}
+        **Auslöser:** {trigger}
+        **Vorbedingung:** {precondition}
+        **Ablauf:**
+        1. {step1}
+        2. {step2}
+        3. {step3}
+        **Ergebnis:** {result}
+        **Priorität:** {high|medium|low}
+      example: |
+        ### UC-01: Benutzer meldet sich an
+        **Akteur:** Endbenutzer
+        **Auslöser:** Benutzer öffnet Anwendung
+        **Vorbedingung:** Benutzer hat gültige Credentials
+        **Ablauf:**
+        1. Benutzer gibt Benutzername ein
+        2. Benutzer gibt Passwort ein
+        3. System validiert Credentials
+        **Ergebnis:** Benutzer ist eingeloggt
+        **Priorität:** high
+
+    - name: "Stakeholder-Mapping"
+      required: true
+      format: |
+        | Stakeholder | Rolle | Interesse | Einfluss |
+        |-------------|-------|-----------|----------|
+        | {name} | {role} | {interest} | {high/medium/low} |
+
+    - name: "Risiken"
+      required: true
+      format: |
+        - **Risiko:** {description}
+          **Wahrscheinlichkeit:** {high/medium/low}
+          **Auswirkung:** {high/medium/low}
+          **Mitigation:** {strategy}
+
+    - name: "Annahmen"
+      required: true
+      format: "- {assumption}"
+
+    - name: "Offene Fragen"
+      required: true
+      format: "- [ ] {question}"
+
+  diagrams:
+    - type: context
+      format: ascii
+      template: |
+        ```
+        ┌─────────────────────────────────────────────────────────┐
+        │                    {SYSTEM_NAME}                         │
+        │                                                          │
+        │   ┌────────────┐   ┌────────────┐   ┌────────────┐      │
+        │   │ Komponente │───│ Komponente │───│ Komponente │      │
+        │   │     A      │   │     B      │   │     C      │      │
+        │   └────────────┘   └────────────┘   └────────────┘      │
+        │                                                          │
+        └────────────────────────┬────────────────────────────────┘
+                                 │
+                  ┌──────────────┼──────────────┐
+                  │              │              │
+                  ▼              ▼              ▼
+           ┌──────────┐   ┌──────────┐   ┌──────────┐
+           │ Externes │   │ Externes │   │ Externes │
+           │ System 1 │   │ System 2 │   │ System 3 │
+           └──────────┘   └──────────┘   └──────────┘
+        ```
+
+    - type: usecase
+      format: ascii
+      template: |
+        ```
+                              ┌───────────────────────────┐
+                              │        {SYSTEM}           │
+                              │                           │
+        ┌─────────────┐       │   ○ Use Case 1            │
+        │   Akteur 1  │───────│   ○ Use Case 2            │
+        └─────────────┘       │   ○ Use Case 3            │
+                              │                           │
+        ┌─────────────┐       │   ○ Use Case 4            │
+        │   Akteur 2  │───────│   ○ Use Case 5            │
+        └─────────────┘       │                           │
+                              └───────────────────────────┘
+        ```
+
+  include_sources: true
+  enterprise_formatting: true
+
+system_prompt: |
+  ## Brainstorming-Anweisungen (Enterprise Standard)
+
+  Du erstellst strukturierte Brainstorming-Dokumente nach Unternehmensstandard.
+
+  ### Recherche-Strategie
+  1. **Interne Quellen zuerst**: Suche in Skills, Handbuch und Confluence
+  2. **Web für Best Practices**: Ergänze mit externen Quellen für Patterns
+  3. **Datenschutz**: NIEMALS interne Service-Namen, Projekt-IDs oder
+     Personen-Namen in Web-Queries verwenden
+
+  ### Output-Anforderungen
+  - **Mindestens 3 Use Cases** im vorgegebenen Format
+  - **Kontext-Diagramm** als ASCII-Art
+  - **Stakeholder-Tabelle** mit Einfluss-Bewertung
+  - **Risiken und Annahmen** explizit auflisten
+  - **Quellen-Angabe** am Ende des Dokuments
+
+  ### Enterprise-Kontext
+  - Architektur: Microservices mit Java/Spring Boot
+  - Datenbank: DB2 als primäre Datenbank
+  - Runtime: WebSphere Liberty
+  - Security: OWASP Top 10 beachten
+  - API-Design: REST mit OpenAPI 3.0
+
+  ### Qualitätskriterien
+  - Vollständige Use Cases (alle Felder ausgefüllt)
+  - Realistische Stakeholder-Analyse
+  - Quantifizierbare Risiken wo möglich
+  - Konkrete, überprüfbare Annahmen
+
+knowledge_sources: []
+
+tools: []
+
+metadata:
+  author: Enterprise Architecture Team
+  created: "2026-03-16"
+  tags:
+    - brainstorm
+    - enterprise
+    - requirements
+    - use-cases
+    - mcp-enhancement

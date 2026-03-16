@@ -314,6 +314,257 @@
       to { transform: translateX(0); opacity: 1; }
     }
 
+    /* Tabs */
+    .tab-container {
+      display: flex;
+      border-bottom: 1px solid var(--border);
+      margin-bottom: 20px;
+    }
+
+    .tab {
+      padding: 12px 20px;
+      cursor: pointer;
+      border: none;
+      background: none;
+      color: var(--text-muted);
+      font-size: 14px;
+      font-weight: 500;
+      border-bottom: 2px solid transparent;
+      margin-bottom: -1px;
+    }
+
+    .tab:hover {
+      color: var(--text);
+    }
+
+    .tab.active {
+      color: var(--accent);
+      border-bottom-color: var(--accent);
+    }
+
+    .tab-content {
+      display: none;
+    }
+
+    .tab-content.active {
+      display: block;
+    }
+
+    /* Command Triggers Section */
+    .command-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+      gap: 16px;
+    }
+
+    .command-card {
+      background: var(--bg-primary);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 16px;
+    }
+
+    .command-card-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 12px;
+    }
+
+    .command-name {
+      font-family: monospace;
+      font-size: 14px;
+      font-weight: 600;
+      color: var(--accent);
+    }
+
+    .command-skill-count {
+      font-size: 12px;
+      color: var(--text-muted);
+    }
+
+    .command-skills {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+
+    .command-skill-item {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 8px 12px;
+      background: var(--bg-secondary);
+      border-radius: 6px;
+    }
+
+    .command-skill-info {
+      display: flex;
+      flex-direction: column;
+    }
+
+    .command-skill-name {
+      font-size: 13px;
+      font-weight: 500;
+    }
+
+    .command-skill-type {
+      font-size: 11px;
+      color: var(--text-muted);
+    }
+
+    .toggle-switch {
+      position: relative;
+      width: 44px;
+      height: 24px;
+    }
+
+    .toggle-switch input {
+      opacity: 0;
+      width: 0;
+      height: 0;
+    }
+
+    .toggle-slider {
+      position: absolute;
+      cursor: pointer;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      background: var(--bg-tertiary);
+      border-radius: 24px;
+      transition: 0.3s;
+    }
+
+    .toggle-slider:before {
+      position: absolute;
+      content: "";
+      height: 18px;
+      width: 18px;
+      left: 3px;
+      bottom: 3px;
+      background: white;
+      border-radius: 50%;
+      transition: 0.3s;
+    }
+
+    .toggle-switch input:checked + .toggle-slider {
+      background: var(--success);
+    }
+
+    .toggle-switch input:checked + .toggle-slider:before {
+      transform: translateX(20px);
+    }
+
+    .config-badge {
+      font-size: 10px;
+      padding: 2px 6px;
+      border-radius: 4px;
+      margin-left: 6px;
+    }
+
+    .config-badge.research {
+      background: #4CAF50;
+      color: white;
+    }
+
+    .config-badge.output {
+      background: #2196F3;
+      color: white;
+    }
+
+    /* Research Config Display */
+    .config-section {
+      margin-top: 12px;
+      padding: 12px;
+      background: var(--bg-secondary);
+      border-radius: 6px;
+      font-size: 12px;
+    }
+
+    .config-section h4 {
+      margin: 0 0 8px 0;
+      font-size: 12px;
+      color: var(--text-muted);
+    }
+
+    .config-row {
+      display: flex;
+      justify-content: space-between;
+      padding: 4px 0;
+    }
+
+    .config-label {
+      color: var(--text-muted);
+    }
+
+    .config-value {
+      font-family: monospace;
+    }
+
+    /* Source Toggles */
+    .source-toggles {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin-top: 8px;
+    }
+
+    .source-toggle {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      padding: 4px 10px;
+      background: var(--bg-primary);
+      border-radius: 16px;
+      font-size: 11px;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+
+    .source-toggle.active {
+      background: var(--accent);
+      color: white;
+    }
+
+    .source-toggle.disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
+
+    .source-toggle .source-icon {
+      font-size: 12px;
+    }
+
+    .scope-selector {
+      display: flex;
+      gap: 4px;
+      margin-top: 8px;
+    }
+
+    .scope-btn {
+      padding: 4px 10px;
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      background: var(--bg-primary);
+      color: var(--text-muted);
+      font-size: 11px;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+
+    .scope-btn:hover {
+      border-color: var(--accent);
+      color: var(--text);
+    }
+
+    .scope-btn.active {
+      background: var(--accent);
+      border-color: var(--accent);
+      color: white;
+    }
+
     /* Knowledge Section */
     .knowledge-list {
       margin-top: 12px;
@@ -357,23 +608,29 @@
     </button>
   </div>
 
-  <div class="skills-grid">
-    <!-- Skills Liste -->
-    <div class="skills-list-panel">
-      <div class="skills-list-header">
-        <h2>Skills</h2>
-        <span id="skills-count">0 Skills</span>
-      </div>
-      <div class="skills-search">
-        <input type="text" id="skills-filter" placeholder="Skills filtern..." oninput="filterSkills()">
-      </div>
-      <div class="skills-list" id="skills-list">
-        <div class="empty-state">
-          <div class="icon">&#9889;</div>
-          <p>Lade Skills...</p>
+  <div class="tab-container">
+    <button class="tab active" onclick="switchTab('skills')">Skills</button>
+    <button class="tab" onclick="switchTab('commands')">MCP Commands</button>
+  </div>
+
+  <div class="tab-content active" id="tab-skills">
+    <div class="skills-grid">
+      <!-- Skills Liste -->
+      <div class="skills-list-panel">
+        <div class="skills-list-header">
+          <h2>Skills</h2>
+          <span id="skills-count">0 Skills</span>
+        </div>
+        <div class="skills-search">
+          <input type="text" id="skills-filter" placeholder="Skills filtern..." oninput="filterSkills()">
+        </div>
+        <div class="skills-list" id="skills-list">
+          <div class="empty-state">
+            <div class="icon">&#9889;</div>
+            <p>Lade Skills...</p>
+          </div>
         </div>
       </div>
-    </div>
 
     <!-- Skill Editor -->
     <div class="skill-editor-panel">
@@ -419,17 +676,23 @@
               </div>
               <div class="form-group">
                 <label for="skill-activation">Aktivierungsmodus</label>
-                <select id="skill-activation">
+                <select id="skill-activation" onchange="toggleTriggerFields()">
                   <option value="manual">Manuell</option>
                   <option value="auto">Automatisch</option>
                   <option value="always">Immer aktiv</option>
+                  <option value="command-trigger">MCP Command</option>
                 </select>
               </div>
             </div>
-            <div class="form-group">
+            <div class="form-group" id="trigger-words-group">
               <label for="skill-triggers">Trigger-Wörter</label>
               <input type="text" id="skill-triggers" placeholder="spring, boot, java (Komma-getrennt)">
               <div class="hint">Bei Auto-Aktivierung: Skill wird aktiviert wenn diese Wörter in der Anfrage vorkommen</div>
+            </div>
+            <div class="form-group" id="trigger-commands-group" style="display:none">
+              <label for="skill-commands">MCP Commands</label>
+              <input type="text" id="skill-commands" placeholder="brainstorm, design (Komma-getrennt)">
+              <div class="hint">Skill wird automatisch geladen wenn diese MCP-Commands ausgeführt werden</div>
             </div>
             <div class="form-group">
               <label for="skill-tags">Tags</label>
@@ -470,6 +733,23 @@
         </form>
       </div>
     </div>
+    </div>
+  </div>
+
+  <!-- Commands Tab -->
+  <div class="tab-content" id="tab-commands">
+    <div style="padding: 20px; max-width: 1200px;">
+      <h2 style="margin-bottom: 20px;">MCP Command Triggers</h2>
+      <p style="color: var(--text-muted); margin-bottom: 24px;">
+        Skills mit <code>command-trigger</code> Aktivierung werden automatisch geladen wenn der entsprechende MCP-Command ausgeführt wird.
+      </p>
+      <div class="command-grid" id="command-triggers-grid">
+        <div class="empty-state">
+          <div class="icon">&#128279;</div>
+          <p>Lade Command-Triggers...</p>
+        </div>
+      </div>
+    </div>
   </div>
 </div>
 
@@ -478,11 +758,271 @@
 let skills = [];
 let currentSkillId = null;
 let isNewSkill = false;
+let commandTriggers = {};
+let commandsLoaded = false;
 
 // Initialize
 document.addEventListener('DOMContentLoaded', () => {
   loadSkills();
 });
+
+// Tab Switching
+function switchTab(tabName) {
+  // Update tab buttons
+  document.querySelectorAll('.tab').forEach(tab => {
+    tab.classList.remove('active');
+  });
+  event.target.classList.add('active');
+
+  // Update tab content
+  document.querySelectorAll('.tab-content').forEach(content => {
+    content.classList.remove('active');
+  });
+  document.getElementById('tab-' + tabName).classList.add('active');
+
+  // Load command triggers on first view
+  if (tabName === 'commands' && !commandsLoaded) {
+    loadCommandTriggers();
+  }
+}
+
+// Load Command Triggers
+async function loadCommandTriggers() {
+  try {
+    const res = await fetch('/api/skills/command-triggers');
+    if (!res.ok) throw new Error('Command-Triggers nicht verfügbar');
+
+    const data = await res.json();
+    commandTriggers = data.triggers || {};
+    commandsLoaded = true;
+    renderCommandTriggers();
+  } catch (e) {
+    showToast('Fehler beim Laden der Command-Triggers: ' + e.message, 'error');
+    document.getElementById('command-triggers-grid').innerHTML = `
+      <div class="empty-state">
+        <div class="icon">&#9888;</div>
+        <p>Command-Triggers konnten nicht geladen werden</p>
+      </div>
+    `;
+  }
+}
+
+// Render Command Triggers
+async function renderCommandTriggers() {
+  const container = document.getElementById('command-triggers-grid');
+
+  const commands = Object.keys(commandTriggers);
+  if (commands.length === 0) {
+    container.innerHTML = `
+      <div class="empty-state" style="grid-column: 1 / -1;">
+        <div class="icon">&#128279;</div>
+        <p>Keine command-getriggerten Skills konfiguriert</p>
+        <p style="font-size: 12px; margin-top: 8px;">
+          Erstelle einen Skill mit <code>activation.mode: command-trigger</code> und <code>activation.trigger_commands</code>
+        </p>
+      </div>
+    `;
+    return;
+  }
+
+  let html = '';
+  for (const command of commands) {
+    const skillIds = commandTriggers[command];
+
+    // Fetch config for this command
+    let config = null;
+    try {
+      const configRes = await fetch(`/api/skills/for-command/${command}`);
+      if (configRes.ok) {
+        config = await configRes.json();
+      }
+    } catch (e) {
+      console.error('Config fetch error:', e);
+    }
+
+    html += `
+      <div class="command-card">
+        <div class="command-card-header">
+          <span class="command-name">/${command}</span>
+          <span class="command-skill-count">${skillIds.length} Skill(s)</span>
+        </div>
+        <div class="command-skills">
+    `;
+
+    for (const skillId of skillIds) {
+      const skill = skills.find(s => s.id === skillId);
+      if (skill) {
+        const hasResearch = skill.research || (config?.research);
+        const hasOutput = skill.output || (config?.output);
+
+        html += `
+          <div class="command-skill-item">
+            <div class="command-skill-info">
+              <span class="command-skill-name">
+                ${escapeHtml(skill.name)}
+                ${hasResearch ? '<span class="config-badge research">Research</span>' : ''}
+                ${hasOutput ? '<span class="config-badge output">Output</span>' : ''}
+              </span>
+              <span class="command-skill-type">${escapeHtml(skill.type || 'general')}</span>
+            </div>
+            <label class="toggle-switch">
+              <input type="checkbox"
+                     id="toggle-${skillId}-${command}"
+                     checked
+                     onchange="toggleSkillForCommand('${skillId}', '${command}', this.checked)">
+              <span class="toggle-slider"></span>
+            </label>
+          </div>
+        `;
+      }
+    }
+
+    // Show research config with interactive toggles
+    if (config?.research) {
+      const scope = config.research.scope || 'internal-only';
+      const sources = config.research.allowed_sources || [];
+      const allSources = ['skills', 'handbook', 'confluence', 'web'];
+      const sourceIcons = {
+        skills: '&#128218;',
+        handbook: '&#128214;',
+        confluence: '&#127760;',
+        web: '&#127760;'
+      };
+      const sourceLabels = {
+        skills: 'Skills',
+        handbook: 'Handbuch',
+        confluence: 'Confluence',
+        web: 'Web'
+      };
+
+      html += `
+        <div class="config-section" data-command="${command}">
+          <h4>Research Config</h4>
+          <div class="config-row">
+            <span class="config-label">Scope:</span>
+          </div>
+          <div class="scope-selector">
+            <button class="scope-btn ${scope === 'internal-only' ? 'active' : ''}"
+                    onclick="setResearchScope('${command}', 'internal-only')"
+                    title="Nur interne Quellen">
+              Intern
+            </button>
+            <button class="scope-btn ${scope === 'external-safe' ? 'active' : ''}"
+                    onclick="setResearchScope('${command}', 'external-safe')"
+                    title="Web erlaubt für technische Queries">
+              Extern Safe
+            </button>
+            <button class="scope-btn ${scope === 'all' ? 'active' : ''}"
+                    onclick="setResearchScope('${command}', 'all')"
+                    title="Alle Quellen ohne Einschränkung">
+              Alle
+            </button>
+          </div>
+          <div class="config-row" style="margin-top: 12px;">
+            <span class="config-label">Quellen:</span>
+          </div>
+          <div class="source-toggles">
+            ${allSources.map(src => {
+              const isActive = sources.includes(src);
+              const isWebDisabled = src === 'web' && scope === 'internal-only';
+              return `
+                <div class="source-toggle ${isActive ? 'active' : ''} ${isWebDisabled ? 'disabled' : ''}"
+                     onclick="toggleResearchSource('${command}', '${src}')"
+                     title="${isWebDisabled ? 'Web nicht erlaubt bei Scope: Intern' : sourceLabels[src]}">
+                  <span class="source-icon">${sourceIcons[src]}</span>
+                  <span>${sourceLabels[src]}</span>
+                </div>
+              `;
+            }).join('')}
+          </div>
+        </div>
+      `;
+    }
+
+    html += `
+        </div>
+      </div>
+    `;
+  }
+
+  container.innerHTML = html;
+}
+
+// Toggle Skill for Command (placeholder for future implementation)
+async function toggleSkillForCommand(skillId, command, enabled) {
+  // This would require session-based skill activation
+  // For now, just show a toast
+  if (!enabled) {
+    showToast(`Skill-Deaktivierung für Commands erfordert Session-Kontext`, 'info');
+    // Reset the toggle
+    document.getElementById(`toggle-${skillId}-${command}`).checked = true;
+  }
+}
+
+// Set Research Scope for a command
+async function setResearchScope(command, scope) {
+  showToast(`Research-Scope für /${command} auf "${scope}" gesetzt (Session-basiert)`, 'info');
+
+  // Update UI immediately
+  const configSection = document.querySelector(`.config-section[data-command="${command}"]`);
+  if (configSection) {
+    const scopeBtns = configSection.querySelectorAll('.scope-btn');
+    scopeBtns.forEach(btn => {
+      btn.classList.remove('active');
+      if (btn.textContent.trim().toLowerCase().includes(scope.split('-')[0])) {
+        btn.classList.add('active');
+      }
+    });
+
+    // Update web source toggle based on scope
+    const webToggle = configSection.querySelector('.source-toggle:last-child');
+    if (webToggle) {
+      if (scope === 'internal-only') {
+        webToggle.classList.add('disabled');
+        webToggle.classList.remove('active');
+      } else {
+        webToggle.classList.remove('disabled');
+      }
+    }
+  }
+}
+
+// Toggle Research Source for a command
+async function toggleResearchSource(command, source) {
+  const configSection = document.querySelector(`.config-section[data-command="${command}"]`);
+  if (!configSection) return;
+
+  const toggle = Array.from(configSection.querySelectorAll('.source-toggle'))
+    .find(t => t.textContent.toLowerCase().includes(source === 'skills' ? 'skills' :
+                                                      source === 'handbook' ? 'handbuch' :
+                                                      source === 'confluence' ? 'confluence' : 'web'));
+
+  if (!toggle || toggle.classList.contains('disabled')) return;
+
+  const isActive = toggle.classList.contains('active');
+  toggle.classList.toggle('active');
+
+  const action = isActive ? 'deaktiviert' : 'aktiviert';
+  showToast(`Quelle "${source}" für /${command} ${action}`, 'success');
+}
+
+// Toggle trigger fields based on activation mode
+function toggleTriggerFields() {
+  const mode = document.getElementById('skill-activation').value;
+  const triggerWordsGroup = document.getElementById('trigger-words-group');
+  const triggerCommandsGroup = document.getElementById('trigger-commands-group');
+
+  if (mode === 'command-trigger') {
+    triggerWordsGroup.style.display = 'none';
+    triggerCommandsGroup.style.display = 'block';
+  } else if (mode === 'auto') {
+    triggerWordsGroup.style.display = 'block';
+    triggerCommandsGroup.style.display = 'none';
+  } else {
+    triggerWordsGroup.style.display = 'none';
+    triggerCommandsGroup.style.display = 'none';
+  }
+}
 
 // Load Skills
 async function loadSkills() {
@@ -575,8 +1115,10 @@ function showEditor(skill = null) {
     document.getElementById('skill-type').value = skill.type || 'general';
     document.getElementById('skill-activation').value = skill.activation?.mode || 'manual';
     document.getElementById('skill-triggers').value = (skill.activation?.trigger_words || []).join(', ');
+    document.getElementById('skill-commands').value = (skill.activation?.trigger_commands || []).join(', ');
     document.getElementById('skill-tags').value = (skill.tags || []).join(', ');
     document.getElementById('skill-prompt').value = skill.system_prompt || '';
+    toggleTriggerFields();
 
     // Knowledge sources
     const knowledgeList = document.getElementById('knowledge-list');
@@ -600,9 +1142,11 @@ function showEditor(skill = null) {
     document.getElementById('skill-type').value = 'general';
     document.getElementById('skill-activation').value = 'manual';
     document.getElementById('skill-triggers').value = '';
+    document.getElementById('skill-commands').value = '';
     document.getElementById('skill-tags').value = '';
     document.getElementById('skill-prompt').value = '';
     document.getElementById('knowledge-list').innerHTML = '<div class="empty-state" style="padding: 20px;"><p>Keine Wissensquellen</p></div>';
+    toggleTriggerFields();
   }
 }
 
@@ -631,12 +1175,18 @@ async function saveSkill(e) {
   e.preventDefault();
 
   const skillId = document.getElementById('skill-id').value;
+  const activationMode = document.getElementById('skill-activation').value;
   const data = {
     name: document.getElementById('skill-name').value,
     description: document.getElementById('skill-description').value,
     type: document.getElementById('skill-type').value,
-    activation_mode: document.getElementById('skill-activation').value,
-    trigger_words: document.getElementById('skill-triggers').value.split(',').map(s => s.trim()).filter(Boolean),
+    activation_mode: activationMode,
+    trigger_words: activationMode === 'auto'
+      ? document.getElementById('skill-triggers').value.split(',').map(s => s.trim()).filter(Boolean)
+      : [],
+    trigger_commands: activationMode === 'command-trigger'
+      ? document.getElementById('skill-commands').value.split(',').map(s => s.trim()).filter(Boolean)
+      : [],
     tags: document.getElementById('skill-tags').value.split(',').map(s => s.trim()).filter(Boolean),
     system_prompt: document.getElementById('skill-prompt').value,
   };

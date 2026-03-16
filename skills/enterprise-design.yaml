@@ -1,0 +1,238 @@
+# Enterprise Design Context Skill
+# Erweitert /design mit UML-Diagrammen, Sequenzdiagrammen,
+# API-Spezifikationen und Enterprise-Architektur-Standards.
+
+id: enterprise-design
+name: Enterprise Design Context
+description: |
+  Erweitert Design-Sessions mit Enterprise-Standards:
+  - Sequenzdiagramme (Mermaid)
+  - Klassen-/Komponenten-Diagramme
+  - ERD für Datenmodelle
+  - OpenAPI-Spezifikationen
+  - Entscheidungsprotokolle
+version: "1.0"
+type: hybrid
+
+activation:
+  mode: command-trigger
+  trigger_commands:
+    - design
+  trigger_words:
+    - design
+    - architektur
+    - architecture
+    - api-design
+
+research:
+  scope: external-safe
+  allowed_sources:
+    - skills
+    - handbook
+    - confluence
+    - web
+  sanitize_queries: true
+  max_web_results: 5
+  max_internal_results: 10
+
+output:
+  templates:
+    - name: "Design Overview"
+      required: true
+      format: "Kurze Beschreibung des Designs (2-3 Sätze)"
+
+    - name: "Komponenten"
+      required: true
+      format: |
+        ### {ComponentName}
+        **Verantwortung:** {responsibility}
+        **Schnittstellen:** {interfaces}
+        **Abhängigkeiten:** {dependencies}
+        **Technologie:** {tech_stack}
+
+    - name: "API Specification"
+      required: false
+      format: |
+        ```yaml
+        openapi: 3.0.3
+        info:
+          title: {API_NAME}
+          version: 1.0.0
+        paths:
+          /{resource}:
+            get:
+              summary: {description}
+              responses:
+                '200':
+                  description: Erfolgreiche Antwort
+        ```
+
+    - name: "Datenmodell"
+      required: false
+      format: |
+        ### Entity: {EntityName}
+        | Feld | Typ | Beschreibung | Constraints |
+        |------|-----|--------------|-------------|
+        | {field} | {type} | {desc} | {constraints} |
+
+    - name: "Entscheidungsprotokoll"
+      required: true
+      format: |
+        | Entscheidung | Alternativen | Begründung |
+        |--------------|--------------|------------|
+        | {decision} | {alternatives} | {rationale} |
+
+  diagrams:
+    - type: sequence
+      format: mermaid
+      template: |
+        ```mermaid
+        sequenceDiagram
+            participant C as Client
+            participant A as API Gateway
+            participant S as Service
+            participant D as Database
+
+            C->>A: HTTP Request
+            A->>S: Forward Request
+            S->>D: Query
+            D-->>S: Result
+            S-->>A: Response
+            A-->>C: HTTP Response
+        ```
+
+    - type: class
+      format: mermaid
+      template: |
+        ```mermaid
+        classDiagram
+            class Service {
+                +process(request): Response
+                -validate(data): boolean
+            }
+            class Repository {
+                +findById(id): Entity
+                +save(entity): Entity
+            }
+            class Entity {
+                +id: String
+                +createdAt: DateTime
+            }
+            Service --> Repository
+            Repository --> Entity
+        ```
+
+    - type: component
+      format: ascii
+      template: |
+        ```
+        ┌─────────────────────────────────────────────────────────────┐
+        │                      PRESENTATION LAYER                      │
+        │   ┌──────────────┐   ┌──────────────┐   ┌──────────────┐    │
+        │   │  Controller  │   │  Controller  │   │  Controller  │    │
+        │   └──────┬───────┘   └──────┬───────┘   └──────┬───────┘    │
+        └──────────┼──────────────────┼──────────────────┼────────────┘
+                   │                  │                  │
+        ┌──────────┼──────────────────┼──────────────────┼────────────┐
+        │          ▼                  ▼                  ▼            │
+        │                       SERVICE LAYER                          │
+        │   ┌──────────────┐   ┌──────────────┐   ┌──────────────┐    │
+        │   │   Service    │   │   Service    │   │   Service    │    │
+        │   └──────┬───────┘   └──────┬───────┘   └──────┬───────┘    │
+        └──────────┼──────────────────┼──────────────────┼────────────┘
+                   │                  │                  │
+        ┌──────────┼──────────────────┼──────────────────┼────────────┐
+        │          ▼                  ▼                  ▼            │
+        │                     PERSISTENCE LAYER                        │
+        │   ┌──────────────┐   ┌──────────────┐   ┌──────────────┐    │
+        │   │  Repository  │   │  Repository  │   │  Repository  │    │
+        │   └──────────────┘   └──────────────┘   └──────────────┘    │
+        └─────────────────────────────────────────────────────────────┘
+        ```
+
+    - type: erd
+      format: ascii
+      template: |
+        ```
+        ┌──────────────────┐         ┌──────────────────┐
+        │    {Entity1}     │         │    {Entity2}     │
+        ├──────────────────┤         ├──────────────────┤
+        │ PK id            │───┐     │ PK id            │
+        │    name          │   │     │ FK entity1_id    │◀──┐
+        │    created_at    │   └────▶│    attribute     │   │
+        │    updated_at    │         │    created_at    │   │
+        └──────────────────┘         └──────────────────┘   │
+                                                            │
+        ┌──────────────────┐                                │
+        │    {Entity3}     │                                │
+        ├──────────────────┤                                │
+        │ PK id            │────────────────────────────────┘
+        │    attribute     │
+        └──────────────────┘
+        ```
+
+  include_sources: true
+  enterprise_formatting: true
+
+system_prompt: |
+  ## Design-Anweisungen (Enterprise Standard)
+
+  Du erstellst technische Designs nach Enterprise-Architektur-Standards.
+
+  ### Recherche-Strategie
+  1. **Bestehende Services prüfen**: Confluence nach existierenden Implementierungen durchsuchen
+  2. **Architektur-Patterns**: Interne Richtlinien für Patterns konsultieren
+  3. **Best Practices**: Web-Recherche für aktuelle Technologie-Standards (anonymisiert)
+
+  ### Pflicht-Diagramme
+  Jedes Design MUSS mindestens enthalten:
+  1. **Sequenzdiagramm** (Mermaid) - Hauptablauf der Interaktionen
+  2. **Komponenten-Diagramm** (ASCII) - Architektur-Übersicht mit Layern
+  3. **ERD** (ASCII) - wenn Datenmodell relevant
+
+  ### API-Design-Standards
+  - **REST** mit OpenAPI 3.0 Spezifikation
+  - **Versionierung**: URL-basiert (/v1/resource)
+  - **Error-Responses**: RFC 7807 Problem Details
+  - **Pagination**: Cursor-basiert für Listen
+  - **Naming**: kebab-case für Pfade, camelCase für JSON
+
+  ### Architektur-Prinzipien
+  - **12-Factor App** Prinzipien befolgen
+  - **Circuit Breaker** für externe Service-Calls
+  - **Structured Logging** im JSON-Format
+  - **Health-Endpoints**: /health (liveness), /ready (readiness)
+  - **Idempotenz**: POST/PUT Operationen idempotent gestalten
+
+  ### Datenbank-Design
+  - **Normalisierung**: Mindestens 3NF
+  - **Naming**: snake_case für Tabellen und Spalten
+  - **Audit-Felder**: created_at, updated_at, created_by
+  - **Soft-Delete**: deleted_at statt physischem Löschen
+
+  ### Entscheidungsdokumentation
+  Jede Architektur-Entscheidung muss dokumentiert werden:
+  - Was wurde entschieden?
+  - Welche Alternativen gab es?
+  - Warum diese Entscheidung?
+
+  ### Qualitätskriterien
+  - Alle Komponenten haben klare Verantwortlichkeiten
+  - Schnittstellen sind vollständig spezifiziert
+  - Abhängigkeiten sind explizit dokumentiert
+  - Skalierbarkeit ist berücksichtigt
+
+knowledge_sources: []
+
+tools: []
+
+metadata:
+  author: Enterprise Architecture Team
+  created: "2026-03-16"
+  tags:
+    - design
+    - enterprise
+    - architecture
+    - uml
+    - api
+    - mcp-enhancement

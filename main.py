@@ -12,7 +12,7 @@ from pathlib import Path
 if sys.platform == 'win32':
     asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())
 
-from app.api.routes import chat, java, logs, pdf, confluence, models, python_routes, handbook, skills, agent, settings, database, datasources, mq, log_servers, wlp, maven, search, jenkins, github, internal_fetch, docker_sandbox, access_logs, servicenow, testtool, analytics, patterns, tokens, healing, agents, reviews, arena, files
+from app.api.routes import chat, java, logs, pdf, confluence, models, python_routes, handbook, skills, agent, settings, database, datasources, mq, log_servers, wlp, maven, search, jenkins, github, internal_fetch, docker_sandbox, access_logs, servicenow, testtool, analytics, patterns, tokens, healing, agents, reviews, arena, files, research, output, designs
 
 
 @asynccontextmanager
@@ -320,6 +320,9 @@ app.include_router(agents.router)
 app.include_router(reviews.router)
 app.include_router(arena.router)
 app.include_router(files.router)
+app.include_router(research.router)
+app.include_router(output.router)
+app.include_router(designs.router)
 
 
 # ============================================================================

@@ -55,6 +55,12 @@
     <button class="header-btn" id="dashboard-btn" onclick="openDashboard()" title="Dashboard">
       &#128202;
     </button>
+    <button class="header-btn" id="arena-btn" onclick="openArenaModal()" title="Arena Mode - Modell-Vergleich">
+      &#9876;
+    </button>
+    <button class="header-btn" id="tokens-btn" onclick="openTokensModal()" title="Token-Nutzung">
+      &#128176;
+    </button>
     <button class="header-btn" id="workspace-btn" onclick="toggleWorkspace()" title="Workspace (Ctrl+B)">
       &#128194;
     </button>
@@ -520,6 +526,11 @@
         <span class="tab-icon">&#128193;</span>
         <span class="tab-label">Files</span>
       </button>
+      <button class="workspace-tab" data-tab="pr" onclick="switchWorkspaceTab('pr')" id="workspace-pr-tab" style="display:none">
+        <span class="tab-icon">&#128209;</span>
+        <span class="tab-label" id="workspace-pr-label">PR</span>
+        <span class="tab-badge pr-badge" id="workspace-pr-badge" style="display:none">0</span>
+      </button>
     </div>
     <div class="workspace-content">
       <!-- Code Tab -->
@@ -557,6 +568,54 @@
           <small>Gelesene und bearbeitete Dateien erscheinen hier</small>
         </div>
         <div class="workspace-items" id="workspace-files-items"></div>
+      </div>
+      <!-- PR Review Tab -->
+      <div class="workspace-tab-content" id="workspace-pr-content">
+        <div class="pr-review-panel" id="pr-review-panel">
+          <!-- Header -->
+          <div class="pr-header">
+            <div class="pr-title-row">
+              <span class="pr-number" id="pr-number">#0</span>
+              <span class="pr-title" id="pr-title">PR Title</span>
+            </div>
+            <div class="pr-meta">
+              <span class="pr-branches" id="pr-branches">main &larr; feature</span>
+              <span class="pr-stats" id="pr-stats">+0 -0 | 0 files</span>
+              <span class="pr-author" id="pr-author">@author</span>
+            </div>
+          </div>
+          <!-- AI Summary -->
+          <div class="pr-summary" id="pr-summary">
+            <div class="pr-summary-title">AI Review Summary</div>
+            <div class="pr-severity-badges">
+              <span class="severity-badge critical" id="pr-critical">0</span>
+              <span class="severity-badge high" id="pr-high">0</span>
+              <span class="severity-badge medium" id="pr-medium">0</span>
+              <span class="severity-badge low" id="pr-low">0</span>
+              <span class="severity-badge info" id="pr-info">0</span>
+            </div>
+            <div class="pr-verdict" id="pr-verdict">
+              <span class="verdict-icon">&#9989;</span>
+              <span class="verdict-text">APPROVE</span>
+            </div>
+          </div>
+          <!-- File Comments -->
+          <div class="pr-files" id="pr-files">
+            <!-- Dynamically populated -->
+          </div>
+          <!-- Overall Comment -->
+          <div class="pr-overall-comment">
+            <label>Gesamtkommentar (optional)</label>
+            <textarea id="pr-overall-comment-input" placeholder="Optionaler Kommentar zum gesamten PR..."></textarea>
+          </div>
+          <!-- Actions -->
+          <div class="pr-actions">
+            <button class="btn btn-success" onclick="submitPRReview('approve')">&#10003; Approve</button>
+            <button class="btn btn-warning" onclick="submitPRReview('request_changes')">&#8634; Request Changes</button>
+            <button class="btn btn-secondary" onclick="submitPRReview('comment')">&#128172; Comment Only</button>
+            <button class="btn btn-ghost" onclick="closePRReview()">&times; Schließen</button>
+          </div>
+        </div>
       </div>
     </div>
     <div class="workspace-footer">
@@ -815,6 +874,215 @@
 
   </aside>
 
+</div>
+
+<!-- Arena Mode Modal -->
+<div id="arena-modal" class="modal" style="display:none">
+  <div class="modal-overlay" onclick="closeArenaModal()"></div>
+  <div class="modal-content modal-large">
+    <div class="modal-header arena-header">
+      <h2>Arena Mode</h2>
+      <button class="modal-close" onclick="closeArenaModal()">&times;</button>
+    </div>
+    <div class="modal-body arena-body">
+      <!-- Arena Status -->
+      <div class="arena-status" id="arena-status">
+        <span class="arena-status-label">Status:</span>
+        <span class="arena-status-value" id="arena-status-value">Bereit</span>
+      </div>
+
+      <!-- Arena Prompt -->
+      <div class="arena-prompt-section" id="arena-prompt-section">
+        <label>Dein Prompt:</label>
+        <textarea id="arena-prompt" placeholder="Beschreibe eine Aufgabe, die von zwei Modellen verglichen werden soll..."></textarea>
+        <button class="btn btn-primary" onclick="startArenaMatch()">Match starten</button>
+      </div>
+
+      <!-- Arena Responses (shown during match) -->
+      <div class="arena-responses" id="arena-responses" style="display:none">
+        <div class="arena-response arena-response-a">
+          <div class="arena-response-header">
+            <span class="arena-model-label">Modell A</span>
+            <span class="arena-model-hidden">(versteckt)</span>
+          </div>
+          <div class="arena-response-content" id="arena-response-a">
+            <div class="arena-loading">Generiere Antwort...</div>
+          </div>
+          <div class="arena-response-meta" id="arena-meta-a"></div>
+        </div>
+        <div class="arena-response arena-response-b">
+          <div class="arena-response-header">
+            <span class="arena-model-label">Modell B</span>
+            <span class="arena-model-hidden">(versteckt)</span>
+          </div>
+          <div class="arena-response-content" id="arena-response-b">
+            <div class="arena-loading">Generiere Antwort...</div>
+          </div>
+          <div class="arena-response-meta" id="arena-meta-b"></div>
+        </div>
+      </div>
+
+      <!-- Voting Section -->
+      <div class="arena-voting" id="arena-voting" style="display:none">
+        <h3>Welche Antwort ist besser?</h3>
+        <div class="arena-vote-buttons">
+          <button class="btn arena-vote-btn" onclick="voteArena('A')">A gewinnt</button>
+          <button class="btn arena-vote-btn" onclick="voteArena('tie')">Unentschieden</button>
+          <button class="btn arena-vote-btn" onclick="voteArena('B')">B gewinnt</button>
+        </div>
+        <textarea id="arena-feedback" placeholder="Optionales Feedback..."></textarea>
+      </div>
+
+      <!-- Result Section -->
+      <div class="arena-result" id="arena-result" style="display:none">
+        <h3>Ergebnis</h3>
+        <div class="arena-result-models">
+          <div class="arena-result-model">
+            <span class="arena-result-label">Modell A:</span>
+            <span class="arena-result-value" id="arena-model-a-reveal">-</span>
+          </div>
+          <div class="arena-result-model">
+            <span class="arena-result-label">Modell B:</span>
+            <span class="arena-result-value" id="arena-model-b-reveal">-</span>
+          </div>
+        </div>
+        <div class="arena-winner" id="arena-winner"></div>
+        <button class="btn btn-primary" onclick="resetArena()">Neues Match</button>
+      </div>
+
+      <!-- Leaderboard -->
+      <div class="arena-leaderboard">
+        <h3>Rangliste</h3>
+        <table class="arena-leaderboard-table">
+          <thead>
+            <tr><th>Modell</th><th>Elo</th><th>Siege</th><th>Matches</th><th>Winrate</th></tr>
+          </thead>
+          <tbody id="arena-leaderboard-body">
+            <tr><td colspan="5" class="arena-leaderboard-empty">Keine Daten</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Token Usage Modal -->
+<div id="tokens-modal" class="modal" style="display:none">
+  <div class="modal-overlay" onclick="closeTokensModal()"></div>
+  <div class="modal-content modal-large">
+    <div class="modal-header tokens-header">
+      <h2>Token-Nutzung</h2>
+      <div class="tokens-period-select">
+        <select id="tokens-period" onchange="loadTokenUsage()">
+          <option value="day">Heute</option>
+          <option value="week" selected>Diese Woche</option>
+          <option value="month">Dieser Monat</option>
+        </select>
+      </div>
+      <button class="modal-close" onclick="closeTokensModal()">&times;</button>
+    </div>
+    <div class="modal-body tokens-body">
+      <!-- Summary Cards -->
+      <div class="tokens-summary">
+        <div class="tokens-card">
+          <div class="tokens-card-value" id="tokens-total">-</div>
+          <div class="tokens-card-label">Gesamt Tokens</div>
+        </div>
+        <div class="tokens-card">
+          <div class="tokens-card-value" id="tokens-requests">-</div>
+          <div class="tokens-card-label">Anfragen</div>
+        </div>
+        <div class="tokens-card">
+          <div class="tokens-card-value" id="tokens-cost">-</div>
+          <div class="tokens-card-label">Kosten (USD)</div>
+        </div>
+        <div class="tokens-card budget">
+          <div class="tokens-card-value" id="tokens-budget">-</div>
+          <div class="tokens-card-label">Budget verbraucht</div>
+          <div class="tokens-budget-bar">
+            <div class="tokens-budget-fill" id="tokens-budget-fill"></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Usage by Model -->
+      <div class="tokens-section">
+        <h3>Nach Modell</h3>
+        <div class="tokens-breakdown" id="tokens-by-model">
+          <div class="tokens-breakdown-empty">Lade Daten...</div>
+        </div>
+      </div>
+
+      <!-- Usage by Type -->
+      <div class="tokens-section">
+        <h3>Nach Typ</h3>
+        <div class="tokens-breakdown" id="tokens-by-type">
+          <div class="tokens-breakdown-empty">Lade Daten...</div>
+        </div>
+      </div>
+
+      <!-- Hourly Chart -->
+      <div class="tokens-section">
+        <h3>Verlauf</h3>
+        <div class="tokens-chart" id="tokens-hourly-chart">
+          <div class="tokens-chart-placeholder">Lade Chart...</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Self-Healing Modal -->
+<div id="healing-modal" class="modal" style="display:none">
+  <div class="modal-overlay"></div>
+  <div class="modal-content modal-medium">
+    <div class="modal-header healing-header">
+      <span class="healing-icon">&#9888;</span>
+      <h2>Fehler erkannt</h2>
+    </div>
+    <div class="modal-body healing-body">
+      <!-- Error Info -->
+      <div class="healing-error">
+        <div class="healing-error-tool">
+          <span class="healing-label">Tool:</span>
+          <span class="healing-value" id="healing-tool">-</span>
+        </div>
+        <div class="healing-error-message" id="healing-error-message">
+          Fehler wird analysiert...
+        </div>
+      </div>
+
+      <!-- Suggested Fix -->
+      <div class="healing-fix" id="healing-fix">
+        <h3>Vorgeschlagene Lösung</h3>
+        <div class="healing-fix-description" id="healing-fix-description"></div>
+        <div class="healing-fix-code" id="healing-fix-code">
+          <pre><code></code></pre>
+        </div>
+        <div class="healing-fix-meta">
+          <span class="healing-confidence">
+            Konfidenz: <span id="healing-confidence">-</span>%
+          </span>
+          <span class="healing-safe" id="healing-safe">
+            &#10003; Sicher für Auto-Apply
+          </span>
+        </div>
+      </div>
+
+      <!-- Pattern Info -->
+      <div class="healing-pattern" id="healing-pattern" style="display:none">
+        <span class="healing-pattern-icon">&#128161;</span>
+        <span id="healing-pattern-text">Pattern Match: "Missing Semicolon" (47x gesehen, 95% Erfolg)</span>
+      </div>
+
+      <!-- Actions -->
+      <div class="healing-actions">
+        <button class="btn btn-success" onclick="applyHealing()">Anwenden</button>
+        <button class="btn btn-secondary" onclick="skipHealing()">Überspringen</button>
+        <button class="btn btn-ghost" onclick="alwaysAutoFix()">Immer Auto-Fix</button>
+      </div>
+    </div>
+  </div>
 </div>
 
 <!-- Template Placeholder Modal -->

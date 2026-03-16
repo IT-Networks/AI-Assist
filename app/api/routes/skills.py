@@ -419,3 +419,65 @@ async def reindex_skill(skill_id: str):
         "message": f"Skill '{skill_id}' neu indexiert",
         "chunks_indexed": chunks
     }
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# MCP Command Integration (NEU)
+# ══════════════════════════════════════════════════════════════════════════════
+
+class CommandSkillsResponse(BaseModel):
+    """Response für Skills eines MCP-Commands."""
+    command: str
+    skills: List[str]
+    combined_system_prompt: str
+    research_config: Optional[dict] = None
+    output_config: Optional[dict] = None
+
+
+class CommandTriggersResponse(BaseModel):
+    """Übersicht welche Commands welche Skills triggern."""
+    triggers: dict  # {"brainstorm": ["skill-1"], "design": ["skill-2"]}
+
+
+# WICHTIG: Diese Route MUSS vor /for-command/{command} stehen,
+# da sonst "command-triggers" als {command} gematcht wird!
+@router.get("/command-triggers", response_model=CommandTriggersResponse)
+async def list_command_triggers():
+    """
+    Gibt eine Übersicht welche MCP-Commands welche Skills triggern.
+
+    Nützlich für UI um zu zeigen welche Commands erweitert werden.
+    """
+    if not settings.skills.enabled:
+        raise HTTPException(status_code=404, detail="Skill-Feature ist nicht aktiviert")
+
+    manager = get_skill_manager()
+    triggers = manager.list_command_triggers()
+
+    return CommandTriggersResponse(triggers=triggers)
+
+
+@router.get("/for-command/{command}", response_model=CommandSkillsResponse)
+async def get_skills_for_command(
+    command: str,
+    session_id: Optional[str] = Query(None, description="Session-ID für Aktivierungsstatus")
+):
+    """
+    Gibt alle Skills zurück, die für ein MCP-Command konfiguriert sind.
+
+    MCP-Commands wie /brainstorm oder /design können Skills mit
+    `activation.trigger_commands` automatisch aktivieren.
+    """
+    if not settings.skills.enabled:
+        raise HTTPException(status_code=404, detail="Skill-Feature ist nicht aktiviert")
+
+    manager = get_skill_manager()
+    config = manager.get_command_skills_config(command)
+
+    return CommandSkillsResponse(
+        command=command,
+        skills=config["skills"],
+        combined_system_prompt=config["combined_system_prompt"],
+        research_config=config["research"],
+        output_config=config["output"]
+    )

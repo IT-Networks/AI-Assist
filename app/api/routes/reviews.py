@@ -157,6 +157,21 @@ class StatsResponse(BaseModel):
     customRulesCount: int
 
 
+class SubmitCommentRequest(BaseModel):
+    """Comment to submit to GitHub."""
+    filePath: str
+    line: int
+    body: str
+
+
+class SubmitReviewRequest(BaseModel):
+    """Request to submit review to GitHub."""
+    reviewId: str
+    verdict: str = Field(pattern="^(approve|request_changes|comment)$")
+    overallComment: Optional[str] = Field(default=None)
+    comments: List[SubmitCommentRequest] = Field(default_factory=list)
+
+
 # ═══════════════════════════════════════════════════════════════════════════════
 # Configuration Endpoints
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -548,6 +563,94 @@ async def dismiss_comment(review_id: str, comment_id: str):
         raise HTTPException(status_code=404, detail="Comment not found")
 
     return {"success": True, "message": "Comment dismissed"}
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# GitHub Submit Endpoint
+# ═══════════════════════════════════════════════════════════════════════════════
+
+@router.post("/submit")
+async def submit_review_to_github(request: SubmitReviewRequest):
+    """
+    Submit a review to GitHub.
+
+    This posts the review with comments to the actual GitHub PR.
+
+    Args:
+        request: Review submission details
+
+    Returns:
+        Success status and GitHub response
+    """
+    from app.core.config import settings
+    import httpx
+
+    service = get_pr_review_service()
+    review = service.get_review(request.reviewId)
+
+    if not review:
+        raise HTTPException(status_code=404, detail=f"Review {request.reviewId} not found")
+
+    # Get GitHub token from settings
+    github_token = getattr(settings, 'github', {})
+    if isinstance(github_token, dict):
+        github_token = github_token.get('token', '')
+    else:
+        github_token = getattr(github_token, 'token', '') if github_token else ''
+
+    if not github_token:
+        raise HTTPException(status_code=400, detail="GitHub token not configured")
+
+    # Map verdict to GitHub event
+    event_map = {
+        'approve': 'APPROVE',
+        'request_changes': 'REQUEST_CHANGES',
+        'comment': 'COMMENT',
+    }
+    event = event_map.get(request.verdict, 'COMMENT')
+
+    # Build review payload
+    payload = {
+        'event': event,
+        'body': request.overallComment or '',
+        'comments': [
+            {
+                'path': c.filePath,
+                'line': c.line,
+                'body': c.body,
+            }
+            for c in request.comments
+        ],
+    }
+
+    # Build GitHub API URL from settings (supports GitHub Enterprise)
+    github_api_base = settings.github.get_api_url() if settings.github.base_url else "https://api.github.com"
+    url = f"{github_api_base}/repos/{review.repo_owner}/{review.repo_name}/pulls/{review.pr_number}/reviews"
+
+    try:
+        async with httpx.AsyncClient(verify=settings.github.verify_ssl) as client:
+            response = await client.post(
+                url,
+                json=payload,
+                headers={
+                    'Authorization': f'token {github_token}',
+                    'Accept': 'application/vnd.github.v3+json',
+                },
+                timeout=settings.github.timeout_seconds,
+            )
+
+            if response.status_code >= 400:
+                error_detail = response.json().get('message', response.text)
+                raise HTTPException(status_code=response.status_code, detail=f"GitHub API error: {error_detail}")
+
+            return {
+                'success': True,
+                'verdict': request.verdict,
+                'commentsPosted': len(request.comments),
+                'githubReviewId': response.json().get('id'),
+            }
+    except httpx.RequestError as e:
+        raise HTTPException(status_code=500, detail=f"Failed to connect to GitHub: {str(e)}")
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
