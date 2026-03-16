@@ -3656,54 +3656,9 @@ function toggleExplorerSection(section) {
 
 // ── Repo Selector (Sidebar) ──
 
-async function loadRepoSelector(lang) {
-  const selectorDiv = document.getElementById(`${lang}-repo-selector`);
-  const select = document.getElementById(`${lang}-repo-select`);
-  if (!selectorDiv || !select) return;
-
-  try {
-    const res = await fetch(`/api/settings/repos/${lang}`);
-    if (!res.ok) { selectorDiv.style.display = 'none'; return; }
-    const d = await res.json();
-    const repos = d.repos || [];
-    const activeRepo = d.active_repo || '';
-
-    if (repos.length < 2) {
-      // Nur einen Repo → kein Selector nötig
-      selectorDiv.style.display = 'none';
-      return;
-    }
-
-    select.innerHTML = repos.map(r =>
-      `<option value="${escapeHtml(r.name)}" ${r.name === activeRepo ? 'selected' : ''}>${escapeHtml(r.name)}</option>`
-    ).join('');
-    selectorDiv.style.display = 'flex';
-  } catch {
-    selectorDiv.style.display = 'none';
-  }
-}
-
-async function setActiveRepo(lang, name) {
-  try {
-    const res = await fetch(`/api/settings/repos/${lang}/active?name=${encodeURIComponent(name)}`, { method: 'PUT' });
-    if (!res.ok) {
-      const d = await res.json().catch(() => ({}));
-      appendMessage('system', `Fehler beim Wechsel des Repositories: ${d.detail || res.statusText}`);
-      // Selector zurücksetzen
-      loadRepoSelector(lang);
-      return;
-    }
-    // Speichern
-    await fetch('/api/settings/save', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ backup: false }) });
-    appendMessage('system', `${lang === 'java' ? 'Java' : 'Python'}-Repository gewechselt zu: ${name}`);
-    // Index-Status neu laden (zeigt Dateizahl des neuen Repos)
-    if (lang === 'java') loadJavaIndexStatus();
-    else loadPythonIndexStatus();
-  } catch (e) {
-    appendMessage('system', `Fehler: ${e.message}`);
-    loadRepoSelector(lang);
-  }
-}
+// DEPRECATED: loadRepoSelector and setActiveRepo removed
+// The "active repo" concept has been replaced by file search with repo filter
+// See: searchExplorerFiles() and @-mention system
 
 // ── Java Index ──
 async function loadJavaIndexStatus() {
@@ -3724,7 +3679,6 @@ async function loadJavaIndexStatus() {
   } catch {
     el.textContent = 'Status nicht verfügbar';
   }
-  loadRepoSelector('java');
 }
 
 async function buildJavaIndex() {
@@ -3784,7 +3738,6 @@ async function loadPythonIndexStatus() {
   } catch {
     el.textContent = 'Status nicht verfügbar';
   }
-  loadRepoSelector('python');
 }
 
 async function buildPythonIndex() {
@@ -6446,8 +6399,6 @@ async function setActiveRepoSettings(lang, name) {
     const d = await res.json();
     if (!res.ok) throw new Error(d.detail || 'Fehler');
     updateSettingsStatus(`${name} aktiviert`, 'success');
-    // Sidebar-Selektor aktualisieren
-    loadRepoSelector(lang);
     renderReposSection(lang);
   } catch (e) {
     updateSettingsStatus('Fehler: ' + e.message, 'error');
@@ -6486,7 +6437,6 @@ async function addRepoSettings(lang) {
     // Jetzt in config.yaml speichern
     await fetch('/api/settings/save', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ backup: true }) });
     updateSettingsStatus('Repository hinzugefügt und gespeichert', 'success');
-    loadRepoSelector(lang);
     renderReposSection(lang);
   } catch (e) {
     msgEl.textContent = '✗ ' + e.message;
@@ -6503,7 +6453,6 @@ async function deleteRepoSettings(lang, name) {
     if (!res.ok) throw new Error(d.detail || 'Fehler');
     await fetch('/api/settings/save', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ backup: true }) });
     updateSettingsStatus('Repository entfernt und gespeichert', 'success');
-    loadRepoSelector(lang);
     renderReposSection(lang);
   } catch (e) {
     updateSettingsStatus('Fehler: ' + e.message, 'error');
