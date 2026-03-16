@@ -32,8 +32,12 @@ def temp_db():
     fd, path = tempfile.mkstemp(suffix=".db")
     os.close(fd)
     yield path
-    if os.path.exists(path):
-        os.unlink(path)
+    # Windows: SQLite may not release file locks immediately
+    try:
+        if os.path.exists(path):
+            os.unlink(path)
+    except PermissionError:
+        pass  # Will be cleaned up by OS temp cleanup
 
 
 @pytest.fixture
