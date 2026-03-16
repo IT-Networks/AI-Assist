@@ -1048,6 +1048,8 @@ class AnalyticsAnonymizeConfig(BaseModel):
 
 class AnalyticsIncludeConfig(BaseModel):
     """Was soll geloggt werden?"""
+    model_config = {"protected_namespaces": ()}
+
     tool_selection: bool = True       # Welches Tool wurde gewählt
     tool_execution: bool = True       # Ausführungs-Ergebnis
     tool_errors: bool = True          # Fehler bei Tool-Ausführung

@@ -1,15 +1,4 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<!--
-  SOAP Login Template - Holt Session-Token für ein Institut
-
-  Platzhalter (auto-inject):
-    {{institut}}  - Institut-Nummer (bestimmt Routing)
-    {{user}}      - Benutzername aus Institut-Config
-    {{password}}  - Passwort aus Institut-Config
-
-  Response-Extraktion (konfigurierbar in Service):
-    session_token_xpath: //SessionToken/text()
--->
 <soap:Envelope
     xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/"
     xmlns:auth="http://example.com/auth">

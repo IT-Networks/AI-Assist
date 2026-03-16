@@ -270,8 +270,8 @@ class TestSessionManager:
             # Envelope für Debugging (Password maskiert)
             debug_envelope = envelope.replace(password, '***') if password else envelope
             logger.error(f"[Login] HTTP {response.status_code} von {settings.test_tool.login_url}")
-            logger.error(f"[Login] Request-Envelope:\n{debug_envelope[:1000]}")
-            logger.error(f"[Login] Response:\n{response.text[:500]}")
+            logger.error(f"[Login] Request-Envelope (vollständig, {len(envelope)} Bytes):\n{debug_envelope}")
+            logger.error(f"[Login] Response:\n{response.text}")
             raise ValueError(
                 f"Login fehlgeschlagen: HTTP {response.status_code}\n"
                 f"URL: {settings.test_tool.login_url}\n"

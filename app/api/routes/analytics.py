@@ -40,6 +40,8 @@ class AnalyticsStatus(BaseModel):
 
 class AnalyticsSummary(BaseModel):
     """Zusammenfassung der Analytics-Daten."""
+    model_config = {"protected_namespaces": ()}
+
     enabled: bool
     period_days: int
     total_chains: int
