@@ -6,6 +6,11 @@ Enterprise AI-Assistent mit Claude-Code-ähnlicher Architektur. Spezialisiert au
 
 - **Workspace Panel** - Split-View mit Code-Diffs, SQL-Ergebnissen und Research-Tabs
 - **User Dashboard** - KPI-Charts, Tool-Usage, Activity-Heatmaps, Token-Tracking
+- **Token/Credit Tracking** - LLM-Kosten-Tracking mit Budget-Limits, Alerts und Export
+- **Self-Healing Code** - Automatische Fehlererkennung und Fix-Vorschläge mit Pattern-Matching
+- **Parallel Agents** - Multi-Agent Task-Execution in isolierten Git Worktrees mit Auto-Merge
+- **PR Review** - AI-gesteuerte Code Reviews mit Copy-Friendly Fixes (kein Auto-Commit)
+- **Arena Mode** - Model-Vergleich mit Blind-Voting und ELO-Rating
 - **Error Pattern Learning** - Automatisches Lernen von Fehler-Lösungen mit Similarity-Matching
 - **MCP-Enhancement Pipeline** - Kontext-Sammlung vor Task-Verarbeitung mit User-Confirmation
 - **Task-Decomposition** - Komplexe Anfragen in parallele Sub-Tasks zerlegen
@@ -207,6 +212,84 @@ Vollständige Optionen: siehe `config.yaml.example`
 | `DELETE /api/patterns/{id}` | Pattern löschen |
 | `GET /api/patterns/export/json` | Alle Patterns exportieren |
 
+### Token Tracking
+| Endpunkt | Beschreibung |
+|----------|-------------|
+| `GET /api/tokens/usage` | Nutzungs-Summary (day, week, month) |
+| `GET /api/tokens/breakdown` | Breakdown nach Model/Type/Session |
+| `GET /api/tokens/recent` | Letzte Token-Records |
+| `GET /api/tokens/stats` | Statistiken und Trends |
+| `GET /api/tokens/budget` | Budget-Konfiguration |
+| `PUT /api/tokens/budget` | Budget setzen |
+| `GET /api/tokens/alerts` | Budget-Warnungen |
+| `GET /api/tokens/export` | Export (JSON/CSV) |
+
+### Self-Healing Code
+| Endpunkt | Beschreibung |
+|----------|-------------|
+| `GET /api/healing/config` | Self-Healing Konfiguration |
+| `PUT /api/healing/config` | Konfiguration setzen |
+| `GET /api/healing/attempts` | Healing-Versuche Liste |
+| `GET /api/healing/attempts/pending` | Ausstehende Fixes |
+| `POST /api/healing/analyze` | Fehler analysieren |
+| `POST /api/healing/apply/{id}` | Fix anwenden |
+| `POST /api/healing/dismiss/{id}` | Fix ablehnen |
+| `GET /api/healing/stats` | Healing-Statistiken |
+
+### Parallel Agents
+| Endpunkt | Beschreibung |
+|----------|-------------|
+| `GET /api/agents/config` | Parallel Agents Konfiguration |
+| `PUT /api/agents/config` | Konfiguration setzen |
+| `GET /api/agents/tasks` | Task-Liste (Filter: status, limit) |
+| `POST /api/agents/tasks` | Neuen Task erstellen |
+| `GET /api/agents/tasks/{id}` | Task-Details |
+| `DELETE /api/agents/tasks/{id}` | Task löschen/abbrechen |
+| `POST /api/agents/tasks/{id}/start` | Task manuell starten |
+| `POST /api/agents/tasks/{id}/progress` | Fortschritt aktualisieren |
+| `POST /api/agents/tasks/{id}/complete` | Task abschließen |
+| `GET /api/agents/pool` | Agent-Pool Status |
+| `POST /api/agents/merge/{id}` | Task-Ergebnisse mergen |
+| `GET /api/agents/conflicts/{id}` | Merge-Konflikte abrufen |
+| `POST /api/agents/conflicts/{id}/resolve` | Konflikt auflösen |
+| `GET /api/agents/stats` | Statistiken |
+
+### PR Review (Copy-Friendly)
+| Endpunkt | Beschreibung |
+|----------|-------------|
+| `GET /api/reviews/config` | Review-Konfiguration |
+| `PUT /api/reviews/config` | Konfiguration setzen |
+| `POST /api/reviews/trigger` | Review manuell starten |
+| `GET /api/reviews/list` | Reviews mit Filter |
+| `GET /api/reviews/history` | Letzte Reviews |
+| `GET /api/reviews/{id}` | Review-Details |
+| `GET /api/reviews/{id}/fixes` | Copyable Fixes abrufen |
+| `GET /api/reviews/{id}/fixes/{cid}/patch` | Fix als Git-Patch |
+| `POST /api/reviews/{id}/fixes/{cid}/copied` | Fix als kopiert markieren |
+| `POST /api/reviews/{id}/comments/{cid}/dismiss` | Kommentar verwerfen |
+| `GET /api/reviews/rules` | Custom Rules abrufen |
+| `POST /api/reviews/rules` | Custom Rule erstellen |
+| `PUT /api/reviews/rules/{id}` | Rule aktualisieren |
+| `DELETE /api/reviews/rules/{id}` | Rule löschen |
+| `GET /api/reviews/stats` | Statistiken |
+
+### Arena Mode (Model-Vergleich)
+| Endpunkt | Beschreibung |
+|----------|-------------|
+| `GET /api/arena/config` | Arena-Konfiguration |
+| `PUT /api/arena/config` | Aktivieren/Modelle setzen |
+| `GET /api/arena/enabled` | Schnelle Enable-Prüfung |
+| `POST /api/arena/start` | Neuen Match starten |
+| `GET /api/arena/match/{id}` | Match-Details |
+| `POST /api/arena/match/{id}/response` | Model-Response setzen |
+| `POST /api/arena/match/{id}/vote` | Abstimmen (A/B/Tie) |
+| `POST /api/arena/match/{id}/skip` | Match überspringen |
+| `GET /api/arena/session/{sid}/pending` | Offene Matches für Session |
+| `GET /api/arena/history` | Match-Historie |
+| `GET /api/arena/stats` | Gesamtstatistiken |
+| `GET /api/arena/leaderboard` | ELO-Rangliste |
+| `GET /api/arena/models/{m}/stats` | Model-Statistiken |
+
 ### System
 | Endpunkt | Beschreibung |
 |----------|-------------|
@@ -214,6 +297,28 @@ Vollständige Optionen: siehe `config.yaml.example`
 | `GET /api/health` | System-Status |
 
 Vollständige API-Docs: **http://localhost:8000/docs**
+
+## Performance Optimierungen
+
+### Backend (Python)
+| Optimierung | Datei | Verbesserung |
+|-------------|-------|--------------|
+| Pre-compiled Regex | `pattern_learner.py` | 10-50x schnellere Pattern-Erkennung |
+| orjson Serialization | `json_utils.py` | 3-10x schnellere JSON-Verarbeitung |
+| SQL Column Constants | `arena_mode.py`, `token_tracker.py`, etc. | Vermeidet `SELECT *` |
+| Connection Pooling | `llm_client.py` | Weniger TCP-Overhead |
+
+### Frontend (JavaScript)
+| Optimierung | Datei | Beschreibung |
+|-------------|-------|--------------|
+| Debug Logger | `app.js` | `DEBUG=false` deaktiviert alle `log.info/warn` |
+| Timing Constants | `app.js` | Zentrale `TIMING.*` Konstanten |
+| Duplicate Removal | `app.js` | 3 doppelte Funktionen entfernt |
+
+```javascript
+// Debug-Modus aktivieren (app.js Zeile 7)
+const DEBUG = true;  // false = silent mode
+```
 
 ## Tests
 
@@ -224,7 +329,7 @@ python -m pytest tests/ -v
 # Mit Coverage
 python -m pytest tests/ --cov=app --cov-report=html
 
-# 568 Tests, 33% Coverage
+# 808 Tests, 33% Coverage
 ```
 
 ### Test-Module
@@ -233,6 +338,9 @@ python -m pytest tests/ --cov=app --cov-report=html
 | `test_pattern_learner.py` | 54 | ErrorPattern, Similarity, Persistence |
 | `test_patterns_api.py` | 32 | Pattern REST API |
 | `test_dashboard_api.py` | 26 | Dashboard-Metriken |
+| `test_parallel_agents.py` | 42 | Parallel Agents, Git Worktrees |
+| `test_pr_review.py` | 51 | PR Review, Copy-Friendly Fixes |
+| `test_arena_mode.py` | 48 | Arena Mode, ELO, Blind Voting |
 | `test_workspace_events.py` | 14 | Code/SQL Events |
 | `test_analytics*.py` | 200+ | Analytics-System |
 | `test_*.py` | 240+ | Weitere Module |

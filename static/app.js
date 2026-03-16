@@ -3,6 +3,26 @@
 // Agent-basierte Architektur mit Tool-Calling und Bestätigungs-Workflow
 // ══════════════════════════════════════════════════════════════════════════════
 
+// ── Debug Logger (toggle DEBUG to enable/disable console output) ──
+const DEBUG = false;
+const log = {
+  info: DEBUG ? console.log.bind(console) : () => {},
+  warn: DEBUG ? console.warn.bind(console) : () => {},
+  error: console.error.bind(console),  // Always log errors
+};
+
+// ── Timing Constants (ms) ──
+const TIMING = {
+  TOAST_DEFAULT: 3000,
+  TOAST_ERROR: 5000,
+  DEBOUNCE: 300,
+  ANIMATION_FAST: 200,
+  ANIMATION_SLOW: 500,
+  HIGHLIGHT_DURATION: 2000,
+  POLL_INTERVAL: 5000,
+  SCROLL_DELAY: 100,
+};
+
 // ── State ──
 const state = {
   sessionId: null,         // Set by active chat
@@ -370,7 +390,7 @@ function renderDiff2Html(diffString, fileName, viewMode = 'split') {
 
   // Check if diff2html is available
   if (typeof Diff2Html === 'undefined') {
-    console.warn('diff2html not loaded, falling back to simple diff');
+    log.warn('diff2html not loaded, falling back to simple diff');
     return `<pre class="workspace-diff">${formatDiff(diffString)}</pre>`;
   }
 
@@ -389,7 +409,7 @@ function renderDiff2Html(diffString, fileName, viewMode = 'split') {
 
     return html;
   } catch (e) {
-    console.error('diff2html rendering failed:', e);
+    log.error('diff2html rendering failed:', e);
     return `<pre class="workspace-diff">${formatDiff(diffString)}</pre>`;
   }
 }
@@ -461,7 +481,7 @@ function copyDiffToClipboard(itemId) {
   navigator.clipboard.writeText(item.diff).then(() => {
     showToast('Diff kopiert', 'success');
   }).catch(err => {
-    console.error('Failed to copy diff:', err);
+    log.error('Failed to copy diff:', err);
     showToast('Kopieren fehlgeschlagen', 'error');
   });
 }
@@ -761,7 +781,7 @@ function copySqlToClipboard(itemId) {
   navigator.clipboard.writeText(item.query).then(() => {
     showToast('SQL kopiert', 'success');
   }).catch(err => {
-    console.error('Failed to copy SQL:', err);
+    log.error('Failed to copy SQL:', err);
     showToast('Kopieren fehlgeschlagen', 'error');
   });
 }
@@ -972,7 +992,7 @@ async function applyCodeChange(itemId) {
       showToast(`Fehler: ${err.detail || 'Unbekannt'}`, 'error');
     }
   } catch (e) {
-    console.error('Apply code change failed:', e);
+    log.error('Apply code change failed:', e);
     showToast('Fehler beim Anwenden der Änderung', 'error');
   }
 }
@@ -1024,11 +1044,11 @@ document.addEventListener('DOMContentLoaded', async () => {
   // Nicht-kritische Daten im Hintergrund laden (non-blocking)
   // Fehler werden geloggt aber blockieren UI nicht
   Promise.all([
-    loadSkills().catch(e => console.warn('[init] Skills load failed:', e)),
-    loadJavaIndexStatus().catch(e => console.warn('[init] Java index status failed:', e)),
-    loadPythonIndexStatus().catch(e => console.warn('[init] Python index status failed:', e)),
-    loadHandbookStatus().catch(e => console.warn('[init] Handbook status failed:', e)),
-    scanExistingPdfs().catch(e => console.warn('[init] PDF scan failed:', e)),
+    loadSkills().catch(e => log.warn('[init] Skills load failed:', e)),
+    loadJavaIndexStatus().catch(e => log.warn('[init] Java index status failed:', e)),
+    loadPythonIndexStatus().catch(e => log.warn('[init] Python index status failed:', e)),
+    loadHandbookStatus().catch(e => log.warn('[init] Handbook status failed:', e)),
+    scanExistingPdfs().catch(e => log.warn('[init] PDF scan failed:', e)),
   ]);
 });
 
@@ -1183,7 +1203,7 @@ async function loadPersistedChats() {
     await switchToChat(last.id);
     renderChatList();
   } catch (e) {
-    console.error('Failed to load persisted chats:', e);
+    log.error('Failed to load persisted chats:', e);
     showErrorToast('Chat-Verlauf konnte nicht geladen werden');
     await createNewChat();
   }
@@ -1195,9 +1215,9 @@ async function createNewChat() {
     const chat = chatManager.createChat(sessionId);
     // switchToChat übernimmt Pane-Swap, State-Restore und UI-Updates
     await switchToChat(chat.id);
-    console.log('New chat created:', chat.id, 'session:', sessionId);
+    log.info('New chat created:', chat.id, 'session:', sessionId);
   } catch (e) {
-    console.error('Failed to create new chat:', e);
+    log.error('Failed to create new chat:', e);
     showErrorToast('Neuer Chat konnte nicht erstellt werden');
   }
 }
@@ -1266,20 +1286,20 @@ async function switchToChat(chatId) {
         }
         // Mode vom Server synchronisieren
         if (mode) {
-          console.log(`[switchToChat] Restored mode from server: ${mode}`);
+          log.info(`[switchToChat] Restored mode from server: ${mode}`);
           syncModeUI(mode);
         }
       }
     } catch (e) {
       if (e.name === 'AbortError') return; // Switch wurde abgebrochen
       incomingChat.pane.innerHTML = _contextBarHTML() + welcomeHTML();
-      console.error('Failed to restore chat history:', e);
+      log.error('Failed to restore chat history:', e);
       showErrorToast('Chat-Historie konnte nicht geladen werden');
     }
   } else {
     // Bestehender Chat - Mode aus Chat-Objekt oder Server laden
     if (incomingChat.mode) {
-      console.log(`[switchToChat] Using cached mode: ${incomingChat.mode}`);
+      log.info(`[switchToChat] Using cached mode: ${incomingChat.mode}`);
       syncModeUI(incomingChat.mode);
     } else {
       // Fallback: Mode vom Server laden
@@ -1290,7 +1310,7 @@ async function switchToChat(chatId) {
         if (switchAc.signal.aborted) return;
         if (res.ok) {
           const { mode } = await res.json();
-          console.log(`[switchToChat] Fetched mode from server: ${mode}`);
+          log.info(`[switchToChat] Fetched mode from server: ${mode}`);
           syncModeUI(mode);
         }
       } catch (e) {
@@ -1508,12 +1528,10 @@ function updateActiveChatTitle(firstUserMessage) {
   renderChatList();
 }
 
-function escapeHtml(str) {
-  return str.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
-}
+// escapeHtml defined in Utilities section (line ~4251) with null-safety
 
 // ── Error UI Feedback ──
-function showErrorToast(message, duration = 5000) {
+function showErrorToast(message, duration = TIMING.TOAST_ERROR) {
   // Existierenden Toast entfernen
   const existing = document.querySelector('.error-toast');
   if (existing) existing.remove();
@@ -1534,14 +1552,14 @@ function showErrorToast(message, duration = 5000) {
     setTimeout(() => {
       if (toast.parentNode) {
         toast.classList.add('fade-out');
-        setTimeout(() => toast.remove(), 300);
+        setTimeout(() => toast.remove(), TIMING.DEBOUNCE);
       }
     }, duration);
   }
 }
 
 // Generic toast for success/error messages
-function showToast(message, type = 'info', duration = 3000) {
+function showToast(message, type = 'info', duration = TIMING.TOAST_DEFAULT) {
   // Existierenden Toast entfernen
   const existing = document.querySelector('.generic-toast');
   if (existing) existing.remove();
@@ -1618,7 +1636,7 @@ async function setAgentMode(mode) {
   const sessionId = chat?.sessionId || state.sessionId;
 
   if (!sessionId) {
-    console.error('No session ID available for mode change');
+    log.error('No session ID available for mode change');
     appendMessage('error', 'Kein aktiver Chat für Modus-Wechsel');
     syncModeRadioButtons(state.mode);
     return;
@@ -1649,7 +1667,7 @@ async function setAgentMode(mode) {
     }
 
     updateModeIndicator();
-    console.log(`[setAgentMode] Mode changed from ${prevMode} to ${data.mode} for session ${sessionId}`);
+    log.info(`[setAgentMode] Mode changed from ${prevMode} to ${data.mode} for session ${sessionId}`);
   } catch (e) {
     appendMessage('error', 'Modus-Wechsel fehlgeschlagen: ' + e.message);
     syncModeRadioButtons(state.mode);
@@ -1661,7 +1679,7 @@ function syncModeRadioButtons(mode) {
   const radio = document.querySelector(`input[name="agent-mode"][value="${mode}"]`);
   if (radio && !radio.checked) {
     radio.checked = true;
-    console.log(`[Mode] Radio synced to: ${mode}`);
+    log.info(`[Mode] Radio synced to: ${mode}`);
   }
 }
 
@@ -1782,12 +1800,12 @@ async function loadModels() {
     sel.addEventListener('change', () => {
       const prevModel = state.currentModel;
       state.currentModel = sel.value;
-      console.log(`[Model] Changed from ${prevModel} to ${sel.value}, mode remains: ${state.mode}`);
+      log.info(`[Model] Changed from ${prevModel} to ${sel.value}, mode remains: ${state.mode}`);
       // Mode UI-Sync sicherstellen (defensiv - sollte nicht nötig sein)
       syncModeRadioButtons(state.mode);
     });
   } catch (e) {
-    console.error('Failed to load models:', e);
+    log.error('Failed to load models:', e);
     showErrorToast('Modelle konnten nicht geladen werden');
   }
 }
@@ -1850,7 +1868,7 @@ async function toggleSkill(skillId) {
       updateActiveSkillsCount();
     }
   } catch (e) {
-    console.error('Failed to toggle skill:', e);
+    log.error('Failed to toggle skill:', e);
     showErrorToast('Skill konnte nicht aktiviert werden');
   }
 }
@@ -2093,7 +2111,7 @@ _Beispiel: \`/brainstorm Neues Feature für User-Login\`_
 async function handleChatCommand(text) {
   // Normalisieren: "/Mode Lesen" → "mode lesen", "/ plan" → "plan"
   const raw = text.slice(1).replace(/\s+/g, ' ').trim().toLowerCase();
-  console.log('[cmd] Befehl erkannt:', { original: text, normalized: raw });
+  log.info('[cmd] Befehl erkannt:', { original: text, normalized: raw });
 
   // Hilfe
   if (raw === 'hilfe' || raw === 'help' || raw === '?') {
@@ -2133,7 +2151,7 @@ async function handleChatCommand(text) {
 
   if (Object.prototype.hasOwnProperty.call(modeMap, modePrefix)) {
     const modeKey = modeMap[modePrefix];
-    console.log('[cmd] Modus-Befehl erkannt:', { modePrefix, modeKey });
+    log.info('[cmd] Modus-Befehl erkannt:', { modePrefix, modeKey });
     await setAgentMode(modeKey);
     appendMessage('system', `Modus gewechselt: ${_MODE_LABELS[modeKey] || modeKey}`);
     return true;
@@ -2183,7 +2201,7 @@ async function handleChatCommand(text) {
 
   if (capabilityMap[cmdKey]) {
     const cap = capabilityMap[cmdKey];
-    console.log('[cmd] MCP Capability:', { capability: cap.name, query: capQuery });
+    log.info('[cmd] MCP Capability:', { capability: cap.name, query: capQuery });
 
     if (!capQuery) {
       appendMessage('system',
@@ -2207,7 +2225,7 @@ async function handleChatCommand(text) {
   // ─────────────────────────────────────────────────────────────────────────
 
   // Unbekannter Befehl → System-Hinweis, aber trotzdem als normaler Text weiterleiten
-  console.log('[cmd] Unbekannter Befehl:', { raw, modePrefix });
+  log.info('[cmd] Unbekannter Befehl:', { raw, modePrefix });
   appendMessage('system',
     `Unbekannter Befehl \`/${raw}\`. Tippe \`/hilfe\` für alle Befehle.\n` +
     `Die Nachricht wird dennoch an den Agenten gesendet.`
@@ -2279,7 +2297,7 @@ async function sendChatInternal(message) {
 
   // Verhindere Doppel-Senden wenn bereits am Streamen
   if (activeChat.streamingState || _chatAbortController) {
-    console.log('[sendChatInternal] Bereits am Streamen, überspringe');
+    log.info('[sendChatInternal] Bereits am Streamen, überspringe');
     return;
   }
 
@@ -3291,7 +3309,7 @@ async function confirmEnhancement(confirmed) {
     });
 
     if (!res.ok) {
-      console.error('[enhancement] Confirmation failed:', await res.text());
+      log.error('[enhancement] Confirmation failed:', await res.text());
     }
 
     const result = await res.json();
@@ -3315,7 +3333,7 @@ async function confirmEnhancement(confirmed) {
     }
 
   } catch (err) {
-    console.error('[enhancement] Confirmation error:', err);
+    log.error('[enhancement] Confirmation error:', err);
     appendMessageToPane(chat.pane, 'error', `Enhancement-Bestätigung fehlgeschlagen: ${err.message}`);
   }
 }
@@ -3402,7 +3420,7 @@ async function loadEnhancementDetails() {
     renderContextItems(data.enhancement?.context_items || []);
 
   } catch (err) {
-    console.error('[enhancement] Failed to load details:', err);
+    log.error('[enhancement] Failed to load details:', err);
     list.innerHTML = '<div style="padding: 12px; color: #f56565;">Details konnten nicht geladen werden</div>';
   }
 }
@@ -3559,14 +3577,7 @@ async function rejectPlan(card, chat) {
   }
 }
 
-function switchRightPanel(panelId) {
-  const sidebar = document.getElementById('sidebar-right');
-  sidebar.querySelectorAll('.sidebar-tab').forEach(t => t.classList.remove('active'));
-  sidebar.querySelectorAll('.sidebar-panel').forEach(p => p.classList.remove('active'));
-
-  sidebar.querySelector(`[data-panel="${panelId}"]`).classList.add('active');
-  document.getElementById(panelId).classList.add('active');
-}
+// switchRightPanel defined earlier (line ~1055) with null-safety checks
 
 // ── Messages ──
 function appendMessage(role, text) {
@@ -3930,7 +3941,7 @@ async function buildHandbookIndex(force = false) {
             const data = JSON.parse(line.slice(6));
             updateHandbookProgress(data);
           } catch (e) {
-            console.warn('Handbook progress parse error:', e);
+            log.warn('Handbook progress parse error:', e);
           }
         }
       }
@@ -4070,7 +4081,7 @@ async function scanExistingPdfs() {
         label: pdf.filename
       }));
       renderPdfList();
-      console.log(`${data.loaded} PDFs aus Upload-Ordner geladen`);
+      log.info(`${data.loaded} PDFs aus Upload-Ordner geladen`);
     }
   } catch (e) {
     console.debug('PDF-Scan fehlgeschlagen:', e);
@@ -4334,7 +4345,7 @@ function restoreSettingsCategoryState() {
         }
       });
     } catch (e) {
-      console.warn('Could not restore settings category state:', e);
+      log.warn('Could not restore settings category state:', e);
     }
   }
 }
@@ -4475,7 +4486,7 @@ async function loadDashboardData(timeRange = 'week') {
     renderTokenUsage(data.tokenUsage);
 
   } catch (err) {
-    console.error('Dashboard load error:', err);
+    log.error('Dashboard load error:', err);
     document.querySelectorAll('.chart-body').forEach(el => {
       el.innerHTML = '<div class="chart-error">Fehler beim Laden der Daten</div>';
     });
@@ -4529,9 +4540,11 @@ function formatNumber(num) {
 }
 
 function formatDuration(ms) {
-  if (ms >= 60000) return (ms / 60000).toFixed(1) + 'm';
-  if (ms >= 1000) return (ms / 1000).toFixed(1) + 's';
-  return ms + 'ms';
+  if (ms < 1000) return `${ms}ms`;
+  if (ms < 60000) return `${(ms / 1000).toFixed(1)}s`;
+  const mins = Math.floor(ms / 60000);
+  const secs = Math.round((ms % 60000) / 1000);
+  return `${mins}:${secs.toString().padStart(2, '0')}min`;
 }
 
 function renderToolUsageChart(toolUsage) {
@@ -4708,7 +4721,7 @@ async function exportDashboard() {
 
     showToast('Report exportiert', 'success');
   } catch (err) {
-    console.error('Export error:', err);
+    log.error('Export error:', err);
     showToast('Export fehlgeschlagen', 'error');
   }
 }
@@ -4730,7 +4743,7 @@ async function viewErrorPattern(patternId) {
     const pattern = await res.json();
     showPatternModal(pattern);
   } catch (err) {
-    console.error('Pattern load error:', err);
+    log.error('Pattern load error:', err);
     showToast('Pattern konnte nicht geladen werden', 'error');
   }
 }
@@ -4860,7 +4873,7 @@ async function applyPattern(patternId) {
       }
     }
   } catch (err) {
-    console.error('Apply pattern error:', err);
+    log.error('Apply pattern error:', err);
     showToast('Fehler beim Anwenden', 'error');
   }
 }
@@ -4876,7 +4889,7 @@ async function skipPattern(patternId) {
     closePatternModal();
     showToast('Pattern übersprungen', 'info');
   } catch (err) {
-    console.error('Skip pattern error:', err);
+    log.error('Skip pattern error:', err);
   }
 }
 
@@ -4893,7 +4906,7 @@ async function ratePattern(patternId, rating) {
       closePatternModal();
     }
   } catch (err) {
-    console.error('Rate pattern error:', err);
+    log.error('Rate pattern error:', err);
     showToast('Bewertung fehlgeschlagen', 'error');
   }
 }
@@ -4925,7 +4938,7 @@ async function learnErrorPattern(errorType) {
       throw new Error('Learning failed');
     }
   } catch (err) {
-    console.error('Learn pattern error:', err);
+    log.error('Learn pattern error:', err);
     showToast('Pattern-Learning fehlgeschlagen', 'error');
   }
 }
@@ -4954,7 +4967,7 @@ async function suggestPatternForError(errorType, stackTrace = '', fileContext = 
 
     return null;
   } catch (err) {
-    console.error('Suggest pattern error:', err);
+    log.error('Suggest pattern error:', err);
     return null;
   }
 }
@@ -4997,7 +5010,7 @@ async function loadSettings() {
     settingsState.settings = data.settings;
     renderSettingsSection();
   } catch (err) {
-    console.error('Settings load error:', err);
+    log.error('Settings load error:', err);
     updateSettingsStatus('Fehler beim Laden', 'error');
   } finally {
     showSettingsLoading(false);
@@ -5026,7 +5039,7 @@ function updateSettingsStatus(msg, type = '') {
   el.textContent = msg;
   el.className = 'settings-status ' + type;
   if (msg) {
-    setTimeout(() => { el.textContent = ''; el.className = 'settings-status'; }, 3000);
+    setTimeout(() => { el.textContent = ''; el.className = 'settings-status'; }, TIMING.TOAST_DEFAULT);
   }
 }
 
@@ -7292,7 +7305,7 @@ async function soapLoadAll() {
         }
       }
     }
-  } catch (e) { console.error('SOAP config load error:', e); }
+  } catch (e) { log.error('SOAP config load error:', e); }
 
   // Institute laden
   instituteData = await soapLoadInstitute();
@@ -7996,7 +8009,7 @@ async function wlpImportSelected() {
     const data = await res.json();
 
     if (data.errors?.length) {
-      console.warn('WLP Import Fehler:', data.errors);
+      log.warn('WLP Import Fehler:', data.errors);
       const errMsg = data.errors.map(e => `${e.server_name}: ${e.error}`).join(', ');
       if (data.imported_count > 0) {
         updateSettingsStatus(`${data.imported_count} importiert, Fehler: ${errMsg}`, 'warning');
@@ -8009,7 +8022,7 @@ async function wlpImportSelected() {
     document.getElementById('wlp-discover-results').innerHTML = '';
     await wlpLoadList();
   } catch (e) {
-    console.error('WLP Import Fehler:', e);
+    log.error('WLP Import Fehler:', e);
     updateSettingsStatus('Import fehlgeschlagen: ' + e.message, 'error');
   }
 }
@@ -8287,7 +8300,7 @@ async function mvnImportSelected() {
     const data = await res.json();
 
     if (data.errors?.length) {
-      console.warn('Maven Import Fehler:', data.errors);
+      log.warn('Maven Import Fehler:', data.errors);
       const errMsg = data.errors.map(e => `${e.name}: ${e.error}`).join(', ');
       if (data.imported_count > 0) {
         updateSettingsStatus(`${data.imported_count} importiert, Fehler: ${errMsg}`, 'warning');
@@ -8300,7 +8313,7 @@ async function mvnImportSelected() {
     document.getElementById('mvn-discover-results').innerHTML = '';
     await mvnLoadBuilds();
   } catch (e) {
-    console.error('Maven Import Fehler:', e);
+    log.error('Maven Import Fehler:', e);
     updateSettingsStatus('Import fehlgeschlagen: ' + e.message, 'error');
   }
 }
@@ -8657,7 +8670,7 @@ let _wlpLastRunningState = null;
 
 function startWLPPolling() {
   if (_wlpPollInterval) return; // Bereits aktiv
-  console.log('[WLP] Starting status polling');
+  log.info('[WLP] Starting status polling');
 
   _wlpPollInterval = setInterval(async () => {
     // Nur pollen wenn WLP-Panel sichtbar ist
@@ -8673,12 +8686,12 @@ function startWLPPolling() {
 
       // Nur aktualisieren wenn sich Status geändert hat
       if (_wlpLastRunningState !== currentRunning) {
-        console.log('[WLP] Status changed, refreshing panel');
+        log.info('[WLP] Status changed, refreshing panel');
         _wlpLastRunningState = currentRunning;
         await loadWLPPanel();
       }
     } catch (e) {
-      console.warn('[WLP] Poll error:', e);
+      log.warn('[WLP] Poll error:', e);
     }
   }, 3000); // Alle 3 Sekunden prüfen
 }
@@ -8687,7 +8700,7 @@ function stopWLPPolling() {
   if (_wlpPollInterval) {
     clearInterval(_wlpPollInterval);
     _wlpPollInterval = null;
-    console.log('[WLP] Stopped status polling');
+    log.info('[WLP] Stopped status polling');
   }
 }
 
@@ -8743,11 +8756,11 @@ async function wlpPanelValidate(id) {
 }
 
 function wlpPanelStart(id) {
-  console.log('[WLP] wlpPanelStart called with id:', id);
+  log.info('[WLP] wlpPanelStart called with id:', id);
   const logArea = document.getElementById('wlp-log-area');
   const logOutput = document.getElementById('wlp-log-output');
   if (!logArea || !logOutput) {
-    console.error('[WLP] Log elements not found!', { logArea, logOutput });
+    log.error('[WLP] Log elements not found!', { logArea, logOutput });
     return;
   }
   logArea.style.display = 'block';
@@ -8776,22 +8789,22 @@ async function wlpPanelLogs(id) {
 
 // Alias-Funktionen für WLP (Button-Callbacks in wlpLoadList)
 function wlpStart(id) {
-  console.log('[WLP] wlpStart called from Settings, id:', id);
+  log.info('[WLP] wlpStart called from Settings, id:', id);
   switchRightPanel('wlp-panel');
   loadWLPPanel(); // Panel-Inhalt aktualisieren
   wlpPanelStart(id);
 }
 
 async function wlpStop(id) {
-  console.log('[WLP] wlpStop called from Settings, id:', id);
+  log.info('[WLP] wlpStop called from Settings, id:', id);
   await wlpPanelStop(id);
 }
 
 async function _streamWLPServer(id, action, outputEl) {
-  console.log('[WLP] _streamWLPServer called:', { id, action });
+  log.info('[WLP] _streamWLPServer called:', { id, action });
   try {
     const res = await fetch(`/api/wlp/servers/${id}/${action}`, { method: 'POST' });
-    console.log('[WLP] Fetch response:', res.status, res.statusText);
+    log.info('[WLP] Fetch response:', res.status, res.statusText);
 
     // Fehlerprüfung
     if (!res.ok) {
@@ -8801,7 +8814,7 @@ async function _streamWLPServer(id, action, outputEl) {
         errorMsg = errData.detail || errorMsg;
       } catch (_) {}
       outputEl.textContent += `\n❌ Fehler: ${errorMsg}`;
-      console.error('[WLP] API Error:', errorMsg);
+      log.error('[WLP] API Error:', errorMsg);
       return;
     }
 
@@ -8823,7 +8836,7 @@ async function _streamWLPServer(id, action, outputEl) {
         if (!line.startsWith('data:')) continue;
         try {
           const ev = JSON.parse(line.slice(5).trim());
-          console.log('[WLP] Event:', ev.type);
+          log.info('[WLP] Event:', ev.type);
           if (ev.type === 'start') {
             const span = document.createElement('div');
             span.className = 'log-info';
@@ -8866,12 +8879,12 @@ async function _streamWLPServer(id, action, outputEl) {
             loadWLPPanel();
           }
         } catch (parseErr) {
-          console.warn('[WLP] Parse error:', parseErr, line);
+          log.warn('[WLP] Parse error:', parseErr, line);
         }
       }
     }
   } catch (e) {
-    console.error('[WLP] Stream error:', e);
+    log.error('[WLP] Stream error:', e);
     outputEl.textContent += `\n❌ Fehler: ${e.message}`;
   }
 }
@@ -8908,11 +8921,11 @@ async function loadMavenPanel() {
 }
 
 function mvnPanelRun(buildId) {
-  console.log('[Maven] mvnPanelRun called with buildId:', buildId);
+  log.info('[Maven] mvnPanelRun called with buildId:', buildId);
   const logArea = document.getElementById('maven-log-area');
   const logOutput = document.getElementById('maven-log-output');
   if (!logArea || !logOutput) {
-    console.error('[Maven] Log elements not found!', { logArea, logOutput });
+    log.error('[Maven] Log elements not found!', { logArea, logOutput });
     return;
   }
   logArea.style.display = 'block';
@@ -8929,17 +8942,17 @@ async function mvnStopBuild(buildId) {
 }
 
 async function mvnRunBuild(buildId) {
-  console.log('[Maven] mvnRunBuild called from Settings, buildId:', buildId);
+  log.info('[Maven] mvnRunBuild called from Settings, buildId:', buildId);
   switchRightPanel('maven-panel');
   loadMavenPanel(); // Panel-Inhalt aktualisieren
   mvnPanelRun(buildId);
 }
 
 async function _streamMavenBuild(buildId, outputEl) {
-  console.log('[Maven] _streamMavenBuild called:', buildId);
+  log.info('[Maven] _streamMavenBuild called:', buildId);
   try {
     const res = await fetch(`/api/maven/builds/${buildId}/run`, { method: 'POST', headers: {'Content-Type':'application/json'}, body: '{}' });
-    console.log('[Maven] Fetch response:', res.status, res.statusText);
+    log.info('[Maven] Fetch response:', res.status, res.statusText);
 
     // Fehlerprüfung
     if (!res.ok) {
@@ -8949,7 +8962,7 @@ async function _streamMavenBuild(buildId, outputEl) {
         errorMsg = errData.detail || errorMsg;
       } catch (_) {}
       outputEl.textContent += `\n❌ Fehler: ${errorMsg}`;
-      console.error('[Maven] API Error:', errorMsg);
+      log.error('[Maven] API Error:', errorMsg);
       return;
     }
 
@@ -8971,7 +8984,7 @@ async function _streamMavenBuild(buildId, outputEl) {
         if (!line.startsWith('data:')) continue;
         try {
           const ev = JSON.parse(line.slice(5).trim());
-          console.log('[Maven] Event:', ev.type);
+          log.info('[Maven] Event:', ev.type);
           if (ev.type === 'output') {
             const div = document.createElement('div');
             div.className = ev.is_error ? 'log-error' : (ev.is_success ? 'log-ready' : (ev.is_warning ? 'log-warn' : ''));
@@ -9004,12 +9017,12 @@ async function _streamMavenBuild(buildId, outputEl) {
             }
           }
         } catch (parseErr) {
-          console.warn('[Maven] Parse error:', parseErr, line);
+          log.warn('[Maven] Parse error:', parseErr, line);
         }
       }
     }
   } catch (e) {
-    console.error('[Maven] Stream error:', e);
+    log.error('[Maven] Stream error:', e);
     outputEl.textContent += `\n❌ Fehler: ${e.message}`;
   }
 }
@@ -9055,7 +9068,7 @@ async function _pollPendingSearches() {
     const data = await res.json();
     const pending = data.pending || [];
     if (pending.length > 0) {
-      console.log('[search] Pending searches:', pending.map(p => ({ id: p.id, status: p.status, query: p.query?.substring(0, 30) })));
+      log.info('[search] Pending searches:', pending.map(p => ({ id: p.id, status: p.status, query: p.query?.substring(0, 30) })));
     }
 
     // Badge in Sidebar-Tab aktualisieren
@@ -9128,7 +9141,7 @@ async function _pollPendingSearches() {
 async function searchConfirm(searchId) {
   // Verhindere Doppelklicks
   if (_searchConfirmInProgress[searchId]) {
-    console.log('[search] Confirm already in progress for', searchId);
+    log.info('[search] Confirm already in progress for', searchId);
     return;
   }
   _searchConfirmInProgress[searchId] = true;
@@ -9143,13 +9156,13 @@ async function searchConfirm(searchId) {
       throw new Error(errData.detail || `HTTP ${res.status}`);
     }
     const data = await res.json();
-    console.log('[search] Confirm response:', data);
+    log.info('[search] Confirm response:', data);
     // Kurz warten damit der Agent-Poll die Änderung sieht
     await new Promise(r => setTimeout(r, 300));
     await _pollPendingSearches();
     loadSearchPanel(); // History aktualisieren
   } catch (e) {
-    console.error('[search] Confirm error:', e);
+    log.error('[search] Confirm error:', e);
     if (card) card.innerHTML = `<span class="badge badge-error">Fehler: ${e.message}</span>`;
   } finally {
     delete _searchConfirmInProgress[searchId];
@@ -9550,7 +9563,7 @@ async function renderDockerSandboxSection() {
     if (runtimeRes.ok) runtimeInfo = await runtimeRes.json();
     if (configRes.ok) cfg = await configRes.json();
   } catch (e) {
-    console.error('Docker Sandbox config load error:', e);
+    log.error('Docker Sandbox config load error:', e);
   }
 
   // In Settings-State speichern
@@ -10251,7 +10264,7 @@ async function saveSearchProxyConfig() {
     verify_ssl: document.getElementById('search-verify-ssl')?.checked ?? true,
   };
 
-  console.log('[Search] Saving config:', { ...config, proxy_password: '***' });
+  log.info('[Search] Saving config:', { ...config, proxy_password: '***' });
 
   try {
     // 1. Config im Speicher aktualisieren
@@ -10280,7 +10293,7 @@ async function saveSearchProxyConfig() {
       updateSettingsStatus('Im Speicher aktualisiert, aber nicht in Datei gespeichert', 'warning');
     }
   } catch (e) {
-    console.error('[Search] Save error:', e);
+    log.error('[Search] Save error:', e);
     statusEl.textContent = '✗ Fehler: ' + e.message;
     statusEl.style.color = 'var(--error)';
   }
@@ -10316,7 +10329,7 @@ async function loadTemplates() {
   try {
     const res = await fetch('/api/settings/templates');
     if (!res.ok) {
-      console.warn('[Templates] Failed to load:', res.status);
+      log.warn('[Templates] Failed to load:', res.status);
       return;
     }
     const data = await res.json();
@@ -10329,10 +10342,10 @@ async function loadTemplates() {
 
     // Templates aus der Response extrahieren
     _templates = data.templates || [];
-    console.log('[Templates] Loaded', _templates.length, 'templates');
+    log.info('[Templates] Loaded', _templates.length, 'templates');
     renderTemplateBar();
   } catch (e) {
-    console.error('[Templates] Load error:', e);
+    log.error('[Templates] Load error:', e);
   }
 }
 
@@ -10385,7 +10398,7 @@ function renderTemplateBar() {
 function selectTemplate(templateId) {
   const template = _templates.find(t => t.id === templateId);
   if (!template) {
-    console.warn('[Templates] Template not found:', templateId);
+    log.warn('[Templates] Template not found:', templateId);
     return;
   }
 
@@ -11208,7 +11221,7 @@ function scrollToStep(sessionId, stepNumber) {
   if (stepEl) {
     stepEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
     stepEl.classList.add('highlighted');
-    setTimeout(() => stepEl.classList.remove('highlighted'), 2000);
+    setTimeout(() => stepEl.classList.remove('highlighted'), TIMING.HIGHLIGHT_DURATION);
   }
 }
 
@@ -11249,27 +11262,4 @@ function insertToolCall(toolName) {
   input.focus();
 }
 
-/**
- * Formatiert eine Dauer in ms zu lesbarem Format.
- * @param {number} ms - Dauer in Millisekunden
- * @returns {string} Formatierte Dauer
- */
-function formatDuration(ms) {
-  if (ms < 1000) return `${ms}ms`;
-  if (ms < 60000) return `${(ms / 1000).toFixed(1)}s`;
-  const mins = Math.floor(ms / 60000);
-  const secs = Math.round((ms % 60000) / 1000);
-  return `${mins}:${secs.toString().padStart(2, '0')}min`;
-}
-
-/**
- * Escapes HTML characters to prevent XSS.
- * @param {string} str - Input string
- * @returns {string} Escaped string
- */
-function escapeHtml(str) {
-  if (!str) return '';
-  const div = document.createElement('div');
-  div.textContent = str;
-  return div.innerHTML;
-}
+// formatDuration and escapeHtml defined earlier in the file

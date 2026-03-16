@@ -10,16 +10,67 @@ Ermoeglicht:
 """
 
 import hashlib
-import json
+import json  # For file I/O (json.load/dump)
 import logging
 import re
 import sqlite3
+
+from app.utils.json_utils import json_loads, json_dumps
 from dataclasses import dataclass, field, asdict
 from datetime import datetime
+from functools import lru_cache
 from pathlib import Path
 from typing import List, Optional, Dict, Any, Tuple
 
 logger = logging.getLogger(__name__)
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Pre-compiled Regex Patterns (Performance Optimization)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+# Error type patterns - compiled once at module load
+_JAVA_ERROR_PATTERNS = [
+    re.compile(r"(NullPointerException)"),
+    re.compile(r"(IllegalArgumentException)"),
+    re.compile(r"(IllegalStateException)"),
+    re.compile(r"(IndexOutOfBoundsException)"),
+    re.compile(r"(SQLException)"),
+    re.compile(r"(IOException)"),
+    re.compile(r"(ClassNotFoundException)"),
+    re.compile(r"(NoSuchMethodException)"),
+    re.compile(r"(RuntimeException)"),
+    re.compile(r"(Exception)"),
+]
+
+_PYTHON_ERROR_PATTERNS = [
+    re.compile(r"(TypeError)"),
+    re.compile(r"(ValueError)"),
+    re.compile(r"(KeyError)"),
+    re.compile(r"(IndexError)"),
+    re.compile(r"(AttributeError)"),
+    re.compile(r"(ImportError)"),
+    re.compile(r"(FileNotFoundError)"),
+    re.compile(r"(RuntimeError)"),
+    re.compile(r"(Exception)"),
+]
+
+_ALL_ERROR_PATTERNS = _JAVA_ERROR_PATTERNS + _PYTHON_ERROR_PATTERNS
+
+# Stack trace normalization patterns
+_RE_LINE_NUMBERS = re.compile(r":(\d+)")
+_RE_TIMESTAMPS = re.compile(r"\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}")
+_RE_HEX_ADDRESSES = re.compile(r"@[0-9a-fA-F]+")
+_RE_UUIDS = re.compile(r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}")
+_RE_WHITESPACE = re.compile(r"\s+")
+
+# Keyword extraction patterns
+_KEYWORD_PATTERNS = [
+    re.compile(r"\b([A-Z][a-z]+(?:[A-Z][a-z]+)+)\b", re.IGNORECASE),  # CamelCase
+    re.compile(r"\b([a-z]+_[a-z]+(?:_[a-z]+)*)\b", re.IGNORECASE),     # snake_case
+    re.compile(r"\b(null|undefined|error|exception|failed|invalid)\b", re.IGNORECASE),
+    re.compile(r"\b([a-z]+(?:service|controller|manager|handler|factory|repository))\b", re.IGNORECASE),
+]
+_RE_WORDS = re.compile(r"\b[a-zA-Z]{3,}\b")
 
 
 @dataclass
@@ -204,35 +255,9 @@ class PatternLearner:
 
     def extract_error_type(self, error_text: str) -> str:
         """Extrahiert den Error-Typ aus einem Fehlertext."""
-        # Common Java exceptions
-        java_patterns = [
-            r"(NullPointerException)",
-            r"(IllegalArgumentException)",
-            r"(IllegalStateException)",
-            r"(IndexOutOfBoundsException)",
-            r"(SQLException)",
-            r"(IOException)",
-            r"(ClassNotFoundException)",
-            r"(NoSuchMethodException)",
-            r"(RuntimeException)",
-            r"(Exception)",
-        ]
-
-        # Common Python exceptions
-        python_patterns = [
-            r"(TypeError)",
-            r"(ValueError)",
-            r"(KeyError)",
-            r"(IndexError)",
-            r"(AttributeError)",
-            r"(ImportError)",
-            r"(FileNotFoundError)",
-            r"(RuntimeError)",
-            r"(Exception)",
-        ]
-
-        for pattern in java_patterns + python_patterns:
-            match = re.search(pattern, error_text)
+        # Use pre-compiled patterns for performance
+        for pattern in _ALL_ERROR_PATTERNS:
+            match = pattern.search(error_text)
             if match:
                 return match.group(1)
 
@@ -242,27 +267,16 @@ class PatternLearner:
         """
         Normalisiert einen Stack-Trace fuer Hashing.
         Entfernt Line Numbers, Timestamps, Instance IDs.
+        Uses pre-compiled patterns for performance.
         """
         normalized = stack_trace
 
-        # Remove line numbers
-        normalized = re.sub(r":(\d+)", "", normalized)
-
-        # Remove timestamps
-        normalized = re.sub(r"\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}", "", normalized)
-
-        # Remove instance IDs (hex addresses)
-        normalized = re.sub(r"@[0-9a-fA-F]+", "", normalized)
-
-        # Remove UUIDs
-        normalized = re.sub(
-            r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}",
-            "",
-            normalized
-        )
-
-        # Collapse whitespace
-        normalized = re.sub(r"\s+", " ", normalized).strip()
+        # Use pre-compiled patterns (10-50x faster)
+        normalized = _RE_LINE_NUMBERS.sub("", normalized)
+        normalized = _RE_TIMESTAMPS.sub("", normalized)
+        normalized = _RE_HEX_ADDRESSES.sub("", normalized)
+        normalized = _RE_UUIDS.sub("", normalized)
+        normalized = _RE_WHITESPACE.sub(" ", normalized).strip()
 
         return normalized
 
@@ -272,30 +286,22 @@ class PatternLearner:
         return hashlib.md5(content.encode()).hexdigest()
 
     def extract_keywords(self, text: str) -> List[str]:
-        """Extrahiert relevante Keywords aus Text."""
-        # Remove common words and extract technical terms
-        text = text.lower()
-
-        # Technical keyword patterns
-        patterns = [
-            r"\b([A-Z][a-z]+(?:[A-Z][a-z]+)+)\b",  # CamelCase
-            r"\b([a-z]+_[a-z]+(?:_[a-z]+)*)\b",     # snake_case
-            r"\b(null|undefined|error|exception|failed|invalid)\b",
-            r"\b([a-z]+(?:service|controller|manager|handler|factory|repository))\b",
-        ]
-
+        """Extrahiert relevante Keywords aus Text. Uses pre-compiled patterns."""
         keywords = set()
-        for pattern in patterns:
-            for match in re.finditer(pattern, text, re.IGNORECASE):
+
+        # Use pre-compiled keyword patterns (much faster)
+        for pattern in _KEYWORD_PATTERNS:
+            for match in pattern.finditer(text):
                 kw = match.group(1).lower()
                 if len(kw) > 2:
                     keywords.add(kw)
 
-        # Also extract words from error messages
-        words = re.findall(r"\b[a-zA-Z]{3,}\b", text)
-        for word in words:
-            if word.lower() not in {"the", "and", "for", "from", "with", "was", "are", "this", "that"}:
-                keywords.add(word.lower())
+        # Also extract words from error messages using pre-compiled pattern
+        _STOPWORDS = {"the", "and", "for", "from", "with", "was", "are", "this", "that"}
+        for match in _RE_WORDS.finditer(text):
+            word = match.group(0).lower()
+            if word not in _STOPWORDS:
+                keywords.add(word)
 
         return list(keywords)[:20]  # Limit to 20 keywords
 
@@ -364,7 +370,7 @@ class PatternLearner:
 
         results = []
         for row in cursor.fetchall():
-            pattern = ErrorPattern.from_dict(json.loads(row[0]))
+            pattern = ErrorPattern.from_dict(json_loads(row[0]))
             similarity = self.calculate_keyword_similarity(keywords, pattern.context_keywords)
 
             if similarity >= min_similarity:
@@ -394,7 +400,7 @@ class PatternLearner:
         conn.close()
 
         if row:
-            return ErrorPattern.from_dict(json.loads(row[0]))
+            return ErrorPattern.from_dict(json_loads(row[0]))
         return None
 
     def get_pattern_by_id(self, pattern_id: str) -> Optional[ErrorPattern]:
@@ -411,7 +417,7 @@ class PatternLearner:
         conn.close()
 
         if row:
-            return ErrorPattern.from_dict(json.loads(row[0]))
+            return ErrorPattern.from_dict(json_loads(row[0]))
         return None
 
     def list_patterns(
@@ -440,7 +446,7 @@ class PatternLearner:
             )
 
         patterns = [
-            ErrorPattern.from_dict(json.loads(row[0]))
+            ErrorPattern.from_dict(json_loads(row[0]))
             for row in cursor.fetchall()
         ]
 
@@ -459,7 +465,7 @@ class PatternLearner:
                    VALUES (?, ?, ?, ?, ?, ?, ?)""",
                 (
                     pattern.id,
-                    json.dumps(pattern.to_dict()),
+                    json_dumps(pattern.to_dict()),
                     pattern.error_hash,
                     pattern.error_type,
                     pattern.confidence,

@@ -26,4 +26,24 @@ def reset_singletons():
     import app.agent.task_agents as agents_module
     agents_module._agent_configs = {}
 
+    # Reset token tracker singleton
+    import app.services.token_tracker as tracker_module
+    tracker_module._token_tracker = None
+
+    # Reset self-healing engine singleton
+    import app.services.self_healing as healing_module
+    healing_module._self_healing_engine = None
+
+    # Reset parallel agents orchestrator singleton
+    import app.services.parallel_agents as agents_module
+    agents_module._parallel_orchestrator = None
+
+    # Reset PR review service singleton
+    import app.services.pr_review as review_module
+    review_module._pr_review_service = None
+
+    # Reset arena mode service singleton
+    import app.services.arena_mode as arena_module
+    arena_module._arena_mode_service = None
+
     yield

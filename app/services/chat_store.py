@@ -3,10 +3,11 @@ Datei-basierte Persistenz für Chat-Sessions.
 Jeder Chat wird als JSON-Datei in ./chats/{session_id}.json gespeichert.
 """
 
-import json
 import time
 from pathlib import Path
 from typing import Dict, List, Optional
+
+from app.utils.json_utils import json_loads, json_dumps
 
 
 def _chats_dir() -> Path:
@@ -35,7 +36,7 @@ def save_chat(
     created_at = now
     if path.exists():
         try:
-            existing = json.loads(path.read_text("utf-8"))
+            existing = json_loads(path.read_text("utf-8"))
             created_at = existing.get("created_at", now)
         except Exception:
             pass
@@ -48,7 +49,7 @@ def save_chat(
         "created_at": created_at,
         "updated_at": now,
     }
-    path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+    path.write_text(json_dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
 def load_chat(session_id: str) -> Optional[Dict]:
@@ -57,7 +58,7 @@ def load_chat(session_id: str) -> Optional[Dict]:
     if not path.exists():
         return None
     try:
-        return json.loads(path.read_text("utf-8"))
+        return json_loads(path.read_text("utf-8"))
     except Exception:
         return None
 
@@ -69,7 +70,7 @@ def list_chats() -> List[Dict]:
     result = []
     for path in chats_dir.glob("*.json"):
         try:
-            data = json.loads(path.read_text("utf-8"))
+            data = json_loads(path.read_text("utf-8"))
             result.append({
                 "session_id": data["session_id"],
                 "title": data.get("title", "Chat"),
@@ -97,10 +98,10 @@ def update_title(session_id: str, title: str) -> bool:
     if not path.exists():
         return False
     try:
-        data = json.loads(path.read_text("utf-8"))
+        data = json_loads(path.read_text("utf-8"))
         data["title"] = title
         data["updated_at"] = time.time()
-        path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+        path.write_text(json_dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
         return True
     except Exception:
         return False

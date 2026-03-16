@@ -12,10 +12,11 @@ Alle Daten werden vor dem Speichern anonymisiert.
 
 import asyncio
 import gzip
-import json
 import logging
 import time
 import uuid
+
+from app.utils.json_utils import json_loads, json_dumps
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -512,7 +513,7 @@ class AnalyticsLogger:
             return
 
         log_file = self._get_log_file()
-        line = json.dumps(chain.to_dict(), ensure_ascii=False) + "\n"
+        line = json_dumps(chain.to_dict(), ensure_ascii=False) + "\n"
 
         try:
             if HAS_AIOFILES:
@@ -568,7 +569,7 @@ class AnalyticsLogger:
                 with open(log_file, "r", encoding="utf-8") as f:
                     for line in f:
                         try:
-                            data = json.loads(line.strip())
+                            data = json_loads(line.strip())
                             summary["total_chains"] += 1
 
                             # Tools zählen
