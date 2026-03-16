@@ -152,6 +152,11 @@ class LLMConfig(BaseModel):
     reasoning_effort: str = ""          # Default-Reasoning für alle Calls (leer = aus)
     analysis_reasoning: str = "high"    # Reasoning für Analyse-Phase (komplexe Aufgaben)
     tool_reasoning: str = ""            # Reasoning für Tool-Phase (normalerweise aus)
+    # Tool-Prefill: Fügt "[TOOL_CALLS]" als Assistant-Prefill hinzu um Modelle
+    # in das richtige Output-Format zu zwingen (hilft bei Mistral/Qwen)
+    use_tool_prefill: bool = False      # True aktiviert Prefill für alle Tool-Calls
+    # Pro-Modell Prefill-Override: {"model_id": true/false}
+    tool_prefill_models: Dict[str, bool] = {}
     # LLM-spezifische Kontext-Limits in Tokens (für automatisches Trimmen)
     # z.B. {"mistral-678b": 32000, "qwen-7b": 8000, "gptoss120b": 64000}
     llm_context_limits: Dict[str, int] = {}

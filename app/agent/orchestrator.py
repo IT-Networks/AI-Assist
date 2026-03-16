@@ -339,6 +339,58 @@ class AgentState:
 
 
 # ══════════════════════════════════════════════════════════════════════════════
+# Tool-Call Content-Bereinigung
+# ══════════════════════════════════════════════════════════════════════════════
+
+def _strip_tool_markers(content: str) -> str:
+    """
+    Entfernt Tool-Call-Marker aus dem Content nach dem Parsing.
+
+    Verhindert dass [TOOL_CALLS]..., <tool_call>...</tool_call> etc.
+    im finalen Output an den User erscheinen.
+
+    Args:
+        content: Roher Content mit möglichen Tool-Markern
+
+    Returns:
+        Bereinigter Content ohne Tool-Marker
+    """
+    if not content:
+        return content
+
+    clean = content
+
+    # [TOOL_CALLS] mit JSON-Array: [TOOL_CALLS] [{"name": ...}]
+    clean = re.sub(r'\[TOOL_CALLS\]\s*\[.*?\]', '', clean, flags=re.DOTALL)
+
+    # [TOOL_CALLS] mit direktem JSON: [TOOL_CALLS]funcname{...}
+    clean = re.sub(r'\[TOOL_CALLS\]\w*\{[^}]*\}', '', clean, flags=re.DOTALL)
+
+    # Generisches [TOOL_CALLS] Cleanup (falls Reste)
+    clean = re.sub(r'\[TOOL_CALLS\][^\[]*', '', clean, flags=re.DOTALL)
+
+    # XML-Style Tool-Calls
+    clean = re.sub(r'<tool_call>.*?</tool_call>', '', clean, flags=re.DOTALL)
+    clean = re.sub(r'<functioncall>.*?</functioncall>', '', clean, flags=re.DOTALL)
+    clean = re.sub(r'<function_calls>.*?</function_calls>', '', clean, flags=re.DOTALL)
+    clean = re.sub(r'<invoke>.*?</invoke>', '', clean, flags=re.DOTALL)
+
+    # JSON-Blöcke mit Tool-Struktur (nur wenn sie wie Tool-Calls aussehen)
+    # Vorsichtig: Nicht alle JSON-Blöcke entfernen!
+    clean = re.sub(
+        r'```(?:json)?\s*\n\s*\{\s*"(?:name|tool|function)"\s*:.*?\}\s*\n```',
+        '',
+        clean,
+        flags=re.DOTALL
+    )
+
+    # Mehrfache Leerzeilen reduzieren
+    clean = re.sub(r'\n{3,}', '\n\n', clean)
+
+    return clean.strip()
+
+
+# ══════════════════════════════════════════════════════════════════════════════
 # Text-basierter Tool-Call-Parser (Fallback für Modelle ohne natives Tool-Calling)
 # ══════════════════════════════════════════════════════════════════════════════
 
@@ -1871,6 +1923,9 @@ Sei präzise und gib detaillierte Analyse-Schritte."""
                         tool_calls = text_tool_calls
                         native_tools = False  # Text-geparst, kein natives tool_calls-Format
                         finish_reason = "tool_calls"
+                        # Content bereinigen - Tool-Marker entfernen
+                        content = _strip_tool_markers(content)
+                        logger.debug("[agent] Content nach Tool-Marker-Bereinigung: %d Zeichen", len(content) if content else 0)
 
                 # Tool-Calls verarbeiten
                 if not tool_calls:
@@ -1880,7 +1935,8 @@ Sei präzise und gib detaillierte Analyse-Schritte."""
 
                     # Entscheiden ob wir streamen oder die vorhandene Antwort nutzen
                     should_stream = settings.llm.streaming
-                    existing_content = content
+                    # Content bereinigen falls noch Tool-Marker vorhanden (Sicherheit)
+                    existing_content = _strip_tool_markers(content) if content else content
 
                     # === PLANUNGSPHASE: Plan extrahieren ===
                     # In der Planungsphase (vor Genehmigung) kein Streaming –
@@ -2765,6 +2821,17 @@ Sei präzise und gib detaillierte Analyse-Schritte."""
         # Reasoning basierend auf Phase (GPT-OSS, o1, o3-mini Support)
         reasoning = settings.llm.tool_reasoning if is_tool_phase else settings.llm.analysis_reasoning
 
+        # Tool-Prefill: Prüfe ob für dieses Modell aktiviert
+        # 1. Modell-spezifischer Override hat Priorität
+        # 2. Fallback auf globale Einstellung
+        use_prefill = False
+        if tools and is_tool_phase:
+            model_prefill = settings.llm.tool_prefill_models.get(selected_model)
+            if model_prefill is not None:
+                use_prefill = model_prefill
+            else:
+                use_prefill = settings.llm.use_tool_prefill
+
         # Zentraler LLM-Call mit Retry-Logik
         try:
             response: LLMResponse = await central_llm_client.chat_with_tools(
@@ -2775,6 +2842,7 @@ Sei präzise und gib detaillierte Analyse-Schritte."""
                 max_tokens=settings.llm.max_tokens,
                 timeout=timeout,
                 reasoning=reasoning or None,
+                use_tool_prefill=use_prefill,
             )
         except Exception as e:
             # Kontext-Info für bessere Fehlermeldungen hinzufügen

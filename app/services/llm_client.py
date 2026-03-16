@@ -364,6 +364,7 @@ class LLMClient:
         timeout: Optional[float] = None,
         tool_choice: str = "auto",
         reasoning: Optional[str] = None,
+        use_tool_prefill: bool = False,
     ) -> LLMResponse:
         """
         Zentraler LLM-Call mit Tool-Support.
@@ -380,6 +381,8 @@ class LLMClient:
             timeout: Request-Timeout in Sekunden (default: TIMEOUT_TOOL)
             tool_choice: "auto", "none", oder {"type": "function", "function": {"name": "..."}}
             reasoning: Reasoning-Effort für GPT-OSS: "low", "medium", "high" (None = aus)
+            use_tool_prefill: Wenn True, wird ein Assistant-Prefill mit [TOOL_CALLS] hinzugefügt
+                              um das Modell in das richtige Output-Format zu zwingen
 
         Returns:
             LLMResponse mit content, tool_calls, finish_reason, usage
@@ -393,6 +396,18 @@ class LLMClient:
         if reasoning:
             messages = self._inject_reasoning(messages, reasoning)
             logger.debug(f"[llm] Reasoning aktiviert: {reasoning}")
+
+        # Tool-Prefill: Assistant-Message mit [TOOL_CALLS] Prefix hinzufügen
+        # Zwingt das Modell, im richtigen Format zu antworten
+        if use_tool_prefill and tools:
+            messages = [dict(m) for m in messages]  # Kopie
+            # LiteLLM-Style Prefill mit prefix: true
+            messages.append({
+                "role": "assistant",
+                "content": "[TOOL_CALLS]",
+                "prefix": True  # LiteLLM-spezifisch
+            })
+            logger.debug("[llm] Tool-Prefill aktiviert")
 
         payload = {
             "model": model,
