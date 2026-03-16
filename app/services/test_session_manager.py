@@ -224,12 +224,27 @@ class TestSessionManager:
         envelope = engine.fill_template(template, {}, auto_params=auto_params)
 
         # Debug: Prüfen ob Platzhalter ersetzt wurden
-        if '{{user}}' in envelope or '{{password}}' in envelope or '{{institut}}' in envelope:
-            logger.error(f"[Login] FEHLER: Platzhalter nicht ersetzt! Template enthält noch: " +
-                        f"{{{{user}}}}={('{{user}}' in envelope)}, " +
-                        f"{{{{password}}}}={('{{password}}' in envelope)}, " +
-                        f"{{{{institut}}}}={('{{institut}}' in envelope)}")
-            logger.debug(f"[Login] Envelope (erste 500 Zeichen): {envelope[:500]}")
+        unreplaced = []
+        if '{{user}}' in envelope:
+            unreplaced.append('{{user}}')
+        if '{{password}}' in envelope:
+            unreplaced.append('{{password}}')
+        if '{{institut}}' in envelope:
+            unreplaced.append('{{institut}}')
+
+        if unreplaced:
+            logger.error(f"[Login] FEHLER: Platzhalter nicht ersetzt: {unreplaced}")
+            logger.error(f"[Login] auto_params keys: {list(auto_params.keys())}")
+            logger.error(f"[Login] Envelope (erste 500 Zeichen): {envelope[:500]}")
+            raise ValueError(
+                f"Template-Platzhalter nicht ersetzt: {unreplaced}. "
+                f"Prüfe ob Template-Datei korrekt ist: {login_template}"
+            )
+
+        # Log envelope for debugging (ohne sensitive Daten)
+        debug_envelope = envelope.replace(password, '***PASSWORD***') if password else envelope
+        logger.info(f"[Login] Envelope erstellt, Länge: {len(envelope)} Bytes")
+        logger.info(f"[Login] Envelope (maskiert):\n{debug_envelope}")
 
         # Headers (SOAP 1.1 Standard)
         headers = {
@@ -252,9 +267,16 @@ class TestSessionManager:
 
         # Response prüfen
         if response.status_code >= 400:
+            # Envelope für Debugging (Password maskiert)
+            debug_envelope = envelope.replace(password, '***') if password else envelope
+            logger.error(f"[Login] HTTP {response.status_code} von {settings.test_tool.login_url}")
+            logger.error(f"[Login] Request-Envelope:\n{debug_envelope[:1000]}")
+            logger.error(f"[Login] Response:\n{response.text[:500]}")
             raise ValueError(
                 f"Login fehlgeschlagen: HTTP {response.status_code}\n"
-                f"{response.text[:500]}"
+                f"URL: {settings.test_tool.login_url}\n"
+                f"Response: {response.text[:500]}\n"
+                f"Tipp: Prüfe ob login.soap.xml die korrekten Namespaces für deinen SOAP-Server hat."
             )
 
         # Token extrahieren mit globalem XPath
