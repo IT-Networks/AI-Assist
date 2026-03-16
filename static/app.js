@@ -1068,6 +1068,8 @@ document.addEventListener('DOMContentLoaded', async () => {
     loadSkills().catch(e => log.warn('[init] Skills load failed:', e)),
     loadJavaIndexStatus().catch(e => log.warn('[init] Java index status failed:', e)),
     loadPythonIndexStatus().catch(e => log.warn('[init] Python index status failed:', e)),
+    loadExplorerRepos('java').catch(e => log.warn('[init] Java repos load failed:', e)),
+    loadExplorerRepos('python').catch(e => log.warn('[init] Python repos load failed:', e)),
     loadHandbookStatus().catch(e => log.warn('[init] Handbook status failed:', e)),
     scanExistingPdfs().catch(e => log.warn('[init] PDF scan failed:', e)),
     refreshFileCache('all').catch(e => log.warn('[init] File cache refresh failed:', e)),
@@ -4358,10 +4360,15 @@ function fuzzyMatch(filename, query) {
   return 0;
 }
 
-async function searchFiles(query, repoFilter = 'all', limit = 10) {
-  const files = await getCachedFiles(repoFilter);
+async function searchFiles(query, lang = 'all', limit = 10, repoName = null) {
+  const files = await getCachedFiles(lang);
 
-  const results = files
+  // Filter by repo name if specified
+  const filtered = repoName
+    ? files.filter(f => f.repo === repoName)
+    : files;
+
+  const results = filtered
     .map(f => ({ ...f, score: fuzzyMatch(f.name, query) }))
     .filter(f => f.score > 0.1)
     .sort((a, b) => b.score - a.score)
@@ -4370,12 +4377,98 @@ async function searchFiles(query, repoFilter = 'all', limit = 10) {
   return results;
 }
 
+// ── Explorer Repo List ──
+
+const explorerRepoState = {
+  java: { repos: [], selectedRepo: null },
+  python: { repos: [], selectedRepo: null },
+};
+
+async function loadExplorerRepos(lang) {
+  try {
+    const res = await fetch(`/api/files/repos/${lang}`);
+    if (!res.ok) return;
+
+    const data = await res.json();
+    explorerRepoState[lang].repos = data.repos || [];
+
+    renderExplorerRepoList(lang);
+    updateRepoFilterDropdown(lang);
+  } catch (e) {
+    console.error(`[Explorer] Error loading ${lang} repos:`, e);
+  }
+}
+
+function renderExplorerRepoList(lang) {
+  const listEl = document.getElementById(`${lang}-repo-list`);
+  if (!listEl) return;
+
+  const repos = explorerRepoState[lang].repos;
+  const selected = explorerRepoState[lang].selectedRepo;
+
+  if (repos.length === 0) {
+    listEl.innerHTML = '';
+    return;
+  }
+
+  listEl.innerHTML = repos.map(r => `
+    <div class="repo-list-item ${selected === r.name ? 'active' : ''}"
+         onclick="selectExplorerRepo('${lang}', '${escapeHtml(r.name)}')"
+         title="${escapeHtml(r.path)}">
+      <span class="repo-list-name">${escapeHtml(r.name)}</span>
+      <span class="repo-list-count">${r.file_count}</span>
+    </div>
+  `).join('');
+}
+
+function updateRepoFilterDropdown(lang) {
+  const select = document.getElementById(`${lang}-repo-filter`);
+  if (!select) return;
+
+  const repos = explorerRepoState[lang].repos;
+  const selected = explorerRepoState[lang].selectedRepo;
+
+  select.innerHTML = '<option value="">Alle</option>' +
+    repos.map(r => `<option value="${escapeHtml(r.name)}" ${selected === r.name ? 'selected' : ''}>${escapeHtml(r.name)}</option>`).join('');
+}
+
+function selectExplorerRepo(lang, repoName) {
+  const current = explorerRepoState[lang].selectedRepo;
+  // Toggle off if clicking same repo
+  explorerRepoState[lang].selectedRepo = (current === repoName) ? null : repoName;
+
+  renderExplorerRepoList(lang);
+  updateRepoFilterDropdown(lang);
+
+  // Re-run search if there's a query
+  const input = document.getElementById(`${lang}-search-input`);
+  if (input && input.value.length >= 2) {
+    searchExplorerFiles(lang, input.value);
+  }
+}
+
+function onRepoFilterChange(lang) {
+  const select = document.getElementById(`${lang}-repo-filter`);
+  if (!select) return;
+
+  const repoName = select.value || null;
+  explorerRepoState[lang].selectedRepo = repoName;
+
+  renderExplorerRepoList(lang);
+
+  // Re-run search if there's a query
+  const input = document.getElementById(`${lang}-search-input`);
+  if (input && input.value.length >= 2) {
+    searchExplorerFiles(lang, input.value);
+  }
+}
+
 // ── Explorer Search ──
 
 let explorerSearchTimeout = null;
 
-async function searchExplorerFiles(repoType, query) {
-  const resultsEl = document.getElementById(`${repoType}-search-results`);
+async function searchExplorerFiles(lang, query) {
+  const resultsEl = document.getElementById(`${lang}-search-results`);
   if (!resultsEl) return;
 
   if (!query || query.length < 2) {
@@ -4387,33 +4480,44 @@ async function searchExplorerFiles(repoType, query) {
   // Debounce
   clearTimeout(explorerSearchTimeout);
   explorerSearchTimeout = setTimeout(async () => {
-    const results = await searchFiles(query, repoType, 15);
+    const repoName = explorerRepoState[lang].selectedRepo;
+    const results = await searchFiles(query, lang, 15, repoName);
 
     if (results.length === 0) {
       resultsEl.innerHTML = '<div class="search-no-results">Keine Treffer</div>';
     } else {
-      resultsEl.innerHTML = results.map(f => `
-        <div class="search-result-item" onclick="addSearchResultToContext('${escapeHtml(f.path)}', '${escapeHtml(f.name)}', '${f.type}')">
-          <span class="search-result-icon">${f.type === 'java' ? '&#9749;' : '&#128013;'}</span>
-          <span class="search-result-name">${escapeHtml(f.name)}</span>
-          <span class="search-result-path">${escapeHtml(f.path)}</span>
-          <span class="search-result-add">+</span>
-        </div>
-      `).join('');
+      resultsEl.innerHTML = results.map(f => {
+        // Get directory path (without filename)
+        const pathParts = f.path.split('/');
+        pathParts.pop();
+        const dirPath = pathParts.join('/') || '.';
+
+        return `
+          <div class="search-result-item" onclick="addSearchResultToContext('${escapeHtml(f.path)}', '${escapeHtml(f.name)}', '${f.type}', '${escapeHtml(f.repo)}')">
+            <span class="search-result-icon">${f.type === 'java' ? '&#9749;' : '&#128013;'}</span>
+            <div class="search-result-info">
+              <span class="search-result-name">${escapeHtml(f.name)}</span>
+              <span class="search-result-path">${escapeHtml(dirPath)}</span>
+              <span class="search-result-repo">${escapeHtml(f.repo)}</span>
+            </div>
+            <span class="search-result-add">+</span>
+          </div>
+        `;
+      }).join('');
     }
     resultsEl.style.display = 'block';
   }, 200);
 }
 
-function addSearchResultToContext(path, name, type) {
+function addSearchResultToContext(path, name, type, repo = '') {
   // Check if already in context
   const contextArray = type === 'java' ? state.context.javaFiles : state.context.pythonFiles;
-  if (contextArray.find(f => f.path === path)) {
+  if (contextArray.find(f => f.path === path && f.repo === repo)) {
     showToast('Datei bereits im Kontext', 'info');
     return;
   }
 
-  contextArray.push({ path, label: name, type });
+  contextArray.push({ path, label: name, type, repo });
   syncContextToActiveChat();
   renderContextChips();
   showToast(`${name} zum Kontext hinzugefügt`, 'success');

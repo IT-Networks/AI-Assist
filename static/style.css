@@ -6477,6 +6477,7 @@ a:visited {
 
 .explorer-search-bar input {
   flex: 1;
+  min-width: 0;
   padding: 6px 10px;
   background: var(--bg);
   border: 1px solid var(--border);
@@ -6494,6 +6495,87 @@ a:visited {
   color: var(--text-muted);
 }
 
+.explorer-search-bar select {
+  padding: 4px 6px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  color: var(--text);
+  font-size: 0.75rem;
+  cursor: pointer;
+  max-width: 90px;
+}
+
+.explorer-search-bar select:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+/* Repo List */
+.explorer-repo-list {
+  margin: 0 8px 8px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg);
+  max-height: 120px;
+  overflow-y: auto;
+}
+
+.explorer-repo-list:empty {
+  display: none;
+}
+
+.repo-list-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 10px;
+  cursor: pointer;
+  border-bottom: 1px solid var(--border);
+  transition: background 0.15s;
+}
+
+.repo-list-item:last-child {
+  border-bottom: none;
+}
+
+.repo-list-item:hover {
+  background: var(--surface-hover);
+}
+
+.repo-list-item.active {
+  background: var(--accent-bg);
+  border-left: 2px solid var(--accent);
+}
+
+.repo-list-name {
+  font-size: 0.8rem;
+  color: var(--text);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.repo-list-name::before {
+  content: '';
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--text-muted);
+}
+
+.repo-list-item.active .repo-list-name::before {
+  background: var(--accent);
+}
+
+.repo-list-count {
+  font-size: 0.7rem;
+  color: var(--text-muted);
+  background: var(--surface);
+  padding: 2px 6px;
+  border-radius: 10px;
+}
+
 .explorer-search-results {
   max-height: 250px;
   overflow-y: auto;
@@ -6505,9 +6587,9 @@ a:visited {
 
 .search-result-item {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   gap: 8px;
-  padding: 6px 10px;
+  padding: 8px 10px;
   cursor: pointer;
   border-bottom: 1px solid var(--border);
   transition: background 0.15s;
@@ -6525,12 +6607,21 @@ a:visited {
   font-size: 1rem;
   width: 20px;
   text-align: center;
+  padding-top: 2px;
+}
+
+.search-result-info {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
 }
 
 .search-result-name {
-  flex: 1;
   font-size: 0.85rem;
-  color: var(--text);
+  font-weight: 500;
+  color: var(--accent);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -6539,10 +6630,20 @@ a:visited {
 .search-result-path {
   font-size: 0.7rem;
   color: var(--text-muted);
-  max-width: 150px;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+.search-result-repo {
+  font-size: 0.65rem;
+  color: var(--text-secondary);
+  background: var(--surface);
+  padding: 1px 5px;
+  border-radius: 3px;
+  display: inline-block;
+  width: fit-content;
+  margin-top: 2px;
 }
 
 .search-result-add {
@@ -6551,6 +6652,7 @@ a:visited {
   font-size: 1.1rem;
   opacity: 0.6;
   transition: opacity 0.15s;
+  padding-top: 2px;
 }
 
 .search-result-item:hover .search-result-add {

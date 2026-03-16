@@ -4,6 +4,7 @@ File Search API - Unified file search across all repositories.
 Routes:
   GET  /api/files/search    - Fuzzy search for files by name
   GET  /api/files/list      - List all indexed files (for caching)
+  GET  /api/files/repos/{lang} - List repos with file counts
 """
 
 import os
@@ -19,38 +20,59 @@ from app.core.config import settings
 router = APIRouter(prefix="/api/files", tags=["files"])
 
 # ── File Cache ────────────────────────────────────────────────────────────────
+# Cache structure: { "java": { "repo_name": {"files": [], "timestamp": 0} } }
 
-_file_cache: Dict[str, Dict[str, Any]] = {
-    "java": {"files": [], "timestamp": 0},
-    "python": {"files": [], "timestamp": 0},
+_file_cache: Dict[str, Dict[str, Dict[str, Any]]] = {
+    "java": {},
+    "python": {},
 }
 _CACHE_TTL = 5 * 60  # 5 minutes in seconds
 
 
-def _is_cache_valid(repo_type: str) -> bool:
-    """Check if cache is still valid."""
-    cache = _file_cache.get(repo_type)
-    if not cache or not cache["files"]:
+def _get_repos(lang: str) -> List[Dict[str, str]]:
+    """Get all repos for a language type."""
+    repos = []
+    config = getattr(settings, lang, None)
+    if not config:
+        return repos
+
+    # Get from repos list
+    if hasattr(config, 'repos') and config.repos:
+        for repo in config.repos:
+            if os.path.isdir(repo.path):
+                repos.append({"name": repo.name, "path": repo.path})
+
+    # Fallback to repo_path if no repos defined
+    if not repos and hasattr(config, 'repo_path') and config.repo_path:
+        if os.path.isdir(config.repo_path):
+            name = Path(config.repo_path).name
+            repos.append({"name": name, "path": config.repo_path})
+
+    return repos
+
+
+def _is_cache_valid(lang: str, repo_name: str) -> bool:
+    """Check if cache is still valid for a specific repo."""
+    cache = _file_cache.get(lang, {}).get(repo_name)
+    if not cache or not cache.get("files"):
         return False
-    age = datetime.now().timestamp() - cache["timestamp"]
+    age = datetime.now().timestamp() - cache.get("timestamp", 0)
     return age < _CACHE_TTL
 
 
-def _refresh_cache(repo_type: str) -> List[Dict[str, Any]]:
-    """Refresh file cache for a repository type."""
-    files = []
+def _refresh_repo_cache(lang: str, repo_name: str, repo_path: str) -> List[Dict[str, Any]]:
+    """Refresh file cache for a specific repository."""
+    extensions = {
+        "java": [".java", ".xml", ".properties", ".yaml", ".yml"],
+        "python": [".py", ".yaml", ".yml", ".json", ".toml"],
+    }
 
-    if repo_type == "java":
-        repo_path = settings.java.get_active_path() if hasattr(settings.java, 'get_active_path') else None
-        if repo_path and os.path.isdir(repo_path):
-            files = _scan_directory(repo_path, "java", [".java", ".xml", ".properties", ".yaml", ".yml"])
+    files = _scan_directory(repo_path, lang, repo_name, extensions.get(lang, []))
 
-    elif repo_type == "python":
-        repo_path = settings.python.get_active_path() if hasattr(settings.python, 'get_active_path') else None
-        if repo_path and os.path.isdir(repo_path):
-            files = _scan_directory(repo_path, "python", [".py", ".yaml", ".yml", ".json", ".toml"])
+    if lang not in _file_cache:
+        _file_cache[lang] = {}
 
-    _file_cache[repo_type] = {
+    _file_cache[lang][repo_name] = {
         "files": files,
         "timestamp": datetime.now().timestamp(),
     }
@@ -58,9 +80,31 @@ def _refresh_cache(repo_type: str) -> List[Dict[str, Any]]:
     return files
 
 
+def _get_all_files(lang: str, repo_name: Optional[str] = None) -> List[Dict[str, Any]]:
+    """Get all files for a language, optionally filtered by repo name."""
+    all_files = []
+    repos = _get_repos(lang)
+
+    for repo in repos:
+        # Skip if filtering by repo_name and doesn't match
+        if repo_name and repo["name"] != repo_name:
+            continue
+
+        # Check cache or refresh
+        if not _is_cache_valid(lang, repo["name"]):
+            files = _refresh_repo_cache(lang, repo["name"], repo["path"])
+        else:
+            files = _file_cache[lang][repo["name"]]["files"]
+
+        all_files.extend(files)
+
+    return all_files
+
+
 def _scan_directory(
     base_path: str,
-    repo_type: str,
+    lang: str,
+    repo_name: str,
     extensions: List[str],
     max_files: int = 10000
 ) -> List[Dict[str, Any]]:
@@ -94,31 +138,13 @@ def _scan_directory(
                 files.append({
                     "name": filename,
                     "path": str(rel_path).replace("\\", "/"),
-                    "type": repo_type,
-                    "repo": _get_repo_name(repo_type),
+                    "type": lang,
+                    "repo": repo_name,
                 })
     except Exception as e:
         print(f"[files] Error scanning {base_path}: {e}")
 
     return files
-
-
-def _get_repo_name(repo_type: str) -> str:
-    """Get human-readable repo name."""
-    if repo_type == "java":
-        path = settings.java.get_active_path() if hasattr(settings.java, 'get_active_path') else ""
-        return Path(path).name if path else "Java"
-    elif repo_type == "python":
-        path = settings.python.get_active_path() if hasattr(settings.python, 'get_active_path') else ""
-        return Path(path).name if path else "Python"
-    return repo_type
-
-
-def _get_cached_files(repo_type: str) -> List[Dict[str, Any]]:
-    """Get files from cache, refreshing if necessary."""
-    if not _is_cache_valid(repo_type):
-        return _refresh_cache(repo_type)
-    return _file_cache[repo_type]["files"]
 
 
 def _fuzzy_match(filename: str, query: str) -> float:
@@ -171,10 +197,37 @@ def _fuzzy_match(filename: str, query: str) -> float:
 
 # ── API Routes ────────────────────────────────────────────────────────────────
 
+@router.get("/repos/{lang}")
+async def get_repos(lang: str) -> Dict[str, Any]:
+    """
+    List all repositories for a language with file counts.
+    """
+    if lang not in ("java", "python"):
+        return {"repos": [], "total": 0}
+
+    repos = _get_repos(lang)
+    result = []
+
+    for repo in repos:
+        # Get file count (uses cache if valid)
+        files = _get_all_files(lang, repo["name"])
+        result.append({
+            "name": repo["name"],
+            "path": repo["path"],
+            "file_count": len(files),
+        })
+
+    return {
+        "repos": result,
+        "total": len(result),
+    }
+
+
 @router.get("/search")
 async def search_files(
     q: str = Query(..., min_length=1, description="Search query"),
-    repo: str = Query("all", description="Filter by repo type: java, python, all"),
+    lang: str = Query("all", description="Filter by language: java, python, all"),
+    repo_name: Optional[str] = Query(None, description="Filter by specific repo name"),
     limit: int = Query(10, ge=1, le=50, description="Max results"),
 ) -> Dict[str, Any]:
     """
@@ -184,16 +237,16 @@ async def search_files(
     """
     results = []
 
-    # Determine which repos to search
-    repo_types = []
-    if repo in ("all", "java"):
-        repo_types.append("java")
-    if repo in ("all", "python"):
-        repo_types.append("python")
+    # Determine which languages to search
+    languages = []
+    if lang in ("all", "java"):
+        languages.append("java")
+    if lang in ("all", "python"):
+        languages.append("python")
 
-    # Search each repo
-    for repo_type in repo_types:
-        files = _get_cached_files(repo_type)
+    # Search each language
+    for language in languages:
+        files = _get_all_files(language, repo_name)
 
         for file in files:
             score = _fuzzy_match(file["name"], q)
@@ -211,23 +264,25 @@ async def search_files(
         "results": results,
         "total": len(results),
         "query": q,
-        "repo_filter": repo,
+        "lang_filter": lang,
+        "repo_filter": repo_name,
     }
 
 
 @router.get("/list")
 async def list_files(
-    repo: str = Query("all", description="Filter by repo type: java, python, all"),
+    lang: str = Query("all", description="Filter by language: java, python, all"),
+    repo_name: Optional[str] = Query(None, description="Filter by specific repo name"),
 ) -> Dict[str, Any]:
     """
     List all indexed files (for client-side caching).
     """
     files = []
 
-    if repo in ("all", "java"):
-        files.extend(_get_cached_files("java"))
-    if repo in ("all", "python"):
-        files.extend(_get_cached_files("python"))
+    if lang in ("all", "java"):
+        files.extend(_get_all_files("java", repo_name))
+    if lang in ("all", "python"):
+        files.extend(_get_all_files("python", repo_name))
 
     return {
         "files": files,
@@ -237,21 +292,27 @@ async def list_files(
 
 
 @router.post("/refresh")
-async def refresh_cache(
-    repo: str = Query("all", description="Repo to refresh: java, python, all"),
+async def refresh_cache_endpoint(
+    lang: str = Query("all", description="Language to refresh: java, python, all"),
 ) -> Dict[str, Any]:
     """
-    Force refresh the file cache.
+    Force refresh the file cache for all repos.
     """
     refreshed = []
 
-    if repo in ("all", "java"):
-        files = _refresh_cache("java")
-        refreshed.append({"type": "java", "count": len(files)})
+    languages = []
+    if lang in ("all", "java"):
+        languages.append("java")
+    if lang in ("all", "python"):
+        languages.append("python")
 
-    if repo in ("all", "python"):
-        files = _refresh_cache("python")
-        refreshed.append({"type": "python", "count": len(files)})
+    for language in languages:
+        repos = _get_repos(language)
+        total_files = 0
+        for repo in repos:
+            files = _refresh_repo_cache(language, repo["name"], repo["path"])
+            total_files += len(files)
+        refreshed.append({"type": language, "count": total_files})
 
     return {
         "refreshed": refreshed,

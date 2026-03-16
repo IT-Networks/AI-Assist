@@ -348,14 +348,16 @@
           <span class="explorer-arrow" id="java-arrow">&#9658;</span>
         </div>
         <div class="explorer-content" id="java-content">
-          <!-- Search Bar -->
+          <!-- Search Bar with Filter -->
           <div class="explorer-search-bar">
             <input type="text" id="java-search-input" placeholder="&#128269; Datei suchen..." oninput="searchExplorerFiles('java', this.value)">
-            <select id="java-repo-filter" title="Repo-Filter" style="display:none">
-              <option value="all">Alle</option>
+            <select id="java-repo-filter" title="Repo-Filter" onchange="onRepoFilterChange('java')">
+              <option value="">Alle</option>
             </select>
           </div>
           <div id="java-search-results" class="explorer-search-results" style="display:none"></div>
+          <!-- Repo List -->
+          <div id="java-repo-list" class="explorer-repo-list"></div>
           <div class="index-status" id="java-index-status">Index wird geladen...</div>
           <div class="explorer-actions">
             <button class="sb-btn" onclick="buildJavaIndex()">&#127959; Index</button>
@@ -372,14 +374,16 @@
           <span class="explorer-arrow" id="python-arrow">&#9658;</span>
         </div>
         <div class="explorer-content" id="python-content">
-          <!-- Search Bar -->
+          <!-- Search Bar with Filter -->
           <div class="explorer-search-bar">
             <input type="text" id="python-search-input" placeholder="&#128269; Datei suchen..." oninput="searchExplorerFiles('python', this.value)">
-            <select id="python-repo-filter" title="Repo-Filter" style="display:none">
-              <option value="all">Alle</option>
+            <select id="python-repo-filter" title="Repo-Filter" onchange="onRepoFilterChange('python')">
+              <option value="">Alle</option>
             </select>
           </div>
           <div id="python-search-results" class="explorer-search-results" style="display:none"></div>
+          <!-- Repo List -->
+          <div id="python-repo-list" class="explorer-repo-list"></div>
           <div class="index-status" id="python-index-status">Index wird geladen...</div>
           <div class="explorer-actions">
             <button class="sb-btn" onclick="buildPythonIndex()">&#127959; Index</button>
