@@ -6463,3 +6463,220 @@ a:visited {
 .workspace-item.expanded .diff-container {
   max-height: none;
 }
+
+/* ══════════════════════════════════════════════════════════════════════════════
+   Explorer Search
+   ══════════════════════════════════════════════════════════════════════════════ */
+
+.explorer-search-bar {
+  display: flex;
+  gap: 4px;
+  padding: 4px 8px;
+  margin-bottom: 4px;
+}
+
+.explorer-search-bar input {
+  flex: 1;
+  padding: 6px 10px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  color: var(--text);
+  font-size: 0.85rem;
+}
+
+.explorer-search-bar input:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.explorer-search-bar input::placeholder {
+  color: var(--text-muted);
+}
+
+.explorer-search-results {
+  max-height: 250px;
+  overflow-y: auto;
+  margin: 0 8px 8px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg);
+}
+
+.search-result-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  cursor: pointer;
+  border-bottom: 1px solid var(--border);
+  transition: background 0.15s;
+}
+
+.search-result-item:last-child {
+  border-bottom: none;
+}
+
+.search-result-item:hover {
+  background: var(--surface-hover);
+}
+
+.search-result-icon {
+  font-size: 1rem;
+  width: 20px;
+  text-align: center;
+}
+
+.search-result-name {
+  flex: 1;
+  font-size: 0.85rem;
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.search-result-path {
+  font-size: 0.7rem;
+  color: var(--text-muted);
+  max-width: 150px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.search-result-add {
+  color: var(--accent);
+  font-weight: bold;
+  font-size: 1.1rem;
+  opacity: 0.6;
+  transition: opacity 0.15s;
+}
+
+.search-result-item:hover .search-result-add {
+  opacity: 1;
+}
+
+.search-no-results {
+  padding: 12px;
+  text-align: center;
+  color: var(--text-muted);
+  font-size: 0.85rem;
+}
+
+/* ══════════════════════════════════════════════════════════════════════════════
+   @-Mention Dropdown
+   ══════════════════════════════════════════════════════════════════════════════ */
+
+.mention-dropdown {
+  position: absolute;
+  bottom: calc(100% + 4px);
+  left: 0;
+  right: 60px;
+  max-height: 300px;
+  overflow-y: auto;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: 0 -4px 20px rgba(0, 0, 0, 0.3);
+  z-index: 1000;
+}
+
+.mention-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  cursor: pointer;
+  transition: background 0.1s;
+}
+
+.mention-item:hover,
+.mention-item.highlighted {
+  background: var(--surface-hover);
+}
+
+.mention-item.selected {
+  background: var(--accent-bg);
+}
+
+.mention-item.highlighted.selected {
+  background: linear-gradient(to right, var(--accent-bg), var(--surface-hover));
+}
+
+.mention-checkbox {
+  font-size: 1rem;
+  width: 20px;
+  color: var(--accent);
+}
+
+.mention-icon {
+  font-size: 1rem;
+  width: 20px;
+  text-align: center;
+}
+
+.mention-name {
+  flex: 1;
+  font-size: 0.9rem;
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.mention-type {
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  padding: 2px 6px;
+  background: var(--surface);
+  border-radius: 4px;
+  text-transform: capitalize;
+}
+
+.mention-no-results {
+  padding: 16px;
+  text-align: center;
+  color: var(--text-muted);
+  font-size: 0.9rem;
+}
+
+.mention-footer {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 8px 12px;
+  border-top: 1px solid var(--border);
+  background: var(--surface);
+}
+
+.mention-count {
+  font-size: 0.8rem;
+  color: var(--text-secondary);
+}
+
+.mention-confirm-btn {
+  padding: 4px 12px;
+  background: var(--accent);
+  color: var(--bg);
+  border: none;
+  border-radius: 4px;
+  font-size: 0.8rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.mention-confirm-btn:hover:not(:disabled) {
+  background: var(--accent-hover);
+}
+
+.mention-confirm-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* Hint text in input */
+#input-row {
+  position: relative;
+}

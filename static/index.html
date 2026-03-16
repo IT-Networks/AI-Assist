@@ -348,10 +348,14 @@
           <span class="explorer-arrow" id="java-arrow">&#9658;</span>
         </div>
         <div class="explorer-content" id="java-content">
-          <div id="java-repo-selector" class="repo-selector-bar" style="display:none">
-            <label class="repo-selector-label">Repo:</label>
-            <select id="java-repo-select" onchange="setActiveRepo('java', this.value)" title="Aktives Java-Repository"></select>
+          <!-- Search Bar -->
+          <div class="explorer-search-bar">
+            <input type="text" id="java-search-input" placeholder="&#128269; Datei suchen..." oninput="searchExplorerFiles('java', this.value)">
+            <select id="java-repo-filter" title="Repo-Filter" style="display:none">
+              <option value="all">Alle</option>
+            </select>
           </div>
+          <div id="java-search-results" class="explorer-search-results" style="display:none"></div>
           <div class="index-status" id="java-index-status">Index wird geladen...</div>
           <div class="explorer-actions">
             <button class="sb-btn" onclick="buildJavaIndex()">&#127959; Index</button>
@@ -368,10 +372,14 @@
           <span class="explorer-arrow" id="python-arrow">&#9658;</span>
         </div>
         <div class="explorer-content" id="python-content">
-          <div id="python-repo-selector" class="repo-selector-bar" style="display:none">
-            <label class="repo-selector-label">Repo:</label>
-            <select id="python-repo-select" onchange="setActiveRepo('python', this.value)" title="Aktives Python-Repository"></select>
+          <!-- Search Bar -->
+          <div class="explorer-search-bar">
+            <input type="text" id="python-search-input" placeholder="&#128269; Datei suchen..." oninput="searchExplorerFiles('python', this.value)">
+            <select id="python-repo-filter" title="Repo-Filter" style="display:none">
+              <option value="all">Alle</option>
+            </select>
           </div>
+          <div id="python-search-results" class="explorer-search-results" style="display:none"></div>
           <div class="index-status" id="python-index-status">Index wird geladen...</div>
           <div class="explorer-actions">
             <button class="sb-btn" onclick="buildPythonIndex()">&#127959; Index</button>
@@ -469,7 +477,7 @@
         <div id="suggestion-chips"></div>
       </div>
       <div id="input-row">
-        <textarea id="message-input" placeholder="Frage stellen... (Enter zum Senden, Shift+Enter für neue Zeile)" rows="2"></textarea>
+        <textarea id="message-input" placeholder="Frage stellen... (@datei für Kontext, Enter senden)" rows="2"></textarea>
         <button id="send-btn" onclick="sendMessage()">
           <span class="send-icon">&#10148;</span>
         </button>

@@ -23,6 +23,24 @@ const TIMING = {
   SCROLL_DELAY: 100,
 };
 
+// ── File Cache for @-Mention and Explorer Search ──
+const fileCache = {
+  java: { files: [], timestamp: 0 },
+  python: { files: [], timestamp: 0 },
+  TTL: 5 * 60 * 1000,  // 5 minutes
+};
+
+// ── @-Mention State ──
+const mentionState = {
+  active: false,
+  query: '',
+  cursorPosition: 0,
+  selectedIndex: 0,      // Currently highlighted item
+  selectedFiles: [],     // Multi-selected files (spacebar)
+  results: [],
+  triggerPosition: 0,    // Position of @ in text
+};
+
 // ── State ──
 const state = {
   sessionId: null,         // Set by active chat
@@ -1041,6 +1059,9 @@ document.addEventListener('DOMContentLoaded', async () => {
     loadPersistedChats(),
   ]);
 
+  // Initialize @-Mention system
+  initMentionSystem();
+
   // Nicht-kritische Daten im Hintergrund laden (non-blocking)
   // Fehler werden geloggt aber blockieren UI nicht
   Promise.all([
@@ -1049,6 +1070,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     loadPythonIndexStatus().catch(e => log.warn('[init] Python index status failed:', e)),
     loadHandbookStatus().catch(e => log.warn('[init] Handbook status failed:', e)),
     scanExistingPdfs().catch(e => log.warn('[init] PDF scan failed:', e)),
+    refreshFileCache('all').catch(e => log.warn('[init] File cache refresh failed:', e)),
   ]);
 });
 
@@ -3864,6 +3886,8 @@ function addFileToContext(path, name, type, el) {
     el.classList.add('selected');
   }
 
+  // Sync to active chat's context
+  syncContextToActiveChat();
   renderContextChips();
 }
 
@@ -4064,6 +4088,7 @@ function addServiceToContext(serviceId, serviceName) {
   if (state.context.handbookServices.find(s => s.id === serviceId)) return;
 
   state.context.handbookServices.push({ id: serviceId, label: serviceName });
+  syncContextToActiveChat();
   renderContextChips();
 }
 
@@ -4080,6 +4105,7 @@ async function scanExistingPdfs() {
         id: pdf.id,
         label: pdf.filename
       }));
+      syncContextToActiveChat();
       renderPdfList();
       log.info(`${data.loaded} PDFs aus Upload-Ordner geladen`);
     }
@@ -4107,6 +4133,7 @@ async function uploadPDF() {
 
     const data = await res.json();
     state.context.pdfIds.push({ id: data.id, label: file.name });
+    syncContextToActiveChat();
     renderContextChips();
     renderPdfList();
     appendMessage('system', `PDF hochgeladen: ${file.name}`);
@@ -4130,6 +4157,7 @@ function renderPdfList() {
 
 function removePdf(id) {
   state.context.pdfIds = state.context.pdfIds.filter(p => p.id !== id);
+  syncContextToActiveChat();
   renderPdfList();
   renderContextChips();
 }
@@ -4255,13 +4283,434 @@ function removeContextItem(key) {
       break;
   }
 
+  // Sync to active chat's context
+  syncContextToActiveChat();
   renderContextChips();
+}
+
+// Sync state.context to the active chat's context
+function syncContextToActiveChat() {
+  const chat = chatManager.getActive();
+  if (chat) {
+    chat.context = typeof structuredClone === 'function'
+      ? structuredClone(state.context)
+      : JSON.parse(JSON.stringify(state.context));
+  }
 }
 
 // ── Utilities ──
 function escapeHtml(str) {
   if (!str) return '';
   return String(str).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+
+
+// ══════════════════════════════════════════════════════════════════════════════
+// File Search & @-Mention System
+// ══════════════════════════════════════════════════════════════════════════════
+
+// ── File Cache Management ──
+
+async function refreshFileCache(repoType = 'all') {
+  try {
+    const res = await fetch(`/api/files/list?repo=${repoType}`);
+    if (!res.ok) return;
+    const data = await res.json();
+
+    const now = Date.now();
+    if (repoType === 'all' || repoType === 'java') {
+      fileCache.java.files = data.files.filter(f => f.type === 'java');
+      fileCache.java.timestamp = now;
+    }
+    if (repoType === 'all' || repoType === 'python') {
+      fileCache.python.files = data.files.filter(f => f.type === 'python');
+      fileCache.python.timestamp = now;
+    }
+    log.info(`[FileCache] Refreshed: ${data.files.length} files`);
+  } catch (e) {
+    log.error('[FileCache] Refresh failed:', e);
+  }
+}
+
+function isCacheValid(repoType) {
+  const cache = fileCache[repoType];
+  if (!cache || !cache.files.length) return false;
+  return (Date.now() - cache.timestamp) < fileCache.TTL;
+}
+
+async function getCachedFiles(repoType = 'all') {
+  const needsRefresh = [];
+  if ((repoType === 'all' || repoType === 'java') && !isCacheValid('java')) {
+    needsRefresh.push('java');
+  }
+  if ((repoType === 'all' || repoType === 'python') && !isCacheValid('python')) {
+    needsRefresh.push('python');
+  }
+
+  if (needsRefresh.length > 0) {
+    await refreshFileCache(repoType);
+  }
+
+  let files = [];
+  if (repoType === 'all' || repoType === 'java') {
+    files = files.concat(fileCache.java.files);
+  }
+  if (repoType === 'all' || repoType === 'python') {
+    files = files.concat(fileCache.python.files);
+  }
+  return files;
+}
+
+// ── Fuzzy Search ──
+
+function fuzzyMatch(filename, query) {
+  if (!query) return 0;
+
+  const name = filename.toLowerCase();
+  const q = query.toLowerCase();
+
+  // Exact match
+  if (name === q) return 1.0;
+
+  // Starts with query
+  if (name.startsWith(q)) {
+    return 0.95 - (q.length / name.length) * 0.05;
+  }
+
+  // Contains query
+  if (name.includes(q)) {
+    const pos = name.indexOf(q);
+    return 0.85 - (pos / name.length) * 0.1;
+  }
+
+  // Character fuzzy match
+  let qi = 0;
+  let matched = 0;
+  let consecutive = 0;
+  let lastPos = -2;
+
+  for (let i = 0; i < name.length && qi < q.length; i++) {
+    if (name[i] === q[qi]) {
+      matched++;
+      if (i === lastPos + 1) consecutive += 0.1;
+      lastPos = i;
+      qi++;
+    }
+  }
+
+  if (qi === q.length) {
+    return Math.min(0.7, matched / name.length + consecutive);
+  }
+
+  return 0;
+}
+
+async function searchFiles(query, repoFilter = 'all', limit = 10) {
+  const files = await getCachedFiles(repoFilter);
+
+  const results = files
+    .map(f => ({ ...f, score: fuzzyMatch(f.name, query) }))
+    .filter(f => f.score > 0.1)
+    .sort((a, b) => b.score - a.score)
+    .slice(0, limit);
+
+  return results;
+}
+
+// ── Explorer Search ──
+
+let explorerSearchTimeout = null;
+
+async function searchExplorerFiles(repoType, query) {
+  const resultsEl = document.getElementById(`${repoType}-search-results`);
+  if (!resultsEl) return;
+
+  if (!query || query.length < 2) {
+    resultsEl.style.display = 'none';
+    resultsEl.innerHTML = '';
+    return;
+  }
+
+  // Debounce
+  clearTimeout(explorerSearchTimeout);
+  explorerSearchTimeout = setTimeout(async () => {
+    const results = await searchFiles(query, repoType, 15);
+
+    if (results.length === 0) {
+      resultsEl.innerHTML = '<div class="search-no-results">Keine Treffer</div>';
+    } else {
+      resultsEl.innerHTML = results.map(f => `
+        <div class="search-result-item" onclick="addSearchResultToContext('${escapeHtml(f.path)}', '${escapeHtml(f.name)}', '${f.type}')">
+          <span class="search-result-icon">${f.type === 'java' ? '&#9749;' : '&#128013;'}</span>
+          <span class="search-result-name">${escapeHtml(f.name)}</span>
+          <span class="search-result-path">${escapeHtml(f.path)}</span>
+          <span class="search-result-add">+</span>
+        </div>
+      `).join('');
+    }
+    resultsEl.style.display = 'block';
+  }, 200);
+}
+
+function addSearchResultToContext(path, name, type) {
+  // Check if already in context
+  const contextArray = type === 'java' ? state.context.javaFiles : state.context.pythonFiles;
+  if (contextArray.find(f => f.path === path)) {
+    showToast('Datei bereits im Kontext', 'info');
+    return;
+  }
+
+  contextArray.push({ path, label: name, type });
+  syncContextToActiveChat();
+  renderContextChips();
+  showToast(`${name} zum Kontext hinzugefügt`, 'success');
+
+  // Clear search
+  const input = document.getElementById(`${type}-search-input`);
+  const results = document.getElementById(`${type}-search-results`);
+  if (input) input.value = '';
+  if (results) {
+    results.style.display = 'none';
+    results.innerHTML = '';
+  }
+}
+
+// ── @-Mention System ──
+
+function initMentionSystem() {
+  const input = document.getElementById('message-input');
+  if (!input) return;
+
+  input.addEventListener('input', handleMentionInput);
+  input.addEventListener('keydown', handleMentionKeydown);
+  input.addEventListener('blur', () => {
+    // Delay to allow click on dropdown
+    setTimeout(() => {
+      if (!document.activeElement?.closest('.mention-dropdown')) {
+        hideMentionDropdown();
+      }
+    }, 150);
+  });
+
+  // Create dropdown element if not exists
+  if (!document.getElementById('mention-dropdown')) {
+    const dropdown = document.createElement('div');
+    dropdown.id = 'mention-dropdown';
+    dropdown.className = 'mention-dropdown';
+    dropdown.style.display = 'none';
+    input.parentElement.appendChild(dropdown);
+  }
+}
+
+async function handleMentionInput(e) {
+  const text = e.target.value;
+  const cursorPos = e.target.selectionStart;
+
+  // Find @ before cursor
+  const beforeCursor = text.slice(0, cursorPos);
+  const atMatch = beforeCursor.match(/@(\w*)$/);
+
+  if (atMatch) {
+    mentionState.active = true;
+    mentionState.query = atMatch[1];
+    mentionState.cursorPosition = cursorPos;
+    mentionState.triggerPosition = cursorPos - atMatch[0].length;
+
+    // Search files
+    const results = await searchFiles(mentionState.query, 'all', 10);
+    mentionState.results = results;
+    mentionState.selectedIndex = 0;
+
+    showMentionDropdown();
+  } else {
+    hideMentionDropdown();
+  }
+}
+
+function handleMentionKeydown(e) {
+  if (!mentionState.active) return;
+
+  const dropdown = document.getElementById('mention-dropdown');
+  if (!dropdown || dropdown.style.display === 'none') return;
+
+  switch (e.key) {
+    case 'ArrowDown':
+      e.preventDefault();
+      mentionState.selectedIndex = Math.min(
+        mentionState.selectedIndex + 1,
+        mentionState.results.length - 1
+      );
+      updateMentionSelection();
+      break;
+
+    case 'ArrowUp':
+      e.preventDefault();
+      mentionState.selectedIndex = Math.max(mentionState.selectedIndex - 1, 0);
+      updateMentionSelection();
+      break;
+
+    case ' ':  // Spacebar - toggle selection
+      if (mentionState.results.length > 0) {
+        e.preventDefault();
+        toggleMentionSelection(mentionState.selectedIndex);
+      }
+      break;
+
+    case 'Enter':
+      if (mentionState.results.length > 0) {
+        e.preventDefault();
+        confirmMentionSelection();
+      }
+      break;
+
+    case 'Escape':
+      e.preventDefault();
+      hideMentionDropdown();
+      break;
+
+    case 'Tab':
+      if (mentionState.results.length > 0) {
+        e.preventDefault();
+        confirmMentionSelection();
+      }
+      break;
+  }
+}
+
+function showMentionDropdown() {
+  const dropdown = document.getElementById('mention-dropdown');
+  const input = document.getElementById('message-input');
+  if (!dropdown || !input) return;
+
+  if (mentionState.results.length === 0) {
+    dropdown.innerHTML = '<div class="mention-no-results">Keine Dateien gefunden</div>';
+  } else {
+    dropdown.innerHTML = mentionState.results.map((f, idx) => {
+      const isHighlighted = idx === mentionState.selectedIndex;
+      const isSelected = mentionState.selectedFiles.some(sf => sf.path === f.path);
+      return `
+        <div class="mention-item ${isHighlighted ? 'highlighted' : ''} ${isSelected ? 'selected' : ''}"
+             data-index="${idx}"
+             onclick="toggleMentionSelection(${idx})"
+             ondblclick="confirmSingleMention(${idx})">
+          <span class="mention-checkbox">${isSelected ? '☑' : '☐'}</span>
+          <span class="mention-icon">${f.type === 'java' ? '&#9749;' : '&#128013;'}</span>
+          <span class="mention-name">${escapeHtml(f.name)}</span>
+          <span class="mention-type">${f.type}</span>
+        </div>
+      `;
+    }).join('');
+
+    // Add footer with selection count and confirm button
+    const selectedCount = mentionState.selectedFiles.length;
+    dropdown.innerHTML += `
+      <div class="mention-footer">
+        <span class="mention-count">${selectedCount} ausgewählt</span>
+        <button class="mention-confirm-btn" onclick="confirmMentionSelection()" ${selectedCount === 0 ? 'disabled' : ''}>
+          Hinzufügen
+        </button>
+      </div>
+    `;
+  }
+
+  dropdown.style.display = 'block';
+}
+
+function updateMentionSelection() {
+  const dropdown = document.getElementById('mention-dropdown');
+  if (!dropdown) return;
+
+  const items = dropdown.querySelectorAll('.mention-item');
+  items.forEach((item, idx) => {
+    item.classList.toggle('highlighted', idx === mentionState.selectedIndex);
+  });
+
+  // Scroll into view
+  const highlighted = dropdown.querySelector('.mention-item.highlighted');
+  if (highlighted) {
+    highlighted.scrollIntoView({ block: 'nearest' });
+  }
+}
+
+function toggleMentionSelection(index) {
+  const file = mentionState.results[index];
+  if (!file) return;
+
+  const existingIdx = mentionState.selectedFiles.findIndex(f => f.path === file.path);
+  if (existingIdx >= 0) {
+    mentionState.selectedFiles.splice(existingIdx, 1);
+  } else {
+    mentionState.selectedFiles.push(file);
+  }
+
+  mentionState.selectedIndex = index;
+  showMentionDropdown();  // Re-render
+}
+
+function confirmSingleMention(index) {
+  const file = mentionState.results[index];
+  if (!file) return;
+
+  // Add just this file
+  insertMentionFiles([file]);
+}
+
+function confirmMentionSelection() {
+  // If nothing selected, add the highlighted item
+  if (mentionState.selectedFiles.length === 0) {
+    const highlighted = mentionState.results[mentionState.selectedIndex];
+    if (highlighted) {
+      insertMentionFiles([highlighted]);
+    }
+  } else {
+    insertMentionFiles(mentionState.selectedFiles);
+  }
+}
+
+function insertMentionFiles(files) {
+  const input = document.getElementById('message-input');
+  if (!input || files.length === 0) return;
+
+  // Add files to context
+  for (const file of files) {
+    const contextArray = file.type === 'java' ? state.context.javaFiles : state.context.pythonFiles;
+    if (!contextArray.find(f => f.path === file.path)) {
+      contextArray.push({ path: file.path, label: file.name, type: file.type });
+    }
+  }
+  syncContextToActiveChat();
+  renderContextChips();
+
+  // Remove @query from input and add file badges
+  const text = input.value;
+  const before = text.slice(0, mentionState.triggerPosition);
+  const after = text.slice(mentionState.cursorPosition);
+  const fileNames = files.map(f => f.name).join(', ');
+
+  input.value = before + fileNames + ' ' + after;
+  input.focus();
+
+  // Show toast
+  if (files.length === 1) {
+    showToast(`${files[0].name} zum Kontext hinzugefügt`, 'success');
+  } else {
+    showToast(`${files.length} Dateien zum Kontext hinzugefügt`, 'success');
+  }
+
+  hideMentionDropdown();
+}
+
+function hideMentionDropdown() {
+  mentionState.active = false;
+  mentionState.query = '';
+  mentionState.results = [];
+  mentionState.selectedFiles = [];
+  mentionState.selectedIndex = 0;
+
+  const dropdown = document.getElementById('mention-dropdown');
+  if (dropdown) {
+    dropdown.style.display = 'none';
+  }
 }
 
 
