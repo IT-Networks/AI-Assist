@@ -1125,6 +1125,8 @@ function setupInputHandlers() {
 
   input.addEventListener('keydown', (e) => {
     if (e.key === 'Enter' && !e.shiftKey) {
+      // Don't send message if @-mention dropdown is active
+      if (mentionState.active) return;
       e.preventDefault();
       sendMessage();
     }
@@ -4048,6 +4050,9 @@ function addServiceToContext(serviceId, serviceName) {
 }
 
 // ── PDF Management ──
+// Available PDFs (not automatically in context)
+const availablePdfs = [];
+
 async function scanExistingPdfs() {
   try {
     const res = await fetch('/api/pdf/scan', { method: 'POST' });
@@ -4055,14 +4060,14 @@ async function scanExistingPdfs() {
 
     const data = await res.json();
     if (data.pdfs && data.pdfs.length > 0) {
-      // PDFs in Context laden
-      state.context.pdfIds = data.pdfs.map(pdf => ({
+      // Store as available PDFs (NOT in context automatically)
+      availablePdfs.length = 0;
+      availablePdfs.push(...data.pdfs.map(pdf => ({
         id: pdf.id,
         label: pdf.filename
-      }));
-      syncContextToActiveChat();
+      })));
       renderPdfList();
-      log.info(`${data.loaded} PDFs aus Upload-Ordner geladen`);
+      log.info(`${data.loaded} PDFs aus Upload-Ordner verfügbar`);
     }
   } catch (e) {
     console.debug('PDF-Scan fehlgeschlagen:', e);
@@ -4074,7 +4079,6 @@ async function uploadPDF() {
   const file = fileInput.files[0];
   if (!file) return;
 
-  const container = document.getElementById('pdf-list');
   const formData = new FormData();
   formData.append('file', file);
 
@@ -4087,6 +4091,9 @@ async function uploadPDF() {
     }
 
     const data = await res.json();
+    // Add to available list
+    availablePdfs.push({ id: data.id, label: file.name });
+    // Auto-add newly uploaded PDF to context
     state.context.pdfIds.push({ id: data.id, label: file.name });
     syncContextToActiveChat();
     renderContextChips();
@@ -4101,13 +4108,34 @@ async function uploadPDF() {
 
 function renderPdfList() {
   const container = document.getElementById('pdf-list');
-  container.innerHTML = state.context.pdfIds.map(pdf => `
-    <div class="item-list-item">
-      <span class="item-icon">&#128196;</span>
-      <span class="item-name">${escapeHtml(pdf.label)}</span>
-      <span class="item-remove" onclick="removePdf('${pdf.id}')">&times;</span>
-    </div>
-  `).join('');
+  if (!container) return;
+
+  container.innerHTML = availablePdfs.map(pdf => {
+    const isInContext = state.context.pdfIds.some(p => p.id === pdf.id);
+    return `
+      <div class="item-list-item ${isInContext ? 'selected' : ''}" onclick="togglePdfContext('${pdf.id}', '${escapeHtml(pdf.label)}')">
+        <span class="item-icon">&#128196;</span>
+        <span class="item-name">${escapeHtml(pdf.label)}</span>
+        <span class="item-toggle">${isInContext ? '&#10003;' : '+'}</span>
+      </div>
+    `;
+  }).join('');
+}
+
+function togglePdfContext(id, label) {
+  const idx = state.context.pdfIds.findIndex(p => p.id === id);
+  if (idx >= 0) {
+    // Remove from context
+    state.context.pdfIds.splice(idx, 1);
+    showToast(`${label} aus Kontext entfernt`, 'info');
+  } else {
+    // Add to context
+    state.context.pdfIds.push({ id, label });
+    showToast(`${label} zum Kontext hinzugefügt`, 'success');
+  }
+  syncContextToActiveChat();
+  renderPdfList();
+  renderContextChips();
 }
 
 function removePdf(id) {
@@ -4380,8 +4408,8 @@ async function searchFiles(query, lang = 'all', limit = 10, repoName = null) {
 // ── Explorer Repo List ──
 
 const explorerRepoState = {
-  java: { repos: [], selectedRepo: null },
-  python: { repos: [], selectedRepo: null },
+  java: { repos: [], selectedRepo: null, searchCounts: null },
+  python: { repos: [], selectedRepo: null, searchCounts: null },
 };
 
 async function loadExplorerRepos(lang) {
@@ -4405,20 +4433,27 @@ function renderExplorerRepoList(lang) {
 
   const repos = explorerRepoState[lang].repos;
   const selected = explorerRepoState[lang].selectedRepo;
+  const searchCounts = explorerRepoState[lang].searchCounts;
 
   if (repos.length === 0) {
     listEl.innerHTML = '';
     return;
   }
 
-  listEl.innerHTML = repos.map(r => `
-    <div class="repo-list-item ${selected === r.name ? 'active' : ''}"
-         onclick="selectExplorerRepo('${lang}', '${escapeHtml(r.name)}')"
-         title="${escapeHtml(r.path)}">
-      <span class="repo-list-name">${escapeHtml(r.name)}</span>
-      <span class="repo-list-count">${r.file_count}</span>
-    </div>
-  `).join('');
+  listEl.innerHTML = repos.map(r => {
+    // Show search count if searching, otherwise total file count
+    const count = searchCounts ? (searchCounts[r.name] || 0) : r.file_count;
+    const countClass = searchCounts && searchCounts[r.name] ? 'repo-list-count search-match' : 'repo-list-count';
+
+    return `
+      <div class="repo-list-item ${selected === r.name ? 'active' : ''}"
+           onclick="selectExplorerRepo('${lang}', '${escapeHtml(r.name)}')"
+           title="${escapeHtml(r.path)}">
+        <span class="repo-list-name">${escapeHtml(r.name)}</span>
+        <span class="${countClass}">${count}</span>
+      </div>
+    `;
+  }).join('');
 }
 
 function updateRepoFilterDropdown(lang) {
@@ -4474,6 +4509,9 @@ async function searchExplorerFiles(lang, query) {
   if (!query || query.length < 2) {
     resultsEl.style.display = 'none';
     resultsEl.innerHTML = '';
+    // Reset repo list to show total counts
+    explorerRepoState[lang].searchCounts = null;
+    renderExplorerRepoList(lang);
     return;
   }
 
@@ -4481,7 +4519,22 @@ async function searchExplorerFiles(lang, query) {
   clearTimeout(explorerSearchTimeout);
   explorerSearchTimeout = setTimeout(async () => {
     const repoName = explorerRepoState[lang].selectedRepo;
-    const results = await searchFiles(query, lang, 15, repoName);
+
+    // Search all files (not limited) to get accurate counts per repo
+    const allResults = await searchFiles(query, lang, 100, repoName);
+
+    // Calculate counts per repo
+    const repoCounts = {};
+    for (const f of allResults) {
+      repoCounts[f.repo] = (repoCounts[f.repo] || 0) + 1;
+    }
+    explorerRepoState[lang].searchCounts = repoCounts;
+
+    // Update repo list with search counts
+    renderExplorerRepoList(lang);
+
+    // Display limited results
+    const results = allResults.slice(0, 15);
 
     if (results.length === 0) {
       resultsEl.innerHTML = '<div class="search-no-results">Keine Treffer</div>';
