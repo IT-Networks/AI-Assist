@@ -1048,6 +1048,58 @@ async def confirm_enhancement(
 
 
 # ══════════════════════════════════════════════════════════════════════════════
+# Web Fallback Confirmation Endpoints
+# ══════════════════════════════════════════════════════════════════════════════
+
+class WebFallbackConfirmRequest(BaseModel):
+    """Anfrage zur Bestätigung der Web-Fallback-Suche."""
+    confirmed: bool = Field(..., description="True = Mit Web-Suche, False = Ohne")
+
+
+@router.post("/web-fallback/{session_id}/confirm")
+async def confirm_web_fallback(
+    session_id: str,
+    request: WebFallbackConfirmRequest
+) -> Dict[str, Any]:
+    """
+    Bestätigt oder lehnt die Web-Fallback-Suche ab.
+
+    Wird aufgerufen, wenn interne Quellen keine Ergebnisse geliefert haben
+    und der User entscheiden muss, ob im Web gesucht werden soll.
+
+    Args:
+        session_id: Session-ID
+        request: Bestätigung (True = Mit Web, False = Ohne Web)
+
+    Returns:
+        Status und ob die Suche fortgesetzt werden soll
+    """
+    from app.agent.orchestrator import get_agent_orchestrator
+
+    orchestrator = get_agent_orchestrator()
+    state = orchestrator._get_state(session_id)
+
+    if request.confirmed:
+        # Web-Suche wurde genehmigt
+        state.web_fallback_approved = True
+        return {
+            "status": "confirmed",
+            "message": "Web-Suche genehmigt mit bereinigter Query",
+            "continue": True,
+            "retry_with_web": True
+        }
+    else:
+        # Web-Suche wurde abgelehnt
+        state.web_fallback_approved = False
+        return {
+            "status": "rejected",
+            "message": "Web-Suche abgelehnt, fahre ohne Web-Ergebnisse fort",
+            "continue": True,
+            "retry_with_web": False
+        }
+
+
+# ══════════════════════════════════════════════════════════════════════════════
 # Workspace Endpoints
 # ══════════════════════════════════════════════════════════════════════════════
 

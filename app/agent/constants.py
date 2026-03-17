@@ -32,6 +32,10 @@ class ControlMarkers:
     # Skip all enhancement/decomposition, direct LLM call
     DIRECT = "[DIRECT]"
 
+    # Web fallback markers
+    RETRY_WITH_WEB = "[RETRY_WITH_WEB]"      # User approved web search fallback
+    CONTINUE_WITHOUT_WEB = "[CONTINUE_WITHOUT_WEB]"  # User rejected web search
+
 
 # ══════════════════════════════════════════════════════════════════════════════
 # Skip Markers for Enhancement Detection

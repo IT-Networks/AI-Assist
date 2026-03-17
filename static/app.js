@@ -3362,6 +3362,11 @@ async function processAgentEvent(event, bubble, msgDiv, chat) {
       handleEnhancementRejected(data, chat);
       break;
 
+    // Web Fallback Events
+    case 'web_fallback_required':
+      handleWebFallbackRequired(data, chat);
+      break;
+
     // Workspace Events
     case 'workspace_code_change':
       addCodeChangeToWorkspace(data);
@@ -4087,7 +4092,7 @@ async function confirmEnhancement(confirmed) {
     // Continue processing if backend signals continue
     if (result.continue) {
       // Resume the chat processing with the enriched context
-      sendChatMessage('[CONTINUE_ENHANCED]');
+      sendChatInternal('[CONTINUE_ENHANCED]');
     }
 
   } catch (err) {
@@ -4134,6 +4139,120 @@ function handleEnhancementRejected(data, chat) {
 
   if (isActive) {
     hideEnhancementPanel();
+  }
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// Web Fallback Confirmation
+// ══════════════════════════════════════════════════════════════════════════════
+
+/**
+ * Handle WEB_FALLBACK_REQUIRED event - show confirmation dialog
+ */
+function handleWebFallbackRequired(data, chat) {
+  const isActive = chat.id === chatManager.activeId;
+
+  chat.pendingWebFallback = {
+    originalQuery: data.original_query,
+    sanitizedQuery: data.sanitized_query,
+    removedTerms: data.removed_terms || [],
+    message: data.message
+  };
+
+  if (isActive) {
+    showWebFallbackConfirmation(data);
+  }
+}
+
+/**
+ * Show the web fallback confirmation panel
+ */
+function showWebFallbackConfirmation(data) {
+  const chat = chatManager.getActive();
+  if (!chat) return;
+
+  // Create inline confirmation message in chat
+  const confirmHtml = `
+    <div class="web-fallback-confirm" style="
+      background: linear-gradient(135deg, #1a365d 0%, #2d3748 100%);
+      border: 1px solid #4299e1;
+      border-radius: 8px;
+      padding: 16px;
+      margin: 8px 0;
+    ">
+      <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 12px;">
+        <span style="font-size: 1.2em;">🌐</span>
+        <span style="font-weight: 600; color: #e2e8f0;">Web-Suche erforderlich</span>
+      </div>
+
+      <p style="color: #a0aec0; margin-bottom: 12px;">
+        Keine Ergebnisse in internen Quellen gefunden. Im Web suchen?
+      </p>
+
+      <div style="background: #1a202c; border-radius: 4px; padding: 12px; margin-bottom: 12px;">
+        <div style="color: #68d391; font-size: 0.85em; margin-bottom: 4px;">Bereinigte Query (ohne interne Daten):</div>
+        <div style="color: #e2e8f0; font-style: italic;">"${escapeHtml(data.sanitized_query)}"</div>
+        ${data.removed_terms && data.removed_terms.length > 0 ? `
+          <div style="color: #f56565; font-size: 0.8em; margin-top: 8px;">
+            ⚠ Entfernt: ${data.removed_terms.join(', ')}
+          </div>
+        ` : ''}
+      </div>
+
+      <div style="display: flex; gap: 8px;">
+        <button onclick="confirmWebFallback(true)" class="btn btn-success" style="flex: 1;">
+          ✓ Mit Web-Suche fortfahren
+        </button>
+        <button onclick="confirmWebFallback(false)" class="btn btn-secondary" style="flex: 1;">
+          ✗ Ohne Web-Suche
+        </button>
+      </div>
+    </div>
+  `;
+
+  appendMessageToPane(chat.pane, 'system', confirmHtml, { isHtml: true });
+  scrollToBottom();
+}
+
+/**
+ * Confirm or reject web fallback search
+ */
+async function confirmWebFallback(confirmed) {
+  const chat = chatManager.getActive();
+  if (!chat?.pendingWebFallback) return;
+
+  try {
+    const res = await fetch(`/api/agent/web-fallback/${chat.sessionId}/confirm`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ confirmed })
+    });
+
+    if (!res.ok) {
+      log.error('[web-fallback] Confirmation failed:', await res.text());
+      return;
+    }
+
+    const result = await res.json();
+
+    // Clear pending state
+    chat.pendingWebFallback = null;
+
+    // Show feedback
+    if (confirmed) {
+      appendMessageToPane(chat.pane, 'system', '✓ Web-Suche gestartet...');
+      // Retry the research with web fallback approved
+      if (result.retry_with_web) {
+        sendChatInternal('[RETRY_WITH_WEB]');
+      }
+    } else {
+      appendMessageToPane(chat.pane, 'system', '⚠ Ohne Web-Ergebnisse fortfahren...');
+      sendChatInternal('[CONTINUE_WITHOUT_WEB]');
+    }
+
+  } catch (err) {
+    log.error('[web-fallback] Confirmation error:', err);
+    appendMessageToPane(chat.pane, 'error', `Web-Fallback-Bestätigung fehlgeschlagen: ${err.message}`);
   }
 }
 

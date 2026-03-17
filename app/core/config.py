@@ -1116,6 +1116,17 @@ class TaskAgentConfig(BaseModel):
     # Planning
     planning_model: str = ""               # Model fuer TaskPlanner (leer = analysis_model)
     planning_temperature: float = 0.1      # Temperature fuer Planung
+    # ════════════════════════════════════════════════════════════════════════
+    # Enhancement/Context Collection Settings
+    # ════════════════════════════════════════════════════════════════════════
+    # Welche Enhancement-Typen brauchen User-Bestaetigung?
+    # "all" = alle, "none" = keine, "write_only" = nur Schreiboperationen
+    enhancement_confirm_mode: str = "none"   # Default: keine Bestaetigung noetig
+    # Bei welchen Enhancement-Typen soll immer bestaetigt werden?
+    # Moegliche Werte: "research", "sequential", "analyze", "brainstorm"
+    enhancement_always_confirm: List[str] = []
+    # Research: Interne Quellen bevorzugen (Wiki/Confluence vor Web)
+    research_internal_first: bool = True     # Intern zuerst, Web nur als Fallback
 
 
 class Settings(BaseModel):

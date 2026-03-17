@@ -252,6 +252,10 @@ class AgentEventType(str, Enum):
     ENHANCEMENT_COMPLETE = "enhancement_complete"    # Kontext gesammelt, Bestätigung anfordern
     ENHANCEMENT_CONFIRMED = "enhancement_confirmed"  # User hat Kontext bestätigt
     ENHANCEMENT_REJECTED = "enhancement_rejected"    # User hat Kontext abgelehnt
+    # Web Fallback Events
+    WEB_FALLBACK_REQUIRED = "web_fallback_required"  # Web-Suche braucht Bestätigung (interne Quellen leer)
+    WEB_FALLBACK_CONFIRMED = "web_fallback_confirmed"  # User hat Web-Suche bestätigt
+    WEB_FALLBACK_REJECTED = "web_fallback_rejected"    # User hat Web-Suche abgelehnt
     # Workspace Events
     WORKSPACE_CODE_CHANGE = "workspace_code_change"  # Code-Änderung für Workspace Panel
     WORKSPACE_SQL_RESULT = "workspace_sql_result"    # SQL-Abfrage-Ergebnis für Workspace Panel
@@ -336,6 +340,8 @@ class AgentState:
     plan_approved: bool = False           # True wenn User den Plan genehmigt hat
     # Tool-Budget-Tracking (fuer Effizienz-Optimierung)
     tool_budget: Optional["ToolBudget"] = None
+    # Web-Fallback-Bestätigung (für Research mit leerem internen Ergebnis)
+    web_fallback_approved: bool = False   # True wenn User Web-Suche genehmigt hat
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -973,13 +979,29 @@ Sei präzise und gib detaillierte Analyse-Schritte."""
         - Config-Setting research_enabled
         - auto_research_on_question
         - Keyword-Matching aus auto_research_keywords
+        - Ausschluss von Begrüßungen und Small-Talk
         """
         if not settings.mcp.research_enabled:
             return False
         if not settings.mcp.auto_research_on_question:
             return False
 
-        query_lower = query.lower()
+        query_lower = query.lower().strip()
+
+        # Zu kurze Queries ignorieren (wahrscheinlich Begrüßung)
+        if len(query_lower) < 15:
+            return False
+
+        # Begrüßungen und Small-Talk ausschließen
+        greetings = [
+            "hi", "hallo", "hey", "moin", "servus", "grüß", "guten tag",
+            "guten morgen", "guten abend", "wie geht", "wie gehts",
+            "was geht", "alles klar", "na du", "hello", "good morning",
+            "how are you", "what's up", "danke", "bitte", "tschüss", "bye"
+        ]
+        for greeting in greetings:
+            if greeting in query_lower:
+                return False
 
         # Prüfe ob Query ein Keyword enthält
         for keyword in settings.mcp.auto_research_keywords:
@@ -1240,6 +1262,28 @@ Sei präzise und gib detaillierte Analyse-Schritte."""
                 logger.info(f"[agent] Restored original query: {user_message[:50]}...")
             else:
                 user_message = "Fahre mit der Anfrage fort."
+
+        # ControlMarkers.RETRY_WITH_WEB wird nach Web-Fallback-Bestätigung gesendet
+        is_retry_with_web = user_message.strip() == ControlMarkers.RETRY_WITH_WEB
+        if is_retry_with_web:
+            logger.debug("[agent] Retry with web search approved")
+            state.web_fallback_approved = True
+            # Hole originale Query zurück für Research-Retry
+            if state.enhancement_original_query:
+                user_message = state.enhancement_original_query
+                logger.info(f"[agent] Retrying with web: {user_message[:50]}...")
+            else:
+                user_message = "Führe die Recherche mit Web-Suche durch."
+
+        # ControlMarkers.CONTINUE_WITHOUT_WEB wird nach Web-Fallback-Ablehnung gesendet
+        is_continue_no_web = user_message.strip() == ControlMarkers.CONTINUE_WITHOUT_WEB
+        if is_continue_no_web:
+            logger.debug("[agent] Continue without web search")
+            state.web_fallback_approved = False
+            if state.enhancement_original_query:
+                user_message = state.enhancement_original_query
+            else:
+                user_message = "Fahre ohne Web-Ergebnisse fort."
         # ─────────────────────────────────────────────────────────────────────
 
         # ── MCP Prompt Enhancement Phase ────────────────────────────────────
@@ -1281,66 +1325,87 @@ Sei präzise und gib detaillierte Analyse-Schritte."""
                         # Enhancement in State speichern für API-Zugriff
                         state.pending_enhancement = enriched
 
-                        # Enhancement-Complete Event - User-Bestätigung anfordern
-                        yield AgentEvent(AgentEventType.ENHANCEMENT_COMPLETE, {
-                            "context_count": len(enriched.context_items),
-                            "sources": enriched.context_sources,
-                            "summary": enriched.summary,
-                            "confirmation_message": enriched.get_confirmation_message(),
-                            "context_items": [
-                                {
-                                    "source": item.source,
-                                    "title": item.title,
-                                    "content_preview": item.content[:200] + "..." if len(item.content) > 200 else item.content,
-                                    "relevance": item.relevance,
-                                    "file_path": item.file_path,
-                                    "url": item.url
-                                }
-                                for item in enriched.context_items
-                            ]
-                        })
-
-                        # Auf User-Bestätigung warten
-                        yield AgentEvent(AgentEventType.CONFIRM_REQUIRED, {
-                            "type": "enhancement",
-                            "message": enriched.get_confirmation_message()
-                        })
-
                         # ────────────────────────────────────────────────────────
-                        # LEGACY YIELD PATTERN - NOT USED IN CURRENT FLOW
+                        # CHECK: Braucht dieser Enhancement-Typ User-Bestätigung?
                         # ────────────────────────────────────────────────────────
-                        # This yield/send pattern was designed for direct generator
-                        # confirmation but is NOT used in the actual flow.
-                        #
-                        # Actual confirmation flow:
-                        # 1. Frontend receives CONFIRM_REQUIRED event
-                        # 2. User clicks confirm/reject in UI
-                        # 3. API endpoint POST /enhancement/{session_id}/confirm
-                        #    stores the confirmed context
-                        # 4. Frontend sends [CONTINUE_ENHANCED] message
-                        # 5. Orchestrator detects is_continue_enhanced=True (line ~995)
-                        #    and retrieves stored context from state.pending_enhancement
-                        #
-                        # This yield pattern remains for potential future use with
-                        # direct generator-based confirmation (e.g., CLI mode).
-                        # ────────────────────────────────────────────────────────
-                        user_confirmed = yield
-                        if user_confirmed is None:
-                            user_confirmed = True  # Default: bestätigen
+                        confirm_mode = settings.task_agents.enhancement_confirm_mode
+                        always_confirm_types = settings.task_agents.enhancement_always_confirm
+                        enhancement_type = enriched.enhancement_type.value
 
-                        if user_confirmed:
+                        needs_confirmation = False
+                        if confirm_mode == "all":
+                            needs_confirmation = True
+                        elif confirm_mode == "write_only":
+                            # Nur bei Schreiboperationen (nicht bei Research)
+                            needs_confirmation = False
+                        elif enhancement_type in always_confirm_types:
+                            needs_confirmation = True
+                        # confirm_mode == "none" → needs_confirmation bleibt False
+
+                        if needs_confirmation:
+                            # Enhancement-Complete Event - User-Bestätigung anfordern
+                            yield AgentEvent(AgentEventType.ENHANCEMENT_COMPLETE, {
+                                "context_count": len(enriched.context_items),
+                                "sources": enriched.context_sources,
+                                "summary": enriched.summary,
+                                "confirmation_message": enriched.get_confirmation_message(),
+                                "context_items": [
+                                    {
+                                        "source": item.source,
+                                        "title": item.title,
+                                        "content_preview": item.content[:200] + "..." if len(item.content) > 200 else item.content,
+                                        "relevance": item.relevance,
+                                        "file_path": item.file_path,
+                                        "url": item.url
+                                    }
+                                    for item in enriched.context_items
+                                ]
+                            })
+
+                            # Auf User-Bestätigung warten
+                            yield AgentEvent(AgentEventType.CONFIRM_REQUIRED, {
+                                "type": "enhancement",
+                                "message": enriched.get_confirmation_message()
+                            })
+
+                            # ────────────────────────────────────────────────────────
+                            # LEGACY YIELD PATTERN - ONLY USED WITH CONFIRMATION
+                            # ────────────────────────────────────────────────────────
+                            # This yield/send pattern was designed for direct generator
+                            # confirmation but is NOT used in the actual flow.
+                            #
+                            # Actual confirmation flow:
+                            # 1. Frontend receives CONFIRM_REQUIRED event
+                            # 2. User clicks confirm/reject in UI
+                            # 3. API endpoint POST /enhancement/{session_id}/confirm
+                            #    stores the confirmed context
+                            # 4. Frontend sends [CONTINUE_ENHANCED] message
+                            # 5. Orchestrator detects is_continue_enhanced=True (line ~995)
+                            #    and retrieves stored context from state.pending_enhancement
+                            # ────────────────────────────────────────────────────────
+                            user_confirmed = yield
+                            if user_confirmed is None:
+                                user_confirmed = True  # Default: bestätigen
+
+                            if user_confirmed:
+                                enriched = enhancer.confirm(enriched, True)
+                                enriched_context = enriched.get_context_for_planner()
+                                state.pending_enhancement = None  # Clear after confirmation
+                                yield AgentEvent(AgentEventType.ENHANCEMENT_CONFIRMED, {
+                                    "context_length": len(enriched_context)
+                                })
+                                logger.info(f"[agent] Enhancement confirmed, context: {len(enriched_context)} chars")
+                            else:
+                                enriched = enhancer.confirm(enriched, False)
+                                state.pending_enhancement = None  # Clear after rejection
+                                yield AgentEvent(AgentEventType.ENHANCEMENT_REJECTED, {})
+                                logger.info("[agent] Enhancement rejected by user")
+                        else:
+                            # Auto-Confirm: Direkt bestätigen ohne UI
                             enriched = enhancer.confirm(enriched, True)
                             enriched_context = enriched.get_context_for_planner()
-                            state.pending_enhancement = None  # Clear after confirmation
-                            yield AgentEvent(AgentEventType.ENHANCEMENT_CONFIRMED, {
-                                "context_length": len(enriched_context)
-                            })
-                            logger.info(f"[agent] Enhancement confirmed, context: {len(enriched_context)} chars")
-                        else:
-                            enriched = enhancer.confirm(enriched, False)
-                            state.pending_enhancement = None  # Clear after rejection
-                            yield AgentEvent(AgentEventType.ENHANCEMENT_REJECTED, {})
-                            logger.info("[agent] Enhancement rejected by user")
+                            state.pending_enhancement = None
+                            logger.info(f"[agent] Enhancement auto-confirmed, context: {len(enriched_context)} chars")
 
                     elif enriched.cache_hit:
                         # Cache-Hit ohne neue Items

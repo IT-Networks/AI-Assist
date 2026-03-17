@@ -92,6 +92,7 @@ class ResearchCapability(BaseCapability):
         self.event_emitter = event_emitter
         self._source_results: Dict[str, List[ResearchResult]] = {}
         self._source_status: Dict[str, SourceStatus] = {}
+        self._wiki_primary: bool = False  # True when wiki/confluence was explicitly requested
 
     @property
     def name(self) -> str:
@@ -153,42 +154,71 @@ class ResearchCapability(BaseCapability):
             except Exception as e:
                 logger.warning(f"[research] Error emitting event: {e}")
 
-    def _determine_sources(self, query: str, requested_sources: Optional[List[str]]) -> List[ResearchSource]:
-        """Determine which sources to use based on query and request."""
+    def _determine_sources(
+        self,
+        query: str,
+        requested_sources: Optional[List[str]],
+        internal_only: bool = False
+    ) -> List[ResearchSource]:
+        """
+        Determine which sources to use based on query and request.
+
+        Strategy: Internal sources first (Wiki/Confluence/Handbook), Web only as fallback.
+
+        Args:
+            query: The search query
+            requested_sources: Explicitly requested sources
+            internal_only: If True, never include web search
+        """
         if requested_sources and "all" not in requested_sources:
             return [ResearchSource(s) for s in requested_sources if s in [e.value for e in ResearchSource]]
 
-        # Auto-detect based on query keywords
         query_lower = query.lower()
         sources = []
 
         # Always include memory for context
         sources.append(ResearchSource.MEMORY)
 
-        # Code-related queries
-        if any(kw in query_lower for kw in ["code", "class", "method", "function", "api", "implementation"]):
-            sources.append(ResearchSource.CODE_JAVA)
-            sources.append(ResearchSource.CODE_PYTHON)
+        # ════════════════════════════════════════════════════════════════════
+        # INTERNAL SOURCES FIRST (Wiki/Confluence/Handbook/Code)
+        # ════════════════════════════════════════════════════════════════════
+
+        # Confluence/wiki queries - HIGH PRIORITY for internal docs
+        wiki_keywords = ["wiki", "confluence", "seite", "page", "artikel",
+                        "durchsuche", "suche in", "finde in", "schau in"]
+        if any(kw in query_lower for kw in wiki_keywords):
+            sources.append(ResearchSource.CONFLUENCE)
+            # Mark that we explicitly want wiki - web only as fallback
+            self._wiki_primary = True
+        else:
+            # Default: always check Confluence for internal knowledge
+            sources.append(ResearchSource.CONFLUENCE)
+            self._wiki_primary = False
 
         # Documentation queries
         if any(kw in query_lower for kw in ["handbuch", "service", "documentation", "docs"]):
             sources.append(ResearchSource.HANDBOOK)
 
-        # Confluence/wiki queries
-        if any(kw in query_lower for kw in ["wiki", "confluence", "page", "artikel"]):
-            sources.append(ResearchSource.CONFLUENCE)
-
-        # Web search for general queries
-        if any(kw in query_lower for kw in ["best practice", "how to", "tutorial", "example", "library", "framework"]):
-            sources.append(ResearchSource.WEB)
+        # Code-related queries
+        if any(kw in query_lower for kw in ["code", "class", "method", "function", "api", "implementation"]):
+            sources.append(ResearchSource.CODE_JAVA)
+            sources.append(ResearchSource.CODE_PYTHON)
 
         # PDF for document-related
         if any(kw in query_lower for kw in ["pdf", "document", "specification", "spec"]):
             sources.append(ResearchSource.PDF)
 
-        # If no specific sources detected, use web + memory
-        if len(sources) <= 1:
-            sources.append(ResearchSource.WEB)
+        # ════════════════════════════════════════════════════════════════════
+        # WEB ONLY AS FALLBACK OR FOR EXTERNAL TOPICS
+        # ════════════════════════════════════════════════════════════════════
+
+        # Skip web if internal_only or if wiki was explicitly requested
+        if not internal_only and not self._wiki_primary:
+            # Web search only for clearly external/general queries
+            external_keywords = ["best practice", "how to", "tutorial", "example",
+                                "library", "framework", "stackoverflow", "github"]
+            if any(kw in query_lower for kw in external_keywords):
+                sources.append(ResearchSource.WEB)
 
         return list(set(sources))
 
@@ -284,6 +314,72 @@ class ResearchCapability(BaseCapability):
                 self._source_status[source.value].error = str(e)
                 logger.error(f"[research] Source {source.value} failed: {e}")
 
+        # ════════════════════════════════════════════════════════════════════
+        # WEB FALLBACK: If internal sources found nothing, request confirmation
+        # ════════════════════════════════════════════════════════════════════
+        internal_results = [
+            r for r in all_results
+            if r.source not in (ResearchSource.WEB,)
+        ]
+
+        web_fallback_approved = session.metadata.get("web_fallback_approved", False)
+
+        if not internal_results and ResearchSource.WEB not in sources:
+            logger.info("[research] No internal results found")
+
+            # Sanitize query for web search (remove internal info)
+            from app.services.research_router import QuerySanitizer
+            sanitizer = QuerySanitizer()
+            sanitized_query = sanitizer.sanitize(session.query)
+            removed_terms = sanitizer.get_removed_terms(session.query, sanitized_query)
+
+            if removed_terms:
+                logger.info(f"[research] Sanitized query, removed: {removed_terms}")
+
+            # Store sanitized query for potential web search
+            session.metadata["sanitized_query"] = sanitized_query
+            session.metadata["removed_terms"] = removed_terms
+
+            if not web_fallback_approved:
+                # Request user confirmation for web search
+                await self._emit_event("WEB_FALLBACK_REQUIRED", {
+                    "original_query": session.query[:100],
+                    "sanitized_query": sanitized_query,
+                    "removed_terms": removed_terms,
+                    "message": f"Keine internen Ergebnisse gefunden. Web-Suche mit bereinigter Query?",
+                    "internal_sources_checked": [s.value for s in sources]
+                })
+
+                logger.info("[research] Web fallback requires user confirmation")
+                # Mark that we need confirmation - the orchestrator will handle this
+                session.metadata["needs_web_fallback_confirmation"] = True
+
+            else:
+                # Web fallback was approved - execute with sanitized query
+                logger.info("[research] Web fallback approved, searching with sanitized query")
+                await self._emit_event("MCP_PROGRESS", {
+                    "current_step": len(sources) + 1,
+                    "total_steps": len(sources) + 2,
+                    "message": f"Web-Suche: {sanitized_query[:50]}..."
+                })
+
+                try:
+                    web_results = await asyncio.wait_for(
+                        self._search_web(sanitized_query, max_results),
+                        timeout=timeout
+                    )
+                    if web_results:
+                        self._source_results[ResearchSource.WEB.value] = web_results
+                        self._source_status[ResearchSource.WEB.value] = SourceStatus(
+                            source=ResearchSource.WEB,
+                            status="completed",
+                            results_count=len(web_results)
+                        )
+                        all_results.extend(web_results)
+                        logger.info(f"[research] Web fallback found {len(web_results)} results")
+                except Exception as e:
+                    logger.warning(f"[research] Web fallback failed: {e}")
+
         # Summarize exploration
         successful_sources = [s for s, st in self._source_status.items() if st.status == "completed"]
         failed_sources = [s for s, st in self._source_status.items() if st.status == "failed"]
@@ -295,7 +391,8 @@ class ResearchCapability(BaseCapability):
             insights=[
                 f"Total results: {len(all_results)}",
                 f"Successful sources: {len(successful_sources)}",
-                f"Failed sources: {len(failed_sources)}"
+                f"Failed sources: {len(failed_sources)}",
+                "Web fallback used" if ResearchSource.WEB.value in self._source_results and ResearchSource.WEB not in sources else ""
             ]
         )
 
