@@ -1127,6 +1127,7 @@ class TaskAgentConfig(BaseModel):
     enhancement_always_confirm: List[str] = []
     # Research: Interne Quellen bevorzugen (Wiki/Confluence vor Web)
     research_internal_first: bool = True     # Intern zuerst, Web nur als Fallback
+    # Hinweis: Web-Suche wird über search.enabled gesteuert (in config.yaml)
 
 
 class Settings(BaseModel):

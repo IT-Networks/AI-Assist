@@ -212,8 +212,15 @@ class ResearchCapability(BaseCapability):
         # WEB ONLY AS FALLBACK OR FOR EXTERNAL TOPICS
         # ════════════════════════════════════════════════════════════════════
 
-        # Skip web if internal_only or if wiki was explicitly requested
-        if not internal_only and not self._wiki_primary:
+        # Check if web search is enabled globally (search.enabled in config.yaml)
+        from app.core.config import settings
+        web_enabled = settings.search.enabled
+
+        # Skip web if:
+        # - web_search_enabled is False (global disable)
+        # - internal_only is True
+        # - wiki was explicitly requested
+        if web_enabled and not internal_only and not self._wiki_primary:
             # Web search only for clearly external/general queries
             external_keywords = ["best practice", "how to", "tutorial", "example",
                                 "library", "framework", "stackoverflow", "github"]
@@ -324,7 +331,11 @@ class ResearchCapability(BaseCapability):
 
         web_fallback_approved = session.metadata.get("web_fallback_approved", False)
 
-        if not internal_results and ResearchSource.WEB not in sources:
+        # Check if web search is globally enabled
+        from app.core.config import settings
+        web_globally_enabled = settings.search.enabled
+
+        if not internal_results and ResearchSource.WEB not in sources and web_globally_enabled:
             logger.info("[research] No internal results found")
 
             # Sanitize query for web search (remove internal info)
