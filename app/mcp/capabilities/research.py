@@ -794,7 +794,13 @@ Erstelle einen strukturierten Report:
 [Liste der verwendeten Quellen]
 """
 
-        if self.llm_callback:
+        # PERFORMANCE: Bei "quick" Tiefe LLM-Synthese überspringen (spart 20-60s)
+        depth = session.metadata.get("depth", "normal")
+        if depth == "quick":
+            # Schneller Default-Report ohne LLM-Call
+            report = self._generate_default_report(session.query, all_results)
+            logger.debug("[research] Quick mode: skipping LLM synthesis")
+        elif self.llm_callback:
             report = await self._call_llm(synthesis_prompt)
         else:
             report = self._generate_default_report(session.query, all_results)
@@ -895,8 +901,9 @@ def get_research_capability(
     if _research_capability is None:
         _research_capability = ResearchCapability(llm_callback, event_emitter)
     else:
-        if llm_callback and _research_capability.llm_callback is None:
+        # Always update callbacks when provided (fixes stale singleton issue)
+        if llm_callback:
             _research_capability.llm_callback = llm_callback
-        if event_emitter and _research_capability.event_emitter is None:
+        if event_emitter:
             _research_capability.event_emitter = event_emitter
     return _research_capability

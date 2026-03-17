@@ -891,4 +891,15 @@ def get_prompt_enhancer(
             mcp_callback=mcp_callback,
             event_callback=event_callback
         )
+    else:
+        # Always update callbacks if provided (fixes stale singleton issue)
+        if event_callback:
+            _prompt_enhancer.event_callback = event_callback
+            # Reset lazy-loaded capabilities to use new callback
+            _prompt_enhancer._research_capability = None
+            _prompt_enhancer._sequential_thinking = None
+            _prompt_enhancer._analyze_capability = None
+            _prompt_enhancer._brainstorm_capability = None
+        if mcp_callback:
+            _prompt_enhancer.mcp_callback = mcp_callback
     return _prompt_enhancer

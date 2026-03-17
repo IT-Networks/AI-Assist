@@ -1085,48 +1085,63 @@ class SequentialThinking:
             if critical:
                 assumption_info = "\n[OFFENE KRITISCHE ANNAHMEN: " + ", ".join(f"{a.id}:{a.text[:30]}..." for a in critical) + "]"
 
-        return f"""Du bist ein strukturierter Denker. Analysiere das folgende Problem schrittweise.
+        return f"""Du bist ein faktenbasierter Analyst. Analysiere das Problem STRIKT auf Basis vorhandener Informationen.
 
 PROBLEM:
 {session.query}
 {branch_info}{assumption_info}
 
-BUDGET: Du hast {session.initial_max_steps} Schritte. Arbeite effizient und fordere NUR dann mehr an, wenn absolut notwendig.
+BUDGET: {session.initial_max_steps} Schritte. Arbeite effizient.
 
 BISHERIGE SCHRITTE:
 {session.get_context()}
 
-Dein nächster Denkschritt sollte einer dieser Typen sein:
-- ANALYSIS: Problem analysieren
-- HYPOTHESIS: Eine Vermutung aufstellen
-- VERIFICATION: Eine Hypothese prüfen
+═══════════════════════════════════════════════════════════════════════════════
+WICHTIG - ANTI-HALLUZINATIONS-REGELN:
+═══════════════════════════════════════════════════════════════════════════════
+1. KEINE ERFINDUNGEN: Behaupte nur was du aus dem Kontext weißt
+2. QUELLEN ANGEBEN: Zitiere konkrete Dateien, Zeilen, Variablen wenn du sie erwähnst
+3. UNSICHERHEIT MARKIEREN: Nutze "vermutlich", "möglicherweise" bei Annahmen
+4. KEINE DETAILS ERFINDEN: Wenn du etwas nicht weißt, sage "unbekannt"
+5. CONFIDENCE < 0.5: Wenn du rätst, setze niedrige Confidence
+
+Bei HYPOTHESIS: Markiere klar als "Vermutung - muss geprüft werden"
+Bei VERIFICATION: Nur "verifiziert" wenn du echte Belege hast
+═══════════════════════════════════════════════════════════════════════════════
+
+Dein nächster Denkschritt:
+- ANALYSIS: Problem analysieren (nur basierend auf bekannten Fakten!)
+- HYPOTHESIS: Vermutung aufstellen (klar als Vermutung markieren!)
+- VERIFICATION: Hypothese prüfen (nur mit echten Belegen!)
 - PLANNING: Konkrete Schritte planen
-- DECISION: Eine Entscheidung treffen
-- REVISION: Einen früheren Schritt korrigieren (gib REVISES_STEP an!)
-- BRANCH: Alternativen Ansatz starten (gib BRANCH_ID und BRANCH_FROM an!)
+- DECISION: Entscheidung treffen
+- REVISION: Früheren Schritt korrigieren (REVISES_STEP angeben!)
+- BRANCH: Alternativen Ansatz (BRANCH_ID, BRANCH_FROM angeben!)
 - CONCLUSION: Finale Schlussfolgerung (wenn fertig)
 
-Antworte im Format:
+Format:
 TYPE: [typ]
 TITLE: [kurzer Titel]
-CONTENT: [Inhalt des Schritts]
+CONTENT: [Inhalt - mit Quellenangaben wenn möglich]
+EVIDENCE: [Konkrete Belege/Quellen oder "keine" wenn Vermutung]
+CONFIDENCE: [0.0-1.0 - realistisch einschätzen!]
 CONTINUE: [yes/no]
-NEEDS_MORE_STEPS: [yes/no] (Brauchst du mehr Schritte?)
-ESTIMATED_REMAINING: [Zahl 0-10]
+NEEDS_MORE_STEPS: [yes/no]
+ESTIMATED_REMAINING: [0-10]
 
 Optional für REVISION:
-REVISES_STEP: [Schritt-Nummer die korrigiert wird]
-REVISION_REASON: [Grund für Korrektur]
+REVISES_STEP: [Schritt-Nummer]
+REVISION_REASON: [Grund]
 
 Optional für BRANCH:
 BRANCH_ID: [kurzer-id-name]
-BRANCH_FROM: [Schritt-Nummer von der abgezweigt wird]
-BRANCH_DESCRIPTION: [Was wird alternativ untersucht]
+BRANCH_FROM: [Schritt-Nummer]
+BRANCH_DESCRIPTION: [Was wird untersucht]
 
-Optional - falls du eine wichtige ANNAHME machst:
-ASSUMPTION: [Text der Annahme]
-ASSUMPTION_CRITICAL: [yes/no - kann diese Annahme alles ändern?]
-ASSUMPTION_CONFIDENCE: [0.0-1.0 - wie sicher bist du?]
+Optional bei ANNAHME:
+ASSUMPTION: [Text - klar als Annahme formuliert]
+ASSUMPTION_CRITICAL: [yes/no]
+ASSUMPTION_CONFIDENCE: [0.0-1.0]
 """
 
     def _build_continuation_prompt(self, session: ThinkingSession) -> str:
@@ -1142,45 +1157,42 @@ ASSUMPTION_CONFIDENCE: [0.0-1.0 - wie sicher bist du?]
         if session.risk_score > 0.5:
             risk_info = f"\n⚠️ ACHTUNG: Hohes Risiko durch ungeprüfte kritische Annahmen (Risk-Score: {session.risk_score:.1%})"
 
-        return f"""Setze die strukturierte Analyse fort.
+        return f"""Setze die faktenbasierte Analyse fort. KEINE Erfindungen!
 
-URSPRÜNGLICHES PROBLEM:
+PROBLEM:
 {session.query}
 
 BISHERIGE SCHRITTE:
 {session.get_context()}
 
-AKTUELLER STATUS: Schritt {session.current_step} von {session.initial_max_steps} (Budget){branch_info}
+STATUS: Schritt {session.current_step}/{session.initial_max_steps}{branch_info}
 {f"Revisionen: {session.revision_count}" if session.revision_count > 0 else ""}{risk_info}
 
-Arbeite innerhalb des Budgets. Fordere NUR mehr Schritte an wenn ABSOLUT notwendig.
-Was ist der nächste logische Denkschritt?
-- Bei Fehlern in früheren Schritten: TYPE: REVISION
-- Um Alternative zu testen: TYPE: BRANCH
-- Um kritische Annahmen zu validieren: TYPE: VERIFICATION
-- Wenn fertig: TYPE: CONCLUSION
+ERINNERUNG - KEINE HALLUZINATIONEN:
+- Nur behaupten was du aus dem Kontext weißt
+- Quellen angeben (Datei:Zeile, Variable, etc.)
+- Unsicherheit mit "vermutlich/möglicherweise" markieren
+- EVIDENCE-Feld nutzen für Belege
 
-Antworte im Format:
+Nächster Schritt:
+- REVISION: Fehler korrigieren
+- BRANCH: Alternative testen
+- VERIFICATION: Annahme prüfen (nur mit echten Belegen!)
+- CONCLUSION: Fertig
+
+Format:
 TYPE: [typ]
 TITLE: [kurzer Titel]
-CONTENT: [Inhalt des Schritts]
+CONTENT: [Inhalt - faktenbasiert!]
+EVIDENCE: [Konkrete Belege oder "keine"]
+CONFIDENCE: [0.0-1.0]
 CONTINUE: [yes/no]
 NEEDS_MORE_STEPS: [yes/no]
-ESTIMATED_REMAINING: [Zahl 0-10]
+ESTIMATED_REMAINING: [0-10]
 
-Optional für REVISION:
-REVISES_STEP: [Schritt-Nummer]
-REVISION_REASON: [Grund]
-
-Optional für BRANCH:
-BRANCH_ID: [kurzer-id-name]
-BRANCH_FROM: [Schritt-Nummer]
-BRANCH_DESCRIPTION: [Was wird alternativ untersucht]
-
-Optional bei neuer ANNAHME:
-ASSUMPTION: [Text]
-ASSUMPTION_CRITICAL: [yes/no]
-ASSUMPTION_CONFIDENCE: [0.0-1.0]
+Optional REVISION: REVISES_STEP, REVISION_REASON
+Optional BRANCH: BRANCH_ID, BRANCH_FROM, BRANCH_DESCRIPTION
+Optional ANNAHME: ASSUMPTION, ASSUMPTION_CRITICAL, ASSUMPTION_CONFIDENCE
 """
 
     def _parse_thinking_response(self, response: str) -> dict:
@@ -1200,6 +1212,10 @@ ASSUMPTION_CONFIDENCE: [0.0-1.0]
             "should_continue": True,
             "needs_more_steps": False,
             "estimated_remaining": 0,
+            # v3: Evidence/Confidence (Anti-Halluzination)
+            "evidence": None,
+            "has_evidence": False,
+            "confidence": 0.5,
             # v2: Revision fields
             "is_revision": False,
             "revises_step": None,
@@ -1258,6 +1274,37 @@ ASSUMPTION_CONFIDENCE: [0.0-1.0]
         remaining_match = re.search(r'ESTIMATED_REMAINING:\s*(\d+)', response, re.IGNORECASE)
         if remaining_match:
             result["estimated_remaining"] = min(10, int(remaining_match.group(1)))
+
+        # ═══════════════════════════════════════════════════════════════════
+        # v3: EVIDENCE und CONFIDENCE (Anti-Halluzination)
+        # ═══════════════════════════════════════════════════════════════════
+        evidence_match = re.search(r'EVIDENCE:\s*(.+?)(?:\nCONFIDENCE:|\nCONTINUE:|\n[A-Z_]+:|\n\n|$)', response, re.IGNORECASE | re.DOTALL)
+        if evidence_match:
+            evidence = evidence_match.group(1).strip().lower()
+            result["evidence"] = evidence_match.group(1).strip()
+            # Keine Belege = niedrigere Default-Confidence
+            if evidence in ("keine", "none", "no", "-", ""):
+                result["has_evidence"] = False
+            else:
+                result["has_evidence"] = True
+        else:
+            result["evidence"] = None
+            result["has_evidence"] = False
+
+        # CONFIDENCE extrahieren
+        conf_match = re.search(r'CONFIDENCE:\s*([\d.]+)', response, re.IGNORECASE)
+        if conf_match:
+            try:
+                confidence = min(1.0, max(0.0, float(conf_match.group(1))))
+                # Confidence ohne Belege auf max 0.5 begrenzen
+                if not result.get("has_evidence", False) and confidence > 0.5:
+                    confidence = 0.5
+                result["confidence"] = confidence
+            except ValueError:
+                result["confidence"] = 0.5
+        else:
+            # Default: 0.5 ohne Belege, 0.7 mit Belegen
+            result["confidence"] = 0.7 if result.get("has_evidence", False) else 0.5
 
         # ═══════════════════════════════════════════════════════════════════
         # v2: REVISION fields

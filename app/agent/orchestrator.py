@@ -1306,7 +1306,9 @@ Sei präzise und gib detaillierte Analyse-Schritte."""
                     ConfirmationStatus
                 )
 
-                enhancer = get_prompt_enhancer()
+                enhancer = get_prompt_enhancer(
+                    event_callback=self._emit_mcp_event  # FIX: Enable live event streaming
+                )
 
                 # Prüfen ob Enhancement sinnvoll
                 if enhancer.detector.should_enhance(user_message):
@@ -1318,8 +1320,24 @@ Sei präzise und gib detaillierte Analyse-Schritte."""
                         "detection_type": enhancer.detector.detect(user_message).value
                     })
 
-                    # Kontext sammeln
-                    enriched = await enhancer.enhance(user_message)
+                    # Subscribe to event bridge for live streaming during enhancement
+                    mcp_queue = self._event_bridge.subscribe()
+
+                    try:
+                        # Kontext sammeln in separatem Task für Live-Event-Streaming
+                        enhance_task = asyncio.create_task(
+                            enhancer.enhance(user_message)
+                        )
+
+                        # Events live streamen während Enhancement läuft
+                        while not enhance_task.done():
+                            async for mcp_event in self._drain_mcp_events_from_queue(mcp_queue):
+                                yield mcp_event
+                            await asyncio.sleep(0.05)
+
+                        enriched = await enhance_task
+                    finally:
+                        self._event_bridge.unsubscribe(mcp_queue)
 
                     if enriched.context_items:
                         # Enhancement in State speichern für API-Zugriff
@@ -1743,8 +1761,10 @@ Sei präzise und gib detaillierte Analyse-Schritte."""
 
         # === RESEARCH PHASE (Parallele Quellensuche) ===
         # Aktiviert bei Fragen oder Keywords - sucht parallel in Memory, Code, Web, Docs
+        # SKIP wenn Enhancement bereits Research durchgeführt hat (vermeidet Doppelarbeit)
         if (
             not forced_capability
+            and not enriched_context  # Enhancement hat bereits Research gemacht
             and self._should_auto_research(user_message)
         ):
             try:
@@ -1756,6 +1776,8 @@ Sei präzise und gib detaillierte Analyse-Schritte."""
             except Exception as e:
                 logger.warning(f"[agent] Research phase failed: {e}")
                 # Nicht kritisch - weiter mit normalem Flow
+        elif enriched_context:
+            logger.debug("[agent] Skipping research phase - enhancement already ran")
 
         # === SUB-AGENT PHASE ===
         # Spezialisierte Sub-Agenten erkunden Datenquellen parallel,
