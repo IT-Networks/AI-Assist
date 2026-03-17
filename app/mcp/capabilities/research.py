@@ -617,18 +617,26 @@ class ResearchCapability(BaseCapability):
             return []
 
     async def _search_pdf(self, query: str, max_results: int) -> List[ResearchResult]:
-        """Search PDF documents."""
+        """Search across all indexed PDF documents."""
         try:
             from app.services.pdf_indexer import get_pdf_indexer
 
             indexer = get_pdf_indexer()
-            pdf_results = indexer.search(query, top_k=max_results)
+
+            # Prüfen ob PDFs indexiert sind
+            pdf_count = indexer.get_pdf_count()
+            if pdf_count == 0:
+                logger.debug("[research] No PDFs indexed")
+                return []
+
+            # Über alle PDFs suchen (nicht nur ein spezifisches)
+            pdf_results = indexer.search_all(query, top_k=max_results)
 
             results = []
             for r in pdf_results:
                 results.append(ResearchResult(
                     source=ResearchSource.PDF,
-                    title=r.get("filename", ""),
+                    title=f"{r.get('filename', 'PDF')} (Seite {r.get('page', '?')})",
                     content=r.get("chunk", "")[:500],
                     relevance=r.get("score", 0.5),
                     metadata={
@@ -637,6 +645,7 @@ class ResearchCapability(BaseCapability):
                     }
                 ))
 
+            logger.debug(f"[research] PDF search: {len(results)} results from {pdf_count} indexed PDFs")
             return results
 
         except Exception as e:

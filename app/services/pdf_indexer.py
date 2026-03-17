@@ -153,6 +153,73 @@ class PDFIndexer:
         with self._connect() as con:
             con.execute("DELETE FROM pdf_fts WHERE pdf_id=?", (pdf_id,))
 
+    def search_all(self, query: str, top_k: int = 10) -> List[dict]:
+        """
+        Sucht über ALLE indizierten PDFs nach der Abfrage.
+
+        Args:
+            query: Suchbegriff
+            top_k: Maximale Anzahl Ergebnisse
+
+        Returns:
+            Liste von Dicts mit: pdf_id, page, chunk, score
+        """
+        if not query.strip():
+            return []
+
+        safe_query = query.replace('"', '""')
+        results = []
+
+        with self._connect() as con:
+            try:
+                rows = con.execute(
+                    """
+                    SELECT pdf_id, page_num, content, rank
+                    FROM pdf_fts
+                    WHERE pdf_fts MATCH ?
+                    ORDER BY rank
+                    LIMIT ?
+                    """,
+                    (safe_query, top_k),
+                ).fetchall()
+            except sqlite3.OperationalError:
+                # Fallback: LIKE-Suche (langsamer aber robuster)
+                like = f"%{query}%"
+                rows = con.execute(
+                    """
+                    SELECT pdf_id, page_num, content, 0 AS rank
+                    FROM pdf_fts
+                    WHERE content LIKE ?
+                    ORDER BY page_num
+                    LIMIT ?
+                    """,
+                    (like, top_k),
+                ).fetchall()
+
+            for row in rows:
+                # Rank ist negativ bei FTS5 (niedrigerer Wert = besser)
+                # Normalisieren zu 0.0-1.0 Score
+                rank = row["rank"]
+                score = 1.0 / (1.0 + abs(rank)) if rank else 0.5
+
+                results.append({
+                    "pdf_id": row["pdf_id"],
+                    "page": row["page_num"],
+                    "chunk": row["content"],
+                    "score": score,
+                    "filename": row["pdf_id"]  # PDF-ID ist oft der Filename
+                })
+
+        return results
+
+    def get_pdf_count(self) -> int:
+        """Gibt die Anzahl indexierter PDFs zurück."""
+        with self._connect() as con:
+            row = con.execute(
+                "SELECT COUNT(DISTINCT pdf_id) FROM pdf_fts"
+            ).fetchone()
+        return row[0] if row else 0
+
 
 # Singleton
 _pdf_indexer: Optional[PDFIndexer] = None
