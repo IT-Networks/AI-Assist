@@ -632,6 +632,8 @@ class AgentOrchestrator:
         LLM-Callback für MCP Sequential Thinking.
 
         Ermöglicht echtes LLM-Denken statt Template-Fallback.
+        WICHTIG: Verwendet längeren Timeout (60s) da Analyse-Schritte
+        mehr Zeit benötigen als einfache Klassifikation.
         """
         system_prompt = """Du bist ein strukturierter analytischer Denker.
 Antworte IMMER im exakten Format das im Prompt angegeben ist.
@@ -645,13 +647,17 @@ Sei präzise und gib detaillierte Analyse-Schritte."""
         messages.append({"role": "user", "content": prompt})
 
         try:
-            response = await central_llm_client.chat_quick(
+            # WICHTIG: Nicht chat_quick() verwenden (15s Timeout, 256 Tokens)!
+            # Sequential Thinking braucht mehr Zeit und Tokens.
+            response = await central_llm_client.chat_with_tools(
                 messages=messages,
                 temperature=0.2,  # Niedrig für konsistentes Format
-                max_tokens=2048   # Mehr Tokens für detaillierte Schritte
+                max_tokens=2048,  # Genug Tokens für detaillierte Schritte
+                timeout=TIMEOUT_TOOL,  # 60s statt 15s
             )
-            logger.debug(f"[MCP] LLM callback response length: {len(response)}")
-            return response
+            result = response.content or ""
+            logger.debug(f"[MCP] LLM callback response length: {len(result)}")
+            return result
         except Exception as e:
             logger.warning(f"[MCP] LLM callback failed: {e}")
             return ""
