@@ -571,3 +571,113 @@ async def list_available_models():
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/example-request")
+async def get_example_request():
+    """
+    Gibt einen Beispiel-Request zurück, den du in Postman/Bruno verwenden kannst.
+
+    Kopiere den 'curl_command' oder nutze den 'request_body' direkt.
+    """
+    base_url = settings.llm.base_url.rstrip("/")
+    model = settings.llm.default_model
+
+    # Einfacher Request ohne Tools
+    simple_body = {
+        "model": model,
+        "messages": [
+            {"role": "system", "content": "Du bist ein hilfreicher Assistent."},
+            {"role": "user", "content": "Wie geht es dir?"}
+        ],
+        "temperature": 0.2,
+        "max_tokens": 256,
+        "stream": False
+    }
+
+    # Request mit Tools (wie Agent ihn macht)
+    tools_body = {
+        "model": model,
+        "messages": [
+            {"role": "system", "content": "Du bist ein hilfreicher Assistent mit Tool-Zugriff."},
+            {"role": "user", "content": "Wie spät ist es?"}
+        ],
+        "temperature": 0.0,
+        "max_tokens": 256,
+        "stream": False,
+        "tools": DIAGNOSTIC_TOOLS,
+        "tool_choice": "auto"
+    }
+
+    import json as json_module
+
+    return {
+        "base_url": base_url,
+        "endpoint": f"{base_url}/chat/completions",
+        "simple_request": {
+            "description": "Einfacher Chat ohne Tools",
+            "body": simple_body,
+            "curl_command": f"""curl -X POST "{base_url}/chat/completions" \\
+  -H "Content-Type: application/json" \\
+  -d '{json_module.dumps(simple_body, ensure_ascii=False)}'"""
+        },
+        "tools_request": {
+            "description": "Chat mit Tools (wie Agent)",
+            "body": tools_body,
+            "curl_command": f"""curl -X POST "{base_url}/chat/completions" \\
+  -H "Content-Type: application/json" \\
+  -d '{json_module.dumps(tools_body, ensure_ascii=False)}'"""
+        },
+        "hint": "Wenn der einfache Request funktioniert aber der mit Tools nicht, liegt das Problem am Tool-Format."
+    }
+
+
+@router.post("/debug-agent-request")
+async def debug_agent_request(
+    message: str = Body(default="Wie geht es dir?", embed=True),
+    model: Optional[str] = Body(default=None, embed=True),
+):
+    """
+    Zeigt den exakten Request, den der Agent an das LLM senden würde.
+
+    Nützlich zum Debuggen warum Requests fehlschlagen.
+    """
+    from app.agent.orchestrator import get_agent_orchestrator, SYSTEM_PROMPT
+    from app.utils.token_counter import estimate_tokens, estimate_messages_tokens
+
+    model = model or settings.llm.default_model
+
+    # Baue Messages wie der Agent es tut
+    messages = [
+        {"role": "system", "content": SYSTEM_PROMPT},
+        {"role": "user", "content": message}
+    ]
+
+    # Token-Schätzung
+    system_tokens = estimate_tokens(SYSTEM_PROMPT)
+    user_tokens = estimate_tokens(message)
+    total_tokens = estimate_messages_tokens(messages)
+
+    # Request-Body wie er gesendet würde
+    request_body = {
+        "model": model,
+        "messages": messages,
+        "temperature": settings.llm.tool_temperature,
+        "max_tokens": settings.llm.max_tokens,
+        "stream": False,
+    }
+
+    return {
+        "model": model,
+        "token_estimate": {
+            "system_prompt": system_tokens,
+            "user_message": user_tokens,
+            "total": total_tokens,
+            "max_context": settings.llm.llm_context_limits.get(model, settings.llm.default_context_limit),
+        },
+        "system_prompt_length": len(SYSTEM_PROMPT),
+        "system_prompt_preview": SYSTEM_PROMPT[:500] + "..." if len(SYSTEM_PROMPT) > 500 else SYSTEM_PROMPT,
+        "request_body": request_body,
+        "request_body_size_bytes": len(json.dumps(request_body)),
+        "endpoint": f"{settings.llm.base_url.rstrip('/')}/chat/completions",
+    }

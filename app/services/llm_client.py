@@ -275,10 +275,21 @@ class LLMClient:
                     return  # Stream erfolgreich abgeschlossen
             except httpx.HTTPStatusError as e:
                 last_exc = e
-                if e.response.status_code >= 500 and attempt < len(_RETRY_DELAYS):
-                    print(f"[llm] Stream Retry {attempt + 1} nach HTTP {e.response.status_code}")
+                status = e.response.status_code
+                if status >= 500 and attempt < len(_RETRY_DELAYS):
+                    print(f"[llm] Stream Retry {attempt + 1} nach HTTP {status}")
                     continue
-                raise LLMError(f"LLM API Fehler {e.response.status_code}: {e.response.text}") from e
+                # Benutzerfreundliche Fehlermeldung für Gateway-Timeouts
+                if status == 504:
+                    raise LLMError(f"LLM Gateway Timeout (504): Der LLM-Server hat zu lange gebraucht.") from e
+                # HTML/Bild-Response erkennen
+                try:
+                    raw = e.response.text[:500]
+                    if raw.startswith("<!") or "base64" in raw.lower():
+                        raise LLMError(f"LLM API Fehler {status}: Gateway-Fehlerseite statt JSON") from e
+                except Exception:
+                    pass
+                raise LLMError(f"LLM API Fehler {status}: {e.response.text[:200]}") from e
             except httpx.RequestError as e:
                 last_exc = e
                 if attempt < len(_RETRY_DELAYS):
@@ -467,12 +478,24 @@ class LLMClient:
                 status = e.response.status_code
                 body = ""
                 try:
-                    body = e.response.text[:500]
+                    raw_body = e.response.text[:2000]
+                    # Erkennen von HTML/Bild-Responses (Gateway-Fehlerseiten)
+                    if raw_body.startswith("<!") or raw_body.startswith("<html") or "base64" in raw_body.lower():
+                        body = f"[Gateway-Fehlerseite - keine JSON-Response]"
+                        logger.warning(f"[llm] HTTP {status}: Gateway gab HTML/Bild zurück statt JSON")
+                    elif raw_body.startswith("data:image") or len(raw_body) > 500 and not raw_body.strip().startswith("{"):
+                        body = f"[Ungültige Response - kein JSON]"
+                        logger.warning(f"[llm] HTTP {status}: Response ist kein JSON (erste 100 Zeichen: {raw_body[:100]})")
+                    else:
+                        body = raw_body[:500]
                 except Exception:
                     pass
                 logger.warning(f"[llm] HTTP {status} (Versuch {attempt + 1}): {body}")
                 if status >= 500 and attempt < len(_RETRY_DELAYS):
                     continue
+                # Benutzerfreundliche Fehlermeldung für Gateway-Timeouts
+                if status == 504:
+                    raise LLMError(f"LLM Gateway Timeout (504): Der LLM-Server hat zu lange gebraucht. Versuche eine kürzere Anfrage oder wähle ein schnelleres Modell.") from e
                 raise LLMError(f"LLM API Fehler {status}: {body}") from e
 
             except httpx.TimeoutException as e:
