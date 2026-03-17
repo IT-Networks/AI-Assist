@@ -260,6 +260,8 @@ class AgentEventType(str, Enum):
     # Workspace Events
     WORKSPACE_CODE_CHANGE = "workspace_code_change"  # Code-Änderung für Workspace Panel
     WORKSPACE_SQL_RESULT = "workspace_sql_result"    # SQL-Abfrage-Ergebnis für Workspace Panel
+    WORKSPACE_FILE = "workspace_file"                # Gelesene Datei für Workspace Panel
+    WORKSPACE_RESEARCH = "workspace_research"        # Research-Ergebnis für Workspace Panel
 
 
 @dataclass
@@ -946,6 +948,8 @@ Sei präzise und gib detaillierte Analyse-Schritte."""
             # Workspace events
             "workspace_code_change": AgentEventType.WORKSPACE_CODE_CHANGE,
             "workspace_sql_result": AgentEventType.WORKSPACE_SQL_RESULT,
+            "workspace_file": AgentEventType.WORKSPACE_FILE,
+            "workspace_research": AgentEventType.WORKSPACE_RESEARCH,
         }
 
     async def _drain_mcp_events(self) -> AsyncGenerator[AgentEvent, None]:
@@ -1093,6 +1097,28 @@ Sei präzise und gib detaillierte Analyse-Schritte."""
                 "success": session.is_complete,
                 "message": "Research-Phase abgeschlossen"
             })
+
+            # Workspace Research Events für UI Panel
+            if session.is_complete:
+                # Emit einzelne Items für jedes Artifact
+                if session.artifacts:
+                    for artifact in session.artifacts:
+                        yield AgentEvent(AgentEventType.WORKSPACE_RESEARCH, {
+                            "source": artifact.source_name if hasattr(artifact, 'source_name') else "research",
+                            "title": artifact.title if hasattr(artifact, 'title') else query[:50],
+                            "snippet": artifact.content[:500] if hasattr(artifact, 'content') else "",
+                            "url": artifact.url if hasattr(artifact, 'url') else None,
+                            "relevance": artifact.relevance if hasattr(artifact, 'relevance') else 0.5
+                        })
+                # Falls keine Artifacts aber Conclusion: Zusammenfassung als Item
+                elif session.final_conclusion:
+                    yield AgentEvent(AgentEventType.WORKSPACE_RESEARCH, {
+                        "source": "summary",
+                        "title": f"Research: {query[:40]}",
+                        "snippet": session.final_conclusion[:500],
+                        "url": None,
+                        "relevance": 1.0
+                    })
 
         except asyncio.TimeoutError:
             logger.warning(f"[agent] Research phase timed out after {timeout}s")
@@ -2618,6 +2644,29 @@ Sei präzise und gib detaillierte Analyse-Schritte."""
                             "success": result.success,
                             "data": result.to_context()[:2000]  # Truncate für Frontend
                         })
+
+                        # Workspace Events für spezifische Tools
+                        if result.success:
+                            if tool_call.name == "read_file":
+                                # Datei-Inhalt für Workspace Panel
+                                file_path = tool_call.arguments.get("path", "")
+                                yield AgentEvent(AgentEventType.WORKSPACE_FILE, {
+                                    "filePath": file_path,
+                                    "path": file_path,  # Fallback für Frontend
+                                    "operation": "read"
+                                })
+                            elif tool_call.name in ("write_file", "edit_file", "create_file"):
+                                # Code-Änderung für Workspace Panel
+                                file_path = tool_call.arguments.get("path", "")
+                                content = tool_call.arguments.get("content", "")
+                                yield AgentEvent(AgentEventType.WORKSPACE_CODE_CHANGE, {
+                                    "filePath": file_path,
+                                    "modifiedContent": content[:5000] if content else result.to_context()[:2000],
+                                    "toolCall": tool_call.name,
+                                    "description": f"{tool_call.name}: {file_path}",
+                                    "status": "applied",
+                                    "isNew": tool_call.name == "create_file"
+                                })
 
                     state.tool_calls_history.append(tool_call)
 

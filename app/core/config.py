@@ -532,6 +532,53 @@ class WebSearchConfig(BaseModel):
 
     def get_proxy_url(self) -> Optional[str]:
         """Gibt die vollständige Proxy-URL inkl. Auth zurück."""
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Update Service (GitHub-basierte App-Updates)
+# ══════════════════════════════════════════════════════════════════════════════
+
+class UpdateConfig(BaseModel):
+    """Konfiguration für GitHub-basierte App-Updates."""
+    enabled: bool = False
+    # GitHub Repository (öffentlich oder privat)
+    repo_url: str = ""               # z.B. https://github.com/user/ai-assist-releases
+    github_token: str = ""           # Personal Access Token für private Repos
+    # Proxy verwenden (aus search-Konfiguration)
+    use_proxy: bool = True           # Proxy aus search-Konfiguration verwenden
+    verify_ssl: bool = False         # SSL-Zertifikate prüfen
+    timeout_seconds: int = 120       # Timeout für Downloads
+    # Auto-Update
+    check_on_start: bool = False     # Beim Start nach Updates suchen
+    # Whitelist: Nur diese Pfade werden aktualisiert
+    include_patterns: List[str] = Field(default_factory=lambda: [
+        "app/**/*.py",
+        "tests/**/*.py",
+        "static/**/*",
+        "templates/**/*",
+        "requirements.txt",
+        "main.py",
+    ])
+    # Blacklist: Diese Pfade werden NIE überschrieben
+    exclude_patterns: List[str] = Field(default_factory=lambda: [
+        "**/.env*",
+        "**/config.yaml",
+        "**/settings*.json",
+        "index/**",
+        "uploads/**",
+        "chats/**",
+        "logs/**",
+        "backups/**",
+        "skills/**",
+        "**/*.db",
+    ])
+
+    def get_proxy_url(self) -> Optional[str]:
+        """Gibt Proxy-URL zurück wenn use_proxy aktiviert."""
+        if not self.use_proxy:
+            return None
+        # Proxy aus search-Config holen (wird zur Laufzeit aufgelöst)
+        return None  # Wird in update_service.py aufgelöst
         return build_proxy_url(self.proxy_url, self.proxy_username, self.proxy_password)
 
 
@@ -1167,6 +1214,7 @@ class Settings(BaseModel):
     access_logging: AccessLoggingConfig = Field(default_factory=AccessLoggingConfig)
     servicenow: ServiceNowConfig = Field(default_factory=ServiceNowConfig)
     analytics: AnalyticsConfig = Field(default_factory=AnalyticsConfig)
+    update: UpdateConfig = Field(default_factory=UpdateConfig)
 
     def apply_env_overrides(self) -> "Settings":
         if os.getenv("LLM_BASE_URL"):

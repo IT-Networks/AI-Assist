@@ -703,3 +703,12 @@ access_logging:
   log_request_body: false
   log_response_body: false
   exclude_hosts: []
+
+# App-Update Service (GitHub-basiert)
+update:
+  enabled: false
+  repo_url: ''                    # z.B. https://github.com/user/ai-assist-releases
+  github_token: ''                # Personal Access Token für private Repos
+  use_proxy: true                 # Proxy aus search-Konfiguration verwenden
+  verify_ssl: false               # SSL-Zertifikate prüfen
+  check_on_start: false           # Beim Start nach Updates suchen

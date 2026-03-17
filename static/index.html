@@ -64,6 +64,9 @@
     <button class="header-btn" id="workspace-btn" onclick="toggleWorkspace()" title="Workspace (Ctrl+B)">
       &#128194;
     </button>
+    <button class="header-btn" id="update-btn" onclick="checkForUpdates()" title="Nach Updates suchen" style="display:none">
+      &#128259;
+    </button>
     <button class="header-btn" id="settings-btn" onclick="openSettings()" title="Einstellungen">
       &#9881;
     </button>
@@ -180,6 +183,20 @@
               <button class="settings-nav-item" data-section="search">Web-Suche</button>
               <button class="settings-nav-item" data-section="internal_fetch">Internal Fetch</button>
               <button class="settings-nav-item" data-section="docker_sandbox">Container Sandbox</button>
+            </div>
+          </div>
+
+          <!-- System -->
+          <div class="settings-nav-category" data-category="system">
+            <button class="settings-nav-category-header" onclick="toggleSettingsCategory('system')">
+              <span class="category-icon">&#128736;</span>
+              <span class="category-label">System</span>
+              <span class="category-arrow">&#9656;</span>
+            </button>
+            <div class="settings-nav-category-items">
+              <button class="settings-nav-item" data-section="arena">Arena Mode</button>
+              <button class="settings-nav-item" data-section="analytics">Analytics</button>
+              <button class="settings-nav-item" data-section="update">Updates</button>
             </div>
           </div>
         </nav>
@@ -1024,8 +1041,14 @@
       <!-- Hourly Chart -->
       <div class="tokens-section">
         <h3>Verlauf</h3>
-        <div class="tokens-chart" id="tokens-hourly-chart">
-          <div class="tokens-chart-placeholder">Lade Chart...</div>
+        <div class="tokens-chart-container">
+          <div class="tokens-chart-y-axis" id="tokens-y-axis"></div>
+          <div class="tokens-chart-wrapper">
+            <div class="tokens-chart" id="tokens-hourly-chart">
+              <div class="tokens-chart-placeholder">Lade Chart...</div>
+            </div>
+            <div class="tokens-chart-x-axis" id="tokens-x-axis"></div>
+          </div>
         </div>
       </div>
     </div>
@@ -1101,6 +1124,71 @@
     <div class="template-modal-actions">
       <button class="btn btn-secondary" onclick="closeTemplateModal()">Abbrechen</button>
       <button class="btn btn-primary" onclick="applyTemplate()">Anwenden</button>
+    </div>
+  </div>
+</div>
+
+<!-- Update Modal -->
+<div id="update-modal" class="modal" style="display:none">
+  <div class="modal-overlay" onclick="closeUpdateModal()"></div>
+  <div class="modal-content">
+    <div class="modal-header">
+      <h2>&#128259; App-Update</h2>
+      <button class="modal-close" onclick="closeUpdateModal()">&times;</button>
+    </div>
+    <div class="modal-body">
+      <div id="update-content">
+        <div id="update-checking" style="text-align:center; padding:20px;">
+          <span class="spinner"></span> Prüfe auf Updates...
+        </div>
+        <div id="update-info" style="display:none;">
+          <div class="update-version-info">
+            <div class="update-version-row">
+              <span class="update-label">Aktuelle Version:</span>
+              <span id="update-current-version" class="update-value">-</span>
+            </div>
+            <div class="update-version-row">
+              <span class="update-label">Verfügbare Version:</span>
+              <span id="update-latest-version" class="update-value">-</span>
+            </div>
+          </div>
+          <div id="update-available" style="display:none;">
+            <div class="update-badge update-badge-new">Neues Update verfügbar!</div>
+            <div id="update-release-notes" class="update-release-notes"></div>
+          </div>
+          <div id="update-current" style="display:none;">
+            <div class="update-badge update-badge-current">Alles aktuell</div>
+            <p>Du verwendest bereits die neueste Version.</p>
+          </div>
+          <div id="update-error" style="display:none;" class="update-error"></div>
+        </div>
+        <div id="update-progress" style="display:none;">
+          <div class="update-progress-stage" id="update-progress-stage">Bereite Update vor...</div>
+          <div class="update-progress-bar">
+            <div class="update-progress-fill" id="update-progress-fill" style="width:0%"></div>
+          </div>
+          <div class="update-progress-message" id="update-progress-message"></div>
+        </div>
+        <div id="update-complete" style="display:none;">
+          <div class="update-badge update-badge-success">Update erfolgreich!</div>
+          <p id="update-complete-message"></p>
+          <p><strong>Server-Neustart erforderlich</strong> um die Änderungen zu aktivieren.</p>
+        </div>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <div id="update-actions-check">
+        <button class="btn btn-secondary" onclick="closeUpdateModal()">Schließen</button>
+        <button class="btn btn-primary" id="update-install-btn" onclick="installUpdate()" style="display:none">
+          &#128259; Update installieren
+        </button>
+      </div>
+      <div id="update-actions-complete" style="display:none;">
+        <button class="btn btn-secondary" onclick="closeUpdateModal()">Später</button>
+        <button class="btn btn-primary" onclick="restartServer()">
+          &#128260; Server neu starten
+        </button>
+      </div>
     </div>
   </div>
 </div>

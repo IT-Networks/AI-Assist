@@ -1342,7 +1342,7 @@ const arenaState = {
 };
 
 function openArenaModal() {
-  document.getElementById('arena-modal').style.display = 'block';
+  document.getElementById('arena-modal').style.display = 'flex';
   loadArenaLeaderboard();
 }
 
@@ -1532,7 +1532,7 @@ async function loadArenaLeaderboard() {
 // ══════════════════════════════════════════════════════════════════════════════
 
 function openTokensModal() {
-  document.getElementById('tokens-modal').style.display = 'block';
+  document.getElementById('tokens-modal').style.display = 'flex';
   loadTokenUsage();
 }
 
@@ -1602,18 +1602,41 @@ async function loadTokenUsage() {
       byTypeContainer.innerHTML = '<div class="tokens-breakdown-empty">Keine Daten</div>';
     }
 
-    // Hourly chart
+    // Hourly chart with axis labels
     const chartContainer = document.getElementById('tokens-hourly-chart');
+    const xAxisContainer = document.getElementById('tokens-x-axis');
+    const yAxisContainer = document.getElementById('tokens-y-axis');
+
     if (data.byHour && data.byHour.length > 0) {
       const maxHourly = Math.max(...data.byHour.map(h => h.tokens));
+
+      // Y-Axis labels
+      if (yAxisContainer) {
+        yAxisContainer.innerHTML = `
+          <span>${formatNumber(maxHourly)}</span>
+          <span>${formatNumber(Math.round(maxHourly / 2))}</span>
+          <span>0</span>
+        `;
+      }
+
+      // Chart bars
       chartContainer.innerHTML = data.byHour.map(h => `
         <div class="tokens-chart-bar"
              style="height: ${maxHourly > 0 ? (h.tokens / maxHourly) * 100 : 0}%"
              title="${h.hour}: ${formatNumber(h.tokens)} tokens">
         </div>
       `).join('');
+
+      // X-Axis labels (show every 3rd hour)
+      if (xAxisContainer) {
+        xAxisContainer.innerHTML = data.byHour.map((h, i) =>
+          `<span>${i % 3 === 0 ? h.hour : ''}</span>`
+        ).join('');
+      }
     } else {
       chartContainer.innerHTML = '<div class="tokens-chart-placeholder">Keine Daten</div>';
+      if (xAxisContainer) xAxisContainer.innerHTML = '';
+      if (yAxisContainer) yAxisContainer.innerHTML = '';
     }
 
   } catch (e) {
@@ -6535,6 +6558,21 @@ function renderSettingsSection() {
 
   if (section === 'docker_sandbox') {
     renderDockerSandboxSection();
+    return;
+  }
+
+  if (section === 'update') {
+    renderUpdateSection();
+    return;
+  }
+
+  if (section === 'arena') {
+    renderArenaSettingsSection();
+    return;
+  }
+
+  if (section === 'analytics') {
+    renderAnalyticsSettingsSection();
     return;
   }
 
@@ -13004,3 +13042,643 @@ function insertToolCall(toolName) {
 }
 
 // formatDuration and escapeHtml defined earlier in the file
+
+// ══════════════════════════════════════════════════════════════════════════════
+// Update Service Functions
+// ══════════════════════════════════════════════════════════════════════════════
+
+let updateState = {
+  checking: false,
+  installing: false,
+  downloadUrl: null,
+  latestVersion: null,
+};
+
+async function initUpdateButton() {
+  try {
+    const response = await fetch('/api/update/config');
+    if (response.ok) {
+      const config = await response.json();
+      const btn = document.getElementById('update-btn');
+      if (btn && config.enabled) {
+        btn.style.display = 'inline-flex';
+        // Check on start if configured
+        if (config.check_on_start) {
+          const check = await fetch('/api/update/check');
+          if (check.ok) {
+            const result = await check.json();
+            if (result.available) {
+              btn.classList.add('update-available');
+              btn.title = `Update verfügbar: v${result.latest_version}`;
+            }
+          }
+        }
+      }
+    }
+  } catch (e) {
+    log.warn('[update] Init failed:', e);
+  }
+}
+
+async function checkForUpdates() {
+  const modal = document.getElementById('update-modal');
+  modal.style.display = 'block';
+
+  // Reset state
+  document.getElementById('update-checking').style.display = 'block';
+  document.getElementById('update-info').style.display = 'none';
+  document.getElementById('update-progress').style.display = 'none';
+  document.getElementById('update-complete').style.display = 'none';
+  document.getElementById('update-actions-check').style.display = 'flex';
+  document.getElementById('update-actions-complete').style.display = 'none';
+
+  updateState.checking = true;
+
+  try {
+    const response = await fetch('/api/update/check');
+    const result = await response.json();
+
+    document.getElementById('update-checking').style.display = 'none';
+    document.getElementById('update-info').style.display = 'block';
+
+    document.getElementById('update-current-version').textContent = result.current_version || '-';
+    document.getElementById('update-latest-version').textContent = result.latest_version || '-';
+
+    if (result.error) {
+      document.getElementById('update-error').style.display = 'block';
+      document.getElementById('update-error').textContent = result.error;
+      document.getElementById('update-available').style.display = 'none';
+      document.getElementById('update-current').style.display = 'none';
+    } else if (result.available) {
+      document.getElementById('update-available').style.display = 'block';
+      document.getElementById('update-current').style.display = 'none';
+      document.getElementById('update-error').style.display = 'none';
+      document.getElementById('update-install-btn').style.display = 'inline-flex';
+
+      if (result.release_notes) {
+        document.getElementById('update-release-notes').innerHTML =
+          `<h4>Release Notes:</h4><div>${marked.parse(result.release_notes)}</div>`;
+      } else {
+        document.getElementById('update-release-notes').innerHTML = '';
+      }
+
+      updateState.downloadUrl = result.download_url;
+      updateState.latestVersion = result.latest_version;
+    } else {
+      document.getElementById('update-available').style.display = 'none';
+      document.getElementById('update-current').style.display = 'block';
+      document.getElementById('update-error').style.display = 'none';
+      document.getElementById('update-install-btn').style.display = 'none';
+    }
+  } catch (e) {
+    document.getElementById('update-checking').style.display = 'none';
+    document.getElementById('update-info').style.display = 'block';
+    document.getElementById('update-error').style.display = 'block';
+    document.getElementById('update-error').textContent = `Fehler: ${e.message}`;
+  } finally {
+    updateState.checking = false;
+  }
+}
+
+async function installUpdate() {
+  if (updateState.installing) return;
+  updateState.installing = true;
+
+  document.getElementById('update-info').style.display = 'none';
+  document.getElementById('update-progress').style.display = 'block';
+  document.getElementById('update-install-btn').style.display = 'none';
+
+  try {
+    const response = await fetch('/api/update/install/stream', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        download_url: updateState.downloadUrl,
+        create_backup: true,
+      }),
+    });
+
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+
+      const text = decoder.decode(value);
+      const lines = text.split('\n');
+
+      for (const line of lines) {
+        if (line.startsWith('data: ')) {
+          try {
+            const data = JSON.parse(line.slice(6));
+
+            if (data.success !== undefined) {
+              // Final result
+              if (data.success) {
+                document.getElementById('update-progress').style.display = 'none';
+                document.getElementById('update-complete').style.display = 'block';
+                document.getElementById('update-complete-message').textContent =
+                  `${data.files_updated?.length || 0} Dateien wurden aktualisiert.`;
+                document.getElementById('update-actions-check').style.display = 'none';
+                document.getElementById('update-actions-complete').style.display = 'flex';
+
+                // Update button status
+                const btn = document.getElementById('update-btn');
+                if (btn) {
+                  btn.classList.remove('update-available');
+                  btn.classList.add('update-installed');
+                }
+              } else {
+                document.getElementById('update-progress').style.display = 'none';
+                document.getElementById('update-info').style.display = 'block';
+                document.getElementById('update-error').style.display = 'block';
+                document.getElementById('update-error').textContent = data.error || 'Update fehlgeschlagen';
+              }
+            } else {
+              // Progress update
+              document.getElementById('update-progress-stage').textContent = stageLabel(data.stage);
+              document.getElementById('update-progress-fill').style.width = `${data.percent}%`;
+              document.getElementById('update-progress-message').textContent = data.message;
+            }
+          } catch (e) {
+            // Ignore parse errors
+          }
+        }
+      }
+    }
+  } catch (e) {
+    document.getElementById('update-progress').style.display = 'none';
+    document.getElementById('update-info').style.display = 'block';
+    document.getElementById('update-error').style.display = 'block';
+    document.getElementById('update-error').textContent = `Fehler: ${e.message}`;
+  } finally {
+    updateState.installing = false;
+  }
+}
+
+function stageLabel(stage) {
+  const labels = {
+    prepare: 'Vorbereitung',
+    download: 'Download',
+    analyze: 'Analyse',
+    backup: 'Backup erstellen',
+    install: 'Installation',
+    complete: 'Abgeschlossen',
+  };
+  return labels[stage] || stage;
+}
+
+async function restartServer() {
+  try {
+    showToast('Server wird neu gestartet...', 'info');
+    await fetch('/api/update/restart', { method: 'POST' });
+    // Server wird sich beenden - Modal schließen
+    closeUpdateModal();
+    // Warte und versuche neu zu verbinden
+    setTimeout(() => {
+      showToast('Versuche erneut zu verbinden...', 'info');
+      setTimeout(() => window.location.reload(), 3000);
+    }, 2000);
+  } catch (e) {
+    // Erwarteter Fehler wenn Server sich beendet
+    setTimeout(() => window.location.reload(), 3000);
+  }
+}
+
+function closeUpdateModal() {
+  document.getElementById('update-modal').style.display = 'none';
+}
+
+function renderUpdateSection() {
+  const container = document.getElementById('settings-form');
+
+  container.innerHTML = `
+    <div class="settings-section">
+      <h3 class="settings-section-title">APP-UPDATES</h3>
+      <p class="settings-section-desc">
+        GitHub-basierte Updates für AI-Assist. Lädt neue Versionen herunter und installiert sie automatisch.
+        Konfigurationsdateien und Daten werden nicht überschrieben.
+      </p>
+
+      <div id="update-settings-loading" style="text-align:center; padding:20px;">
+        <span class="spinner"></span> Lade Konfiguration...
+      </div>
+      <div id="update-settings-form" style="display:none;"></div>
+    </div>
+  `;
+
+  loadUpdateSettings();
+}
+
+async function loadUpdateSettings() {
+  try {
+    const response = await fetch('/api/update/config');
+    const config = await response.json();
+
+    document.getElementById('update-settings-loading').style.display = 'none';
+    document.getElementById('update-settings-form').style.display = 'block';
+
+    document.getElementById('update-settings-form').innerHTML = `
+      <div class="settings-group">
+        <label class="settings-label">
+          <input type="checkbox" id="update-enabled" ${config.enabled ? 'checked' : ''}>
+          Update-Service aktivieren
+        </label>
+      </div>
+
+      <div class="settings-group">
+        <label class="settings-label">GitHub Repository URL</label>
+        <input type="text" id="update-repo-url" class="settings-input"
+          value="${escapeHtml(config.repo_url)}"
+          placeholder="https://github.com/user/ai-assist-releases">
+        <small class="settings-hint">URL des GitHub-Repositories mit den Releases</small>
+      </div>
+
+      <div class="settings-group">
+        <label class="settings-label">GitHub Token (optional, für private Repos)</label>
+        <input type="password" id="update-github-token" class="settings-input"
+          value="${config.has_token ? '***' : ''}"
+          placeholder="ghp_xxxxxxxxxxxx">
+        <small class="settings-hint">Personal Access Token mit 'repo' Berechtigung</small>
+      </div>
+
+      <div class="settings-group">
+        <label class="settings-label">
+          <input type="checkbox" id="update-use-proxy" ${config.use_proxy ? 'checked' : ''}>
+          Proxy verwenden
+        </label>
+        <small class="settings-hint">
+          ${config.proxy_configured
+            ? `Proxy konfiguriert: ${escapeHtml(config.proxy_url)}`
+            : 'Kein Proxy konfiguriert (siehe Web-Suche Einstellungen)'}
+        </small>
+      </div>
+
+      <div class="settings-group">
+        <label class="settings-label">
+          <input type="checkbox" id="update-verify-ssl" ${config.verify_ssl ? 'checked' : ''}>
+          SSL-Zertifikate prüfen
+        </label>
+      </div>
+
+      <div class="settings-group">
+        <label class="settings-label">
+          <input type="checkbox" id="update-check-on-start" ${config.check_on_start ? 'checked' : ''}>
+          Beim Start nach Updates suchen
+        </label>
+      </div>
+
+      <div class="settings-actions" style="margin-top: 20px;">
+        <button class="btn btn-primary" onclick="saveUpdateSettings()">Speichern</button>
+        <button class="btn btn-secondary" onclick="checkForUpdates()">Jetzt prüfen</button>
+      </div>
+
+      <hr style="margin: 30px 0;">
+
+      <h4>Whitelist (wird aktualisiert)</h4>
+      <div class="settings-code-block">
+        ${config.include_patterns?.map(p => `<div>${escapeHtml(p)}</div>`).join('') || '-'}
+      </div>
+
+      <h4 style="margin-top: 20px;">Blacklist (wird NICHT überschrieben)</h4>
+      <div class="settings-code-block">
+        ${config.exclude_patterns?.map(p => `<div>${escapeHtml(p)}</div>`).join('') || '-'}
+      </div>
+    `;
+  } catch (e) {
+    document.getElementById('update-settings-loading').style.display = 'none';
+    document.getElementById('update-settings-form').style.display = 'block';
+    document.getElementById('update-settings-form').innerHTML = `
+      <div class="settings-error">Fehler beim Laden: ${escapeHtml(e.message)}</div>
+    `;
+  }
+}
+
+async function saveUpdateSettings() {
+  const data = {
+    enabled: document.getElementById('update-enabled').checked,
+    repo_url: document.getElementById('update-repo-url').value,
+    github_token: document.getElementById('update-github-token').value,
+    use_proxy: document.getElementById('update-use-proxy').checked,
+    verify_ssl: document.getElementById('update-verify-ssl').checked,
+    check_on_start: document.getElementById('update-check-on-start').checked,
+  };
+
+  try {
+    const response = await fetch('/api/update/config', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data),
+    });
+
+    if (response.ok) {
+      showToast('Update-Einstellungen gespeichert', 'success');
+      // Update button visibility
+      const btn = document.getElementById('update-btn');
+      if (btn) {
+        btn.style.display = data.enabled ? 'inline-flex' : 'none';
+      }
+    } else {
+      const error = await response.json();
+      showToast(`Fehler: ${error.detail || 'Speichern fehlgeschlagen'}`, 'error');
+    }
+  } catch (e) {
+    showToast(`Fehler: ${e.message}`, 'error');
+  }
+}
+
+// Initialize update button on page load
+document.addEventListener('DOMContentLoaded', () => {
+  initUpdateButton();
+});
+
+// ══════════════════════════════════════════════════════════════════════════════
+// Arena Settings Section
+// ══════════════════════════════════════════════════════════════════════════════
+
+async function renderArenaSettingsSection() {
+  const container = document.getElementById('settings-form');
+
+  container.innerHTML = `
+    <div class="settings-section">
+      <h3 class="settings-section-title">ARENA MODE</h3>
+      <p class="settings-section-desc">
+        Vergleiche zwei LLM-Modelle blind gegeneinander. Die Antworten werden anonymisiert angezeigt
+        und du bewertest, welche besser ist. Ideal zum Finden des besten Modells für deine Aufgaben.
+      </p>
+
+      <div id="arena-settings-loading" style="text-align:center; padding:20px;">
+        <span class="spinner"></span> Lade Konfiguration...
+      </div>
+      <div id="arena-settings-form" style="display:none;"></div>
+    </div>
+  `;
+
+  await loadArenaSettings();
+}
+
+async function loadArenaSettings() {
+  try {
+    // Load available models
+    const modelsRes = await fetch('/api/models');
+    const models = modelsRes.ok ? await modelsRes.json() : [];
+
+    // Load arena config
+    const configRes = await fetch('/api/arena/config');
+    const config = configRes.ok ? await configRes.json() : {
+      enabled: false,
+      modelA: '',
+      modelB: '',
+      autoArena: false,
+      sampleRate: 1.0,
+      eloKFactor: 32
+    };
+
+    document.getElementById('arena-settings-loading').style.display = 'none';
+    document.getElementById('arena-settings-form').style.display = 'block';
+
+    const modelOptions = models.map(m =>
+      `<option value="${escapeHtml(m.id)}">${escapeHtml(m.display_name || m.id)}</option>`
+    ).join('');
+
+    document.getElementById('arena-settings-form').innerHTML = `
+      <div class="settings-group">
+        <label class="settings-label">
+          <input type="checkbox" id="arena-enabled" ${config.enabled ? 'checked' : ''}>
+          Arena Mode aktivieren
+        </label>
+      </div>
+
+      <div class="settings-group">
+        <label class="settings-label">Modell A</label>
+        <select id="arena-model-a" class="settings-select">
+          <option value="">-- Modell wählen --</option>
+          ${modelOptions}
+        </select>
+      </div>
+
+      <div class="settings-group">
+        <label class="settings-label">Modell B</label>
+        <select id="arena-model-b" class="settings-select">
+          <option value="">-- Modell wählen --</option>
+          ${modelOptions}
+        </select>
+      </div>
+
+      <div class="settings-group">
+        <label class="settings-label">
+          <input type="checkbox" id="arena-auto" ${config.autoArena ? 'checked' : ''}>
+          Auto-Arena (automatisch Matches starten)
+        </label>
+        <small class="settings-hint">Bei aktiviert wird bei jeder Anfrage automatisch ein Arena-Match gestartet</small>
+      </div>
+
+      <div class="settings-group">
+        <label class="settings-label">Sample Rate: <span id="arena-sample-value">${Math.round(config.sampleRate * 100)}%</span></label>
+        <input type="range" id="arena-sample-rate" min="0" max="100" value="${Math.round(config.sampleRate * 100)}"
+          oninput="document.getElementById('arena-sample-value').textContent = this.value + '%'">
+        <small class="settings-hint">Prozentsatz der Anfragen die als Arena-Matches laufen</small>
+      </div>
+
+      <div class="settings-group">
+        <label class="settings-label">ELO K-Faktor</label>
+        <input type="number" id="arena-elo-k" class="settings-input" value="${config.eloKFactor}" min="1" max="64">
+        <small class="settings-hint">Höhere Werte = schnellere Rating-Änderungen (Standard: 32)</small>
+      </div>
+
+      <div class="settings-actions" style="margin-top: 20px;">
+        <button class="btn btn-primary" onclick="saveArenaSettings()">Speichern</button>
+        <button class="btn btn-secondary" onclick="openArenaModal()">Arena öffnen</button>
+      </div>
+    `;
+
+    // Set selected models
+    if (config.modelA) {
+      document.getElementById('arena-model-a').value = config.modelA;
+    }
+    if (config.modelB) {
+      document.getElementById('arena-model-b').value = config.modelB;
+    }
+
+  } catch (e) {
+    document.getElementById('arena-settings-loading').style.display = 'none';
+    document.getElementById('arena-settings-form').style.display = 'block';
+    document.getElementById('arena-settings-form').innerHTML = `
+      <div class="settings-error">Fehler beim Laden: ${escapeHtml(e.message)}</div>
+    `;
+  }
+}
+
+async function saveArenaSettings() {
+  const data = {
+    enabled: document.getElementById('arena-enabled').checked,
+    modelA: document.getElementById('arena-model-a').value,
+    modelB: document.getElementById('arena-model-b').value,
+    autoArena: document.getElementById('arena-auto').checked,
+    sampleRate: parseInt(document.getElementById('arena-sample-rate').value) / 100,
+    eloKFactor: parseInt(document.getElementById('arena-elo-k').value) || 32,
+  };
+
+  try {
+    const response = await fetch('/api/arena/config', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data),
+    });
+
+    if (response.ok) {
+      showToast('Arena-Einstellungen gespeichert', 'success');
+    } else {
+      const error = await response.json();
+      showToast(`Fehler: ${error.detail || 'Speichern fehlgeschlagen'}`, 'error');
+    }
+  } catch (e) {
+    showToast(`Fehler: ${e.message}`, 'error');
+  }
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// Analytics Settings Section
+// ══════════════════════════════════════════════════════════════════════════════
+
+async function renderAnalyticsSettingsSection() {
+  const container = document.getElementById('settings-form');
+
+  container.innerHTML = `
+    <div class="settings-section">
+      <h3 class="settings-section-title">ANALYTICS</h3>
+      <p class="settings-section-desc">
+        Erfasst anonymisierte Nutzungsdaten zur Verbesserung der Anwendung.
+        Daten werden lokal gespeichert und nicht an externe Server gesendet.
+      </p>
+
+      <div id="analytics-settings-loading" style="text-align:center; padding:20px;">
+        <span class="spinner"></span> Lade Status...
+      </div>
+      <div id="analytics-settings-form" style="display:none;"></div>
+    </div>
+  `;
+
+  await loadAnalyticsSettings();
+}
+
+async function loadAnalyticsSettings() {
+  try {
+    const response = await fetch('/api/analytics/status');
+    const status = response.ok ? await response.json() : {
+      enabled: false,
+      storage_path: '',
+      retention_days: 30,
+      log_level: 'info',
+      anonymization_enabled: true
+    };
+
+    document.getElementById('analytics-settings-loading').style.display = 'none';
+    document.getElementById('analytics-settings-form').style.display = 'block';
+
+    document.getElementById('analytics-settings-form').innerHTML = `
+      <div class="settings-group">
+        <label class="settings-label">
+          <input type="checkbox" id="analytics-enabled" ${status.enabled ? 'checked' : ''}
+            onchange="toggleAnalytics(this.checked)">
+          Analytics aktivieren
+        </label>
+      </div>
+
+      <div class="settings-group">
+        <label class="settings-label">Speicherpfad</label>
+        <input type="text" class="settings-input" value="${escapeHtml(status.storage_path)}" disabled>
+      </div>
+
+      <div class="settings-group">
+        <label class="settings-label">Aufbewahrung (Tage)</label>
+        <input type="number" class="settings-input" value="${status.retention_days}" disabled>
+      </div>
+
+      <div class="settings-group">
+        <label class="settings-label">
+          <input type="checkbox" ${status.anonymization_enabled ? 'checked' : ''} disabled>
+          Anonymisierung aktiviert
+        </label>
+        <small class="settings-hint">Sensible Daten werden automatisch entfernt</small>
+      </div>
+
+      <div class="settings-actions" style="margin-top: 20px;">
+        <button class="btn btn-secondary" onclick="openDashboard()">Dashboard öffnen</button>
+      </div>
+
+      <hr style="margin: 30px 0;">
+
+      <h4>Daten-Management</h4>
+      <div class="settings-actions" style="margin-top: 12px; gap: 8px;">
+        <button class="btn btn-secondary" onclick="exportAnalytics()">Daten exportieren</button>
+        <button class="btn btn-danger" onclick="cleanupAnalytics()">Alte Daten löschen</button>
+      </div>
+    `;
+
+  } catch (e) {
+    document.getElementById('analytics-settings-loading').style.display = 'none';
+    document.getElementById('analytics-settings-form').style.display = 'block';
+    document.getElementById('analytics-settings-form').innerHTML = `
+      <div class="settings-error">Fehler beim Laden: ${escapeHtml(e.message)}</div>
+    `;
+  }
+}
+
+async function toggleAnalytics(enabled) {
+  try {
+    const response = await fetch('/api/analytics/toggle', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ enabled }),
+    });
+
+    if (response.ok) {
+      showToast(enabled ? 'Analytics aktiviert' : 'Analytics deaktiviert', 'success');
+    } else {
+      showToast('Fehler beim Umschalten', 'error');
+    }
+  } catch (e) {
+    showToast(`Fehler: ${e.message}`, 'error');
+  }
+}
+
+async function exportAnalytics() {
+  try {
+    const response = await fetch('/api/analytics/export?format=json');
+    if (response.ok) {
+      const blob = await response.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `analytics_export_${new Date().toISOString().split('T')[0]}.json`;
+      a.click();
+      URL.revokeObjectURL(url);
+      showToast('Export gestartet', 'success');
+    } else {
+      showToast('Export fehlgeschlagen', 'error');
+    }
+  } catch (e) {
+    showToast(`Fehler: ${e.message}`, 'error');
+  }
+}
+
+async function cleanupAnalytics() {
+  if (!confirm('Alte Analytics-Daten wirklich löschen?')) return;
+
+  try {
+    const response = await fetch('/api/analytics/maintenance/cleanup', {
+      method: 'POST',
+    });
+
+    if (response.ok) {
+      const result = await response.json();
+      showToast(`${result.deleted_count || 0} alte Einträge gelöscht`, 'success');
+    } else {
+      showToast('Cleanup fehlgeschlagen', 'error');
+    }
+  } catch (e) {
+    showToast(`Fehler: ${e.message}`, 'error');
+  }
+}
