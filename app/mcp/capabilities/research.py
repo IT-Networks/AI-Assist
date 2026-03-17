@@ -794,16 +794,22 @@ Erstelle einen strukturierten Report:
 [Liste der verwendeten Quellen]
 """
 
-        # PERFORMANCE: Bei "quick" Tiefe LLM-Synthese überspringen (spart 20-60s)
+        # PERFORMANCE: Bei "quick" Tiefe oder 0 Ergebnissen LLM-Synthese überspringen
         depth = session.metadata.get("depth", "normal")
-        if depth == "quick":
-            # Schneller Default-Report ohne LLM-Call
+        skip_llm = (
+            depth == "quick" or
+            len(all_results) == 0 or  # Keine Ergebnisse = kein LLM-Call nötig
+            not self.llm_callback
+        )
+
+        if skip_llm:
             report = self._generate_default_report(session.query, all_results)
-            logger.debug("[research] Quick mode: skipping LLM synthesis")
-        elif self.llm_callback:
-            report = await self._call_llm(synthesis_prompt)
+            if len(all_results) == 0:
+                logger.debug("[research] No results found - skipping LLM synthesis")
+            elif depth == "quick":
+                logger.debug("[research] Quick mode: skipping LLM synthesis")
         else:
-            report = self._generate_default_report(session.query, all_results)
+            report = await self._call_llm(synthesis_prompt)
 
         session.add_step(
             phase=CapabilityPhase.SYNTHESIZE,

@@ -658,53 +658,51 @@ class PromptEnhancer:
         return items
 
     async def _collect_sequential_context(self, query: str) -> List[ContextItem]:
-        """Sammelt Kontext durch strukturierte Analyse via SequentialThinking."""
+        """
+        Sammelt Kontext für strukturierte Analyse.
+
+        PERFORMANCE: Überspringt LLM-basiertes Sequential Thinking während Enhancement,
+        da dies zu 30s+ Timeouts führt. Stattdessen wird eine schnelle heuristische
+        Analyse verwendet. Das vollständige Sequential Thinking wird später im
+        Tool-Phase (via /seq Kommando) oder bei Task-Decomposition ausgeführt.
+        """
         items = []
 
-        sequential = self._get_sequential_thinking()
-        if sequential is None:
-            logger.debug("[PromptEnhancer] SequentialThinking not available")
-            return items
+        # PERFORMANCE: Kein LLM-Call während Enhancement - zu langsam (30s+ Timeout)
+        # Stattdessen schnelle heuristische Analyse
+        query_lower = query.lower()
 
-        try:
-            # Execute sequential thinking with limited steps for context
-            session = await sequential.think(
-                query=query,
-                max_steps=3,  # Begrenzt für Kontext-Sammlung
-                emit_events=False  # No UI events during enhancement
-            )
+        # Erkennung: Debug/Fehleranalyse
+        if any(kw in query_lower for kw in ["fehler", "error", "bug", "exception", "stacktrace", "traceback"]):
+            items.append(ContextItem(
+                source="sequential_hint",
+                title="Fehleranalyse empfohlen",
+                content="Query enthält Fehler-Keywords. Empfehle strukturierte Debug-Analyse mit /seq Kommando.",
+                relevance=0.8
+            ))
 
-            # Convert thinking steps to ContextItems
-            for step in session.steps[:3]:  # Limit to first 3 steps
-                items.append(ContextItem(
-                    source=f"sequential_{step.step_type.value}",
-                    title=step.title or f"Schritt {step.step_number}",
-                    content=step.content[:500],
-                    relevance=step.confidence or 0.7
-                ))
+        # Erkennung: Warum/Wieso-Fragen
+        if any(kw in query_lower for kw in ["warum", "wieso", "weshalb", "why"]):
+            items.append(ContextItem(
+                source="sequential_hint",
+                title="Ursachenanalyse empfohlen",
+                content="Query enthält Warum-Frage. Empfehle Root-Cause-Analyse.",
+                relevance=0.75
+            ))
 
-            # Add hypotheses if any
-            for hypothesis in session.hypotheses[:3]:
-                items.append(ContextItem(
-                    source="hypothesis",
-                    title=f"Hypothese: {hypothesis.title}",
-                    content=hypothesis.description[:300],
-                    relevance=hypothesis.confidence
-                ))
+        # Erkennung: Debug-Anforderung
+        if any(kw in query_lower for kw in ["debug", "debugge", "trace", "analysiere"]):
+            items.append(ContextItem(
+                source="sequential_hint",
+                title="Debug-Modus empfohlen",
+                content="Query enthält Debug-Keywords. Für tiefe Analyse /seq verwenden.",
+                relevance=0.7
+            ))
 
-            # Add conclusion if available
-            if session.conclusion:
-                items.append(ContextItem(
-                    source="sequential_conclusion",
-                    title="Analyse-Schlussfolgerung",
-                    content=session.conclusion[:500],
-                    relevance=0.95
-                ))
-
-            logger.info(f"[PromptEnhancer] Sequential collected {len(items)} items")
-
-        except Exception as e:
-            logger.warning(f"[PromptEnhancer] Sequential analysis failed: {e}")
+        if items:
+            logger.debug(f"[PromptEnhancer] Sequential hints: {len(items)} (skipped LLM for performance)")
+        else:
+            logger.debug("[PromptEnhancer] No sequential context needed")
 
         return items
 
