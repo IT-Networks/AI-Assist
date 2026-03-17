@@ -13,7 +13,7 @@ import logging
 import time
 from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Body
 from pydantic import BaseModel, Field
 
 from app.core.config import settings
@@ -385,12 +385,16 @@ async def _test_json_mode(model: str, timeout: float) -> DiagnoseResult:
 # ══════════════════════════════════════════════════════════════════════════════
 
 @router.post("/reasoning", response_model=DiagnoseResult)
-async def test_reasoning(request: ReasoningTestRequest):
+async def test_reasoning(
+    request: ReasoningTestRequest = Body(default=ReasoningTestRequest())
+):
     """
     Testet ob ein Modell Reasoning-Direktiven versteht.
 
     Sendet eine logische Aufgabe mit aktiviertem Reasoning und prüft
     ob das Modell Chain-of-Thought Reasoning zeigt.
+
+    Kann ohne Body aufgerufen werden - nutzt dann Defaults.
     """
     model = request.model or settings.llm.default_model
     result = await _test_reasoning(
@@ -402,7 +406,9 @@ async def test_reasoning(request: ReasoningTestRequest):
 
 
 @router.post("/tools", response_model=DiagnoseResult)
-async def test_tools(request: ToolTestRequest):
+async def test_tools(
+    request: ToolTestRequest = Body(default=ToolTestRequest())
+):
     """
     Testet Tool-Calling mit optionalem Prefill.
 
@@ -422,7 +428,9 @@ async def test_tools(request: ToolTestRequest):
 
 
 @router.post("/tools/compare")
-async def compare_tool_methods(request: DiagnoseRequest):
+async def compare_tool_methods(
+    request: DiagnoseRequest = Body(default=DiagnoseRequest())
+):
     """
     Vergleicht Tool-Calling mit und ohne Prefill.
 
@@ -464,14 +472,18 @@ async def compare_tool_methods(request: DiagnoseRequest):
 
 
 @router.post("/json", response_model=DiagnoseResult)
-async def test_json_mode(request: DiagnoseRequest):
+async def test_json_mode(
+    request: DiagnoseRequest = Body(default=DiagnoseRequest())
+):
     """Testet ob das Modell strukturierten JSON-Output liefern kann."""
     model = request.model or settings.llm.default_model
     return await _test_json_mode(model, request.timeout)
 
 
 @router.post("/all", response_model=AllDiagnoseResult)
-async def run_all_diagnostics(request: DiagnoseRequest):
+async def run_all_diagnostics(
+    request: DiagnoseRequest = Body(default=DiagnoseRequest())
+):
     """
     Führt alle Diagnose-Tests durch.
 
