@@ -1452,6 +1452,13 @@ Sei präzise und gib detaillierte Analyse-Schritte."""
                 if await should_use_task_decomposition(user_message):
                     logger.info("[agent] Using Task-Decomposition for complex query")
 
+                    # WICHTIG: Event SOFORT senden bevor LLM-Call blockiert!
+                    yield AgentEvent(AgentEventType.MCP_START, {
+                        "mode": "task_planning",
+                        "message": "Erstelle Ausführungsplan...",
+                        "query_preview": user_message[:100]
+                    })
+
                     # Task-Events zu Agent-Events mappen und yielden
                     async for task_event in process_with_tasks(
                         user_message=user_message,
@@ -1464,7 +1471,15 @@ Sei präzise und gib detaillierte Analyse-Schritte."""
                         event_data = task_event.get("data", {})
 
                         # Event-Mapping
-                        if event_type == TaskEventType.PLAN_CREATED:
+                        if event_type == "planning_start":
+                            # Progress-Event für UI während LLM plant
+                            yield AgentEvent(AgentEventType.MCP_PROGRESS, {
+                                "mode": "task_planning",
+                                "message": event_data.get("message", "Plane Tasks..."),
+                                "progress": 10
+                            })
+
+                        elif event_type == TaskEventType.PLAN_CREATED:
                             yield AgentEvent(AgentEventType.TASK_PLAN_CREATED, event_data)
 
                         elif event_type == TaskEventType.TASK_STARTED:

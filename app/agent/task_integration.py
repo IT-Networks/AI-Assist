@@ -91,8 +91,14 @@ async def process_with_tasks(
     planner = get_task_planner()
     executor = get_task_executor()
 
-    # 1. Planung
+    # 1. Planung - Event SOFORT senden bevor LLM blockiert
     logger.info(f"[TaskIntegration] Planning for query: {user_message[:80]}...")
+
+    # Progress-Event für UI (zeigt "Plane Tasks...")
+    yield {
+        "type": "planning_start",
+        "data": {"message": "Analysiere Anfrage und erstelle Aufgabenplan..."}
+    }
 
     try:
         plan = await planner.plan(user_message, context)

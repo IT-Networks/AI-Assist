@@ -515,7 +515,24 @@ class PromptEnhancer:
 
         # Kontext sammeln basierend auf Typ
         try:
+            # Progress-Event VOR der eigentlichen Arbeit
+            if self.event_callback:
+                await self.event_callback("MCP_PROGRESS", {
+                    "mode": "enhancement",
+                    "message": f"Sammle {enhancement_type.value}-Kontext...",
+                    "progress": 20
+                })
+
             context_items = await self._collect_context(query, enhancement_type)
+
+            # Progress nach Kontext-Sammlung
+            if self.event_callback:
+                await self.event_callback("MCP_PROGRESS", {
+                    "mode": "enhancement",
+                    "message": f"Erstelle Zusammenfassung ({len(context_items)} Items)...",
+                    "progress": 80
+                })
+
             summary = await self._create_summary(query, context_items)
 
             # Bei leerem Kontext direkt bestätigen (nichts zu confirmen)
