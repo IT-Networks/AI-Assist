@@ -121,17 +121,19 @@ async def process_with_tasks(
         }
         return
 
-    # 3. Plan-Event senden
+    # 3. Plan-Event senden (mit vollständigen Task-Infos für UI)
     yield {
         "type": TaskEventType.PLAN_CREATED,
         "data": {
             "task_count": len(plan.tasks),
+            "original_query": plan.original_query[:200] if plan.original_query else "",
             "tasks": [
                 {
                     "id": t.id,
                     "type": t.type.value,
-                    "description": t.description[:100],
-                    "depends_on": t.depends_on
+                    "description": t.description,
+                    "depends_on": t.depends_on,
+                    "status": "pending"
                 }
                 for t in plan.tasks
             ]

@@ -147,12 +147,16 @@ class TaskExecutor:
 
             self.current_phase = new_phase
 
-            # Event: Tasks starten
+            # Event: Tasks starten (einzeln für bessere UI-Updates)
             if event_callback:
-                await event_callback("tasks_started", {
-                    "task_ids": [t.id for t in ready],
-                    "phase": new_phase.value
-                })
+                for task in ready:
+                    await event_callback("task_started", {
+                        "task_id": task.id,
+                        "type": task.type.value,
+                        "description": task.description,
+                        "depends_on": task.depends_on,
+                        "phase": new_phase.value
+                    })
 
             # Tasks parallel ausfuehren (bis zu max_parallel)
             batches = [
@@ -181,7 +185,9 @@ class TaskExecutor:
                         if event_callback:
                             await event_callback("task_failed", {
                                 "task_id": task.id,
-                                "error": str(result),
+                                "type": task.type.value,
+                                "description": task.description,
+                                "error": str(result)[:200],
                                 "retry_count": task.retry_count
                             })
                     else:
@@ -216,10 +222,20 @@ class TaskExecutor:
                                 logger.debug(f"[TaskExecutor] Auto-learning failed: {e}")
 
                         if event_callback:
+                            # Kurze Vorschau des Ergebnisses für UI
+                            result_preview = ""
+                            if result:
+                                # Erste Zeile oder erste 150 Zeichen
+                                first_line = result.split('\n')[0][:150]
+                                result_preview = first_line + ("..." if len(result) > 150 else "")
+
                             await event_callback("task_completed", {
                                 "task_id": task.id,
                                 "type": task.type.value,
-                                "result_length": len(result) if result else 0
+                                "description": task.description,
+                                "result_preview": result_preview,
+                                "result_length": len(result) if result else 0,
+                                "has_full_result": bool(result)
                             })
 
         # Finale Synthese

@@ -3466,6 +3466,28 @@ async function processAgentEvent(event, bubble, msgDiv, chat) {
       handleMcpToolRec(data, chat);
       break;
     }
+
+    // ── Task Decomposition Events ──
+    case 'task_plan_created': {
+      handleTaskPlanCreated(data, chat, bubble);
+      break;
+    }
+    case 'task_started': {
+      handleTaskStarted(data, chat);
+      break;
+    }
+    case 'task_completed': {
+      handleTaskCompleted(data, chat);
+      break;
+    }
+    case 'task_failed': {
+      handleTaskFailed(data, chat);
+      break;
+    }
+    case 'task_execution_complete': {
+      handleTaskExecutionComplete(data, chat);
+      break;
+    }
   }
 }
 
@@ -12629,6 +12651,319 @@ function scrollToStep(sessionId, stepNumber) {
     stepEl.classList.add('highlighted');
     setTimeout(() => stepEl.classList.remove('highlighted'), TIMING.HIGHLIGHT_DURATION);
   }
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// Task Progress Panel - Inline UI for Task Decomposition
+// ══════════════════════════════════════════════════════════════════════════════
+
+/**
+ * Creates and shows the task progress panel when a plan is created.
+ * @param {Object} data - Plan created event data
+ * @param {Object} chat - Chat object
+ * @param {HTMLElement} bubble - Message bubble element
+ */
+function handleTaskPlanCreated(data, chat, bubble) {
+  // Store task plan in chat
+  chat.taskPlan = {
+    taskCount: data.task_count,
+    originalQuery: data.original_query,
+    tasks: new Map(data.tasks.map(t => [t.id, {
+      id: t.id,
+      type: t.type,
+      description: t.description,
+      dependsOn: t.depends_on,
+      status: 'pending',
+      result: null,
+      resultPreview: null
+    }])),
+    startedAt: new Date()
+  };
+
+  // Find or create the panel in the bubble
+  let panel = bubble.querySelector('.task-progress-panel');
+  if (!panel) {
+    panel = createTaskProgressPanel(chat.taskPlan);
+    bubble.appendChild(panel);
+  }
+
+  console.log(`[TaskProgress] Plan created with ${data.task_count} tasks`);
+}
+
+/**
+ * Creates the task progress panel HTML.
+ * @param {Object} plan - Task plan object
+ * @returns {HTMLElement} Panel element
+ */
+function createTaskProgressPanel(plan) {
+  const panel = document.createElement('div');
+  panel.className = 'task-progress-panel';
+
+  const header = document.createElement('div');
+  header.className = 'task-panel-header';
+  header.innerHTML = `
+    <div class="task-panel-title">
+      <span class="task-panel-icon">📋</span>
+      <span>Ausführungsplan</span>
+      <span class="task-count-badge">${plan.taskCount} Tasks</span>
+    </div>
+    <div class="task-overall-progress">
+      <div class="task-progress-bar">
+        <div class="task-progress-fill" style="width: 0%"></div>
+      </div>
+      <span class="task-progress-text">0%</span>
+    </div>
+  `;
+
+  const taskList = document.createElement('div');
+  taskList.className = 'task-list';
+
+  plan.tasks.forEach((task, id) => {
+    const taskEl = createTaskItem(task);
+    taskList.appendChild(taskEl);
+  });
+
+  panel.appendChild(header);
+  panel.appendChild(taskList);
+
+  return panel;
+}
+
+/**
+ * Creates a single task item element.
+ * @param {Object} task - Task object
+ * @returns {HTMLElement} Task item element
+ */
+function createTaskItem(task) {
+  const el = document.createElement('div');
+  el.className = 'task-item';
+  el.dataset.taskId = task.id;
+
+  const statusIcon = getTaskStatusIcon(task.status);
+  const typeLabel = getTaskTypeLabel(task.type);
+  const dependsText = task.dependsOn.length > 0
+    ? `<span class="task-depends">Wartet auf: ${task.dependsOn.join(', ')}</span>`
+    : '';
+
+  el.innerHTML = `
+    <div class="task-item-header">
+      <span class="task-status-icon">${statusIcon}</span>
+      <span class="task-id">${task.id}</span>
+      <span class="task-type-badge task-type-${task.type}">${typeLabel}</span>
+      <span class="task-status-label">${getTaskStatusLabel(task.status)}</span>
+    </div>
+    <div class="task-description">${escapeHtml(task.description)}</div>
+    ${dependsText}
+    <div class="task-result-preview" style="display: none;"></div>
+  `;
+
+  return el;
+}
+
+/**
+ * Updates task status when a task starts.
+ * @param {Object} data - Task started event data
+ * @param {Object} chat - Chat object
+ */
+function handleTaskStarted(data, chat) {
+  if (!chat.taskPlan) return;
+
+  const task = chat.taskPlan.tasks.get(data.task_id);
+  if (task) {
+    task.status = 'running';
+    task.startedAt = new Date();
+  }
+
+  updateTaskItemUI(chat, data.task_id, 'running');
+  updateOverallProgress(chat);
+
+  console.log(`[TaskProgress] Task ${data.task_id} started`);
+}
+
+/**
+ * Updates task status when a task completes.
+ * @param {Object} data - Task completed event data
+ * @param {Object} chat - Chat object
+ */
+function handleTaskCompleted(data, chat) {
+  if (!chat.taskPlan) return;
+
+  const task = chat.taskPlan.tasks.get(data.task_id);
+  if (task) {
+    task.status = 'completed';
+    task.resultPreview = data.result_preview;
+    task.hasFullResult = data.has_full_result;
+    task.completedAt = new Date();
+  }
+
+  updateTaskItemUI(chat, data.task_id, 'completed', data.result_preview);
+  updateOverallProgress(chat);
+
+  console.log(`[TaskProgress] Task ${data.task_id} completed`);
+}
+
+/**
+ * Updates task status when a task fails.
+ * @param {Object} data - Task failed event data
+ * @param {Object} chat - Chat object
+ */
+function handleTaskFailed(data, chat) {
+  if (!chat.taskPlan) return;
+
+  const task = chat.taskPlan.tasks.get(data.task_id);
+  if (task) {
+    task.status = 'failed';
+    task.error = data.error;
+  }
+
+  updateTaskItemUI(chat, data.task_id, 'failed', data.error);
+  updateOverallProgress(chat);
+
+  console.log(`[TaskProgress] Task ${data.task_id} failed: ${data.error}`);
+}
+
+/**
+ * Handles execution complete event.
+ * @param {Object} data - Execution complete event data
+ * @param {Object} chat - Chat object
+ */
+function handleTaskExecutionComplete(data, chat) {
+  if (!chat.taskPlan) return;
+
+  chat.taskPlan.completedAt = new Date();
+  chat.taskPlan.success = data.success;
+
+  // Update panel header to show completion
+  const panel = document.querySelector(`[data-chat-id="${chat.id}"] .task-progress-panel`);
+  if (panel) {
+    const header = panel.querySelector('.task-panel-title');
+    if (header) {
+      const icon = data.success ? '✅' : '⚠️';
+      const text = data.success ? 'Abgeschlossen' : 'Teilweise fehlgeschlagen';
+      header.querySelector('.task-panel-icon').textContent = icon;
+      header.innerHTML = header.innerHTML.replace('Ausführungsplan', text);
+    }
+  }
+
+  updateOverallProgress(chat);
+  console.log(`[TaskProgress] Execution complete, success: ${data.success}`);
+}
+
+/**
+ * Updates the UI for a specific task item.
+ * @param {Object} chat - Chat object
+ * @param {string} taskId - Task ID
+ * @param {string} status - New status
+ * @param {string} [resultPreview] - Optional result preview text
+ */
+function updateTaskItemUI(chat, taskId, status, resultPreview) {
+  const isActive = chat.id === chatManager.activeId;
+  if (!isActive) return;
+
+  const taskEl = document.querySelector(`.task-item[data-task-id="${taskId}"]`);
+  if (!taskEl) return;
+
+  // Update status icon
+  const iconEl = taskEl.querySelector('.task-status-icon');
+  if (iconEl) {
+    iconEl.textContent = getTaskStatusIcon(status);
+  }
+
+  // Update status label
+  const labelEl = taskEl.querySelector('.task-status-label');
+  if (labelEl) {
+    labelEl.textContent = getTaskStatusLabel(status);
+    labelEl.className = `task-status-label task-status-${status}`;
+  }
+
+  // Update class for styling
+  taskEl.className = `task-item task-${status}`;
+
+  // Show result preview if available
+  if (resultPreview) {
+    const previewEl = taskEl.querySelector('.task-result-preview');
+    if (previewEl) {
+      previewEl.textContent = status === 'failed' ? `Fehler: ${resultPreview}` : resultPreview;
+      previewEl.style.display = 'block';
+      previewEl.className = `task-result-preview ${status === 'failed' ? 'task-error' : ''}`;
+    }
+  }
+}
+
+/**
+ * Updates the overall progress bar.
+ * @param {Object} chat - Chat object
+ */
+function updateOverallProgress(chat) {
+  if (!chat.taskPlan) return;
+
+  const isActive = chat.id === chatManager.activeId;
+  if (!isActive) return;
+
+  const tasks = Array.from(chat.taskPlan.tasks.values());
+  const completed = tasks.filter(t => t.status === 'completed').length;
+  const failed = tasks.filter(t => t.status === 'failed').length;
+  const total = tasks.length;
+  const percent = Math.round(((completed + failed) / total) * 100);
+
+  const progressFill = document.querySelector('.task-progress-fill');
+  const progressText = document.querySelector('.task-progress-text');
+
+  if (progressFill) {
+    progressFill.style.width = `${percent}%`;
+    progressFill.className = `task-progress-fill ${failed > 0 ? 'has-failures' : ''}`;
+  }
+
+  if (progressText) {
+    progressText.textContent = `${completed}/${total}`;
+  }
+}
+
+/**
+ * Returns the icon for a task status.
+ * @param {string} status - Task status
+ * @returns {string} Icon character
+ */
+function getTaskStatusIcon(status) {
+  const icons = {
+    'pending': '⏳',
+    'running': '🔄',
+    'completed': '✅',
+    'failed': '❌'
+  };
+  return icons[status] || '○';
+}
+
+/**
+ * Returns the label for a task status.
+ * @param {string} status - Task status
+ * @returns {string} Status label
+ */
+function getTaskStatusLabel(status) {
+  const labels = {
+    'pending': 'Wartend',
+    'running': 'Läuft...',
+    'completed': 'Fertig',
+    'failed': 'Fehler'
+  };
+  return labels[status] || status;
+}
+
+/**
+ * Returns the label for a task type.
+ * @param {string} type - Task type
+ * @returns {string} Type label
+ */
+function getTaskTypeLabel(type) {
+  const labels = {
+    'research': '🔍 Recherche',
+    'code': '💻 Code',
+    'analyst': '📊 Analyse',
+    'devops': '🔧 DevOps',
+    'docs': '📝 Doku',
+    'debug': '🐛 Debug'
+  };
+  return labels[type] || type;
 }
 
 /**
