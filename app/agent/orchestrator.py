@@ -68,6 +68,7 @@ from app.services.llm_client import (
     TIMEOUT_TOOL,
     TIMEOUT_ANALYSIS,
 )
+from app.services.token_tracker import get_token_tracker
 from app.services.memory_store import get_memory_store
 from app.services.context_manager import get_context_manager, ContextManager
 from app.services.transcript_logger import get_transcript_logger, TranscriptLogger, TranscriptEntry
@@ -791,7 +792,7 @@ Sei präzise und gib detaillierte Analyse-Schritte."""
         }
 
         await self._event_bridge.emit(
-            AgentEventType.WORKSPACE_CODE_CHANGE,
+            AgentEventType.WORKSPACE_CODE_CHANGE.value,
             event_data
         )
 
@@ -832,7 +833,7 @@ Sei präzise und gib detaillierte Analyse-Schritte."""
             if not result.success:
                 # Emit error event
                 await self._event_bridge.emit(
-                    AgentEventType.WORKSPACE_SQL_RESULT,
+                    AgentEventType.WORKSPACE_SQL_RESULT.value,
                     {
                         "id": str(uuid.uuid4()),
                         "timestamp": int(time.time() * 1000),
@@ -863,7 +864,7 @@ Sei präzise und gib detaillierte Analyse-Schritte."""
 
             # Emit success event
             await self._event_bridge.emit(
-                AgentEventType.WORKSPACE_SQL_RESULT,
+                AgentEventType.WORKSPACE_SQL_RESULT.value,
                 {
                     "id": str(uuid.uuid4()),
                     "timestamp": int(time.time() * 1000),
@@ -899,7 +900,7 @@ Sei präzise und gib detaillierte Analyse-Schritte."""
             execution_time_ms = int((time.time() - start_time) * 1000)
             # Emit error event
             await self._event_bridge.emit(
-                AgentEventType.WORKSPACE_SQL_RESULT,
+                AgentEventType.WORKSPACE_SQL_RESULT.value,
                 {
                     "id": str(uuid.uuid4()),
                     "timestamp": int(time.time() * 1000),
@@ -936,6 +937,9 @@ Sei präzise und gib detaillierte Analyse-Schritte."""
             "mcp_branch_end": AgentEventType.MCP_BRANCH_END,
             "mcp_assumption_created": AgentEventType.MCP_ASSUMPTION,
             "mcp_tool_recommendation": AgentEventType.MCP_TOOL_REC,
+            # Workspace events
+            "workspace_code_change": AgentEventType.WORKSPACE_CODE_CHANGE,
+            "workspace_sql_result": AgentEventType.WORKSPACE_SQL_RESULT,
         }
 
     async def _drain_mcp_events(self) -> AsyncGenerator[AgentEvent, None]:
@@ -2086,6 +2090,19 @@ Sei präzise und gib detaillierte Analyse-Schritte."""
                             "compaction_count": state.compaction_count,
                         }
 
+                        # Token-Tracking für Statistiken
+                        try:
+                            tracker = get_token_tracker()
+                            tracker.log_usage(
+                                session_id=session_id,
+                                model=last_model or settings.llm.default_model,
+                                input_tokens=request_prompt_tokens,
+                                output_tokens=request_completion_tokens,
+                                request_type="plan",
+                            )
+                        except Exception as e:
+                            logger.debug(f"[agent] Token-Tracking failed: {e}")
+
                         plan_match = _RE_PLAN_BLOCK.search(plan_response)
                         if plan_match:
                             plan_text = plan_match.group(1).strip()
@@ -2234,6 +2251,20 @@ Sei präzise und gib detaillierte Analyse-Schritte."""
                         "budget": budget.get_status() if budget else None,
                         "compaction_count": state.compaction_count
                     }
+
+                    # Token-Tracking für Statistiken
+                    try:
+                        tracker = get_token_tracker()
+                        tracker.log_usage(
+                            session_id=session_id,
+                            model=last_model or settings.llm.default_model,
+                            input_tokens=request_prompt_tokens,
+                            output_tokens=request_completion_tokens,
+                            request_type="chat",
+                        )
+                    except Exception as e:
+                        logger.debug(f"[agent] Token-Tracking failed: {e}")
+
                     yield AgentEvent(AgentEventType.USAGE, usage_data)
 
                     # Analytics: Chain beenden
