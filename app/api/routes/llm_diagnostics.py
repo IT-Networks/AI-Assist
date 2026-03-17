@@ -642,7 +642,7 @@ async def debug_agent_request(
 
     Nützlich zum Debuggen warum Requests fehlschlagen.
     """
-    from app.agent.orchestrator import get_agent_orchestrator, SYSTEM_PROMPT
+    from app.services.llm_client import SYSTEM_PROMPT
     from app.utils.token_counter import estimate_tokens, estimate_messages_tokens
 
     model = model or settings.llm.default_model
@@ -680,4 +680,127 @@ async def debug_agent_request(
         "request_body": request_body,
         "request_body_size_bytes": len(json.dumps(request_body)),
         "endpoint": f"{settings.llm.base_url.rstrip('/')}/chat/completions",
+    }
+
+
+@router.post("/test-endpoint-formats")
+async def test_endpoint_formats(
+    model: Optional[str] = Body(default=None, embed=True),
+):
+    """
+    Testet beide LLM-Endpoint-Formate um herauszufinden welches funktioniert.
+
+    - Chat Completions: /chat/completions mit messages
+    - Text Completions: /completions mit prompt
+
+    Gibt zurueck welches Format der Server akzeptiert.
+    """
+    import httpx
+
+    model = model or settings.llm.default_model
+    base_url = settings.llm.base_url.rstrip("/")
+
+    results = {}
+
+    # Headers
+    headers = {"Content-Type": "application/json"}
+    if settings.llm.api_key and settings.llm.api_key != "none":
+        headers["Authorization"] = f"Bearer {settings.llm.api_key}"
+
+    async with httpx.AsyncClient(timeout=30.0, verify=settings.llm.verify_ssl) as client:
+
+        # Test 1: Chat Completions Format
+        chat_payload = {
+            "model": model,
+            "messages": [
+                {"role": "user", "content": "Hi"}
+            ],
+            "max_tokens": 10,
+        }
+
+        try:
+            resp = await client.post(
+                f"{base_url}/chat/completions",
+                headers=headers,
+                json=chat_payload,
+            )
+            results["chat_completions"] = {
+                "endpoint": f"{base_url}/chat/completions",
+                "status_code": resp.status_code,
+                "success": resp.status_code == 200,
+                "response": resp.json() if resp.status_code == 200 else resp.text[:500],
+            }
+        except Exception as e:
+            results["chat_completions"] = {
+                "endpoint": f"{base_url}/chat/completions",
+                "success": False,
+                "error": str(e),
+            }
+
+        # Test 2: Text Completions Format (mit prompt statt messages)
+        text_payload = {
+            "model": model,
+            "prompt": "Hi",
+            "max_tokens": 10,
+        }
+
+        try:
+            resp = await client.post(
+                f"{base_url}/completions",
+                headers=headers,
+                json=text_payload,
+            )
+            results["text_completions"] = {
+                "endpoint": f"{base_url}/completions",
+                "status_code": resp.status_code,
+                "success": resp.status_code == 200,
+                "response": resp.json() if resp.status_code == 200 else resp.text[:500],
+            }
+        except Exception as e:
+            results["text_completions"] = {
+                "endpoint": f"{base_url}/completions",
+                "success": False,
+                "error": str(e),
+            }
+
+        # Test 3: Chat Completions mit minimalem Request
+        minimal_payload = {
+            "model": model,
+            "messages": [{"role": "user", "content": "Hi"}],
+        }
+
+        try:
+            resp = await client.post(
+                f"{base_url}/chat/completions",
+                headers=headers,
+                json=minimal_payload,
+            )
+            results["chat_minimal"] = {
+                "endpoint": f"{base_url}/chat/completions",
+                "payload": minimal_payload,
+                "status_code": resp.status_code,
+                "success": resp.status_code == 200,
+                "response": resp.json() if resp.status_code == 200 else resp.text[:500],
+            }
+        except Exception as e:
+            results["chat_minimal"] = {
+                "success": False,
+                "error": str(e),
+            }
+
+    # Empfehlung
+    recommendation = "unknown"
+    if results.get("chat_completions", {}).get("success"):
+        recommendation = "chat_completions"
+    elif results.get("text_completions", {}).get("success"):
+        recommendation = "text_completions - ACHTUNG: Code muss angepasst werden!"
+    elif results.get("chat_minimal", {}).get("success"):
+        recommendation = "chat_completions (minimal)"
+
+    return {
+        "model": model,
+        "base_url": base_url,
+        "results": results,
+        "recommendation": recommendation,
+        "hint": "Wenn text_completions funktioniert aber chat_completions nicht, ist der Server fuer Text Completion konfiguriert.",
     }
