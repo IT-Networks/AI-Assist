@@ -29,6 +29,10 @@ from app.services.analytics_logger import AnalyticsLogger, get_analytics_logger
 
 logger = logging.getLogger(__name__)
 
+# Timeout für einzelne Tool-Aufrufe in Sekunden
+# Research-Tools (Confluence, GitHub, etc.) können lange dauern
+TOOL_EXECUTION_TIMEOUT = 90.0
+
 
 class TaskExecutor:
     """
@@ -238,7 +242,14 @@ class TaskExecutor:
                                 "has_full_result": bool(result)
                             })
 
-        # Finale Synthese
+        # Finale Synthese - Event senden damit UI nicht in Timeout-Loop läuft
+        if event_callback:
+            await event_callback("synthesis_started", {
+                "total_tasks": len(plan.tasks),
+                "completed_tasks": len(self.completed),
+                "results_count": len(self.results)
+            })
+
         final_response = await self._final_synthesis(plan)
 
         duration_ms = int((time.time() - start_time) * 1000)
@@ -440,13 +451,20 @@ class TaskExecutor:
                 except json.JSONDecodeError:
                     tool_args = {}
 
-                # Tool ausfuehren
+                # Tool ausfuehren mit Timeout
                 tool_success = False
                 if tool_name in config.tools:
                     try:
-                        tool_result = await self.tools.execute(tool_name, tool_args)
+                        # Timeout für Tool-Ausführung (verhindert Hänger bei langsamen APIs)
+                        tool_result = await asyncio.wait_for(
+                            self.tools.execute(tool_name, tool_args),
+                            timeout=TOOL_EXECUTION_TIMEOUT
+                        )
                         result_str = tool_result.to_context()
                         tool_success = True
+                    except asyncio.TimeoutError:
+                        result_str = f"[Timeout] Tool '{tool_name}' hat nach {TOOL_EXECUTION_TIMEOUT}s nicht geantwortet"
+                        logger.warning(f"[TaskExecutor] Tool timeout: {tool_name}")
                     except Exception as e:
                         result_str = f"[Tool-Fehler] {e}"
                 else:

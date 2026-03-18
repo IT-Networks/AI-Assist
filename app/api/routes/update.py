@@ -215,7 +215,8 @@ async def get_update_config():
         # Globale Proxy-Konfiguration (readonly hier, Bearbeitung über Settings > Proxy)
         "proxy_enabled": proxy_config.enabled,
         "proxy_url": proxy_config.url,
-        "proxy_configured": proxy_config.enabled and bool(proxy_config.url),
+        # Verwende get_proxy_url() für korrekte Erkennung (inkl. DNS:port ohne http://)
+        "proxy_configured": proxy_config.get_proxy_url() is not None,
     }
 
 

@@ -1,3 +1,12 @@
+# Globale Proxy-Konfiguration (für alle externen HTTP-Verbindungen)
+proxy:
+  enabled: false
+  url: ''                # z.B. http://proxy.intern:8080
+  username: ''
+  password: ''
+  no_proxy: ''           # Kommagetrennte Liste ohne Proxy, z.B. "localhost,127.0.0.1,.intern"
+  verify_ssl: true
+
 # LLM-Verbindung (OpenAI-kompatibler Endpunkt)
 llm:
   base_url: http://internal-llm-gateway/v1
@@ -314,13 +323,8 @@ maven:
   default_timeout_minutes: 15
 
 search:
-  enabled: true  # Web-Suche aktivieren
-  proxy_url: ''
-  proxy_username: ''
-  proxy_password: ''
-  no_proxy: ''
-  verify_ssl: false  # Für Firmennetzwerk mit Proxy oft nötig
-  timeout_seconds: 30
+  enabled: true       # Web-Suche aktivieren
+  timeout_seconds: 30 # Proxy wird global unter 'proxy:' konfiguriert
 
 
 # ═══════════════════════════════════════════════════════════════════

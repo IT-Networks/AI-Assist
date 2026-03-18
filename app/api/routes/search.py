@@ -188,10 +188,10 @@ def _clean(html: str) -> str:
 
 def _should_bypass_proxy(url: str) -> bool:
     """Prüft ob die URL im no_proxy-List ist und kein Proxy verwendet werden soll."""
-    if not settings.search.no_proxy:
+    if not settings.proxy.no_proxy:
         return False
 
-    no_proxy_list = [x.strip().lower() for x in settings.search.no_proxy.split(",") if x.strip()]
+    no_proxy_list = [x.strip().lower() for x in settings.proxy.no_proxy.split(",") if x.strip()]
     if not no_proxy_list:
         return False
 
@@ -223,7 +223,7 @@ def _get_proxy_config(target_url: str = "") -> dict:
     if target_url and _should_bypass_proxy(target_url):
         return {}
 
-    proxy_url = settings.search.get_proxy_url()
+    proxy_url = settings.proxy.get_proxy_url()
     if not proxy_url:
         return {}
 
@@ -239,7 +239,7 @@ async def _ddg_search(query: str, max_results: int = 5) -> List[Dict[str, str]]:
     Verwendet die duckduckgo-search Library (empfohlen) mit HTML-Scraping als Fallback.
     """
     timeout = settings.search.timeout_seconds or 30
-    proxy_url = settings.search.get_proxy_url()
+    proxy_url = settings.proxy.get_proxy_url()
 
     print(f"[search] Query: {query[:50]}... | method={'library' if _DDG_AVAILABLE else 'legacy'} | proxy={bool(proxy_url)}")
 
@@ -664,8 +664,8 @@ async def test_search() -> Dict[str, Any]:
         "query": test_query,
         "search_method": "duckduckgo-search library" if _DDG_AVAILABLE else "legacy HTML scraping",
         "library_available": _DDG_AVAILABLE,
-        "proxy_url": settings.proxy.url or "(kein Proxy)",
-        "proxy_configured": settings.proxy.enabled and bool(settings.proxy.url),
+        "proxy_url": settings.proxy.get_proxy_url() or "(kein Proxy)",
+        "proxy_configured": settings.proxy.get_proxy_url() is not None,
         "verify_ssl": settings.proxy.verify_ssl,
         "timeout": timeout,
     }
@@ -702,13 +702,93 @@ async def test_search() -> Dict[str, Any]:
 @router.get("/info")
 async def get_search_info() -> Dict[str, Any]:
     """Gibt Informationen über die Such-Konfiguration zurück."""
+    proxy_url = settings.proxy.get_proxy_url()
     return {
         "library_available": _DDG_AVAILABLE,
         "library_name": "duckduckgo-search" if _DDG_AVAILABLE else None,
         "search_method": "library" if _DDG_AVAILABLE else "legacy",
         "enabled": settings.search.enabled,
-        "proxy_configured": settings.proxy.enabled and bool(settings.proxy.url),
-        "proxy_url": settings.proxy.url if settings.proxy.enabled else None,
+        "proxy_configured": proxy_url is not None,
+        "proxy_url": proxy_url,
         "verify_ssl": settings.proxy.verify_ssl,
         "timeout_seconds": settings.search.timeout_seconds,
     }
+
+
+@router.post("/test-proxy")
+async def test_proxy_connection() -> Dict[str, Any]:
+    """
+    Testet die globale Proxy-Verbindung.
+    Versucht eine einfache HTTP-Anfrage über den konfigurierten Proxy.
+    """
+    import httpx
+
+    proxy_url = settings.proxy.get_proxy_url()
+
+    if not proxy_url:
+        return {
+            "success": False,
+            "error": "Kein Proxy konfiguriert. Bitte unter Settings > Proxy einrichten.",
+            "proxy_enabled": settings.proxy.enabled,
+            "proxy_url": settings.proxy.url,
+        }
+
+    # Test-URL (öffentlich erreichbar, schnelle Antwort)
+    test_url = "https://httpbin.org/ip"
+
+    try:
+        async with httpx.AsyncClient(
+            proxy=proxy_url,
+            verify=settings.proxy.verify_ssl,
+            timeout=10.0,
+        ) as client:
+            response = await client.get(test_url)
+
+            if response.status_code == 200:
+                return {
+                    "success": True,
+                    "message": "Proxy-Verbindung erfolgreich",
+                    "proxy_url": settings.proxy.url,
+                    "test_url": test_url,
+                    "status_code": response.status_code,
+                    "response_ip": response.json().get("origin", "unknown"),
+                }
+            else:
+                return {
+                    "success": False,
+                    "error": f"HTTP-Fehler: {response.status_code}",
+                    "proxy_url": settings.proxy.url,
+                    "test_url": test_url,
+                }
+
+    except httpx.ProxyError as e:
+        return {
+            "success": False,
+            "error": f"Proxy-Fehler: {str(e)}",
+            "error_type": "ProxyError",
+            "proxy_url": settings.proxy.url,
+            "hint": "Prüfen Sie die Proxy-URL und Credentials",
+        }
+    except httpx.ConnectError as e:
+        return {
+            "success": False,
+            "error": f"Verbindungsfehler: {str(e)}",
+            "error_type": "ConnectError",
+            "proxy_url": settings.proxy.url,
+            "hint": "Proxy-Server nicht erreichbar oder falsche URL",
+        }
+    except httpx.TimeoutException as e:
+        return {
+            "success": False,
+            "error": f"Timeout: {str(e)}",
+            "error_type": "TimeoutException",
+            "proxy_url": settings.proxy.url,
+            "hint": "Proxy antwortet nicht innerhalb von 10 Sekunden",
+        }
+    except Exception as e:
+        return {
+            "success": False,
+            "error": str(e),
+            "error_type": type(e).__name__,
+            "proxy_url": settings.proxy.url,
+        }

@@ -217,12 +217,24 @@ async def _execute_tasks_with_events(
     # Events aus Queue yielden bis Execution fertig
     result: Optional[TaskExecutionResult] = None
 
+    synthesis_started = False
+
     while not execution_task.done():
         try:
-            # Kurzer Timeout um regelmaessig Task-Status zu pruefen
-            event = await asyncio.wait_for(event_queue.get(), timeout=0.1)
+            # Längerer Timeout während Synthese (LLM-Call), kürzerer während Tasks
+            timeout = 2.0 if synthesis_started else 0.5
+            event = await asyncio.wait_for(event_queue.get(), timeout=timeout)
             yield event
+
+            # Track synthesis phase to use longer timeout
+            if event.get("type") == "synthesis_started":
+                synthesis_started = True
+
         except asyncio.TimeoutError:
+            # Während Synthese: Weniger häufige Polls, keine Warn-Logs
+            if not synthesis_started:
+                continue
+            # In Synthese-Phase: Warten ist normal, kein Fehler
             continue
         except Exception as e:
             logger.error(f"[TaskIntegration] Event processing error: {e}")

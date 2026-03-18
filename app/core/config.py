@@ -546,16 +546,8 @@ class MavenConfig(BaseModel):
 class WebSearchConfig(BaseModel):
     """Internet-Recherche mit Nutzer-Bestätigungspflicht."""
     enabled: bool = False
-    # Proxy-Konfiguration für Internet-Zugriff
-    proxy_url: str = ""              # z.B. http://proxy.intern:8080 oder proxy.intern:8080
-    proxy_username: str = ""         # Proxy-Benutzername (optional)
-    proxy_password: str = ""         # Proxy-Passwort (optional)
-    no_proxy: str = ""               # Kommagetrennte Liste ohne Proxy (z.B. "localhost,127.0.0.1,.intern")
-    verify_ssl: bool = True          # SSL-Zertifikate prüfen (False für selbstsignierte Proxy-Zertifikate)
+    # Proxy wird jetzt global über settings.proxy konfiguriert
     timeout_seconds: int = 30        # Timeout für HTTP-Requests
-
-    def get_proxy_url(self) -> Optional[str]:
-        """Gibt die vollständige Proxy-URL inkl. Auth zurück."""
 
 
 # ══════════════════════════════════════════════════════════════════════════════

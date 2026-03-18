@@ -1445,7 +1445,7 @@ async function pollArenaResponses(matchId) {
 
   const poll = async () => {
     try {
-      const res = await fetch(`/api/arena/matches/${matchId}`);
+      const res = await fetch(`/api/arena/match/${matchId}`);
       if (!res.ok) throw new Error('Failed to fetch match');
 
       const match = await res.json();
@@ -1490,7 +1490,7 @@ async function voteArena(vote) {
   const feedback = document.getElementById('arena-feedback').value.trim();
 
   try {
-    const res = await fetch(`/api/arena/matches/${arenaState.matchId}/vote`, {
+    const res = await fetch(`/api/arena/match/${arenaState.matchId}/vote`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ vote, feedback }),
@@ -7729,15 +7729,10 @@ function collectSectionValues(section) {
 async function saveCurrentSection() {
   const section = settingsState.currentSection;
 
-  // Web-Suche hat eigene Felder
+  // Web-Suche hat eigene Felder (nur timeout - Proxy ist global)
   if (section === 'search') {
     const config = {
-      proxy_url: document.getElementById('search-proxy-url')?.value || '',
-      proxy_username: document.getElementById('search-proxy-user')?.value || '',
-      proxy_password: document.getElementById('search-proxy-pass')?.value || '',
-      no_proxy: document.getElementById('search-no-proxy')?.value || '',
       timeout_seconds: parseInt(document.getElementById('search-timeout')?.value) || 30,
-      verify_ssl: document.getElementById('search-verify-ssl')?.checked ?? true,
     };
     try {
       const res = await fetch('/api/search/config', {
@@ -11604,41 +11599,7 @@ async function renderSearchSettingsSection() {
       </div>
 
       <div class="settings-subsection" style="margin-top:16px">
-        <h4>Proxy-Konfiguration</h4>
-        <p style="font-size:12px;color:var(--text-muted);margin-bottom:12px">
-          Für Netzwerke mit Proxy-Server. Leer lassen für direkten Internetzugang.
-        </p>
-        <div class="settings-field">
-          <label>Proxy-URL</label>
-          <input type="text" id="search-proxy-url" class="settings-input"
-                 placeholder="http://proxy.example.com:8080"
-                 value="${escapeHtml(config.proxy_url || '')}"
-                 onchange="markSettingsModified()">
-        </div>
-        <div class="settings-field-row" style="display:flex;gap:12px">
-          <div class="settings-field" style="flex:1">
-            <label>Benutzername</label>
-            <input type="text" id="search-proxy-user" class="settings-input"
-                   placeholder="(optional)"
-                   value="${escapeHtml(config.proxy_username || '')}"
-                   onchange="markSettingsModified()">
-          </div>
-          <div class="settings-field" style="flex:1">
-            <label>Passwort</label>
-            <input type="password" id="search-proxy-pass" class="settings-input"
-                   placeholder="(optional)"
-                   value="${config.proxy_password || ''}"
-                   onchange="markSettingsModified()">
-          </div>
-        </div>
-        <div class="settings-field">
-          <label>No-Proxy (Ausnahmen)</label>
-          <input type="text" id="search-no-proxy" class="settings-input"
-                 placeholder="localhost,.intern,.local"
-                 value="${escapeHtml(config.no_proxy || '')}"
-                 onchange="markSettingsModified()">
-          <span style="font-size:11px;color:var(--text-muted)">Kommagetrennte Liste von Hosts ohne Proxy</span>
-        </div>
+        <h4>Verbindungseinstellungen</h4>
         <div class="settings-field">
           <label>Timeout (Sekunden)</label>
           <input type="number" id="search-timeout" class="settings-input" style="width:100px"
@@ -11646,15 +11607,14 @@ async function renderSearchSettingsSection() {
                  value="${config.timeout_seconds || 30}"
                  onchange="markSettingsModified()">
         </div>
-        <div class="settings-field" style="margin-top:12px">
-          <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
-            <input type="checkbox" id="search-verify-ssl" ${config.verify_ssl !== false ? 'checked' : ''}
-                   onchange="markSettingsModified()">
-            <span>SSL-Zertifikate verifizieren</span>
-          </label>
-          <span style="font-size:11px;color:var(--text-muted);display:block;margin-top:4px">
-            Deaktivieren für selbstsignierte Zertifikate (z.B. interne Proxys)
-          </span>
+        <div class="settings-field" style="margin-top:12px;padding:12px;background:var(--surface);border-radius:6px">
+          <p style="font-size:12px;color:var(--text-secondary);margin:0">
+            <strong>Proxy:</strong> ${data.proxy_configured ? '✓ Konfiguriert' : 'Nicht konfiguriert'}
+            ${data.proxy_url ? ` (${escapeHtml(data.proxy_url)})` : ''}
+          </p>
+          <p style="font-size:11px;color:var(--text-muted);margin:4px 0 0 0">
+            Proxy-Einstellungen werden global unter <a href="#" onclick="showSettingsSection('proxy'); return false;" style="color:var(--accent)">Settings &gt; Proxy</a> konfiguriert.
+          </p>
         </div>
         <div class="settings-actions-section" style="margin-top:16px;padding-top:12px;border-top:1px solid var(--border)">
           <button class="btn btn-secondary" onclick="testSearchConnection()">
@@ -11805,20 +11765,12 @@ async function searchSettingsToggle(enabled) {
 }
 
 async function saveSearchProxyConfig() {
-  const statusEl = document.getElementById('search-proxy-status');
-  statusEl.textContent = 'Speichere...';
-  statusEl.style.color = 'var(--text-muted)';
-
+  // Nur timeout_seconds speichern - Proxy wird global konfiguriert
   const config = {
-    proxy_url: document.getElementById('search-proxy-url')?.value || '',
-    proxy_username: document.getElementById('search-proxy-user')?.value || '',
-    proxy_password: document.getElementById('search-proxy-pass')?.value || '',
-    no_proxy: document.getElementById('search-no-proxy')?.value || '',
     timeout_seconds: parseInt(document.getElementById('search-timeout')?.value) || 30,
-    verify_ssl: document.getElementById('search-verify-ssl')?.checked ?? true,
   };
 
-  log.info('[Search] Saving config:', { ...config, proxy_password: '***' });
+  log.info('[Search] Saving config:', config);
 
   try {
     // 1. Config im Speicher aktualisieren
