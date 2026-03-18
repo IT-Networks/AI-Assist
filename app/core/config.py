@@ -574,6 +574,7 @@ class UpdateConfig(BaseModel):
         "templates/**/*",
         "requirements.txt",
         "main.py",
+        "VERSION",
     ])
     # Blacklist: Diese Pfade werden NIE überschrieben
     exclude_patterns: List[str] = Field(default_factory=lambda: [
