@@ -13484,6 +13484,14 @@ async function loadUpdateSettings() {
       </div>
 
       <div class="settings-group">
+        <label class="settings-label">Branch (optional)</label>
+        <input type="text" id="update-branch" class="settings-input"
+          value="${escapeHtml(config.branch || '')}"
+          placeholder="main">
+        <small class="settings-hint">Leer = Releases/Tags verwenden, "main" = immer neuesten Branch-Code laden</small>
+      </div>
+
+      <div class="settings-group">
         <label class="settings-label">GitHub Token (optional, für private Repos)</label>
         <input type="password" id="update-github-token" class="settings-input"
           value="${config.has_token ? '***' : ''}"
@@ -13547,6 +13555,7 @@ async function saveUpdateSettings() {
   const data = {
     enabled: document.getElementById('update-enabled').checked,
     repo_url: document.getElementById('update-repo-url').value,
+    branch: document.getElementById('update-branch').value,
     github_token: document.getElementById('update-github-token').value,
     use_proxy: document.getElementById('update-use-proxy').checked,
     verify_ssl: document.getElementById('update-verify-ssl').checked,

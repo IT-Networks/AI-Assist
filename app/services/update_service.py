@@ -175,7 +175,51 @@ class UpdateService:
 
         try:
             async with self._get_http_client() as client:
-                # Versuche zuerst Releases API
+                # Wenn Branch konfiguriert ist, direkt Branch verwenden
+                if config.branch:
+                    branch = config.branch
+                    # Letzten Commit des Branches holen
+                    branch_response = await client.get(
+                        f"https://api.github.com/repos/{owner}/{repo}/branches/{branch}"
+                    )
+
+                    if branch_response.status_code == 200:
+                        branch_data = branch_response.json()
+                        commit = branch_data.get("commit", {})
+                        commit_sha = commit.get("sha", "")[:7]
+                        commit_date = commit.get("commit", {}).get("committer", {}).get("date", "")
+                        commit_msg = commit.get("commit", {}).get("message", "").split("\n")[0]
+
+                        # VERSION-Datei aus dem Branch lesen um Remote-Version zu ermitteln
+                        version_response = await client.get(
+                            f"https://raw.githubusercontent.com/{owner}/{repo}/{branch}/VERSION"
+                        )
+                        if version_response.status_code == 200:
+                            latest = version_response.text.strip()
+                        else:
+                            latest = f"{branch}@{commit_sha}"
+
+                        # Update verfügbar wenn Version unterschiedlich oder Commit neuer
+                        available = latest != current
+
+                        return {
+                            "available": available,
+                            "current_version": current,
+                            "latest_version": latest,
+                            "release_notes": f"Branch: {branch}\nCommit: {commit_sha}\n{commit_msg}",
+                            "download_url": f"https://api.github.com/repos/{owner}/{repo}/zipball/{branch}",
+                            "branch": branch,
+                            "commit_sha": commit_sha,
+                            "commit_date": commit_date,
+                        }
+                    else:
+                        return {
+                            "available": False,
+                            "current_version": current,
+                            "error": f"Branch '{branch}' nicht gefunden (HTTP {branch_response.status_code})",
+                        }
+
+                # Sonst: Releases API versuchen
                 response = await client.get(
                     f"https://api.github.com/repos/{owner}/{repo}/releases/latest"
                 )
@@ -223,13 +267,14 @@ class UpdateService:
                         "available": False,
                         "current_version": current,
                         "latest_version": current,
-                        "message": "Keine Releases oder Tags gefunden. Verwende main-Branch.",
+                        "message": "Keine Releases oder Tags gefunden. Konfiguriere 'branch: main' für Branch-Updates.",
                         "download_url": f"https://api.github.com/repos/{owner}/{repo}/zipball/main",
                     }
 
                 else:
                     return {
                         "available": False,
+                        "current_version": current,
                         "error": f"GitHub API Fehler: {response.status_code}",
                     }
 

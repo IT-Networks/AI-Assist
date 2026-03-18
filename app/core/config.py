@@ -560,6 +560,8 @@ class UpdateConfig(BaseModel):
     # GitHub Repository (öffentlich oder privat)
     repo_url: str = ""               # z.B. https://github.com/user/ai-assist-releases
     github_token: str = ""           # Personal Access Token für private Repos
+    # Branch für Updates (leer = Releases/Tags verwenden, "main" = immer main-Branch)
+    branch: str = ""                 # z.B. "main" für direkte Branch-Updates
     # Proxy verwenden (aus globaler proxy-Konfiguration)
     use_proxy: bool = True           # Globalen Proxy verwenden
     verify_ssl: bool = False         # SSL-Zertifikate prüfen (False für Corporate Proxies)

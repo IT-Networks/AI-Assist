@@ -41,6 +41,7 @@ class UpdateConfigRequest(BaseModel):
     """Request für Update-Konfiguration."""
     enabled: bool = False
     repo_url: str = ""
+    branch: str = ""             # Branch für Updates (leer = Releases, "main" = Branch)
     github_token: str = ""
     use_proxy: bool = True       # Globalen Proxy verwenden
     verify_ssl: bool = False
@@ -205,6 +206,7 @@ async def get_update_config():
     return {
         "enabled": config.enabled,
         "repo_url": config.repo_url,
+        "branch": config.branch,
         "github_token": "***" if config.github_token else "",
         "has_token": bool(config.github_token),
         "use_proxy": config.use_proxy,
@@ -243,6 +245,7 @@ async def save_update_config(request: UpdateConfigRequest):
 
         config_data["update"]["enabled"] = request.enabled
         config_data["update"]["repo_url"] = request.repo_url
+        config_data["update"]["branch"] = request.branch
         config_data["update"]["use_proxy"] = request.use_proxy
         config_data["update"]["verify_ssl"] = request.verify_ssl
         config_data["update"]["check_on_start"] = request.check_on_start
@@ -259,6 +262,7 @@ async def save_update_config(request: UpdateConfigRequest):
         # Settings-Objekt direkt aktualisieren (kein Neustart nötig)
         settings.update.enabled = request.enabled
         settings.update.repo_url = request.repo_url
+        settings.update.branch = request.branch
         settings.update.use_proxy = request.use_proxy
         settings.update.verify_ssl = request.verify_ssl
         settings.update.check_on_start = request.check_on_start
