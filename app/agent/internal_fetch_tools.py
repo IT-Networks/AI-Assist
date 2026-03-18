@@ -949,12 +949,12 @@ def register_internal_fetch_tools(registry: ToolRegistry) -> int:
         url: str = kwargs.get("url", "").strip()
         max_length: int = int(kwargs.get("max_length", 15000))
         extract_mode: str = kwargs.get("extract_mode", "text").strip()
-        # SSL-Verifizierung: Default aus Search-Config, kann überschrieben werden
+        # SSL-Verifizierung: Default aus globaler Proxy-Config, kann überschrieben werden
         verify_ssl_param = kwargs.get("verify_ssl")
         if verify_ssl_param is not None:
             verify_ssl = bool(verify_ssl_param)
         else:
-            verify_ssl = settings.search.verify_ssl
+            verify_ssl = settings.proxy.verify_ssl
 
         if not url:
             return ToolResult(

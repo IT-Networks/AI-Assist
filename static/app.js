@@ -13450,10 +13450,11 @@ async function saveProxySettings() {
   if (data.password === '********' || data.password === '') delete data.password;
 
   try {
-    const response = await fetch('/api/settings/section', {
+    // Section im URL-Pfad, nicht im Body
+    const response = await fetch('/api/settings/section/proxy', {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ section: 'proxy', values: data }),
+      body: JSON.stringify(data),
     });
 
     if (response.ok) {
@@ -13655,9 +13656,10 @@ async function renderArenaSettingsSection() {
 
 async function loadArenaSettings() {
   try {
-    // Load available models
+    // Load available models - API returns {models: [...], default: "..."}
     const modelsRes = await fetch('/api/models');
-    const models = modelsRes.ok ? await modelsRes.json() : [];
+    const modelsData = modelsRes.ok ? await modelsRes.json() : { models: [] };
+    const models = modelsData.models || [];
 
     // Load arena config
     const configRes = await fetch('/api/arena/config');

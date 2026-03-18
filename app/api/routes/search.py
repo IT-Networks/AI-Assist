@@ -47,10 +47,10 @@ def _get_search_client() -> httpx.AsyncClient:
     """
     global _search_client
     if _search_client is None:
-        # Proxy-URL aus Konfiguration
-        proxy_url = settings.search.get_proxy_url()
+        # Proxy-URL aus globaler Konfiguration
+        proxy_url = settings.proxy.get_proxy_url()
         if proxy_url:
-            print(f"[search] Creating HTTP client with proxy: {settings.search.proxy_url}")
+            print(f"[search] Creating HTTP client with proxy: {settings.proxy.url}")
         else:
             print(f"[search] Creating HTTP client without proxy")
 
@@ -58,8 +58,8 @@ def _get_search_client() -> httpx.AsyncClient:
             timeout=settings.search.timeout_seconds or 30,
             follow_redirects=True,
             headers=_DDG_HEADERS,
-            verify=settings.search.verify_ssl,
-            proxy=proxy_url,  # Proxy aus Konfiguration
+            verify=settings.proxy.verify_ssl if proxy_url else True,
+            proxy=proxy_url,  # Proxy aus globaler Konfiguration
             limits=httpx.Limits(
                 max_connections=10,
                 max_keepalive_connections=5,
@@ -127,13 +127,9 @@ class ToggleRequest(BaseModel):
 
 
 class SearchConfigRequest(BaseModel):
-    """Proxy-Konfiguration für Web-Suche."""
-    proxy_url: str = ""
-    proxy_username: str = ""
-    proxy_password: str = ""
-    no_proxy: str = ""
+    """Konfiguration für Web-Suche (Proxy wird global konfiguriert)."""
+    enabled: bool = True
     timeout_seconds: int = 30
-    verify_ssl: bool = True
 
 
 # ── DuckDuckGo Search ─────────────────────────────────────────────────────────
@@ -358,18 +354,18 @@ async def _ddg_search_legacy(query: str, max_results: int, timeout: int) -> List
             print(f"[search] WARNING: Response encoding issue, used fallback decoding")
 
     except httpx.TimeoutException:
-        proxy_hint = f" (Proxy: {settings.search.proxy_url})" if settings.search.proxy_url else ""
+        proxy_hint = f" (Proxy: {settings.proxy.url})" if settings.proxy.enabled and settings.proxy.url else ""
         return [{"title": "Timeout", "snippet": f"Verbindung zu DuckDuckGo timed out nach {timeout}s.{proxy_hint}", "url": ""}]
     except httpx.ProxyError as e:
-        return [{"title": "Proxy-Fehler", "snippet": f"Proxy-Verbindung fehlgeschlagen: {e}", "url": ""}]
+        return [{"title": "Proxy-Fehler", "snippet": f"Proxy-Verbindung fehlgeschlagen: {e}. Prüfe Settings → System → Proxy.", "url": ""}]
     except httpx.ConnectError as e:
         error_str = str(e).lower()
         if "ssl" in error_str or "certificate" in error_str:
-            ssl_status = "aktiviert" if settings.search.verify_ssl else "deaktiviert"
+            ssl_status = "aktiviert" if settings.proxy.verify_ssl else "deaktiviert"
             return [{
                 "title": "SSL-Zertifikatsfehler",
                 "snippet": f"SSL-Verifizierung fehlgeschlagen. SSL-Prüfung ist aktuell {ssl_status}. "
-                          f"Für selbstsignierte Proxy-Zertifikate: Settings → Web-Suche → "
+                          f"Für selbstsignierte Proxy-Zertifikate: Settings → System → Proxy → "
                           f"'SSL-Zertifikate verifizieren' deaktivieren und speichern.",
                 "url": ""
             }]
@@ -518,43 +514,34 @@ async def toggle_search(req: ToggleRequest) -> Dict[str, Any]:
 
 @router.get("/config")
 async def get_search_config() -> Dict[str, Any]:
-    """Gibt die aktuelle Proxy-Konfiguration zurück (Passwort maskiert)."""
+    """Gibt die aktuelle Such-Konfiguration zurück (Proxy aus globaler Config)."""
     return {
         "enabled": settings.search.enabled,
-        "proxy_url": settings.search.proxy_url,
-        "proxy_username": settings.search.proxy_username,
-        "proxy_password": "***" if settings.search.proxy_password else "",
-        "no_proxy": settings.search.no_proxy,
         "timeout_seconds": settings.search.timeout_seconds,
-        "verify_ssl": settings.search.verify_ssl,
+        # Proxy aus globaler Konfiguration (readonly hier)
+        "proxy_enabled": settings.proxy.enabled,
+        "proxy_url": settings.proxy.url,
+        "proxy_configured": settings.proxy.enabled and bool(settings.proxy.url),
+        "proxy_hint": "Proxy wird unter System > Proxy konfiguriert",
     }
 
 
 @router.put("/config")
 async def update_search_config(req: SearchConfigRequest) -> Dict[str, Any]:
-    """Aktualisiert die Proxy-Konfiguration."""
-    settings.search.proxy_url = req.proxy_url
-    settings.search.proxy_username = req.proxy_username
-    # Passwort nur setzen wenn nicht maskiert
-    if req.proxy_password and req.proxy_password != "***":
-        settings.search.proxy_password = req.proxy_password
-    settings.search.no_proxy = req.no_proxy
+    """Aktualisiert die Such-Konfiguration (Proxy wird global unter System > Proxy konfiguriert)."""
+    settings.search.enabled = req.enabled
     settings.search.timeout_seconds = max(5, min(req.timeout_seconds, 120))  # 5-120s
-    settings.search.verify_ssl = req.verify_ssl
 
-    # HTTP-Client neu erstellen damit neue Proxy-Einstellungen wirksam werden
+    # HTTP-Client neu erstellen falls Proxy-Einstellungen sich geändert haben
     reset_search_client()
 
     return {
         "success": True,
-        "message": "Proxy-Konfiguration aktualisiert. HTTP-Client wird neu erstellt. POST /api/settings/save zum Persistieren.",
+        "message": "Such-Konfiguration aktualisiert. Proxy unter System > Proxy konfigurieren.",
         "config": {
-            "proxy_url": settings.search.proxy_url,
-            "proxy_username": settings.search.proxy_username,
-            "proxy_password": "***" if settings.search.proxy_password else "",
-            "no_proxy": settings.search.no_proxy,
+            "enabled": settings.search.enabled,
             "timeout_seconds": settings.search.timeout_seconds,
-            "verify_ssl": settings.search.verify_ssl,
+            "proxy_configured": settings.proxy.enabled and bool(settings.proxy.url),
         }
     }
 
@@ -671,15 +658,15 @@ async def test_search() -> Dict[str, Any]:
     """
     test_query = "python programming"
     timeout = settings.search.timeout_seconds or 30
-    proxy_url = settings.search.get_proxy_url()
+    proxy_url = settings.proxy.get_proxy_url()
 
     debug_info = {
         "query": test_query,
         "search_method": "duckduckgo-search library" if _DDG_AVAILABLE else "legacy HTML scraping",
         "library_available": _DDG_AVAILABLE,
-        "proxy_url": settings.search.proxy_url or "(kein Proxy)",
-        "proxy_configured": bool(proxy_url),
-        "verify_ssl": settings.search.verify_ssl,
+        "proxy_url": settings.proxy.url or "(kein Proxy)",
+        "proxy_configured": settings.proxy.enabled and bool(settings.proxy.url),
+        "verify_ssl": settings.proxy.verify_ssl,
         "timeout": timeout,
     }
 
@@ -720,7 +707,8 @@ async def get_search_info() -> Dict[str, Any]:
         "library_name": "duckduckgo-search" if _DDG_AVAILABLE else None,
         "search_method": "library" if _DDG_AVAILABLE else "legacy",
         "enabled": settings.search.enabled,
-        "proxy_configured": bool(settings.search.proxy_url),
-        "verify_ssl": settings.search.verify_ssl,
+        "proxy_configured": settings.proxy.enabled and bool(settings.proxy.url),
+        "proxy_url": settings.proxy.url if settings.proxy.enabled else None,
+        "verify_ssl": settings.proxy.verify_ssl,
         "timeout_seconds": settings.search.timeout_seconds,
     }
