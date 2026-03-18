@@ -201,7 +201,12 @@ class TaskExecutor:
                         self.completed.add(task.id)
                         phase_results.append(result)
 
-                        logger.info(f"[TaskExecutor] Task {task.id} completed")
+                        # Debug: Log result length to trace empty results
+                        result_len = len(result) if result else 0
+                        logger.info(
+                            f"[TaskExecutor] Task {task.id} completed: "
+                            f"result_len={result_len}, preview={result[:100] if result else 'EMPTY'}..."
+                        )
 
                         # Auto-Learning: Analysiere Agent-Response
                         if self.auto_learner and result:
@@ -453,11 +458,13 @@ class TaskExecutor:
 
             # Tool-Calls ausfuehren
             # Assistant-Message mit Tool-Calls hinzufuegen
-            assistant_msg: Dict[str, Any] = {"role": "assistant"}
-            if content:
-                assistant_msg["content"] = content
-            assistant_msg["tool_calls"] = tool_calls
-            messages.append(assistant_msg)
+            # WICHTIG: content muss explizit null sein wenn tool_calls vorhanden
+            # (OpenAI/Mistral API-Anforderung - fehlendes Feld != null)
+            messages.append({
+                "role": "assistant",
+                "content": content if content else None,
+                "tool_calls": tool_calls
+            })
 
             for tc in tool_calls:
                 func = tc.get("function", {})
@@ -515,44 +522,84 @@ class TaskExecutor:
                 })
 
         # Ergebnis zusammenfassen
+        tool_results = [m for m in messages if m.get("role") == "tool"]
+
         if collected_output:
             result = "\n\n".join(collected_output)
             logger.info(f"[TaskExecutor] Agent finished with {len(collected_output)} parts, total length: {len(result)}")
             return result
 
-        # Fallback: Wenn wir Tool-Ergebnisse haben aber keinen Output,
-        # explizit nach einer Zusammenfassung fragen
-        tool_results = [m for m in messages if m.get("role") == "tool"]
+        # Kein direkter Output aber Tool-Ergebnisse vorhanden?
+        # -> Explizit nach Zusammenfassung fragen (wie orchestrator's needs_new_request)
         if tool_results:
-            logger.warning(
-                f"[TaskExecutor] No output but {len(tool_results)} tool results. "
-                f"Requesting explicit summary..."
+            logger.info(
+                f"[TaskExecutor] No direct output but {len(tool_results)} tool results. "
+                f"Requesting final summary..."
             )
-            # Explizite Anfrage nach Zusammenfassung
-            messages.append({
+
+            # Finale Zusammenfassungs-Anfrage OHNE Tools
+            # (Zwingt das Modell, die Ergebnisse zu verarbeiten statt weitere Tools aufzurufen)
+            summary_messages = messages.copy()
+            summary_messages.append({
                 "role": "user",
                 "content": (
-                    "Bitte fasse die Ergebnisse der Tool-Aufrufe zusammen. "
-                    "Gib eine strukturierte Antwort im geforderten Format."
+                    "Fasse nun die Ergebnisse der ausgefuehrten Tool-Aufrufe zusammen. "
+                    "Erstelle eine strukturierte Antwort basierend auf den gesammelten Informationen. "
+                    "Halte dich an das geforderte Ausgabeformat."
                 )
             })
 
             try:
+                # WICHTIG: tools=None verhindert weitere Tool-Calls
                 response = await self.llm.chat_with_tools(
-                    messages=messages,
-                    tools=None,  # Keine Tools mehr, nur Zusammenfassung
+                    messages=summary_messages,
+                    tools=None,
                     model=model,
                     temperature=config.temperature,
                     max_tokens=4096
                 )
+
                 if response.content:
-                    logger.info(f"[TaskExecutor] Got summary via fallback: {len(response.content)} chars")
+                    logger.info(f"[TaskExecutor] Got summary: {len(response.content)} chars")
                     return response.content
+                else:
+                    logger.warning(
+                        f"[TaskExecutor] Summary request returned empty. "
+                        f"finish_reason={response.finish_reason}"
+                    )
+                    # Versuche, Tool-Ergebnisse direkt zurueckzugeben
+                    tool_summary = self._summarize_tool_results(tool_results)
+                    if tool_summary:
+                        return tool_summary
+
             except Exception as e:
-                logger.error(f"[TaskExecutor] Fallback summary failed: {e}")
+                logger.error(f"[TaskExecutor] Summary request failed: {e}")
+                # Fallback: Tool-Ergebnisse direkt zusammenfassen
+                tool_summary = self._summarize_tool_results(tool_results)
+                if tool_summary:
+                    return tool_summary
 
         logger.warning(f"[TaskExecutor] Agent finished with NO output! Iterations: {iteration + 1}/{config.max_iterations}")
         return "[Keine Ausgabe vom Agent]"
+
+    def _summarize_tool_results(self, tool_results: List[Dict]) -> str:
+        """
+        Erstellt eine einfache Zusammenfassung aus Tool-Ergebnissen.
+
+        Wird als Fallback verwendet wenn das LLM keine Zusammenfassung generiert.
+        """
+        if not tool_results:
+            return ""
+
+        parts = ["## Tool-Ergebnisse\n"]
+        for i, result in enumerate(tool_results, 1):
+            content = result.get("content", "")
+            # Kuerze lange Ergebnisse
+            if len(content) > 2000:
+                content = content[:2000] + "\n\n[... gekuerzt ...]"
+            parts.append(f"### Ergebnis {i}\n{content}\n")
+
+        return "\n".join(parts)
 
     async def _select_model(self, config: AgentConfig) -> str:
         """
@@ -770,11 +817,26 @@ AUSGABE-FORMAT:
                 return f"Alle Tasks sind fehlgeschlagen: {', '.join(failed)}"
             return "Keine Ergebnisse verfuegbar."
 
-        if len(successful_results) == 1:
+        # Erfolgreiche Tasks sammeln
+        successful_tasks = [
+            t for t in plan.tasks
+            if t.status == TaskStatus.COMPLETED and t.result
+        ]
+
+        if len(successful_tasks) == 1:
             # Nur ein Ergebnis -> direkt zurueckgeben
-            return plan.tasks[0].result or ""
+            # BUG FIX: War plan.tasks[0].result - falsch wenn erster Task fehlgeschlagen
+            single_result = successful_tasks[0].result
+            logger.info(
+                f"[TaskExecutor] Single task result: len={len(single_result) if single_result else 0}"
+            )
+            return single_result
 
         combined = "\n\n---\n\n".join(successful_results)
+        logger.info(
+            f"[TaskExecutor] Synthesizing {len(successful_results)} results, "
+            f"combined_len={len(combined)}"
+        )
 
         prompt = f"""Erstelle eine kohaerente Antwort aus den folgenden Task-Ergebnissen.
 
@@ -803,10 +865,13 @@ REGELN:
                 max_tokens=4096
             )
 
-            return response.content or combined
+            final = response.content or combined
+            logger.info(f"[TaskExecutor] Synthesis complete: len={len(final)}")
+            return final
 
         except Exception as e:
             logger.warning(f"[TaskExecutor] Final synthesis failed: {e}")
+            logger.info(f"[TaskExecutor] Using combined results as fallback: len={len(combined)}")
             return combined
 
     def _truncate(self, text: str, max_tokens: int) -> str:
