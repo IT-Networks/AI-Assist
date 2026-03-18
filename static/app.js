@@ -1606,42 +1606,163 @@ async function loadTokenUsage() {
       document.getElementById('tokens-budget-fill').style.width = '0%';
     }
 
-    // By Model
+    // By Model - Enhanced display with donut chart and details
     const byModelContainer = document.getElementById('tokens-by-model');
+    const donutContainer = document.getElementById('tokens-model-donut');
+
     if (data.byModel && Object.keys(data.byModel).length > 0) {
+      const totalAllTokens = data.totalTokens || Object.values(data.byModel).reduce((sum, m) => sum + m.totalTokens, 0);
       const maxTokens = Math.max(...Object.values(data.byModel).map(m => m.totalTokens));
-      byModelContainer.innerHTML = Object.entries(data.byModel).map(([model, stats]) => `
-        <div class="tokens-breakdown-item">
-          <div>
-            <span class="tokens-breakdown-label">${escapeHtml(model)}</span>
-            <div class="tokens-breakdown-bar">
-              <div class="tokens-breakdown-bar-fill" style="width: ${(stats.totalTokens / maxTokens) * 100}%"></div>
+
+      // Sort by total tokens descending
+      const sortedModels = Object.entries(data.byModel).sort((a, b) => b[1].totalTokens - a[1].totalTokens);
+
+      // Render Donut Chart
+      if (donutContainer) {
+        const donutColors = ['#6366f1', '#8b5cf6', '#a855f7', '#d946ef', '#ec4899', '#f43f5e'];
+        const radius = 60;
+        const circumference = 2 * Math.PI * radius;
+        let offset = 0;
+
+        const segments = sortedModels.slice(0, 6).map(([model, stats], i) => {
+          const pct = totalAllTokens > 0 ? (stats.totalTokens / totalAllTokens) : 0;
+          const dashLength = pct * circumference;
+          const segment = `
+            <circle class="tokens-donut-segment"
+                    cx="80" cy="80" r="${radius}"
+                    stroke="${donutColors[i % donutColors.length]}"
+                    stroke-dasharray="${dashLength} ${circumference - dashLength}"
+                    stroke-dashoffset="${-offset}"
+                    title="${escapeHtml(model)}: ${(pct * 100).toFixed(1)}%"/>
+          `;
+          offset += dashLength;
+          return segment;
+        }).join('');
+
+        const legend = sortedModels.slice(0, 6).map(([model], i) => `
+          <span class="tokens-donut-legend-item">
+            <span class="tokens-donut-legend-color" style="background: ${donutColors[i % donutColors.length]}"></span>
+            ${escapeHtml(model.length > 12 ? model.substring(0, 12) + '...' : model)}
+          </span>
+        `).join('');
+
+        donutContainer.innerHTML = `
+          <div class="tokens-donut">
+            <svg class="tokens-donut-svg" viewBox="0 0 160 160">
+              <circle cx="80" cy="80" r="${radius}" fill="none" stroke="var(--border)" stroke-width="28"/>
+              ${segments}
+            </svg>
+            <div class="tokens-donut-center">
+              <div class="tokens-donut-center-value">${sortedModels.length}</div>
+              <div class="tokens-donut-center-label">Modelle</div>
             </div>
           </div>
-          <span class="tokens-breakdown-value">${formatNumber(stats.totalTokens)}</span>
+          <div class="tokens-donut-legend">${legend}</div>
+        `;
+      }
+
+      byModelContainer.innerHTML = sortedModels.map(([model, stats]) => {
+        const pct = totalAllTokens > 0 ? (stats.totalTokens / totalAllTokens) * 100 : 0;
+        const barPct = maxTokens > 0 ? (stats.totalTokens / maxTokens) * 100 : 0;
+        const costStr = stats.costUsd !== undefined ? `$${stats.costUsd.toFixed(3)}` : '';
+
+        return `
+        <div class="tokens-breakdown-item">
+          <div class="tokens-breakdown-main">
+            <div class="tokens-breakdown-header">
+              <span class="tokens-breakdown-label">${escapeHtml(model)}</span>
+              <span class="tokens-breakdown-pct">${pct.toFixed(1)}%</span>
+            </div>
+            <div class="tokens-breakdown-bar">
+              <div class="tokens-breakdown-bar-fill" style="width: ${barPct}%"></div>
+            </div>
+            <div class="tokens-breakdown-stats">
+              <span class="tokens-breakdown-stat">
+                <span class="tokens-breakdown-stat-icon">↓</span>
+                <span class="tokens-breakdown-stat-value">${formatNumber(stats.inputTokens || 0)}</span> Input
+              </span>
+              <span class="tokens-breakdown-stat">
+                <span class="tokens-breakdown-stat-icon">↑</span>
+                <span class="tokens-breakdown-stat-value">${formatNumber(stats.outputTokens || 0)}</span> Output
+              </span>
+              <span class="tokens-breakdown-stat">
+                <span class="tokens-breakdown-stat-icon">📝</span>
+                <span class="tokens-breakdown-stat-value">${formatNumber(stats.requests || 0)}</span> Requests
+              </span>
+            </div>
+          </div>
+          <div class="tokens-breakdown-value">
+            <span class="tokens-breakdown-total">${formatNumber(stats.totalTokens)}</span>
+            ${costStr ? `<span class="tokens-breakdown-cost">${costStr}</span>` : ''}
+          </div>
         </div>
-      `).join('');
+      `;
+      }).join('');
     } else {
-      byModelContainer.innerHTML = '<div class="tokens-breakdown-empty">Keine Daten</div>';
+      byModelContainer.innerHTML = '<div class="tokens-breakdown-empty">Keine Modell-Daten verfügbar</div>';
+      if (donutContainer) donutContainer.innerHTML = '';
     }
 
-    // By Type
+    // By Type - Enhanced display with details
     const byTypeContainer = document.getElementById('tokens-by-type');
     if (data.byRequestType && Object.keys(data.byRequestType).length > 0) {
+      const totalAllTokens = data.totalTokens || Object.values(data.byRequestType).reduce((sum, t) => sum + t.totalTokens, 0);
       const maxTokens = Math.max(...Object.values(data.byRequestType).map(t => t.totalTokens));
-      byTypeContainer.innerHTML = Object.entries(data.byRequestType).map(([type, stats]) => `
+
+      // Sort by total tokens descending
+      const sortedTypes = Object.entries(data.byRequestType).sort((a, b) => b[1].totalTokens - a[1].totalTokens);
+
+      byTypeContainer.innerHTML = sortedTypes.map(([type, stats]) => {
+        const pct = totalAllTokens > 0 ? (stats.totalTokens / totalAllTokens) * 100 : 0;
+        const barPct = maxTokens > 0 ? (stats.totalTokens / maxTokens) * 100 : 0;
+        const costStr = stats.costUsd !== undefined ? `$${stats.costUsd.toFixed(3)}` : '';
+
+        // Friendly type labels
+        const typeLabels = {
+          'chat': 'Chat',
+          'agent': 'Agent',
+          'task': 'Task',
+          'enhancement': 'Enhancement',
+          'planning': 'Planning',
+          'research': 'Research',
+          'analysis': 'Analysis'
+        };
+        const displayType = typeLabels[type.toLowerCase()] || type;
+
+        return `
         <div class="tokens-breakdown-item">
-          <div>
-            <span class="tokens-breakdown-label">${escapeHtml(type)}</span>
+          <div class="tokens-breakdown-main">
+            <div class="tokens-breakdown-header">
+              <span class="tokens-breakdown-label">${escapeHtml(displayType)}</span>
+              <span class="tokens-breakdown-pct">${pct.toFixed(1)}%</span>
+            </div>
             <div class="tokens-breakdown-bar">
-              <div class="tokens-breakdown-bar-fill" style="width: ${(stats.totalTokens / maxTokens) * 100}%"></div>
+              <div class="tokens-breakdown-bar-fill" style="width: ${barPct}%"></div>
+            </div>
+            <div class="tokens-breakdown-stats">
+              <span class="tokens-breakdown-stat">
+                <span class="tokens-breakdown-stat-icon">↓</span>
+                <span class="tokens-breakdown-stat-value">${formatNumber(stats.inputTokens || 0)}</span> Input
+              </span>
+              <span class="tokens-breakdown-stat">
+                <span class="tokens-breakdown-stat-icon">↑</span>
+                <span class="tokens-breakdown-stat-value">${formatNumber(stats.outputTokens || 0)}</span> Output
+              </span>
+              <span class="tokens-breakdown-stat">
+                <span class="tokens-breakdown-stat-icon">📝</span>
+                <span class="tokens-breakdown-stat-value">${formatNumber(stats.requests || 0)}</span> Requests
+              </span>
             </div>
           </div>
-          <span class="tokens-breakdown-value">${formatNumber(stats.totalTokens)}</span>
+          <div class="tokens-breakdown-value">
+            <span class="tokens-breakdown-total">${formatNumber(stats.totalTokens)}</span>
+            ${costStr ? `<span class="tokens-breakdown-cost">${costStr}</span>` : ''}
+          </div>
         </div>
-      `).join('');
+      `;
+      }).join('');
     } else {
-      byTypeContainer.innerHTML = '<div class="tokens-breakdown-empty">Keine Daten</div>';
+      byTypeContainer.innerHTML = '<div class="tokens-breakdown-empty">Keine Typ-Daten verfügbar</div>';
     }
 
     // Hourly chart with axis labels
