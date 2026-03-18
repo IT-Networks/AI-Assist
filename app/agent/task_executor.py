@@ -406,6 +406,14 @@ class TaskExecutor:
             if schema["function"]["name"] in config.tools
         ]
 
+        # Debug: Verfügbare Tools loggen
+        available_tools = [s["function"]["name"] for s in tool_schemas]
+        missing_tools = [t for t in config.tools if t not in available_tools]
+        logger.info(
+            f"[TaskExecutor] Agent {config.type.value}: "
+            f"available_tools={available_tools}, missing_tools={missing_tools}"
+        )
+
         collected_output: List[str] = []
 
         # Agent-Loop
@@ -425,12 +433,22 @@ class TaskExecutor:
             content = response.content
             tool_calls = response.tool_calls
 
+            # Debug-Logging für Agent-Diagnose
+            logger.info(
+                f"[TaskExecutor] Iteration {iteration + 1}: "
+                f"content_len={len(content) if content else 0}, "
+                f"tool_calls={len(tool_calls) if tool_calls else 0}, "
+                f"finish_reason={response.finish_reason}"
+            )
+
             # Content sammeln
             if content:
                 collected_output.append(content)
+                logger.debug(f"[TaskExecutor] Content collected: {content[:200]}...")
 
             # Keine Tool-Calls -> fertig
             if not tool_calls:
+                logger.info(f"[TaskExecutor] No more tool calls, finishing. Total output parts: {len(collected_output)}")
                 break
 
             # Tool-Calls ausfuehren
@@ -498,9 +516,43 @@ class TaskExecutor:
 
         # Ergebnis zusammenfassen
         if collected_output:
-            return "\n\n".join(collected_output)
-        else:
-            return "[Keine Ausgabe vom Agent]"
+            result = "\n\n".join(collected_output)
+            logger.info(f"[TaskExecutor] Agent finished with {len(collected_output)} parts, total length: {len(result)}")
+            return result
+
+        # Fallback: Wenn wir Tool-Ergebnisse haben aber keinen Output,
+        # explizit nach einer Zusammenfassung fragen
+        tool_results = [m for m in messages if m.get("role") == "tool"]
+        if tool_results:
+            logger.warning(
+                f"[TaskExecutor] No output but {len(tool_results)} tool results. "
+                f"Requesting explicit summary..."
+            )
+            # Explizite Anfrage nach Zusammenfassung
+            messages.append({
+                "role": "user",
+                "content": (
+                    "Bitte fasse die Ergebnisse der Tool-Aufrufe zusammen. "
+                    "Gib eine strukturierte Antwort im geforderten Format."
+                )
+            })
+
+            try:
+                response = await self.llm.chat_with_tools(
+                    messages=messages,
+                    tools=None,  # Keine Tools mehr, nur Zusammenfassung
+                    model=model,
+                    temperature=config.temperature,
+                    max_tokens=4096
+                )
+                if response.content:
+                    logger.info(f"[TaskExecutor] Got summary via fallback: {len(response.content)} chars")
+                    return response.content
+            except Exception as e:
+                logger.error(f"[TaskExecutor] Fallback summary failed: {e}")
+
+        logger.warning(f"[TaskExecutor] Agent finished with NO output! Iterations: {iteration + 1}/{config.max_iterations}")
+        return "[Keine Ausgabe vom Agent]"
 
     async def _select_model(self, config: AgentConfig) -> str:
         """
