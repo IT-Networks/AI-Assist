@@ -126,30 +126,10 @@ class UpdateService:
         """Erstellt HTTP-Client mit Proxy-Support."""
         config = settings.update
 
-        # Proxy ermitteln (Priorität: update > search > internal_fetch)
+        # Globalen Proxy verwenden wenn aktiviert
         proxy_url = None
         if config.use_proxy:
-            # 1. Eigene Proxy-Konfiguration im Update-Service
-            if config.proxy_url:
-                proxy_url = build_proxy_url(
-                    config.proxy_url,
-                    config.proxy_username,
-                    config.proxy_password
-                )
-            # 2. Fallback: Web Search Proxy
-            elif settings.search.proxy_url:
-                proxy_url = build_proxy_url(
-                    settings.search.proxy_url,
-                    settings.search.proxy_username,
-                    settings.search.proxy_password
-                )
-            # 3. Fallback: Internal Fetch Proxy
-            elif settings.internal_fetch.proxy_url:
-                proxy_url = build_proxy_url(
-                    settings.internal_fetch.proxy_url,
-                    settings.internal_fetch.proxy_username,
-                    settings.internal_fetch.proxy_password
-                )
+            proxy_url = settings.proxy.get_proxy_url()
 
         # Headers
         headers = {

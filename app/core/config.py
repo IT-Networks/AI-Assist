@@ -67,6 +67,30 @@ def build_proxy_url(
     return urlunparse((parsed.scheme or "http", netloc, "", "", "", ""))
 
 
+# ══════════════════════════════════════════════════════════════════════════════
+# Globale Proxy-Konfiguration (wird von allen Services verwendet)
+# ══════════════════════════════════════════════════════════════════════════════
+
+class ProxyConfig(BaseModel):
+    """
+    Zentrale Proxy-Konfiguration für alle externen HTTP-Verbindungen.
+
+    Wird von Web-Suche, Update-Service, Internal-Fetch etc. verwendet.
+    """
+    enabled: bool = False            # Proxy global aktivieren
+    url: str = ""                    # z.B. http://proxy.intern:8080
+    username: str = ""               # Proxy-Benutzername (optional)
+    password: str = ""               # Proxy-Passwort (optional)
+    no_proxy: str = ""               # Kommagetrennte Liste ohne Proxy (z.B. "localhost,127.0.0.1,.intern")
+    verify_ssl: bool = True          # SSL-Zertifikate prüfen
+
+    def get_proxy_url(self) -> Optional[str]:
+        """Gibt die vollständige Proxy-URL inkl. Auth zurück."""
+        if not self.enabled or not self.url:
+            return None
+        return build_proxy_url(self.url, self.username, self.password)
+
+
 class ModelEntry(BaseModel):
     id: str
     display_name: str
@@ -544,12 +568,9 @@ class UpdateConfig(BaseModel):
     # GitHub Repository (öffentlich oder privat)
     repo_url: str = ""               # z.B. https://github.com/user/ai-assist-releases
     github_token: str = ""           # Personal Access Token für private Repos
-    # Eigene Proxy-Konfiguration (unabhängig von Web Search)
-    proxy_url: str = ""              # z.B. http://proxy.intern:8080 (leer = aus search-Config)
-    proxy_username: str = ""         # Proxy-Benutzername (optional)
-    proxy_password: str = ""         # Proxy-Passwort (optional)
-    use_proxy: bool = True           # Proxy verwenden
-    verify_ssl: bool = False         # SSL-Zertifikate prüfen
+    # Proxy verwenden (aus globaler proxy-Konfiguration)
+    use_proxy: bool = True           # Globalen Proxy verwenden
+    verify_ssl: bool = False         # SSL-Zertifikate prüfen (False für Corporate Proxies)
     timeout_seconds: int = 120       # Timeout für Downloads
     # Auto-Update
     check_on_start: bool = False     # Beim Start nach Updates suchen
@@ -580,15 +601,7 @@ class UpdateConfig(BaseModel):
         "**/*.db",              # Alle SQLite-Datenbanken
     ])
 
-    def get_proxy_url(self) -> Optional[str]:
-        """Gibt Proxy-URL zurück wenn use_proxy aktiviert."""
-        if not self.use_proxy:
-            return None
-        # Eigene Proxy-URL verwenden wenn vorhanden
-        if self.proxy_url:
-            return build_proxy_url(self.proxy_url, self.proxy_username, self.proxy_password)
-        # Sonst: wird zur Laufzeit aus anderen Configs aufgelöst (search, internal_fetch)
-        return None
+    # Proxy wird über settings.proxy.get_proxy_url() geholt
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -1187,8 +1200,14 @@ class TaskAgentConfig(BaseModel):
 
 
 class Settings(BaseModel):
+    # Globale Einstellungen
+    proxy: ProxyConfig = Field(default_factory=ProxyConfig)  # Zentrale Proxy-Konfiguration
+
+    # LLM und Modelle
     llm: LLMConfig = LLMConfig()
     models: List[ModelEntry] = []
+
+    # Entwicklung
     java: JavaConfig = JavaConfig()
     python: PythonConfig = PythonConfig()
     tools: ToolsConfig = ToolsConfig()

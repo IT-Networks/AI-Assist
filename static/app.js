@@ -6644,6 +6644,11 @@ function renderSettingsSection() {
     return;
   }
 
+  if (section === 'proxy') {
+    renderProxySection();
+    return;
+  }
+
   if (section === 'update') {
     renderUpdateSection();
     return;
@@ -13333,6 +13338,153 @@ function closeUpdateModal() {
   document.getElementById('update-modal').style.display = 'none';
 }
 
+// ══════════════════════════════════════════════════════════════════════════════
+// Proxy Settings Section (Global Proxy Configuration)
+// ══════════════════════════════════════════════════════════════════════════════
+
+function renderProxySection() {
+  const container = document.getElementById('settings-form');
+
+  container.innerHTML = `
+    <div class="settings-section">
+      <h3 class="settings-section-title">PROXY-KONFIGURATION</h3>
+      <p class="settings-section-desc">
+        Globale Proxy-Einstellungen für alle externen HTTP-Verbindungen.
+        Wird von Web-Suche, Update-Service, Internal-Fetch und anderen Services verwendet.
+      </p>
+
+      <div id="proxy-settings-loading" style="text-align:center; padding:20px;">
+        <span class="spinner"></span> Lade Konfiguration...
+      </div>
+      <div id="proxy-settings-form" style="display:none;"></div>
+    </div>
+  `;
+
+  loadProxySettings();
+}
+
+async function loadProxySettings() {
+  try {
+    const response = await fetch('/api/settings');
+    const data = await response.json();
+    const config = data.settings?.proxy || {};
+
+    document.getElementById('proxy-settings-loading').style.display = 'none';
+    document.getElementById('proxy-settings-form').style.display = 'block';
+
+    document.getElementById('proxy-settings-form').innerHTML = `
+      <div class="settings-group">
+        <label class="settings-label">
+          <input type="checkbox" id="proxy-enabled" ${config.enabled ? 'checked' : ''}>
+          Proxy aktivieren
+        </label>
+        <small class="settings-hint">Aktiviert den Proxy für alle externen Verbindungen</small>
+      </div>
+
+      <div class="settings-group">
+        <label class="settings-label">Proxy-URL</label>
+        <input type="text" id="proxy-url" class="settings-input"
+          value="${escapeHtml(config.url || '')}"
+          placeholder="http://proxy.intern:8080">
+        <small class="settings-hint">Format: http://host:port oder https://host:port</small>
+      </div>
+
+      <div class="settings-group">
+        <label class="settings-label">Benutzername (optional)</label>
+        <input type="text" id="proxy-username" class="settings-input"
+          value="${config.username === '********' ? '********' : escapeHtml(config.username || '')}"
+          placeholder="proxy-user">
+      </div>
+
+      <div class="settings-group">
+        <label class="settings-label">Passwort (optional)</label>
+        <input type="password" id="proxy-password" class="settings-input"
+          value="${config.password === '********' ? '********' : ''}"
+          placeholder="********">
+      </div>
+
+      <div class="settings-group">
+        <label class="settings-label">No-Proxy (Ausnahmen)</label>
+        <input type="text" id="proxy-no-proxy" class="settings-input"
+          value="${escapeHtml(config.no_proxy || '')}"
+          placeholder="localhost,127.0.0.1,.intern">
+        <small class="settings-hint">Kommagetrennte Liste von Hosts ohne Proxy</small>
+      </div>
+
+      <div class="settings-group">
+        <label class="settings-label">
+          <input type="checkbox" id="proxy-verify-ssl" ${config.verify_ssl !== false ? 'checked' : ''}>
+          SSL-Zertifikate prüfen
+        </label>
+        <small class="settings-hint">Deaktivieren für Corporate Proxies mit selbstsignierten Zertifikaten</small>
+      </div>
+
+      <div class="settings-actions" style="margin-top: 20px;">
+        <button class="btn btn-primary" onclick="saveProxySettings()">Speichern</button>
+        <button class="btn btn-secondary" onclick="testProxyConnection()">Verbindung testen</button>
+      </div>
+
+      <div id="proxy-test-result" style="margin-top: 15px;"></div>
+    `;
+  } catch (e) {
+    document.getElementById('proxy-settings-loading').style.display = 'none';
+    document.getElementById('proxy-settings-form').style.display = 'block';
+    document.getElementById('proxy-settings-form').innerHTML = `
+      <div class="settings-error">Fehler beim Laden: ${escapeHtml(e.message)}</div>
+    `;
+  }
+}
+
+async function saveProxySettings() {
+  const data = {
+    enabled: document.getElementById('proxy-enabled').checked,
+    url: document.getElementById('proxy-url').value,
+    username: document.getElementById('proxy-username').value,
+    password: document.getElementById('proxy-password').value,
+    no_proxy: document.getElementById('proxy-no-proxy').value,
+    verify_ssl: document.getElementById('proxy-verify-ssl').checked,
+  };
+
+  // Maskierte Werte nicht überschreiben
+  if (data.username === '********') delete data.username;
+  if (data.password === '********' || data.password === '') delete data.password;
+
+  try {
+    const response = await fetch('/api/settings/section', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ section: 'proxy', values: data }),
+    });
+
+    if (response.ok) {
+      showToast('Proxy-Einstellungen gespeichert', 'success');
+    } else {
+      const error = await response.json();
+      showToast(`Fehler: ${error.detail || 'Speichern fehlgeschlagen'}`, 'error');
+    }
+  } catch (e) {
+    showToast(`Fehler: ${e.message}`, 'error');
+  }
+}
+
+async function testProxyConnection() {
+  const resultEl = document.getElementById('proxy-test-result');
+  resultEl.innerHTML = '<span class="spinner"></span> Teste Proxy-Verbindung...';
+
+  try {
+    const response = await fetch('/api/search/test-proxy', { method: 'POST' });
+    const result = await response.json();
+
+    if (result.success) {
+      resultEl.innerHTML = `<div class="settings-success">✓ Proxy-Verbindung erfolgreich</div>`;
+    } else {
+      resultEl.innerHTML = `<div class="settings-error">✗ ${escapeHtml(result.error || 'Verbindung fehlgeschlagen')}</div>`;
+    }
+  } catch (e) {
+    resultEl.innerHTML = `<div class="settings-error">✗ ${escapeHtml(e.message)}</div>`;
+  }
+}
+
 function renderUpdateSection() {
   const container = document.getElementById('settings-form');
 
@@ -13389,35 +13541,13 @@ async function loadUpdateSettings() {
       <div class="settings-group">
         <label class="settings-label">
           <input type="checkbox" id="update-use-proxy" ${config.use_proxy ? 'checked' : ''}>
-          Proxy verwenden
+          Globalen Proxy verwenden
         </label>
         <small class="settings-hint">
           ${config.proxy_configured
-            ? `Aktiver Proxy: ${escapeHtml(config.effective_proxy)} (Quelle: ${config.proxy_source})`
-            : 'Kein Proxy konfiguriert'}
+            ? `Proxy konfiguriert: ${escapeHtml(config.proxy_url)}`
+            : 'Kein Proxy konfiguriert - <a href="#" onclick="showSettingsSection(\'proxy\'); return false;">Proxy einrichten</a>'}
         </small>
-      </div>
-
-      <div class="settings-group">
-        <label class="settings-label">Eigene Proxy-URL (optional)</label>
-        <input type="text" id="update-proxy-url" class="settings-input"
-          value="${escapeHtml(config.proxy_url || '')}"
-          placeholder="http://proxy.intern:8080">
-        <small class="settings-hint">Leer = Fallback auf Web-Suche/Internal-Fetch Proxy</small>
-      </div>
-
-      <div class="settings-group">
-        <label class="settings-label">Proxy Benutzername (optional)</label>
-        <input type="text" id="update-proxy-username" class="settings-input"
-          value="${config.has_proxy_auth ? '***' : ''}"
-          placeholder="username">
-      </div>
-
-      <div class="settings-group">
-        <label class="settings-label">Proxy Passwort (optional)</label>
-        <input type="password" id="update-proxy-password" class="settings-input"
-          value="${config.has_proxy_auth ? '***' : ''}"
-          placeholder="password">
       </div>
 
       <div class="settings-group">
@@ -13465,9 +13595,6 @@ async function saveUpdateSettings() {
     enabled: document.getElementById('update-enabled').checked,
     repo_url: document.getElementById('update-repo-url').value,
     github_token: document.getElementById('update-github-token').value,
-    proxy_url: document.getElementById('update-proxy-url').value,
-    proxy_username: document.getElementById('update-proxy-username').value,
-    proxy_password: document.getElementById('update-proxy-password').value,
     use_proxy: document.getElementById('update-use-proxy').checked,
     verify_ssl: document.getElementById('update-verify-ssl').checked,
     check_on_start: document.getElementById('update-check-on-start').checked,

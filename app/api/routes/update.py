@@ -42,10 +42,7 @@ class UpdateConfigRequest(BaseModel):
     enabled: bool = False
     repo_url: str = ""
     github_token: str = ""
-    proxy_url: str = ""
-    proxy_username: str = ""
-    proxy_password: str = ""
-    use_proxy: bool = True
+    use_proxy: bool = True       # Globalen Proxy verwenden
     verify_ssl: bool = False
     check_on_start: bool = False
 
@@ -203,39 +200,22 @@ async def get_update_config():
     Sensitive Daten (Token) werden maskiert.
     """
     config = settings.update
-
-    # Effektiver Proxy ermitteln (update > search > internal_fetch)
-    effective_proxy = ""
-    proxy_source = ""
-    if config.proxy_url:
-        effective_proxy = config.proxy_url
-        proxy_source = "update"
-    elif settings.search.proxy_url:
-        effective_proxy = settings.search.proxy_url
-        proxy_source = "search"
-    elif settings.internal_fetch.proxy_url:
-        effective_proxy = settings.internal_fetch.proxy_url
-        proxy_source = "internal_fetch"
+    proxy_config = settings.proxy
 
     return {
         "enabled": config.enabled,
         "repo_url": config.repo_url,
         "github_token": "***" if config.github_token else "",
         "has_token": bool(config.github_token),
-        # Eigene Proxy-Einstellungen
-        "proxy_url": config.proxy_url,
-        "proxy_username": "***" if config.proxy_username else "",
-        "proxy_password": "***" if config.proxy_password else "",
-        "has_proxy_auth": bool(config.proxy_username),
         "use_proxy": config.use_proxy,
         "verify_ssl": config.verify_ssl,
         "check_on_start": config.check_on_start,
         "include_patterns": config.include_patterns,
         "exclude_patterns": config.exclude_patterns,
-        # Effektiver Proxy (Fallback-Logik)
-        "effective_proxy": effective_proxy,
-        "proxy_source": proxy_source,
-        "proxy_configured": bool(effective_proxy),
+        # Globale Proxy-Konfiguration (readonly hier, Bearbeitung über Settings > Proxy)
+        "proxy_enabled": proxy_config.enabled,
+        "proxy_url": proxy_config.url,
+        "proxy_configured": proxy_config.enabled and bool(proxy_config.url),
     }
 
 
@@ -269,14 +249,7 @@ async def save_update_config(request: UpdateConfigRequest):
         # Token nur speichern wenn nicht maskiert
         if request.github_token and request.github_token != "***":
             config_data["update"]["github_token"] = request.github_token
-
-        # Proxy-Einstellungen speichern (wenn nicht maskiert)
-        if request.proxy_url:
-            config_data["update"]["proxy_url"] = request.proxy_url
-        if request.proxy_username and request.proxy_username != "***":
-            config_data["update"]["proxy_username"] = request.proxy_username
-        if request.proxy_password and request.proxy_password != "***":
-            config_data["update"]["proxy_password"] = request.proxy_password
+        # Proxy wird global unter "proxy" konfiguriert, nicht pro Service
 
         # Config speichern
         with open(config_path, "w", encoding="utf-8") as f:

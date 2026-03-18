@@ -75,6 +75,7 @@ def get_settings_dict(unmask: bool = False) -> Dict[str, Any]:
 def get_section_schema(section: str) -> Dict[str, Any]:
     """Gibt das Schema einer Settings-Section zurück."""
     section_classes = {
+        "proxy": "ProxyConfig",  # Globale Proxy-Konfiguration
         "llm": "LLMConfig",
         "java": "JavaConfig",
         "python": "PythonConfig",
