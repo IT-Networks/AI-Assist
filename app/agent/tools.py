@@ -12,6 +12,9 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, Callable, Dict, List, Optional, Awaitable
 import json
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 class ToolCategory(str, Enum):
@@ -484,6 +487,32 @@ async def read_file(
     path = path.strip()
     if not path:
         return ToolResult(success=False, error="Kein Pfad angegeben")
+
+    # Path Traversal Protection: Blockiere verdaechtige Muster
+    # (Defense in Depth - zusaetzlich zur resolve()-Pruefung)
+    if ".." in path or path.startswith("~"):
+        # Pruefe ob nach resolve() der Pfad noch ok ist
+        try:
+            test_path = Path(path).resolve()
+            # Stelle sicher dass wir in einem erlaubten Verzeichnis sind
+            java_path = settings.java.get_active_path() if hasattr(settings.java, 'get_active_path') else None
+            python_path = settings.python.get_active_path() if hasattr(settings.python, 'get_active_path') else None
+            cwd = os.getcwd()
+
+            allowed_roots = [p for p in [java_path, python_path, cwd] if p]
+            is_safe = any(
+                str(test_path).startswith(str(Path(root).resolve()))
+                for root in allowed_roots
+            )
+            if not is_safe:
+                logger.warning(f"[read_file] Path traversal blocked: {path} -> {test_path}")
+                return ToolResult(
+                    success=False,
+                    error=f"Pfad-Traversal nicht erlaubt: {path}"
+                )
+        except Exception as e:
+            logger.warning(f"[read_file] Path resolution failed: {path} - {e}")
+            return ToolResult(success=False, error=f"Ungueltiger Pfad: {path}")
 
     # Stacktrace-Zeilennummer extrahieren (z.B. "MyClass.java:42" → Zeile 42)
     stacktrace_line = None

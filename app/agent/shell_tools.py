@@ -74,6 +74,18 @@ _BLOCKED_PATTERNS = [
     (re.compile(r"^format\b", re.IGNORECASE), "format nicht erlaubt"),
     (re.compile(r"curl.*\|\s*(bash|sh)", re.IGNORECASE), "curl | bash nicht erlaubt"),
     (re.compile(r"wget.*\|\s*(bash|sh)", re.IGNORECASE), "wget | sh nicht erlaubt"),
+    # Command Injection Prevention
+    (re.compile(r"`[^`]+`"), "Backtick command substitution nicht erlaubt"),
+    (re.compile(r"\$\([^)]+\)"), "$() command substitution nicht erlaubt"),
+    (re.compile(r"\$\{[^}]+\}"), "${} variable expansion nicht erlaubt"),
+    (re.compile(r";\s*\w"), "Semicolon command chaining nicht erlaubt"),
+    (re.compile(r"\|\|"), "|| command chaining nicht erlaubt (nutze einzelne Befehle)"),
+    (re.compile(r"&&"), "&& command chaining nicht erlaubt (nutze einzelne Befehle)"),
+    (re.compile(r">\s*&"), "Output redirection to fd nicht erlaubt"),
+    (re.compile(r"<\s*\("), "Process substitution nicht erlaubt"),
+    (re.compile(r"\beval\b", re.IGNORECASE), "eval nicht erlaubt"),
+    (re.compile(r"\bexec\b", re.IGNORECASE), "exec nicht erlaubt"),
+    (re.compile(r"\bsource\b|\.\s+/", re.IGNORECASE), "source/dot nicht erlaubt"),
 ]
 
 # LOCAL_ONLY_SAFE - Sichere System-Befehle die lokal ohne Bestätigung laufen
@@ -493,6 +505,20 @@ def _wrap_podman_for_wsl(command: str) -> str:
     return f'wsl -d {distro} {command}'
 
 
+def _sanitize_command(command: str) -> tuple:
+    """
+    Validiert einen Befehl gegen Injection-Patterns.
+
+    Returns:
+        Tuple (is_safe: bool, reason: Optional[str])
+    """
+    # Nochmalige Pruefung gegen Injection-Patterns (Defense in Depth)
+    for pattern, reason in _BLOCKED_PATTERNS:
+        if pattern.search(command):
+            return (False, reason)
+    return (True, None)
+
+
 async def _run_local_shell(
     command: str,
     working_dir: Optional[str] = None,
@@ -511,6 +537,17 @@ async def _run_local_shell(
     Returns:
         Dict mit stdout, stderr, exit_code, duration
     """
+    # Defense in Depth: Nochmalige Injection-Pruefung vor Ausfuehrung
+    is_safe, block_reason = _sanitize_command(command)
+    if not is_safe:
+        logger.warning(f"[shell] Blocked potentially dangerous command: {command[:50]}...")
+        return {
+            "success": False,
+            "error": f"Befehl blockiert (Sicherheit): {block_reason}",
+            "exit_code": -1,
+            "executed_in": "blocked"
+        }
+
     start_time = time.time()
 
     # Podman/Docker-Befehle für WSL wrappen (Windows)

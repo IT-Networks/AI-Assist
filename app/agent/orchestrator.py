@@ -1472,6 +1472,12 @@ Sei präzise und gib detaillierte Analyse-Schritte."""
                 logger.debug(f"[agent] Prompt enhancement not available: {e}")
             except Exception as e:
                 logger.warning(f"[agent] Prompt enhancement failed: {e}")
+                # Fehler-Event emittieren (nicht mehr silent!)
+                yield AgentEvent(AgentEventType.MCP_ERROR, {
+                    "mode": "enhancement",
+                    "error": str(e),
+                    "message": "Kontext-Sammlung fehlgeschlagen - fahre ohne Kontext fort"
+                })
                 # Bei Fehler: Direkt zu Tasks (Fallback)
         # ─────────────────────────────────────────────────────────────────────
 
@@ -1563,8 +1569,18 @@ Sei präzise und gib detaillierte Analyse-Schritte."""
 
             except ImportError as e:
                 logger.warning(f"[agent] Task-Decomposition not available: {e}")
+            except asyncio.CancelledError:
+                # Async task wurde abgebrochen - nicht als Fehler behandeln
+                logger.info("[agent] Task-Decomposition cancelled")
+                raise  # Re-raise damit der uebergeordnete Handler es behandelt
             except Exception as e:
                 logger.error(f"[agent] Task-Decomposition failed: {e}")
+                # Fehler-Event emittieren (nicht mehr silent!)
+                yield AgentEvent(AgentEventType.ERROR, {
+                    "source": "task_decomposition",
+                    "error": str(e),
+                    "message": "Task-Zerlegung fehlgeschlagen - fahre mit direkter Verarbeitung fort"
+                })
                 # Bei Fehler normal fortfahren
         # ─────────────────────────────────────────────────────────────────────
 

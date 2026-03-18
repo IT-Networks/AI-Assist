@@ -11,7 +11,7 @@ Der TaskPlanner:
 import json
 import logging
 import re
-from typing import Optional
+from typing import List, Optional
 
 from app.agent.task_models import Task, TaskPlan, TaskType, TaskStatus
 from app.core.config import settings
@@ -252,6 +252,22 @@ class TaskPlanner:
                     )
                     task.depends_on = [d for d in task.depends_on if d in task_ids]
 
+            # Validierung: Zirkulaere Abhaengigkeiten erkennen (Deadlock-Praevention)
+            cycle = self._detect_dependency_cycle(tasks)
+            if cycle:
+                logger.error(f"[TaskPlanner] Circular dependency detected: {' -> '.join(cycle)}")
+                # Zyklus aufbrechen: Entferne die letzte Kante im Zyklus
+                # z.B. T1 -> T2 -> T1 => Entferne T2 -> T1
+                if len(cycle) >= 2:
+                    cycle_end = cycle[-1]
+                    cycle_start = cycle[0]
+                    for task in tasks:
+                        if task.id == cycle_end and cycle_start in task.depends_on:
+                            task.depends_on.remove(cycle_start)
+                            logger.warning(
+                                f"[TaskPlanner] Broke cycle by removing {cycle_end} -> {cycle_start}"
+                            )
+
             return TaskPlan(
                 needs_clarification=False,
                 tasks=tasks,
@@ -291,6 +307,55 @@ class TaskPlanner:
             ],
             original_query=query
         )
+
+    def _detect_dependency_cycle(self, tasks: list) -> list:
+        """
+        Erkennt zirkulaere Abhaengigkeiten mittels DFS.
+
+        Args:
+            tasks: Liste der Tasks
+
+        Returns:
+            Liste der Task-IDs im Zyklus, oder leere Liste wenn kein Zyklus
+        """
+        # Graph aufbauen: task_id -> depends_on
+        graph = {t.id: t.depends_on for t in tasks}
+        visited = set()
+        rec_stack = set()
+        path = []
+
+        def dfs(node: str) -> list:
+            """DFS mit Pfadverfolgung fuer Zykluserkennung."""
+            if node in rec_stack:
+                # Zyklus gefunden - Pfad ab Zyklusstart zurueckgeben
+                cycle_start = path.index(node)
+                return path[cycle_start:] + [node]
+
+            if node in visited:
+                return []
+
+            visited.add(node)
+            rec_stack.add(node)
+            path.append(node)
+
+            for dep in graph.get(node, []):
+                if dep in graph:  # Nur existierende Tasks pruefen
+                    cycle = dfs(dep)
+                    if cycle:
+                        return cycle
+
+            path.pop()
+            rec_stack.remove(node)
+            return []
+
+        # Alle Startpunkte pruefen
+        for task_id in graph:
+            if task_id not in visited:
+                cycle = dfs(task_id)
+                if cycle:
+                    return cycle
+
+        return []
 
     def _detect_task_type(self, query: str) -> TaskType:
         """
