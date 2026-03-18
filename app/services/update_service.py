@@ -445,14 +445,41 @@ class UpdateService:
         """
         Fordert einen Server-Neustart an.
 
-        Nutzt os.execv() für einen sauberen In-Place-Restart.
+        Verwendet subprocess für Windows-Kompatibilität mit venv.
         """
+        import subprocess
+        import platform
+
         logger.info("[update] Server-Neustart angefordert...")
 
-        # In-Place Restart via os.execv()
-        # Startet denselben Python-Prozess mit denselben Argumenten neu
         python = sys.executable
-        os.execv(python, [python] + sys.argv)
+        # Hauptskript ermitteln (absoluter Pfad)
+        main_script = sys.argv[0]
+        if not os.path.isabs(main_script):
+            main_script = os.path.join(os.getcwd(), main_script)
+
+        # Prüfen ob Datei existiert
+        if not os.path.exists(main_script):
+            # Fallback: main.py im App-Root
+            main_script = str(self.app_root / "main.py")
+
+        logger.info(f"[update] Restart: python={python}, script={main_script}")
+
+        if platform.system() == "Windows":
+            # Windows: subprocess.Popen mit DETACHED_PROCESS
+            # Startet neuen Prozess unabhängig vom aktuellen
+            DETACHED_PROCESS = 0x00000008
+            subprocess.Popen(
+                [python, main_script] + sys.argv[1:],
+                creationflags=DETACHED_PROCESS,
+                close_fds=True,
+                cwd=str(self.app_root)
+            )
+            # Aktuellen Prozess beenden
+            os._exit(0)
+        else:
+            # Unix: os.execv für In-Place-Restart
+            os.execv(python, [python, main_script] + sys.argv[1:])
 
 
 # Singleton
