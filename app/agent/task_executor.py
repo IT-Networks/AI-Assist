@@ -457,7 +457,7 @@ class TaskExecutor:
                     try:
                         # Timeout für Tool-Ausführung (verhindert Hänger bei langsamen APIs)
                         tool_result = await asyncio.wait_for(
-                            self.tools.execute(tool_name, tool_args),
+                            self.tools.execute(tool_name, **tool_args),
                             timeout=TOOL_EXECUTION_TIMEOUT
                         )
                         result_str = tool_result.to_context()

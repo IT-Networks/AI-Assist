@@ -2675,14 +2675,24 @@ Sei präzise und gib detaillierte Analyse-Schritte."""
                                 repo = tool_call.arguments.get("repo", "")
                                 # Parse result data
                                 result_data = result.data if hasattr(result, 'data') and isinstance(result.data, dict) else {}
+
+                                # Author kann String sein (von github_pr_details) oder Dict (von GitHub API direkt)
+                                author = result_data.get("user", "")
+                                if isinstance(author, dict):
+                                    author = author.get("login", "")
+
+                                # Branches: Tool gibt "head_branch"/"base_branch" zurück, nicht nested objects
+                                head_branch = result_data.get("head_branch") or result_data.get("head", {}).get("ref", "") if isinstance(result_data.get("head"), dict) else result_data.get("head", "")
+                                base_branch = result_data.get("base_branch") or result_data.get("base", {}).get("ref", "") if isinstance(result_data.get("base"), dict) else result_data.get("base", "")
+
                                 yield AgentEvent(AgentEventType.WORKSPACE_PR, {
                                     "prNumber": pr_number,
                                     "repoOwner": repo.split("/")[0] if "/" in repo else "",
                                     "repoName": repo.split("/")[1] if "/" in repo else repo,
                                     "title": result_data.get("title", f"PR #{pr_number}"),
-                                    "author": result_data.get("author", result_data.get("user", {}).get("login", "")),
-                                    "baseBranch": result_data.get("base", {}).get("ref", "main"),
-                                    "headBranch": result_data.get("head", {}).get("ref", "feature"),
+                                    "author": author or "unknown",
+                                    "baseBranch": base_branch or "main",
+                                    "headBranch": head_branch or "feature",
                                     "additions": result_data.get("additions", 0),
                                     "deletions": result_data.get("deletions", 0),
                                     "filesChanged": result_data.get("changed_files", 0),

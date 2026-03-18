@@ -374,6 +374,13 @@ def register_github_tools(registry: ToolRegistry) -> int:
 
         pr = pr_result["data"]
 
+        # Sicherheitsprüfung: PR-Daten müssen ein Dict sein
+        if not isinstance(pr, dict):
+            return ToolResult(
+                success=False,
+                error=f"Unerwartetes API-Response-Format (erwartet: dict, erhalten: {type(pr).__name__})"
+            )
+
         # Reviews holen
         reviews_result = await _github_request(
             method="GET",
@@ -385,12 +392,16 @@ def register_github_tools(registry: ToolRegistry) -> int:
 
         reviews = []
         if reviews_result["success"]:
-            for review in reviews_result["data"]:
-                reviews.append({
-                    "user": review.get("user", {}).get("login"),
-                    "state": review.get("state"),
-                    "submitted_at": review.get("submitted_at"),
-                })
+            reviews_data = reviews_result["data"]
+            # Sicherheitsprüfung: Reviews müssen eine Liste sein
+            if isinstance(reviews_data, list):
+                for review in reviews_data:
+                    if isinstance(review, dict):
+                        reviews.append({
+                            "user": review.get("user", {}).get("login"),
+                            "state": review.get("state"),
+                            "submitted_at": review.get("submitted_at"),
+                        })
 
         # Kommentare holen (nur Anzahl)
         comments_result = await _github_request(
