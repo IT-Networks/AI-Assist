@@ -256,9 +256,16 @@ async def save_update_config(request: UpdateConfigRequest):
         with open(config_path, "w", encoding="utf-8") as f:
             yaml.dump(config_data, f, default_flow_style=False, allow_unicode=True)
 
-        # Settings neu laden (global settings wird überschrieben)
-        # In der Praxis: Neustart empfohlen für konsistente Settings
-        logger.info("[update] Konfiguration gespeichert")
+        # Settings-Objekt direkt aktualisieren (kein Neustart nötig)
+        settings.update.enabled = request.enabled
+        settings.update.repo_url = request.repo_url
+        settings.update.use_proxy = request.use_proxy
+        settings.update.verify_ssl = request.verify_ssl
+        settings.update.check_on_start = request.check_on_start
+        if request.github_token and request.github_token != "***":
+            settings.update.github_token = request.github_token
+
+        logger.info(f"[update] Konfiguration gespeichert und aktiviert (enabled={request.enabled})")
 
         return {"success": True, "message": "Konfiguration gespeichert"}
 

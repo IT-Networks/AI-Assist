@@ -156,9 +156,12 @@ class UpdateService:
         """
         config = settings.update
 
+        current = get_current_version()
+
         if not config.enabled or not config.repo_url:
             return {
                 "available": False,
+                "current_version": current,
                 "error": "Update-Service nicht konfiguriert",
             }
 
@@ -166,10 +169,9 @@ class UpdateService:
         if not owner or not repo:
             return {
                 "available": False,
+                "current_version": current,
                 "error": f"Ungültige Repository-URL: {config.repo_url}",
             }
-
-        current = get_current_version()
 
         try:
             async with self._get_http_client() as client:
