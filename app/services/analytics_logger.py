@@ -16,6 +16,7 @@ import logging
 import time
 import uuid
 
+import json
 from app.utils.json_utils import json_loads, json_dumps
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timedelta
@@ -310,16 +311,29 @@ class AnalyticsLogger:
         if not self._enabled:
             return ""
 
-        # Feedback von vorheriger Chain inferieren
-        if self._current_chain and self._include.user_feedback:
-            feedback = self._feedback_inferrer.infer(
-                current_query=query,
-                previous_query=self._previous_query,
-                previous_response=self._previous_response,
-            )
-            self._current_chain.user_feedback = feedback
-            # Vorherige Chain speichern
-            await self._save_chain(self._current_chain)
+        # Feedback von vorheriger Chain inferieren und als separaten Eintrag speichern
+        if self._previous_query and self._previous_response and self._include.user_feedback:
+            try:
+                feedback = self._feedback_inferrer.infer(
+                    current_query=query,
+                    previous_query=self._previous_query,
+                    previous_response=self._previous_response,
+                )
+                # Feedback als separaten Eintrag loggen (verlinkt mit vorheriger Query)
+                if feedback.type not in ("unknown", "mixed"):
+                    feedback_entry = {
+                        "type": "feedback",
+                        "ts": datetime.utcnow().isoformat(),
+                        "feedback_type": feedback.type,
+                        "signal": feedback.signal,
+                        "previous_query_hash": self._anonymizer.hash_query(self._previous_query)[0],
+                    }
+                    log_file = self._get_log_file()
+                    line = json_dumps(feedback_entry, ensure_ascii=False) + "\n"
+                    with open(log_file, "a", encoding="utf-8") as f:
+                        f.write(line)
+            except Exception as e:
+                logger.debug(f"[analytics] Feedback inference failed: {e}")
 
         # Query anonymisieren
         query_hash, categories = self._anonymizer.hash_query(query)
@@ -446,6 +460,7 @@ class AnalyticsLogger:
         self,
         status: str,
         response: str = "",
+        save_immediately: bool = True,
     ) -> None:
         """
         Beendet die aktuelle Kette.
@@ -453,6 +468,7 @@ class AnalyticsLogger:
         Args:
             status: Endstatus (resolved, failed, timeout, user_abort)
             response: KI-Antwort (für Feedback-Inference)
+            save_immediately: Sofort speichern (default True, False nur für Feedback-Inference)
         """
         if not self._enabled or not self._current_chain:
             return
@@ -463,7 +479,10 @@ class AnalyticsLogger:
 
         logger.debug(f"[analytics] Chain beendet: {self._current_chain.chain_id} -> {status}")
 
-        # NICHT sofort speichern - warten auf nächste Query für Feedback
+        # Chain sofort speichern (Feedback wird bei nächster Query nachträglich hinzugefügt)
+        if save_immediately:
+            await self._save_chain(self._current_chain)
+            self._current_chain = None
 
     async def force_save(self) -> None:
         """Erzwingt Speichern der aktuellen Chain (z.B. bei Session-Ende)."""

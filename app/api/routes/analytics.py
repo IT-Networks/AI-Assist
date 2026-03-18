@@ -464,10 +464,13 @@ async def get_dashboard_metrics(
     avg_response_time = (total_time / total_calls) if total_calls > 0 else 0
     response_trend = -5.0  # Placeholder trend
 
-    # Success rate
+    # Success rate - tool_success_rate contains {tool: {"success": n, "total": m, "rate": pct}}
     tool_success = current_summary.get("tool_success_rate", {})
     if tool_success:
-        success_rate = sum(tool_success.values()) / len(tool_success) * 100
+        # Calculate overall success rate from all tools
+        total_success = sum(t.get("success", 0) for t in tool_success.values())
+        total_calls = sum(t.get("total", 0) for t in tool_success.values())
+        success_rate = (total_success / total_calls * 100) if total_calls > 0 else 100.0
     else:
         success_rate = 100.0
     success_trend = 2.0  # Placeholder trend
@@ -477,11 +480,12 @@ async def get_dashboard_metrics(
     sorted_tools = sorted(tools_used.items(), key=lambda x: x[1], reverse=True)[:10]
     total_tool_calls = sum(tools_used.values()) or 1
     for tool_name, count in sorted_tools:
-        success = tool_success.get(tool_name, 1.0)
+        tool_stats = tool_success.get(tool_name, {})
+        tool_rate = tool_stats.get("rate", 100.0) if isinstance(tool_stats, dict) else 100.0
         tool_usage.append(ToolUsageEntry(
             tool=tool_name,
             count=count,
-            successRate=success * 100,
+            successRate=tool_rate,
             avgDuration=500.0  # Placeholder
         ))
 
