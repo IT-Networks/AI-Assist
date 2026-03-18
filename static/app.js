@@ -6172,28 +6172,108 @@ function renderErrorsList(errors) {
     return;
   }
 
-  const html = errors.map(err => `
-    <div class="error-item">
-      <div class="error-header">
-        <span class="error-icon">&#9888;</span>
-        <span class="error-type">${escapeHtml(err.errorType)}</span>
-        <span class="error-count">${err.count}x</span>
-      </div>
-      <div class="error-message">${escapeHtml(err.message)}</div>
-      ${err.patternId ? `
-        <div class="error-pattern">
-          <span class="pattern-badge">Pattern Match</span>
-          <button class="btn btn-sm" onclick="viewErrorPattern('${err.patternId}')">Details</button>
+  const html = errors.map((err, index) => {
+    // Zeitstempel formatieren
+    const timestamp = err.timestamp ? new Date(err.timestamp).toLocaleString('de-DE', {
+      day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit'
+    }) : '';
+
+    // Status-Badge
+    const statusBadge = err.wasResolved
+      ? '<span class="status-badge status-success">Behoben</span>'
+      : err.hasSuggestedFix
+        ? '<span class="status-badge status-warning">Fix verfuegbar</span>'
+        : '<span class="status-badge status-error">Offen</span>';
+
+    // Location Info
+    const locationInfo = err.filePath
+      ? `<div class="error-location">
+           <span class="location-icon">&#128196;</span>
+           <span class="location-path">${escapeHtml(err.filePath)}${err.lineNumber ? ':' + err.lineNumber : ''}</span>
+         </div>`
+      : '';
+
+    // Tool Info
+    const toolInfo = err.tool && err.tool !== 'unknown'
+      ? `<span class="error-tool" title="Tool: ${escapeHtml(err.tool)}">${escapeHtml(err.tool)}</span>`
+      : '';
+
+    // Fix Info
+    const fixInfo = err.hasSuggestedFix && err.suggestedFix
+      ? `<div class="error-fix-suggestion">
+           <span class="fix-icon">&#128161;</span>
+           <span class="fix-text">${escapeHtml(err.suggestedFix)}</span>
+           ${err.fixConfidence ? `<span class="fix-confidence">${(err.fixConfidence * 100).toFixed(0)}%</span>` : ''}
+         </div>`
+      : '';
+
+    // Session/Context Info (klappbar)
+    const contextInfo = err.sessionId
+      ? `<div class="error-context" title="Session: ${escapeHtml(err.sessionId)}">
+           <span class="context-label">Session:</span>
+           <span class="context-value">${escapeHtml(err.sessionId.substring(0, 8))}...</span>
+         </div>`
+      : '';
+
+    return `
+      <div class="error-item ${err.wasResolved ? 'resolved' : ''}" data-error-id="${err.id || index}">
+        <div class="error-header">
+          <span class="error-icon">&#9888;</span>
+          <span class="error-type">${escapeHtml(err.errorType)}</span>
+          ${toolInfo}
+          ${statusBadge}
+          <span class="error-time">${timestamp}</span>
         </div>
-      ` : `
+        ${locationInfo}
+        <div class="error-message" onclick="toggleErrorDetails('${err.id || index}')">${escapeHtml(err.message)}</div>
+        <div class="error-details" id="error-details-${err.id || index}" style="display:none;">
+          ${err.stackTrace ? `<pre class="error-stack">${escapeHtml(err.stackTrace)}</pre>` : ''}
+          ${err.toolArgs ? `<div class="error-args"><strong>Argumente:</strong> <code>${escapeHtml(JSON.stringify(err.toolArgs))}</code></div>` : ''}
+          ${contextInfo}
+        </div>
+        ${fixInfo}
         <div class="error-actions">
-          <button class="btn btn-sm btn-secondary" onclick="learnErrorPattern('${err.errorType}')">Pattern lernen</button>
+          ${err.patternId ? `
+            <span class="pattern-badge">Pattern: ${escapeHtml(err.patternName || err.patternId.substring(0, 8))}</span>
+            <button class="btn btn-sm" onclick="viewErrorPattern('${err.patternId}')">Pattern ansehen</button>
+          ` : `
+            <button class="btn btn-sm btn-secondary" onclick="learnErrorPattern('${err.errorType}', '${err.id || ''}', '${escapeHtml(err.message || '')}')">Pattern lernen</button>
+          `}
+          ${err.hasSuggestedFix && !err.wasResolved ? `
+            <button class="btn btn-sm btn-primary" onclick="applyErrorFix('${err.id}')">Fix anwenden</button>
+          ` : ''}
         </div>
-      `}
-    </div>
-  `).join('');
+      </div>
+    `;
+  }).join('');
 
   container.innerHTML = `<div class="errors-list">${html}</div>`;
+}
+
+function toggleErrorDetails(errorId) {
+  const details = document.getElementById(`error-details-${errorId}`);
+  if (details) {
+    details.style.display = details.style.display === 'none' ? 'block' : 'none';
+  }
+}
+
+async function applyErrorFix(attemptId) {
+  if (!attemptId) return;
+
+  try {
+    const res = await fetch(`/api/healing/attempts/${attemptId}/apply`, { method: 'POST' });
+    const data = await res.json();
+
+    if (data.success) {
+      showNotification('Fix erfolgreich angewendet', 'success');
+      // Dashboard neu laden
+      loadDashboardData();
+    } else {
+      showNotification('Fix fehlgeschlagen: ' + (data.message || 'Unbekannter Fehler'), 'error');
+    }
+  } catch (e) {
+    showNotification('Fehler beim Anwenden: ' + e.message, 'error');
+  }
 }
 
 function renderTokenUsage(tokenUsage) {
@@ -6449,11 +6529,50 @@ async function ratePattern(patternId, rating) {
   }
 }
 
-async function learnErrorPattern(errorType) {
-  // Open a learning dialog
-  const solution = prompt(`Lösung für "${errorType}" beschreiben:\n\n(Kurze Beschreibung der Lösung)`);
+async function learnErrorPattern(errorType, errorId = '', errorMessage = '') {
+  // Open a learning dialog mit mehr Kontext
+  const dialogHtml = `
+    <div class="pattern-learn-dialog">
+      <h3>Pattern für Fehler lernen</h3>
+      <div class="dialog-section">
+        <label>Fehlertyp:</label>
+        <input type="text" id="pattern-error-type" value="${escapeHtml(errorType)}" readonly />
+      </div>
+      <div class="dialog-section">
+        <label>Fehlermeldung:</label>
+        <textarea id="pattern-error-text" rows="3" readonly>${escapeHtml(errorMessage)}</textarea>
+      </div>
+      <div class="dialog-section">
+        <label>Lösung beschreiben: *</label>
+        <textarea id="pattern-solution" rows="3" placeholder="Kurze Beschreibung wie der Fehler behoben wird..."></textarea>
+      </div>
+      <div class="dialog-section">
+        <label>Lösungsschritte (einer pro Zeile):</label>
+        <textarea id="pattern-steps" rows="4" placeholder="1. Schritt eins&#10;2. Schritt zwei&#10;3. ..."></textarea>
+      </div>
+      <div class="dialog-section">
+        <label>Betroffene Tools (kommagetrennt):</label>
+        <input type="text" id="pattern-tools" placeholder="z.B. edit_file, search_code" />
+      </div>
+    </div>
+  `;
 
-  if (!solution) return;
+  // Modal anzeigen
+  const result = await showConfirmDialog('Pattern lernen', dialogHtml, 'Speichern', 'Abbrechen');
+
+  if (!result) return;
+
+  const solution = document.getElementById('pattern-solution')?.value?.trim();
+  if (!solution) {
+    showNotification('Bitte eine Lösung beschreiben', 'warning');
+    return;
+  }
+
+  const stepsText = document.getElementById('pattern-steps')?.value || '';
+  const steps = stepsText.split('\n').map(s => s.trim()).filter(s => s);
+
+  const toolsText = document.getElementById('pattern-tools')?.value || '';
+  const tools = toolsText.split(',').map(t => t.trim()).filter(t => t);
 
   try {
     const res = await fetch('/api/patterns/learn', {
@@ -6461,23 +6580,25 @@ async function learnErrorPattern(errorType) {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         errorType: errorType,
-        errorText: patternState.currentError || errorType,
+        errorText: errorMessage || errorType,
         solutionDescription: solution,
-        solutionSteps: [],
-        toolsUsed: [],
+        solutionSteps: steps,
+        toolsUsed: tools,
         filesChanged: []
       })
     });
 
     if (res.ok) {
       const data = await res.json();
-      showToast(data.isNew ? 'Neues Pattern gelernt' : 'Pattern aktualisiert', 'success');
+      showNotification(data.isNew ? 'Neues Pattern gelernt!' : 'Pattern aktualisiert!', 'success');
+      // Dashboard neu laden
+      loadDashboardData();
     } else {
       throw new Error('Learning failed');
     }
   } catch (err) {
     log.error('Learn pattern error:', err);
-    showToast('Pattern-Learning fehlgeschlagen', 'error');
+    showNotification('Pattern-Learning fehlgeschlagen', 'error');
   }
 }
 

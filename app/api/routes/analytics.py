@@ -23,6 +23,8 @@ from app.core.config import settings
 from app.services.analytics_logger import get_analytics_logger
 from app.services.pattern_detector import PatternDetector
 from app.services.report_generator import ReportGenerator
+from app.services.self_healing import get_self_healing_engine
+from app.utils.json_utils import json_loads
 
 logger = logging.getLogger(__name__)
 
@@ -374,13 +376,37 @@ class ActivityEntry(BaseModel):
 
 
 class ErrorEntry(BaseModel):
-    """Fehlereintrag fuer Dashboard."""
-    timestamp: int
-    tool: str
-    errorType: str
-    message: str
-    count: int
-    patternId: Optional[str] = None
+    """Fehlereintrag fuer Dashboard - erweitert fuer Lösungsfindung."""
+    # Basis-Info
+    id: str                                    # Healing-Attempt ID
+    timestamp: int                             # Wann der Fehler auftrat
+    tool: str                                  # Welches Tool den Fehler verursachte
+    errorType: str                             # Fehlertyp (z.B. FileNotFoundError)
+    message: str                               # Vollständige Fehlermeldung
+    count: int = 1                             # Wie oft dieser Fehler auftrat
+
+    # Kontext für Lösungsfindung
+    filePath: Optional[str] = None             # Betroffene Datei
+    lineNumber: Optional[int] = None           # Betroffene Zeile
+    stackTrace: Optional[str] = None           # Stack-Trace (gekürzt)
+    toolArgs: Optional[Dict[str, Any]] = None  # Tool-Argumente die zum Fehler führten
+    codeSnippet: Optional[str] = None          # Code-Kontext um den Fehler
+
+    # Session-Kontext
+    sessionId: Optional[str] = None            # Session in der Fehler auftrat
+    chainId: Optional[str] = None              # Chain/Request ID
+
+    # Pattern/Lösung
+    patternId: Optional[str] = None            # Bekanntes Pattern (falls vorhanden)
+    patternName: Optional[str] = None          # Pattern-Name
+    hasSuggestedFix: bool = False              # Gibt es einen Lösungsvorschlag?
+    suggestedFix: Optional[str] = None         # Kurzbeschreibung der Lösung
+    fixConfidence: Optional[float] = None      # Konfidenz der Lösung (0-1)
+    fixType: Optional[str] = None              # Art der Lösung (edit_file, run_command, etc.)
+
+    # Status
+    status: str = "pending"                    # pending, applied, success, failed, dismissed
+    wasResolved: bool = False                  # Wurde der Fehler erfolgreich behoben?
 
 
 class TokenUsageEntry(BaseModel):
@@ -404,6 +430,116 @@ class DashboardMetrics(BaseModel):
     activityHeatmap: List[ActivityEntry]
     recentErrors: List[ErrorEntry]
     tokenUsage: TokenUsageEntry
+
+
+async def _get_recent_errors(limit: int = 10) -> List[ErrorEntry]:
+    """
+    Holt detaillierte Fehler-Eintraege aus healing_attempts.
+
+    Gibt reichhaltige Informationen fuer Lösungsfindung zurück:
+    - Vollstaendige Fehlermeldung
+    - Datei/Zeile wo Fehler auftrat
+    - Tool-Argumente
+    - Bestehende Pattern-Matches
+    - Lösungsvorschlaege
+    """
+    import sqlite3
+    from pathlib import Path
+
+    errors: List[ErrorEntry] = []
+
+    try:
+        healing_engine = get_self_healing_engine()
+        db_path = healing_engine.db_path
+
+        if not db_path.exists():
+            return errors
+
+        conn = sqlite3.connect(db_path)
+        cursor = conn.cursor()
+
+        # Hole die letzten Healing-Attempts mit allen Details
+        cursor.execute("""
+            SELECT
+                id, timestamp, session_id, chain_id,
+                tool_name, error_type, error_message,
+                pattern_id, pattern_name,
+                fix_type, fix_description, fix_data,
+                status, applied, success, retry_count, result_message
+            FROM healing_attempts
+            ORDER BY timestamp DESC
+            LIMIT ?
+        """, (limit,))
+
+        rows = cursor.fetchall()
+        conn.close()
+
+        for row in rows:
+            # Parse fix_data JSON für Details
+            fix_data = {}
+            if row[11]:
+                try:
+                    fix_data = json_loads(row[11])
+                except Exception:
+                    pass
+
+            # Extrahiere Datei/Zeile aus error_message
+            file_path = None
+            line_number = None
+            error_message = row[6] or ""
+
+            # Pattern für Datei-Extraktion
+            import re
+            file_match = re.search(
+                r'(?:in\s+|file\s+|at\s+)?["\']?([^"\'\s]+\.(py|java|js|ts|go|rs))["\']?',
+                error_message, re.I
+            )
+            if file_match:
+                file_path = file_match.group(1)
+
+            line_match = re.search(r'line\s*(\d+)|:(\d+):', error_message)
+            if line_match:
+                line_number = int(line_match.group(1) or line_match.group(2))
+
+            # Extrahiere Code-Snippet falls in fix_data vorhanden
+            code_snippet = None
+            tool_args = None
+            if fix_data:
+                changes = fix_data.get("changes", [])
+                if changes and len(changes) > 0:
+                    code_snippet = changes[0].get("old_content")
+                # Tool-Args aus dem Original-Error extrahieren (falls gespeichert)
+
+            errors.append(ErrorEntry(
+                id=row[0],
+                timestamp=row[1],
+                tool=row[4] or "unknown",
+                errorType=row[5] or "UnknownError",
+                message=error_message[:500] if error_message else "No message",
+                count=1,
+                filePath=file_path,
+                lineNumber=line_number,
+                stackTrace=error_message[:1000] if len(error_message) > 500 else None,
+                toolArgs=tool_args,
+                codeSnippet=code_snippet,
+                sessionId=row[2],
+                chainId=row[3],
+                patternId=row[7],
+                patternName=row[8],
+                hasSuggestedFix=bool(row[10]),
+                suggestedFix=row[10],  # fix_description
+                fixConfidence=fix_data.get("confidence") if fix_data else None,
+                fixType=row[9],
+                status=row[12] or "pending",
+                wasResolved=bool(row[14])  # success
+            ))
+
+    except Exception as e:
+        logger.warning(f"[analytics] Failed to get recent errors: {e}")
+        # Fallback: Leere Liste
+        pass
+
+    return errors
 
 
 @router.get("/dashboard", response_model=DashboardMetrics)
@@ -507,18 +643,8 @@ async def get_dashboard_metrics(
                     count=count
                 ))
 
-    # Recent errors
-    error_types = current_summary.get("error_types", {})
-    recent_errors = []
-    for error_type, count in list(error_types.items())[:5]:
-        recent_errors.append(ErrorEntry(
-            timestamp=int(datetime.now().timestamp() * 1000),
-            tool="unknown",
-            errorType=error_type,
-            message=f"{error_type} occurred",
-            count=count,
-            patternId=None
-        ))
+    # Recent errors - aus healing_attempts für detaillierte Infos
+    recent_errors = await _get_recent_errors(limit=10)
 
     # Token usage - aggregate from summary
     total_tokens = total_requests * 2000  # Estimate
