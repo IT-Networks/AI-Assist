@@ -544,8 +544,11 @@ class UpdateConfig(BaseModel):
     # GitHub Repository (öffentlich oder privat)
     repo_url: str = ""               # z.B. https://github.com/user/ai-assist-releases
     github_token: str = ""           # Personal Access Token für private Repos
-    # Proxy verwenden (aus search-Konfiguration)
-    use_proxy: bool = True           # Proxy aus search-Konfiguration verwenden
+    # Eigene Proxy-Konfiguration (unabhängig von Web Search)
+    proxy_url: str = ""              # z.B. http://proxy.intern:8080 (leer = aus search-Config)
+    proxy_username: str = ""         # Proxy-Benutzername (optional)
+    proxy_password: str = ""         # Proxy-Passwort (optional)
+    use_proxy: bool = True           # Proxy verwenden
     verify_ssl: bool = False         # SSL-Zertifikate prüfen
     timeout_seconds: int = 120       # Timeout für Downloads
     # Auto-Update
@@ -581,9 +584,11 @@ class UpdateConfig(BaseModel):
         """Gibt Proxy-URL zurück wenn use_proxy aktiviert."""
         if not self.use_proxy:
             return None
-        # Proxy aus search-Config holen (wird zur Laufzeit aufgelöst)
-        return None  # Wird in update_service.py aufgelöst
-        return build_proxy_url(self.proxy_url, self.proxy_username, self.proxy_password)
+        # Eigene Proxy-URL verwenden wenn vorhanden
+        if self.proxy_url:
+            return build_proxy_url(self.proxy_url, self.proxy_username, self.proxy_password)
+        # Sonst: wird zur Laufzeit aus anderen Configs aufgelöst (search, internal_fetch)
+        return None
 
 
 # ══════════════════════════════════════════════════════════════════════════════

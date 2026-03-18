@@ -13393,9 +13393,31 @@ async function loadUpdateSettings() {
         </label>
         <small class="settings-hint">
           ${config.proxy_configured
-            ? `Proxy konfiguriert: ${escapeHtml(config.proxy_url)}`
-            : 'Kein Proxy konfiguriert (siehe Web-Suche Einstellungen)'}
+            ? `Aktiver Proxy: ${escapeHtml(config.effective_proxy)} (Quelle: ${config.proxy_source})`
+            : 'Kein Proxy konfiguriert'}
         </small>
+      </div>
+
+      <div class="settings-group">
+        <label class="settings-label">Eigene Proxy-URL (optional)</label>
+        <input type="text" id="update-proxy-url" class="settings-input"
+          value="${escapeHtml(config.proxy_url || '')}"
+          placeholder="http://proxy.intern:8080">
+        <small class="settings-hint">Leer = Fallback auf Web-Suche/Internal-Fetch Proxy</small>
+      </div>
+
+      <div class="settings-group">
+        <label class="settings-label">Proxy Benutzername (optional)</label>
+        <input type="text" id="update-proxy-username" class="settings-input"
+          value="${config.has_proxy_auth ? '***' : ''}"
+          placeholder="username">
+      </div>
+
+      <div class="settings-group">
+        <label class="settings-label">Proxy Passwort (optional)</label>
+        <input type="password" id="update-proxy-password" class="settings-input"
+          value="${config.has_proxy_auth ? '***' : ''}"
+          placeholder="password">
       </div>
 
       <div class="settings-group">
@@ -13443,6 +13465,9 @@ async function saveUpdateSettings() {
     enabled: document.getElementById('update-enabled').checked,
     repo_url: document.getElementById('update-repo-url').value,
     github_token: document.getElementById('update-github-token').value,
+    proxy_url: document.getElementById('update-proxy-url').value,
+    proxy_username: document.getElementById('update-proxy-username').value,
+    proxy_password: document.getElementById('update-proxy-password').value,
     use_proxy: document.getElementById('update-use-proxy').checked,
     verify_ssl: document.getElementById('update-verify-ssl').checked,
     check_on_start: document.getElementById('update-check-on-start').checked,
