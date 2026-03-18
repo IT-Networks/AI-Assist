@@ -13605,7 +13605,7 @@ async function saveArenaSettings() {
 
   try {
     const response = await fetch('/api/arena/config', {
-      method: 'POST',
+      method: 'PUT',  // Backend expects PUT, not POST
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(data),
     });
