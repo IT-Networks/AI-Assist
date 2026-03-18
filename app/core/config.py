@@ -564,13 +564,17 @@ class UpdateConfig(BaseModel):
         "**/.env*",
         "**/config.yaml",
         "**/settings*.json",
-        "index/**",
-        "uploads/**",
-        "chats/**",
-        "logs/**",
-        "backups/**",
-        "skills/**",
-        "**/*.db",
+        "data/**",              # Datenbanken, Analytics, Templates
+        "index/**",             # Such-Indizes
+        "uploads/**",           # Hochgeladene PDFs
+        "chats/**",             # Chat-Verläufe
+        "logs/**",              # Log-Dateien
+        "backups/**",           # Backups
+        "skills/**",            # Custom Skills
+        "claudedocs/**",        # Claude-Dokumentation
+        "sandbox_uploads/**",   # Sandbox-Uploads
+        "htmlcov/**",           # Test-Coverage-Reports
+        "**/*.db",              # Alle SQLite-Datenbanken
     ])
 
     def get_proxy_url(self) -> Optional[str]:
