@@ -1109,6 +1109,48 @@ async function loadPRReview(repoOwner, repoName, prNumber) {
   }
 }
 
+// Handle workspace_pr event from backend (when github_pr_details/github_pr_diff is called)
+function openPRFromEvent(data) {
+  // Update prReviewState with data from the event
+  prReviewState.active = true;
+  prReviewState.prNumber = data.prNumber;
+  prReviewState.repoOwner = data.repoOwner || '';
+  prReviewState.repoName = data.repoName || '';
+  prReviewState.title = data.title || `PR #${data.prNumber}`;
+  prReviewState.author = data.author || '';
+  prReviewState.baseBranch = data.baseBranch || 'main';
+  prReviewState.headBranch = data.headBranch || 'feature';
+  prReviewState.additions = data.additions || 0;
+  prReviewState.deletions = data.deletions || 0;
+  prReviewState.filesChanged = data.filesChanged || 0;
+  prReviewState.comments = [];
+  prReviewState.summary = null;
+  prReviewState.userComments = {};
+  prReviewState.dismissedComments = new Set();
+
+  // Store diff if available (from github_pr_diff)
+  if (data.diff) {
+    prReviewState.diff = data.diff;
+  }
+
+  // Show PR tab
+  const prTab = document.getElementById('workspace-pr-tab');
+  const prLabel = document.getElementById('workspace-pr-label');
+  if (prTab) {
+    prTab.style.display = 'flex';
+    prLabel.textContent = `PR #${data.prNumber}`;
+  }
+
+  // Render panel content
+  renderPRReviewPanel();
+
+  // Switch to PR tab and show workspace
+  if (!workspaceState.visible) {
+    toggleWorkspace();
+  }
+  switchWorkspaceTab('pr');
+}
+
 function openPRReviewTab(review) {
   // Store review data
   prReviewState.active = true;
@@ -1710,7 +1752,7 @@ function showHealingModal(attempt) {
     document.getElementById('healing-pattern').style.display = 'none';
   }
 
-  document.getElementById('healing-modal').style.display = 'block';
+  document.getElementById('healing-modal').style.display = 'flex';
 }
 
 function closeHealingModal() {
@@ -3405,6 +3447,10 @@ async function processAgentEvent(event, bubble, msgDiv, chat) {
 
     case 'workspace_file':
       addFileToWorkspace(data);
+      break;
+
+    case 'workspace_pr':
+      openPRFromEvent(data);
       break;
 
     case 'compaction': {
@@ -5928,10 +5974,51 @@ async function loadDashboardData(timeRange = 'week') {
   });
 
   try {
-    const res = await fetch(`/api/analytics/dashboard?timeRange=${timeRange}`);
-    if (!res.ok) throw new Error('Dashboard data fetch failed');
+    // Fetch analytics dashboard and token usage in parallel
+    const [analyticsRes, tokensRes] = await Promise.all([
+      fetch(`/api/analytics/dashboard?timeRange=${timeRange}`).catch(() => null),
+      fetch(`/api/tokens/usage?period=${timeRange}`).catch(() => null)
+    ]);
 
-    const data = await res.json();
+    // Parse responses
+    let analyticsData = null;
+    let tokensData = null;
+
+    if (analyticsRes?.ok) {
+      analyticsData = await analyticsRes.json();
+    }
+    if (tokensRes?.ok) {
+      tokensData = await tokensRes.json();
+    }
+
+    // Merge data - prefer analytics but fallback to token data
+    const data = analyticsData || {
+      totalRequests: tokensData?.totalRequests || 0,
+      requestsTrend: 0,
+      avgResponseTime: 0,
+      responseTrend: 0,
+      successRate: 100,
+      successTrend: 0,
+      toolUsage: [],
+      activityHeatmap: [],
+      recentErrors: [],
+      tokenUsage: { input: 0, output: 0, total: 0, limit: 100000 }
+    };
+
+    // Enhance with token tracker data if available
+    if (tokensData) {
+      data.tokenUsage = {
+        input: tokensData.inputTokens || 0,
+        output: tokensData.outputTokens || 0,
+        total: tokensData.totalTokens || 0,
+        limit: tokensData.budgetLimit || 100000
+      };
+      // Update request count from token data if analytics was empty
+      if (!analyticsData && tokensData.totalRequests > 0) {
+        data.totalRequests = tokensData.totalRequests;
+      }
+    }
+
     dashboardState.data = data;
 
     renderDashboardKPIs(data);
@@ -5988,11 +6075,7 @@ function renderKpiTrend(elementId, trend, inverted = false) {
   el.innerHTML = `<span class="${trendClass}">${arrow} ${Math.abs(trend).toFixed(1)}%</span>`;
 }
 
-function formatNumber(num) {
-  if (num >= 1000000) return (num / 1000000).toFixed(1) + 'M';
-  if (num >= 1000) return (num / 1000).toFixed(1) + 'K';
-  return num.toString();
-}
+// formatNumber defined earlier in file (Token Usage section)
 
 function formatDuration(ms) {
   if (ms < 1000) return `${ms}ms`;

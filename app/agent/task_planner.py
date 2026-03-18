@@ -15,7 +15,7 @@ from typing import Optional
 
 from app.agent.task_models import Task, TaskPlan, TaskType, TaskStatus
 from app.core.config import settings
-from app.services.llm_client import LLMClient, llm_client as default_llm_client
+from app.services.llm_client import LLMClient, llm_client as default_llm_client, TIMEOUT_ANALYSIS
 
 logger = logging.getLogger(__name__)
 
@@ -120,7 +120,15 @@ class TaskPlanner:
             llm_client: LLM-Client fuer Anfragen (default: globaler Client)
         """
         self.llm = llm_client or default_llm_client
-        self.model = settings.llm.analysis_model or settings.llm.default_model
+        # Priorisierung: task_agents.planning_model > llm.analysis_model > llm.default_model
+        self.model = (
+            settings.task_agents.planning_model
+            or settings.llm.analysis_model
+            or settings.llm.default_model
+        )
+        self.temperature = settings.task_agents.planning_temperature
+        # Timeout: Größere Modelle brauchen mehr Zeit (120s statt 30s)
+        self.timeout = TIMEOUT_ANALYSIS
 
     async def plan(
         self,
@@ -137,7 +145,10 @@ class TaskPlanner:
         Returns:
             TaskPlan mit Tasks oder Klaerungsfragen
         """
-        logger.debug(f"[TaskPlanner] Planning for query: {user_query[:100]}...")
+        logger.debug(
+            f"[TaskPlanner] Planning for query: {user_query[:100]}... "
+            f"(model={self.model}, timeout={self.timeout}s)"
+        )
 
         messages = [
             {"role": "system", "content": PLANNER_SYSTEM_PROMPT}
@@ -158,9 +169,9 @@ class TaskPlanner:
             response = await self.llm.chat_with_tools(
                 messages=messages,
                 model=self.model,
-                temperature=0.1,
+                temperature=self.temperature,
                 max_tokens=2048,
-                timeout=30.0
+                timeout=self.timeout
             )
 
             plan = self._parse_response(response.content, user_query)

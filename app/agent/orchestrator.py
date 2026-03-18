@@ -262,6 +262,7 @@ class AgentEventType(str, Enum):
     WORKSPACE_SQL_RESULT = "workspace_sql_result"    # SQL-Abfrage-Ergebnis für Workspace Panel
     WORKSPACE_FILE = "workspace_file"                # Gelesene Datei für Workspace Panel
     WORKSPACE_RESEARCH = "workspace_research"        # Research-Ergebnis für Workspace Panel
+    WORKSPACE_PR = "workspace_pr"                    # PR-Daten für Workspace Panel
 
 
 @dataclass
@@ -950,6 +951,7 @@ Sei präzise und gib detaillierte Analyse-Schritte."""
             "workspace_sql_result": AgentEventType.WORKSPACE_SQL_RESULT,
             "workspace_file": AgentEventType.WORKSPACE_FILE,
             "workspace_research": AgentEventType.WORKSPACE_RESEARCH,
+            "workspace_pr": AgentEventType.WORKSPACE_PR,
         }
 
     async def _drain_mcp_events(self) -> AsyncGenerator[AgentEvent, None]:
@@ -2666,6 +2668,27 @@ Sei präzise und gib detaillierte Analyse-Schritte."""
                                     "description": f"{tool_call.name}: {file_path}",
                                     "status": "applied",
                                     "isNew": tool_call.name == "create_file"
+                                })
+                            elif tool_call.name in ("github_pr_details", "github_pr_diff"):
+                                # PR-Daten für Workspace Panel
+                                pr_number = tool_call.arguments.get("pr_number")
+                                repo = tool_call.arguments.get("repo", "")
+                                # Parse result data
+                                result_data = result.data if hasattr(result, 'data') and isinstance(result.data, dict) else {}
+                                yield AgentEvent(AgentEventType.WORKSPACE_PR, {
+                                    "prNumber": pr_number,
+                                    "repoOwner": repo.split("/")[0] if "/" in repo else "",
+                                    "repoName": repo.split("/")[1] if "/" in repo else repo,
+                                    "title": result_data.get("title", f"PR #{pr_number}"),
+                                    "author": result_data.get("author", result_data.get("user", {}).get("login", "")),
+                                    "baseBranch": result_data.get("base", {}).get("ref", "main"),
+                                    "headBranch": result_data.get("head", {}).get("ref", "feature"),
+                                    "additions": result_data.get("additions", 0),
+                                    "deletions": result_data.get("deletions", 0),
+                                    "filesChanged": result_data.get("changed_files", 0),
+                                    "state": result_data.get("state", "open"),
+                                    "diff": result_data.get("diff", "")[:10000] if tool_call.name == "github_pr_diff" else "",
+                                    "toolCall": tool_call.name
                                 })
 
                     state.tool_calls_history.append(tool_call)
