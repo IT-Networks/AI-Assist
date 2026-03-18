@@ -704,6 +704,14 @@ access_logging:
   log_response_body: false
   exclude_hosts: []
 
+# Analytics - Tool-Nutzung und KI-Entscheidungen loggen
+analytics:
+  enabled: true                    # Master-Switch für Analytics
+  storage_path: ./data/analytics   # Speicherort für Logs
+  retention_days: 90               # Aufbewahrungsdauer
+  log_level: standard              # minimal | standard | detailed
+  compress_after_days: 7           # GZIP nach X Tagen
+
 # App-Update Service (GitHub-basiert)
 update:
   enabled: false
