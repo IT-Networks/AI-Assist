@@ -451,13 +451,8 @@ class TaskExecutor:
                 logger.info(f"[TaskExecutor] No more tool calls, finishing. Total output parts: {len(collected_output)}")
                 break
 
-            # Tool-Calls ausfuehren
-            # Assistant-Message mit Tool-Calls hinzufuegen
-            assistant_msg: Dict[str, Any] = {"role": "assistant"}
-            if content:
-                assistant_msg["content"] = content
-            assistant_msg["tool_calls"] = tool_calls
-            messages.append(assistant_msg)
+            # Tool-Calls ausfuehren und Ergebnisse sammeln
+            tool_results_parts: List[str] = []
 
             for tc in tool_calls:
                 func = tc.get("function", {})
@@ -507,12 +502,23 @@ class TaskExecutor:
                     except Exception as e:
                         logger.debug(f"[TaskExecutor] Tool tracking failed: {e}")
 
-                # Tool-Result als Message
-                messages.append({
-                    "role": "tool",
-                    "tool_call_id": tc.get("id", ""),
-                    "content": result_str
-                })
+                # Ergebnis für User-Message sammeln
+                # Kürze lange Ergebnisse (max 15000 Zeichen pro Tool)
+                if len(result_str) > 15000:
+                    result_str = result_str[:15000] + "\n\n[... Ergebnis gekürzt ...]"
+                tool_results_parts.append(f"### Tool: {tool_name}\n{result_str}")
+
+            # WICHTIG: Tool-Ergebnisse als USER-Message hinzufügen (nicht role="tool")
+            # Kleinere Modelle (Qwen, Mistral-Compact) verstehen role="tool" nicht!
+            # Der Orchestrator verwendet dasselbe Format für nicht-native Tool-Support.
+            messages.append({
+                "role": "assistant",
+                "content": content or f"Ich rufe {len(tool_calls)} Tool(s) auf..."
+            })
+            messages.append({
+                "role": "user",
+                "content": "Tool-Ergebnisse:\n\n" + "\n\n---\n\n".join(tool_results_parts)
+            })
 
         # Ergebnis zusammenfassen
         if collected_output:
@@ -522,7 +528,7 @@ class TaskExecutor:
 
         # Fallback: Wenn wir Tool-Ergebnisse haben aber keinen Output,
         # explizit nach einer Zusammenfassung fragen
-        tool_results = [m for m in messages if m.get("role") == "tool"]
+        tool_results = [m for m in messages if m.get("role") == "user" and "Tool-Ergebnisse:" in m.get("content", "")]
         if tool_results:
             logger.warning(
                 f"[TaskExecutor] No output but {len(tool_results)} tool results. "
