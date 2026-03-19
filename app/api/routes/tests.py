@@ -7,6 +7,7 @@ Endpoints für Test-Ausführung, Ergebnis-Anzeige und Fix-Generierung.
 import asyncio
 import json
 import logging
+from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, HTTPException, Query, BackgroundTasks
@@ -341,7 +342,7 @@ async def get_test_status() -> Dict[str, Any]:
 
     return {
         "available": bool(java_path),
-        "java_path": java_path,
+        "java_path": java_path or None,
         "build_tool": service.build_tool if java_path else None,
         "maven_available": bool(java_path and (Path(java_path) / "pom.xml").exists()) if java_path else False,
         "gradle_available": bool(java_path and (
@@ -349,7 +350,3 @@ async def get_test_status() -> Dict[str, Any]:
             (Path(java_path) / "build.gradle.kts").exists()
         )) if java_path else False
     }
-
-
-# Import Path for status check
-from pathlib import Path
