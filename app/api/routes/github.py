@@ -332,11 +332,17 @@ async def get_pr_details(owner: str, repo: str, pr_number: int) -> Dict[str, Any
             user_data = user_result["data"]
             author_name = user_data.get("name") or author_login
 
+    # Status korrekt erkennen: merged hat Priorität
+    # GitHub API: merged=true oder merged_at gesetzt = gemerged
+    is_merged = pr.get("merged") is True or pr.get("merged_at") is not None
+    pr_state = "merged" if is_merged else pr.get("state", "open")
+
     return {
         "prNumber": pr.get("number"),
         "title": pr.get("title"),
         "body": (pr.get("body") or "")[:2000],
-        "state": "merged" if pr.get("merged") else pr.get("state"),
+        "state": pr_state,
+        "merged": is_merged,
         "author": author_login,
         "authorName": author_name,
         "baseBranch": pr.get("base", {}).get("ref", "main"),

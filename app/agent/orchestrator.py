@@ -2998,8 +2998,9 @@ Sei präzise und gib detaillierte Analyse-Schritte."""
                                 )
 
                                 # PR-Status bestimmen (open, closed, merged)
+                                # merged=True oder merged_at gesetzt = gemerged
                                 pr_state = result_data.get("state", "open")
-                                is_merged = result_data.get("merged", False) or result_data.get("merged_at") is not None
+                                is_merged = result_data.get("merged") is True or result_data.get("merged_at") is not None
 
                                 # Debug-Logging für PR-Daten
                                 logger.info(f"[agent] Emitting WORKSPACE_PR event: PR #{pr_number}, "
