@@ -57,13 +57,14 @@ class KnowledgeGraphViewer {
     controls.className = 'kg-controls';
     controls.innerHTML = `
       <div class="kg-search">
-        <input type="text" id="kg-search-input" placeholder="Suche Klasse/Interface..." />
+        <input type="text" id="kg-search-input" placeholder="Suche Klasse/Interface..." autocomplete="off" />
         <button id="kg-search-btn" title="Suchen">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
             <circle cx="11" cy="11" r="8"/>
             <path d="M21 21l-4.35-4.35"/>
           </svg>
         </button>
+        <div id="kg-search-results" class="kg-search-results"></div>
       </div>
       <div class="kg-actions">
         <button id="kg-zoom-in" title="Zoom In">+</button>
@@ -87,11 +88,20 @@ class KnowledgeGraphViewer {
     `;
     this.container.insertBefore(controls, this.container.firstChild);
 
+    // Search debounce
+    this._searchTimeout = null;
+    this._selectedResultIndex = -1;
+
     // Event Listeners
-    document.getElementById('kg-search-btn')?.addEventListener('click', () => this._handleSearch());
-    document.getElementById('kg-search-input')?.addEventListener('keypress', (e) => {
-      if (e.key === 'Enter') this._handleSearch();
+    const searchInput = document.getElementById('kg-search-input');
+    searchInput?.addEventListener('input', (e) => this._handleSearchInput(e.target.value));
+    searchInput?.addEventListener('keydown', (e) => this._handleSearchKeydown(e));
+    searchInput?.addEventListener('blur', () => {
+      // Delay to allow click on results
+      setTimeout(() => this._hideSearchResults(), 200);
     });
+
+    document.getElementById('kg-search-btn')?.addEventListener('click', () => this._handleSearch());
     document.getElementById('kg-zoom-in')?.addEventListener('click', () => this._zoomIn());
     document.getElementById('kg-zoom-out')?.addEventListener('click', () => this._zoomOut());
     document.getElementById('kg-reset')?.addEventListener('click', () => this._resetView());
@@ -103,27 +113,177 @@ class KnowledgeGraphViewer {
     });
   }
 
-  async _handleSearch() {
-    const input = document.getElementById('kg-search-input');
-    const query = input?.value?.trim();
-    if (!query) return;
+  _handleSearchInput(query) {
+    clearTimeout(this._searchTimeout);
 
+    if (!query || query.length < 2) {
+      this._hideSearchResults();
+      return;
+    }
+
+    // Debounce search
+    this._searchTimeout = setTimeout(() => this._performSearch(query), 300);
+  }
+
+  async _performSearch(query) {
     try {
       const response = await fetch(`/api/graph/search?q=${encodeURIComponent(query)}&limit=20`);
       if (!response.ok) throw new Error('Search failed');
 
       const results = await response.json();
-      if (results.length === 0) {
-        this._showMessage('Keine Ergebnisse gefunden');
-        return;
-      }
-
-      // Erstes Ergebnis als Center laden
-      await this.loadSubgraph(results[0].id, this.currentDepth);
+      this._showSearchResults(results, query);
     } catch (e) {
       console.error('[KnowledgeGraph] Search error:', e);
-      this._showMessage('Suche fehlgeschlagen');
+      this._showSearchResults([], query);
     }
+  }
+
+  _showSearchResults(results, query) {
+    const container = document.getElementById('kg-search-results');
+    if (!container) return;
+
+    this._selectedResultIndex = -1;
+    this._searchResults = results;
+
+    if (results.length === 0) {
+      container.innerHTML = `
+        <div class="kg-search-no-results">
+          Keine Ergebnisse für "<strong>${query}</strong>"
+          <div class="kg-search-hint">
+            Prüfe ob das Workspace indexiert ist (Einstellungen → Graph indexieren)
+          </div>
+        </div>
+      `;
+      container.style.display = 'block';
+      return;
+    }
+
+    container.innerHTML = results.map((node, index) => {
+      // Name highlighting
+      const name = this._highlightMatch(node.name, query);
+      const typeIcon = this._getTypeIcon(node.type);
+      const typeClass = `kg-type-${node.type}`;
+
+      return `
+        <div class="kg-search-result" data-index="${index}" data-id="${node.id}">
+          <span class="kg-search-result-icon ${typeClass}">${typeIcon}</span>
+          <span class="kg-search-result-name">${name}</span>
+          <span class="kg-search-result-type">${node.type}</span>
+          ${node.file_path ? `<span class="kg-search-result-path">${this._shortenPath(node.file_path)}</span>` : ''}
+        </div>
+      `;
+    }).join('');
+
+    // Click handlers
+    container.querySelectorAll('.kg-search-result').forEach(el => {
+      el.addEventListener('click', () => {
+        const nodeId = el.dataset.id;
+        this._selectSearchResult(nodeId);
+      });
+    });
+
+    container.style.display = 'block';
+  }
+
+  _highlightMatch(text, query) {
+    const regex = new RegExp(`(${query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')})`, 'gi');
+    return text.replace(regex, '<mark>$1</mark>');
+  }
+
+  _getTypeIcon(type) {
+    const icons = {
+      'class': 'C',
+      'interface': 'I',
+      'method': 'm',
+      'field': 'f',
+      'table': 'T',
+      'file': '📄',
+      'package': '📦',
+      'enum': 'E',
+      'annotation': '@'
+    };
+    return icons[type] || '○';
+  }
+
+  _shortenPath(path) {
+    if (!path) return '';
+    const parts = path.replace(/\\/g, '/').split('/');
+    if (parts.length > 3) {
+      return '.../' + parts.slice(-2).join('/');
+    }
+    return path;
+  }
+
+  _handleSearchKeydown(e) {
+    const container = document.getElementById('kg-search-results');
+    if (!container || container.style.display !== 'block') {
+      if (e.key === 'Enter') this._handleSearch();
+      return;
+    }
+
+    const results = container.querySelectorAll('.kg-search-result');
+
+    switch(e.key) {
+      case 'ArrowDown':
+        e.preventDefault();
+        this._selectedResultIndex = Math.min(this._selectedResultIndex + 1, results.length - 1);
+        this._updateResultSelection(results);
+        break;
+      case 'ArrowUp':
+        e.preventDefault();
+        this._selectedResultIndex = Math.max(this._selectedResultIndex - 1, 0);
+        this._updateResultSelection(results);
+        break;
+      case 'Enter':
+        e.preventDefault();
+        if (this._selectedResultIndex >= 0 && this._searchResults) {
+          this._selectSearchResult(this._searchResults[this._selectedResultIndex].id);
+        }
+        break;
+      case 'Escape':
+        this._hideSearchResults();
+        break;
+    }
+  }
+
+  _updateResultSelection(results) {
+    results.forEach((el, i) => {
+      el.classList.toggle('selected', i === this._selectedResultIndex);
+      if (i === this._selectedResultIndex) {
+        el.scrollIntoView({ block: 'nearest' });
+      }
+    });
+  }
+
+  _selectSearchResult(nodeId) {
+    this._hideSearchResults();
+    document.getElementById('kg-search-input').value = '';
+    this.loadSubgraph(nodeId, this.currentDepth);
+  }
+
+  _hideSearchResults() {
+    const container = document.getElementById('kg-search-results');
+    if (container) {
+      container.style.display = 'none';
+      container.innerHTML = '';
+    }
+    this._searchResults = null;
+    this._selectedResultIndex = -1;
+  }
+
+  async _handleSearch() {
+    const input = document.getElementById('kg-search-input');
+    const query = input?.value?.trim();
+    if (!query) return;
+
+    // If search results are visible and one is selected, use it
+    if (this._selectedResultIndex >= 0 && this._searchResults) {
+      this._selectSearchResult(this._searchResults[this._selectedResultIndex].id);
+      return;
+    }
+
+    // Otherwise perform search and show results
+    await this._performSearch(query);
   }
 
   _showMessage(msg) {

@@ -8831,6 +8831,134 @@ a:visited {
   flex: 1;
   min-width: 200px;
   max-width: 400px;
+  position: relative;
+}
+
+/* Search Results Dropdown */
+.kg-search-results {
+  display: none;
+  position: absolute;
+  top: 100%;
+  left: 0;
+  right: 40px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(0,0,0,0.3);
+  max-height: 400px;
+  overflow-y: auto;
+  z-index: 1000;
+  margin-top: 4px;
+}
+
+.kg-search-result {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  cursor: pointer;
+  border-bottom: 1px solid var(--border);
+  transition: background 0.15s;
+}
+
+.kg-search-result:last-child {
+  border-bottom: none;
+}
+
+.kg-search-result:hover,
+.kg-search-result.selected {
+  background: var(--surface-hover);
+}
+
+.kg-search-result-icon {
+  width: 24px;
+  height: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 4px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  flex-shrink: 0;
+}
+
+.kg-search-result-icon.kg-type-class {
+  background: #6366f1;
+  color: white;
+}
+
+.kg-search-result-icon.kg-type-interface {
+  background: #8b5cf6;
+  color: white;
+}
+
+.kg-search-result-icon.kg-type-method {
+  background: #22c55e;
+  color: white;
+}
+
+.kg-search-result-icon.kg-type-field {
+  background: #f59e0b;
+  color: white;
+}
+
+.kg-search-result-icon.kg-type-table {
+  background: #ef4444;
+  color: white;
+}
+
+.kg-search-result-icon.kg-type-package {
+  background: #0ea5e9;
+  color: white;
+}
+
+.kg-search-result-icon.kg-type-enum {
+  background: #ec4899;
+  color: white;
+}
+
+.kg-search-result-name {
+  flex: 1;
+  font-weight: 500;
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.kg-search-result-name mark {
+  background: var(--accent);
+  color: var(--bg);
+  padding: 0 2px;
+  border-radius: 2px;
+}
+
+.kg-search-result-type {
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  text-transform: uppercase;
+}
+
+.kg-search-result-path {
+  font-size: 0.75rem;
+  color: var(--text-secondary);
+  max-width: 150px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.kg-search-no-results {
+  padding: 16px;
+  text-align: center;
+  color: var(--text-secondary);
+  font-size: 0.9rem;
+}
+
+.kg-search-hint {
+  margin-top: 8px;
+  font-size: 0.8rem;
+  color: var(--text-muted);
 }
 
 .kg-search input {
