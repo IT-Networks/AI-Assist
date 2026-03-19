@@ -151,15 +151,12 @@ class UpdateService:
         if config.use_proxy:
             proxy_url = settings.proxy.get_proxy_url()
 
-        # Headers mit Cache-Busting für GitHub API
-        import time
+        # Basis-Headers (Cache-Busting wird pro Request hinzugefügt)
         headers = {
             "Accept": "application/vnd.github.v3+json",
             "User-Agent": "AI-Assist-Update-Service/1.0",
             "Cache-Control": "no-cache, no-store, must-revalidate",
             "Pragma": "no-cache",
-            "If-None-Match": "",  # Deaktiviert ETag-basiertes Caching
-            "X-Request-Time": str(int(time.time() * 1000)),  # Unique pro Request
         }
         if config.github_token:
             headers["Authorization"] = f"token {config.github_token}"
@@ -170,7 +167,14 @@ class UpdateService:
             proxy=proxy_url,
             headers=headers,
             follow_redirects=True,
+            http2=False,  # HTTP/1.1 erzwingen um Connection-Caching zu vermeiden
         )
+
+    def _add_cache_bust(self, url: str) -> str:
+        """Fügt Cache-Busting Query-Parameter zur URL hinzu."""
+        import time
+        separator = "&" if "?" in url else "?"
+        return f"{url}{separator}_nocache={int(time.time() * 1000)}"
 
     async def check_for_updates(self) -> Dict:
         """
@@ -203,10 +207,12 @@ class UpdateService:
                 # Wenn Branch konfiguriert ist, direkt Branch verwenden
                 if config.branch:
                     branch = config.branch
-                    # Letzten Commit des Branches holen
-                    branch_response = await client.get(
+                    # Letzten Commit des Branches holen (mit Cache-Busting)
+                    branch_url = self._add_cache_bust(
                         f"https://api.github.com/repos/{owner}/{repo}/branches/{branch}"
                     )
+                    logger.debug(f"[update] Checking branch: {branch_url}")
+                    branch_response = await client.get(branch_url)
 
                     if branch_response.status_code == 200:
                         branch_data = branch_response.json()
@@ -215,10 +221,11 @@ class UpdateService:
                         commit_date = commit.get("commit", {}).get("committer", {}).get("date", "")
                         commit_msg = commit.get("commit", {}).get("message", "").split("\n")[0]
 
-                        # VERSION-Datei aus dem Branch lesen um Remote-Version zu ermitteln
-                        version_response = await client.get(
+                        # VERSION-Datei aus dem Branch lesen (mit Cache-Busting)
+                        version_url = self._add_cache_bust(
                             f"https://raw.githubusercontent.com/{owner}/{repo}/{branch}/VERSION"
                         )
+                        version_response = await client.get(version_url)
                         if version_response.status_code == 200:
                             latest = version_response.text.strip()
                         else:
@@ -226,6 +233,7 @@ class UpdateService:
 
                         # Update verfügbar wenn Version unterschiedlich oder Commit neuer
                         available = latest != current
+                        logger.info(f"[update] Version check: current={current}, remote={latest}, available={available}")
 
                         return {
                             "available": available,
@@ -244,10 +252,12 @@ class UpdateService:
                             "error": f"Branch '{branch}' nicht gefunden (HTTP {branch_response.status_code})",
                         }
 
-                # Sonst: Releases API versuchen
-                response = await client.get(
+                # Sonst: Releases API versuchen (mit Cache-Busting)
+                releases_url = self._add_cache_bust(
                     f"https://api.github.com/repos/{owner}/{repo}/releases/latest"
                 )
+                logger.debug(f"[update] Checking releases: {releases_url}")
+                response = await client.get(releases_url)
 
                 if response.status_code == 200:
                     release = response.json()
@@ -255,6 +265,7 @@ class UpdateService:
 
                     # Vergleiche Versionen (einfacher String-Vergleich)
                     available = latest > current if latest else False
+                    logger.info(f"[update] Version check: current={current}, remote={latest}, available={available}")
 
                     return {
                         "available": available,
@@ -267,10 +278,11 @@ class UpdateService:
                     }
 
                 elif response.status_code == 404:
-                    # Keine Releases - versuche Tags
-                    tags_response = await client.get(
+                    # Keine Releases - versuche Tags (mit Cache-Busting)
+                    tags_url = self._add_cache_bust(
                         f"https://api.github.com/repos/{owner}/{repo}/tags"
                     )
+                    tags_response = await client.get(tags_url)
 
                     if tags_response.status_code == 200:
                         tags = tags_response.json()
