@@ -2379,14 +2379,13 @@ async function switchToChat(chatId) {
 
   // Nachrichten-Historie und Mode vom Server laden wenn Chat vom Disk wiederhergestellt wird
   if (incomingChat.needsRestore) {
-    incomingChat.needsRestore = false;
     // Context bar first, then messages
     incomingChat.pane.innerHTML = _contextBarHTML();
     try {
       const res = await fetch(`/api/agent/session/${incomingChat.sessionId}/history`, {
         signal: switchAc.signal
       });
-      // Aborted? Stop processing
+      // Aborted? Stop processing - needsRestore bleibt true für nächsten Versuch!
       if (switchAc.signal.aborted) return;
       if (res.ok) {
         const data = await res.json();
@@ -2406,17 +2405,22 @@ async function switchToChat(chatId) {
           log.info(`[switchToChat] Restored mode from server: ${mode}`);
           syncModeUI(mode);
         }
+        // Restore erfolgreich - Flag erst JETZT setzen
+        incomingChat.needsRestore = false;
       } else {
         // Server-Fehler (4xx/5xx) - Fallback auf Welcome Screen
         log.error(`[switchToChat] History fetch failed: ${res.status} ${res.statusText}`);
         incomingChat.pane.innerHTML = _contextBarHTML() + welcomeHTML();
+        // Bei Fehler auch needsRestore = false setzen, um Endlosschleife zu vermeiden
+        incomingChat.needsRestore = false;
         if (res.status !== 404) {
           showErrorToast('Chat-Historie konnte nicht geladen werden');
         }
       }
     } catch (e) {
-      if (e.name === 'AbortError') return; // Switch wurde abgebrochen
+      if (e.name === 'AbortError') return; // Switch wurde abgebrochen - needsRestore bleibt true!
       incomingChat.pane.innerHTML = _contextBarHTML() + welcomeHTML();
+      incomingChat.needsRestore = false;
       log.error('Failed to restore chat history:', e);
       showErrorToast('Chat-Historie konnte nicht geladen werden');
     }
