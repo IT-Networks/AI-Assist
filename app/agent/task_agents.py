@@ -26,6 +26,17 @@ AUFGABE:
 - Fasse Ergebnisse KOMPAKT zusammen (max 500 Woerter)
 - Extrahiere die wichtigsten Fakten und Code-Beispiele
 
+TOOL-AUSWAHL (WICHTIG):
+- LOKALE Code-Suche: search_code, read_file, grep_content
+- CONFLUENCE/Wiki: search_confluence, read_confluence_page
+- GITHUB Pull Requests: github_pr_details, github_pr_diff, github_get_file
+- GITHUB Repositories: github_list_repos, github_list_prs, github_recent_commits
+
+WICHTIG bei GitHub-Anfragen:
+- Bei PR-Analysen IMMER github_pr_details und github_pr_diff verwenden
+- github_get_file fuer Dateien AUS dem GitHub-Repository (nicht read_file!)
+- NIEMALS read_file/search_code fuer GitHub-Inhalte - diese sind nur lokal!
+
 REGELN:
 - Generiere KEINEN neuen Code - nur existierende Informationen sammeln
 - Bei mehreren Quellen: Beste auswaehlen, nicht alle kopieren
@@ -84,6 +95,14 @@ AUFGABE:
 - Analysiere Code auf Qualitaet, Bugs, Security
 - Gib konkrete, umsetzbare Verbesserungsvorschlaege
 - Priorisiere nach Schweregrad
+
+TOOL-AUSWAHL:
+- LOKALER Code: read_file, grep_content, search_code
+- GITHUB PR-Aenderungen: github_pr_diff (zeigt geaenderte Zeilen)
+- GITHUB Dateiinhalt: github_get_file (vollstaendige Datei aus Repo)
+- GITHUB Commit: github_commit_diff (einzelner Commit)
+
+WICHTIG: Bei PR-Reviews IMMER github_pr_diff verwenden, nicht read_file!
 
 ANALYSE-KATEGORIEN:
 1. KRITISCH: Security-Luecken, Data Races, Memory Leaks
@@ -249,10 +268,18 @@ def get_agent_configs() -> Dict[TaskType, AgentConfig]:
             fallback_model=fallback,
             system_prompt=RESEARCH_SYSTEM_PROMPT,
             tools=[
+                # Lokale Code-Suche
                 "search_code", "read_file", "grep_content",
+                "combined_search", "batch_read_files",
+                # Confluence/Wiki
                 "search_confluence", "read_confluence_page",
+                # Handbuch/Skills
                 "search_handbook", "search_skills",
-                "combined_search", "batch_read_files"
+                # GitHub Enterprise - fuer PR-Analysen und Code-Recherche
+                "github_pr_details", "github_pr_diff", "github_get_file",
+                "github_list_prs", "github_list_repos", "github_recent_commits",
+                "github_list_branches", "github_commit_diff",
+                "github_list_issues", "github_issue_details",
             ],
             max_iterations=5,
             temperature=0.1,
@@ -282,8 +309,12 @@ def get_agent_configs() -> Dict[TaskType, AgentConfig]:
             fallback_model=fallback,
             system_prompt=ANALYST_SYSTEM_PROMPT,
             tools=[
+                # Lokale Analyse
                 "read_file", "grep_content", "search_code",
-                "batch_read_files"
+                "batch_read_files",
+                # GitHub - fuer PR-Code-Reviews und Remote-Code-Analyse
+                "github_pr_diff", "github_get_file", "github_pr_details",
+                "github_commit_diff",
             ],
             max_iterations=3,
             temperature=0.1,
