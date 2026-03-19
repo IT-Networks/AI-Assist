@@ -360,6 +360,146 @@ Antworte auf Deutsch und nutze Markdown-Formatierung."""
             "estimated_savings": max(0, tokens_to_remove - tokens_for_summary)
         }
 
+    # ══════════════════════════════════════════════════════════════════════════════
+    # Tool-Result Summarization (Phase 3)
+    # ══════════════════════════════════════════════════════════════════════════════
+
+    TOOL_RESULT_PROMPT = """Fasse dieses Tool-Ergebnis zusammen.
+
+KONTEXT: Der User fragt nach "{query}"
+TOOL: {tool_name}
+
+ERGEBNIS:
+{content}
+
+ZUSAMMENFASSUNG (max 350 Wörter):
+- Behalte ALLE relevanten Fakten, Zahlen, Pfade, Klassen- und Methodennamen
+- Strukturiere als Bullet-Points
+- Entferne nur redundante oder offensichtlich irrelevante Teile
+- Bei Code: Behalte wichtige Signaturen und Logik-Kommentare
+- Bei Confluence: Behalte Seiten-IDs und Titel für Referenzen
+- Wenn etwas NICHT gefunden wurde, erwähne das explizit
+
+Format:
+### Kernaussagen
+- ...
+
+### Relevante Details
+- ...
+
+### Quellen
+- ..."""
+
+    async def summarize_tool_result(
+        self,
+        tool_name: str,
+        result_content: str,
+        query: str,
+        max_tokens: int = 500
+    ) -> Optional[str]:
+        """
+        Fasst ein Tool-Ergebnis zusammen.
+
+        Verwendet analysis_model für Konsistenz mit dem Haupt-Analyse-Flow.
+
+        Args:
+            tool_name: Name des Tools (für Kontext)
+            result_content: Der zu kürzende Inhalt
+            query: Die User-Query (für Relevanz-Fokus)
+            max_tokens: Max Tokens für die Zusammenfassung
+
+        Returns:
+            Zusammenfassung oder None bei Fehler
+        """
+        model = settings.llm.analysis_model or settings.llm.tool_model or settings.llm.default_model
+
+        # Content auf sinnvolle Größe begrenzen
+        content_limit = 6000
+        truncated_content = result_content[:content_limit]
+        if len(result_content) > content_limit:
+            truncated_content += "\n\n[... weitere Inhalte gekürzt ...]"
+
+        prompt = self.TOOL_RESULT_PROMPT.format(
+            query=query[:200],  # Query begrenzen
+            tool_name=tool_name,
+            content=truncated_content
+        )
+
+        try:
+            summary = await self._call_llm_simple(prompt, model, max_tokens)
+            if summary:
+                return summary.strip()
+        except Exception as e:
+            print(f"[summarizer] Tool-Result-Summary Fehler: {e}")
+
+        # Fallback: Einfache Kürzung
+        return self._simple_tool_truncate(result_content, 1500)
+
+    def _simple_tool_truncate(self, content: str, max_chars: int) -> str:
+        """
+        Einfache Kürzung als Fallback wenn LLM-Summary fehlschlägt.
+
+        Versucht intelligent bei Code-Blöcken oder Zeilenenden zu kürzen.
+        """
+        if len(content) <= max_chars:
+            return content
+
+        truncated = content[:max_chars]
+
+        # Bei Code: Versuche bei Zeilenende zu kürzen
+        last_newline = truncated.rfind('\n')
+        if last_newline > max_chars * 0.7:
+            truncated = truncated[:last_newline]
+
+        # Bei Markdown: Versuche bei Header zu kürzen
+        last_header = truncated.rfind('\n#')
+        if last_header > max_chars * 0.6:
+            truncated = truncated[:last_header]
+
+        return truncated + "\n\n[... weitere Inhalte gekürzt ...]"
+
+    async def summarize_multiple_results(
+        self,
+        results: List[Dict[str, str]],
+        query: str,
+        max_total_tokens: int = 1000
+    ) -> str:
+        """
+        Fasst mehrere Tool-Ergebnisse zusammen.
+
+        Nützlich für Sub-Agent-Koordination wenn mehrere Quellen
+        zusammengeführt werden müssen.
+
+        Args:
+            results: Liste von {"tool": "name", "content": "..."}
+            query: Die User-Query
+            max_total_tokens: Max Tokens für die Gesamtzusammenfassung
+
+        Returns:
+            Kombinierte Zusammenfassung
+        """
+        if not results:
+            return ""
+
+        # Einzelne Results erst kürzen
+        shortened = []
+        per_result_tokens = max_total_tokens // len(results)
+
+        for r in results:
+            tool = r.get("tool", "unknown")
+            content = r.get("content", "")
+
+            # Kurze Results nicht zusammenfassen
+            if estimate_tokens(content) <= per_result_tokens:
+                shortened.append(f"### {tool}\n{content}")
+            else:
+                summary = await self.summarize_tool_result(
+                    tool, content, query, per_result_tokens
+                )
+                shortened.append(f"### {tool}\n{summary or content[:500]}")
+
+        return "\n\n".join(shortened)
+
 
 # Singleton
 _summarizer: Optional[ConversationSummarizer] = None

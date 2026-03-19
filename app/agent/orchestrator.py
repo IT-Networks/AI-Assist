@@ -52,6 +52,21 @@ _RE_HINT_TOOL_KEY = re.compile(r'"tool"\s*:')
 from app.agent.tools import ToolRegistry, ToolResult, get_tool_registry
 from app.agent.tool_cache import ToolResultCache, get_tool_cache
 from app.agent.tool_budget import ToolBudget, BudgetLevel, create_budget
+from app.agent.tool_progress import (
+    ToolProgressTracker,
+    get_progress_tracker,
+    reset_progress_tracker,
+    StuckDetectionResult,
+)
+from app.agent.result_validator import (
+    ResultValidator,
+    get_result_validator,
+    ValidationResult,
+)
+from app.agent.sub_agent_coordinator import (
+    SubAgentCoordinator,
+    CoordinatedResult,
+)
 from app.core.config import settings
 from app.mcp.tool_bridge import get_tool_bridge, MCPToolBridge
 from app.mcp.capabilities.research import get_research_capability, ResearchCapability
@@ -265,6 +280,9 @@ class AgentEventType(str, Enum):
     WORKSPACE_RESEARCH = "workspace_research"        # Research-Ergebnis für Workspace Panel
     WORKSPACE_PR = "workspace_pr"                    # PR-Daten für Workspace Panel
     WORKSPACE_PR_ANALYSIS = "workspace_pr_analysis"  # PR-Analyse-Ergebnisse für Badges
+    # Progress & Stuck Detection Events
+    STUCK_DETECTED = "stuck_detected"                # Agent dreht sich im Kreis
+    PROGRESS_UPDATE = "progress_update"              # Neues Wissen gewonnen
 
 
 @dataclass
@@ -348,6 +366,10 @@ class AgentState:
     tool_budget: Optional["ToolBudget"] = None
     # Web-Fallback-Bestätigung (für Research mit leerem internen Ergebnis)
     web_fallback_approved: bool = False   # True wenn User Web-Suche genehmigt hat
+    # Pending PR-Analyse (läuft im Hintergrund)
+    pending_pr_analysis: Optional[asyncio.Task] = None
+    pending_pr_number: Optional[int] = None
+    pending_pr_state: Optional[str] = None
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -1242,8 +1264,20 @@ Sei präzise und gib detaillierte Analyse-Schritte."""
                     "error": result.error,
                 })
 
-        # Ergebnisse als System-Message in den Haupt-Kontext injizieren
-        context_block = format_sub_agent_results(results)
+        # ── SubAgentCoordinator: Deduplizierung und Ranking ──
+        coordinator = SubAgentCoordinator()
+        try:
+            coordinated = await coordinator.process_results(results, user_message)
+            logger.debug(
+                f"[sub_agents] Coordination: {coordinated.total_findings} total → "
+                f"{coordinated.unique_findings} unique ({coordinated.duplicates_removed} dupes removed)"
+            )
+            # Verwende koordinierten Context-Block
+            context_block = coordinated.to_context_block()
+        except Exception as e:
+            logger.debug(f"[sub_agents] Coordination failed, using fallback: {e}")
+            # Fallback auf einfache Formatierung
+            context_block = format_sub_agent_results(results)
         if context_block:
             context_tokens = estimate_tokens(context_block)
             # Nur injizieren wenn Token-Budget ausreicht
@@ -1292,6 +1326,9 @@ Sei präzise und gib detaillierte Analyse-Schritte."""
         state.read_files_this_request = {}
         # Abbruch-Flag zurücksetzen
         state.cancelled = False
+        # Progress-Tracker für Stuck-Detection zurücksetzen
+        reset_progress_tracker(session_id)
+        progress_tracker = get_progress_tracker(session_id)
 
         # ── MCP Force-Capability Detection ────────────────────────────────────
         # Format: [MCP:capability_name] actual query
@@ -2076,6 +2113,34 @@ Sei präzise und gib detaillierte Analyse-Schritte."""
                     yield AgentEvent(AgentEventType.CANCELLED, {"message": "Anfrage wurde abgebrochen"})
                     return
 
+                # ── Pending PR-Analyse prüfen ──
+                # Wenn die Background-Task fertig ist, Event yielden
+                if state.pending_pr_analysis is not None and state.pending_pr_analysis.done():
+                    try:
+                        pr_analysis_result = state.pending_pr_analysis.result()
+                        yield AgentEvent(AgentEventType.WORKSPACE_PR_ANALYSIS, {
+                            "prNumber": state.pending_pr_number,
+                            **pr_analysis_result
+                        })
+                        logger.debug(f"[agent] PR analysis completed for PR #{state.pending_pr_number}")
+                    except Exception as e:
+                        # Bei Fehler: Leeres Ergebnis senden damit Frontend Loading beendet
+                        logger.warning(f"[agent] PR analysis failed: {e}")
+                        yield AgentEvent(AgentEventType.WORKSPACE_PR_ANALYSIS, {
+                            "prNumber": state.pending_pr_number,
+                            "error": str(e),
+                            "bySeverity": {"critical": 0, "high": 0, "medium": 0, "low": 0, "info": 0},
+                            "verdict": "comment",
+                            "findings": [],
+                            "summary": "Analyse fehlgeschlagen",
+                            "canApprove": state.pending_pr_state == "open"
+                        })
+                    finally:
+                        # Task aufräumen
+                        state.pending_pr_analysis = None
+                        state.pending_pr_number = None
+                        state.pending_pr_state = None
+
                 # Tool-Budget: Neue Iteration starten
                 if state.tool_budget and iteration > 0:
                     state.tool_budget.next_iteration()
@@ -2445,6 +2510,40 @@ Sei präzise und gib detaillierte Analyse-Schritte."""
                     except Exception:
                         pass  # Task-Tracking-Fehler nicht propagieren
 
+                    # ── Pending PR-Analyse abschließen (vor DONE) ──
+                    if state.pending_pr_analysis is not None:
+                        try:
+                            # Warte max 5 Sekunden auf Abschluss
+                            pr_result = await asyncio.wait_for(
+                                state.pending_pr_analysis, timeout=5.0
+                            )
+                            yield AgentEvent(AgentEventType.WORKSPACE_PR_ANALYSIS, {
+                                "prNumber": state.pending_pr_number,
+                                **pr_result
+                            })
+                        except asyncio.TimeoutError:
+                            logger.debug("[agent] PR analysis timeout, sending fallback")
+                            yield AgentEvent(AgentEventType.WORKSPACE_PR_ANALYSIS, {
+                                "prNumber": state.pending_pr_number,
+                                "bySeverity": {"critical": 0, "high": 0, "medium": 0, "low": 0, "info": 0},
+                                "verdict": "comment",
+                                "findings": [],
+                                "summary": "Analyse-Timeout",
+                                "canApprove": state.pending_pr_state == "open"
+                            })
+                        except Exception as e:
+                            logger.warning(f"[agent] PR analysis error: {e}")
+                            yield AgentEvent(AgentEventType.WORKSPACE_PR_ANALYSIS, {
+                                "prNumber": state.pending_pr_number,
+                                "error": str(e),
+                                "bySeverity": {"critical": 0, "high": 0, "medium": 0, "low": 0, "info": 0},
+                                "verdict": "comment",
+                                "findings": [],
+                                "canApprove": state.pending_pr_state == "open"
+                            })
+                        finally:
+                            state.pending_pr_analysis = None
+
                     yield AgentEvent(AgentEventType.DONE, {
                         "response": assistant_response,
                         "tool_calls_count": len(state.tool_calls_history),
@@ -2685,6 +2784,60 @@ Sei präzise und gib detaillierte Analyse-Schritte."""
                             source_path=_source_path
                         )
 
+                    # ── Stuck-Detection: Prüfen ob Agent sich im Kreis dreht ──
+                    stuck_result = progress_tracker.record_call(
+                        tool_name=tool_call.name,
+                        args=tool_call.arguments,
+                        result=result,
+                        iteration=iteration
+                    )
+                    if stuck_result.is_stuck:
+                        # Event für Frontend
+                        yield AgentEvent(AgentEventType.STUCK_DETECTED, {
+                            "reason": stuck_result.reason.value if stuck_result.reason else "unknown",
+                            "details": stuck_result.details,
+                            "suggestion": stuck_result.suggestion,
+                            "repeated_count": stuck_result.repeated_count,
+                            "progress": progress_tracker.get_progress_summary()
+                        })
+                        # Hinweis ins LLM injizieren
+                        messages.append({
+                            "role": "system",
+                            "content": stuck_result.get_hint()
+                        })
+                        logger.warning(
+                            f"[agent] Stuck detected: {stuck_result.reason.value} - "
+                            f"{stuck_result.details}"
+                        )
+                    # ────────────────────────────────────────────────────────────
+
+                    # ── Result-Validierung: Relevanz prüfen und Source-Metadata ──
+                    if result.success and tool_call.name not in ("write_file", "execute_command"):
+                        try:
+                            result_validator = get_result_validator()
+                            validation = await result_validator.validate(
+                                tool_name=tool_call.name,
+                                query=user_message,
+                                result=result,
+                                create_summary=(estimate_tokens(result.to_context()) > 2000)
+                            )
+                            # Low-Relevanz Warnung ins Log
+                            if not validation.should_use:
+                                logger.debug(
+                                    f"[agent] Low relevance result ({validation.relevance_score:.2f}): "
+                                    f"{tool_call.name} - {validation.reason}"
+                                )
+                            # Source-Metadata für Attribution speichern
+                            if validation.source_metadata:
+                                state.entity_tracker.track_source(
+                                    validation.source_metadata.source_type,
+                                    validation.source_metadata.source_id,
+                                    validation.source_metadata.source_title
+                                )
+                        except Exception as e:
+                            logger.debug(f"[agent] Result validation failed: {e}")
+                    # ────────────────────────────────────────────────────────────
+
                     # Bestätigung benötigt?
                     if result.requires_confirmation and state.mode == AgentMode.WRITE_WITH_CONFIRM:
                         state.pending_confirmation = tool_call
@@ -2855,30 +3008,21 @@ Sei präzise und gib detaillierte Analyse-Schritte."""
                                     "loading": True  # Analyse läuft noch
                                 })
 
-                                # Starte Background-PR-Analyse wenn Diff verfügbar
+                                # PR-Analyse starten (läuft als Background-Task, Event wird
+                                # über pending_pr_analysis im State gespeichert und am Ende
+                                # jeder Iteration abgefragt)
                                 diff_content = result_data.get("diff", "")
                                 if diff_content and len(diff_content) > 50:
-                                    try:
-                                        analysis = await self._analyze_pr_for_workspace(
+                                    state.pending_pr_analysis = asyncio.create_task(
+                                        self._analyze_pr_for_workspace(
                                             pr_number=pr_number,
                                             title=result_data.get("title", ""),
-                                            diff=diff_content[:15000],  # Limit für LLM
+                                            diff=diff_content[:15000],
                                             state="merged" if is_merged else pr_state
                                         )
-                                        yield AgentEvent(AgentEventType.WORKSPACE_PR_ANALYSIS, {
-                                            "prNumber": pr_number,
-                                            **analysis
-                                        })
-                                    except Exception as e:
-                                        logger.warning(f"[agent] PR analysis failed: {e}")
-                                        # Sende leere Analyse damit Frontend Loading beendet
-                                        yield AgentEvent(AgentEventType.WORKSPACE_PR_ANALYSIS, {
-                                            "prNumber": pr_number,
-                                            "error": str(e),
-                                            "bySeverity": {"critical": 0, "high": 0, "medium": 0, "low": 0, "info": 0},
-                                            "verdict": "comment",
-                                            "findings": []
-                                        })
+                                    )
+                                    state.pending_pr_number = pr_number
+                                    state.pending_pr_state = "merged" if is_merged else pr_state
 
                     state.tool_calls_history.append(tool_call)
 

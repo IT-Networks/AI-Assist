@@ -198,6 +198,36 @@ class EntityTracker:
         """Leert alle Entitäten (bei Session-Reset)."""
         self.entities.clear()
 
+    def track_source(
+        self,
+        source_type: str,
+        source_id: str,
+        source_title: str
+    ) -> None:
+        """
+        Speichert eine explizite Quellen-Referenz.
+
+        Wird von ResultValidator aufgerufen wenn Source-Metadata
+        aus Tool-Ergebnissen extrahiert wurde.
+
+        Args:
+            source_type: Art der Quelle (confluence, code, jira, etc.)
+            source_id: Eindeutige ID (Page-ID, Dateipfad, Ticket-Key)
+            source_title: Lesbare Bezeichnung
+        """
+        # Verwende source_title als Entitätsname
+        entity_name = source_title[:50] if source_title else source_id
+
+        if entity_name not in self.entities:
+            self.entities[entity_name] = EntityEntry(
+                name=entity_name,
+                first_seen_tool=f"source:{source_type}"
+            )
+
+        entry = self.entities[entity_name]
+        entry.mention_count += 1
+        entry.sources[source_type] = source_id
+
     @property
     def entity_count(self) -> int:
         return len(self.entities)
