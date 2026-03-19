@@ -3978,6 +3978,15 @@ async function processAgentEvent(event, bubble, msgDiv, chat) {
       showCompactionNotification(data);
       break;
 
+    case 'stuck_detected':
+      showStuckDetectedNotification(data, chat);
+      break;
+
+    case 'progress_update':
+      // Optional: Fortschritts-Indikator aktualisieren
+      log.info('[Progress]', data);
+      break;
+
     case 'done':
       if (data.usage) displayTokenUsage(data.usage, chat);
       hideSuggestions();  // Rückfrage-Buttons ausblenden wenn Antwort fertig
@@ -4183,6 +4192,75 @@ function showCompactionNotification(data) {
     limit_tokens: data.limit_tokens || 32000,
     percent: Math.round((data.new_tokens / (data.limit_tokens || 32000)) * 100)
   });
+}
+
+// Stuck-Detection Benachrichtigung
+function showStuckDetectedNotification(data, chat) {
+  const reason = data.reason || 'unknown';
+  const details = data.details || 'Der Agent scheint in einer Schleife zu sein';
+  const suggestion = data.suggestion || 'Versuche andere Suchbegriffe oder einen anderen Ansatz';
+
+  // Reason-Labels
+  const reasonLabels = {
+    'repeated_call': 'Wiederholter Aufruf',
+    'no_progress': 'Kein Fortschritt',
+    'cyclic_pattern': 'Zyklisches Muster',
+    'empty_results': 'Leere Ergebnisse'
+  };
+
+  // Toast-Benachrichtigung im Warn-Stil
+  const toast = document.createElement('div');
+  toast.className = 'stuck-toast';
+  toast.innerHTML = `
+    <div class="stuck-header">
+      <span class="stuck-icon">⚠️</span>
+      <span class="stuck-title">Loop erkannt: ${reasonLabels[reason] || reason}</span>
+    </div>
+    <div class="stuck-details">${details}</div>
+    <div class="stuck-suggestion">
+      <strong>Empfehlung:</strong> ${suggestion.split('\n')[0]}
+    </div>
+  `;
+  toast.style.cssText = `
+    position: fixed;
+    bottom: 80px;
+    right: 20px;
+    background: var(--warning-bg, #fef3c7);
+    border: 1px solid var(--warning-border, #f59e0b);
+    border-left: 4px solid var(--warning, #f59e0b);
+    border-radius: 8px;
+    padding: 12px 16px;
+    max-width: 400px;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+    z-index: 1000;
+    animation: slideIn 0.3s ease-out;
+    color: var(--text-primary, #1f2937);
+  `;
+
+  document.body.appendChild(toast);
+
+  // Nach 6 Sekunden ausblenden (länger als normale Toasts wegen wichtiger Info)
+  setTimeout(() => {
+    toast.style.animation = 'slideOut 0.3s ease-in';
+    setTimeout(() => toast.remove(), 300);
+  }, 6000);
+
+  // Auch in der Chat-Nachricht anzeigen (als System-Hinweis)
+  if (chat?.pane) {
+    const hintDiv = document.createElement('div');
+    hintDiv.className = 'message system-hint stuck-hint';
+    hintDiv.innerHTML = `
+      <div class="hint-icon">⚠️</div>
+      <div class="hint-content">
+        <strong>Loop-Erkennung:</strong> ${details}
+        <br><small>${suggestion.split('\n')[0]}</small>
+      </div>
+    `;
+    chat.pane.appendChild(hintDiv);
+    hintDiv.scrollIntoView({ behavior: 'smooth', block: 'end' });
+  }
+
+  log.warn('[Stuck Detected]', data);
 }
 
 function displayTokenUsage(usage, chat) {
@@ -4854,7 +4932,7 @@ function toggleEnhancementDetails() {
 }
 
 /**
- * Load full context details via API
+ * Load full context details - erst lokal, dann API als Fallback
  */
 async function loadEnhancementDetails() {
   const chat = chatManager.getActive();
@@ -4863,7 +4941,14 @@ async function loadEnhancementDetails() {
   const list = document.getElementById('enhancement-context-list');
   if (!list) return;
 
-  // Show loading state
+  // Prüfe zuerst lokal gespeicherte Items (wurden mit Event mitgesendet)
+  const localItems = chat.pendingEnhancement?.context_items;
+  if (localItems && localItems.length > 0) {
+    renderContextItems(localItems);
+    return;
+  }
+
+  // Fallback: Lade via API wenn keine lokalen Items
   list.innerHTML = '<div style="padding: 12px; color: #a0aec0;">Lade Details...</div>';
 
   try {

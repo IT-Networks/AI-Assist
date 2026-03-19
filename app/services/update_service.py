@@ -151,10 +151,15 @@ class UpdateService:
         if config.use_proxy:
             proxy_url = settings.proxy.get_proxy_url()
 
-        # Headers
+        # Headers mit Cache-Busting für GitHub API
+        import time
         headers = {
             "Accept": "application/vnd.github.v3+json",
             "User-Agent": "AI-Assist-Update-Service/1.0",
+            "Cache-Control": "no-cache, no-store, must-revalidate",
+            "Pragma": "no-cache",
+            "If-None-Match": "",  # Deaktiviert ETag-basiertes Caching
+            "X-Request-Time": str(int(time.time() * 1000)),  # Unique pro Request
         }
         if config.github_token:
             headers["Authorization"] = f"token {config.github_token}"
