@@ -6,6 +6,7 @@
 // ── Debug Logger (toggle DEBUG to enable/disable console output) ──
 const DEBUG = false;
 const log = {
+  debug: DEBUG ? console.debug.bind(console) : () => {},
   info: DEBUG ? console.log.bind(console) : () => {},
   warn: DEBUG ? console.warn.bind(console) : () => {},
   error: console.error.bind(console),  // Always log errors
