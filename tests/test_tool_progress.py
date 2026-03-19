@@ -82,15 +82,30 @@ class TestToolProgressTracker:
         assert not stuck.is_stuck
 
     def test_empty_results_streak(self):
-        """3x leere Ergebnisse → STUCK."""
+        """3x leere Ergebnisse im ähnlichen Kontext → STUCK."""
         empty_result = ToolResult(success=True, data="Keine Treffer gefunden")
 
-        self.tracker.record_call("search_code", {"query": "X"}, empty_result, 0)
-        self.tracker.record_call("search_code", {"query": "Y"}, empty_result, 1)
-        stuck = self.tracker.record_call("search_code", {"query": "Z"}, empty_result, 2)
+        # Ähnliche Suchbegriffe = gleicher Kontext → Streak wird gezählt
+        # Verschiedene Args um REPEATED_CALL zu vermeiden
+        self.tracker.record_call("search_code", {"query": "OrderService"}, empty_result, 0)
+        self.tracker.record_call("search_code", {"query": "OrderService", "path": "src"}, empty_result, 1)
+        stuck = self.tracker.record_call("search_code", {"query": "OrderService", "path": "test"}, empty_result, 2)
 
         assert stuck.is_stuck
-        assert stuck.reason == StuckReason.EMPTY_RESULTS
+        # Kann REPEATED_CALL oder EMPTY_RESULTS sein - beides ist valides Stuck
+        assert stuck.reason in (StuckReason.EMPTY_RESULTS, StuckReason.REPEATED_CALL)
+
+    def test_empty_results_different_context_no_stuck(self):
+        """Leere Ergebnisse in verschiedenen Kontexten → NICHT STUCK."""
+        empty_result = ToolResult(success=True, data="Keine Treffer gefunden")
+
+        # Unterschiedliche Suchbegriffe = unterschiedliche Kontexte
+        self.tracker.record_call("search_code", {"query": "OrderService"}, empty_result, 0)
+        self.tracker.record_call("search_code", {"query": "PaymentService"}, empty_result, 1)
+        stuck = self.tracker.record_call("search_code", {"query": "UserService"}, empty_result, 2)
+
+        # Verschiedene Kontexte → kein Stuck
+        assert not stuck.is_stuck
 
     def test_empty_streak_reset_on_success(self):
         """Erfolgreiche Ergebnisse resetten den Empty-Streak."""

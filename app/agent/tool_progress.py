@@ -87,6 +87,8 @@ class ProgressState:
     stuck_counter: int = 0
     last_progress_iteration: int = 0
     empty_result_streak: int = 0  # Aufeinanderfolgende leere Ergebnisse
+    last_search_context: str = ""  # Hash des letzten Such-Kontexts
+    empty_searches_in_context: List[str] = field(default_factory=list)  # Leere Suchen im aktuellen Kontext
 
 
 class ToolProgressTracker:
@@ -155,12 +157,30 @@ class ToolProgressTracker:
 
         self._state.call_signatures.append(signature)
 
-        # Leere Ergebnisse tracken
+        # Such-Kontext ermitteln (basierend auf Tool und Suchbegriffen)
+        current_context = self._get_search_context(tool_name, args)
+
+        # Leere Ergebnisse tracken - MIT Kontext-Berücksichtigung
         is_empty = self._is_empty_result(result)
         if is_empty:
-            self._state.empty_result_streak += 1
+            # Prüfen ob wir im gleichen Kontext sind
+            if current_context and current_context != self._state.last_search_context:
+                # Neuer Such-Kontext - Streak resetten
+                logger.debug(f"[ToolProgress] Neuer Such-Kontext: {current_context[:50]}")
+                self._state.empty_result_streak = 1
+                self._state.empty_searches_in_context = [current_context]
+                self._state.last_search_context = current_context
+            else:
+                # Gleicher Kontext - Streak erhöhen
+                self._state.empty_result_streak += 1
+                if current_context:
+                    self._state.empty_searches_in_context.append(current_context)
         else:
+            # Erfolgreiche Suche - Streak und Kontext resetten
             self._state.empty_result_streak = 0
+            self._state.empty_searches_in_context = []
+            if current_context:
+                self._state.last_search_context = current_context
 
         # Wissen extrahieren und tracken
         new_knowledge = self._extract_knowledge(tool_name, result)
@@ -248,20 +268,36 @@ class ToolProgressTracker:
         return StuckDetectionResult(is_stuck=False)
 
     def _check_empty_streak(self) -> StuckDetectionResult:
-        """Prüft auf aufeinanderfolgende leere Ergebnisse."""
+        """Prüft auf aufeinanderfolgende leere Ergebnisse im gleichen Kontext."""
         if self._state.empty_result_streak >= self.EMPTY_STREAK_THRESHOLD:
+            # Extrahiere die gesuchten Begriffe für die Meldung
+            searched_terms = []
+            for ctx in self._state.empty_searches_in_context[-5:]:
+                if ":" in ctx:
+                    terms = ctx.split(":", 1)[1]
+                    searched_terms.append(terms)
+
+            # Deduplizieren und formatieren
+            unique_terms = list(dict.fromkeys(searched_terms))[:3]
+            terms_info = f" (gesucht: {', '.join(unique_terms)})" if unique_terms else ""
+
             return StuckDetectionResult(
                 is_stuck=True,
                 reason=StuckReason.EMPTY_RESULTS,
                 details=(
-                    f"{self._state.empty_result_streak} Tool-Aufrufe in Folge "
-                    f"haben keine Ergebnisse geliefert"
+                    f"{self._state.empty_result_streak} Suchen in Folge "
+                    f"haben keine Ergebnisse geliefert{terms_info}"
                 ),
                 suggestion=(
-                    "Mehrere Suchen waren erfolglos. Mögliche Ursachen:\n"
-                    "- Die gesuchte Information existiert nicht in den Quellen\n"
-                    "- Die Suchbegriffe sind zu spezifisch oder falsch geschrieben\n"
-                    "- Versuche allgemeinere Begriffe oder frage den User nach Details"
+                    "Mehrere Suchen waren erfolglos.\n\n"
+                    "Mögliche Ursachen:\n"
+                    "• Die gesuchte Information existiert nicht in den verfügbaren Quellen\n"
+                    "• Die Suchbegriffe sind zu spezifisch oder falsch geschrieben\n"
+                    "• Der gesuchte Begriff verwendet eine andere Schreibweise\n\n"
+                    "Empfohlene Aktionen:\n"
+                    "• Versuche allgemeinere oder alternative Begriffe\n"
+                    "• Prüfe bereits gefundene Informationen auf Hinweise\n"
+                    "• Frage den User nach weiteren Details oder Kontext"
                 ),
                 repeated_count=self._state.empty_result_streak
             )
@@ -405,6 +441,41 @@ class ToolProgressTracker:
 
         content_lower = content.lower()
         return any(p in content_lower for p in empty_patterns) and len(content) < 200
+
+    def _get_search_context(self, tool_name: str, args: Dict[str, Any]) -> str:
+        """
+        Extrahiert den Such-Kontext aus Tool-Argumenten.
+
+        Für Such-Tools wird der Suchbegriff extrahiert um zu erkennen
+        ob aufeinanderfolgende Suchen im gleichen Kontext sind.
+        """
+        # Nur für Such-Tools relevant
+        search_tools = {
+            "search_code": ["query", "pattern", "search"],
+            "search_confluence": ["query", "search", "cql"],
+            "search_handbook": ["query", "search"],
+            "search_jira": ["query", "jql"],
+            "find_class": ["name", "class_name"],
+            "find_method": ["name", "method_name"],
+            "grep_files": ["pattern", "search"],
+        }
+
+        if tool_name not in search_tools:
+            return ""
+
+        # Suchbegriff aus passenden Args extrahieren
+        search_keys = search_tools[tool_name]
+        search_terms = []
+        for key in search_keys:
+            if key in args and args[key]:
+                search_terms.append(str(args[key]).lower())
+
+        if not search_terms:
+            return ""
+
+        # Kontext-String erstellen (normalisiert für Vergleiche)
+        context = f"{tool_name}:{','.join(sorted(search_terms))}"
+        return context
 
     def _hash_args(self, args: Dict[str, Any]) -> str:
         """Erstellt einen Hash der Tool-Argumente."""

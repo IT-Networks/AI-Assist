@@ -4270,6 +4270,7 @@ function showStuckDetectedNotification(data, chat) {
   const reason = data.reason || 'unknown';
   const details = data.details || 'Der Agent scheint in einer Schleife zu sein';
   const suggestion = data.suggestion || 'Versuche andere Suchbegriffe oder einen anderen Ansatz';
+  const repeatedCount = data.repeated_count || 0;
 
   // Reason-Labels
   const reasonLabels = {
@@ -4279,17 +4280,32 @@ function showStuckDetectedNotification(data, chat) {
     'empty_results': 'Leere Ergebnisse'
   };
 
-  // Toast-Benachrichtigung im Warn-Stil
-  const toast = document.createElement('div');
-  toast.className = 'stuck-toast';
+  // Suggestion formatieren (Zeilenumbrüche zu HTML)
+  const suggestionHtml = suggestion
+    .replace(/\n\n/g, '</p><p>')
+    .replace(/\n• /g, '<br>• ')
+    .replace(/\n- /g, '<br>- ')
+    .replace(/\n/g, '<br>');
+
+  // Bestehenden Toast entfernen/updaten statt neuen erstellen
+  let toast = document.querySelector('.stuck-toast');
+  const isUpdate = !!toast;
+
+  if (!toast) {
+    toast = document.createElement('div');
+    toast.className = 'stuck-toast';
+    document.body.appendChild(toast);
+  }
+
   toast.innerHTML = `
     <div class="stuck-header">
       <span class="stuck-icon">⚠️</span>
-      <span class="stuck-title">Loop erkannt: ${reasonLabels[reason] || reason}</span>
+      <span class="stuck-title">Loop erkannt: ${reasonLabels[reason] || reason}${repeatedCount > 1 ? ` (${repeatedCount}x)` : ''}</span>
+      <button class="stuck-close" onclick="this.closest('.stuck-toast').remove()" title="Schließen">×</button>
     </div>
     <div class="stuck-details">${details}</div>
     <div class="stuck-suggestion">
-      <strong>Empfehlung:</strong> ${suggestion.split('\n')[0]}
+      <p>${suggestionHtml}</p>
     </div>
   `;
   toast.style.cssText = `
@@ -4301,33 +4317,37 @@ function showStuckDetectedNotification(data, chat) {
     border-left: 4px solid var(--warning, #f59e0b);
     border-radius: 8px;
     padding: 12px 16px;
-    max-width: 400px;
+    max-width: 450px;
     box-shadow: 0 4px 12px rgba(0,0,0,0.15);
     z-index: 1000;
-    animation: slideIn 0.3s ease-out;
+    animation: ${isUpdate ? 'pulse' : 'slideIn'} 0.3s ease-out;
     color: var(--text-primary, #1f2937);
   `;
 
-  document.body.appendChild(toast);
-
-  // Nach 6 Sekunden ausblenden (länger als normale Toasts wegen wichtiger Info)
-  setTimeout(() => {
+  // Timer für Auto-Hide zurücksetzen
+  if (toast._hideTimer) clearTimeout(toast._hideTimer);
+  toast._hideTimer = setTimeout(() => {
     toast.style.animation = 'slideOut 0.3s ease-in';
     setTimeout(() => toast.remove(), 300);
-  }, 6000);
+  }, 8000);
 
-  // Auch in der Chat-Nachricht anzeigen (als System-Hinweis)
+  // Im Chat: Bestehenden Hint updaten statt neuen erstellen
   if (chat?.pane) {
-    const hintDiv = document.createElement('div');
-    hintDiv.className = 'message system-hint stuck-hint';
+    let hintDiv = chat.pane.querySelector('.stuck-hint');
+
+    if (!hintDiv) {
+      hintDiv = document.createElement('div');
+      hintDiv.className = 'message system-hint stuck-hint';
+      chat.pane.appendChild(hintDiv);
+    }
+
     hintDiv.innerHTML = `
       <div class="hint-icon">⚠️</div>
       <div class="hint-content">
-        <strong>Loop-Erkennung:</strong> ${details}
-        <br><small>${suggestion.split('\n')[0]}</small>
+        <strong>Loop-Erkennung${repeatedCount > 1 ? ` (${repeatedCount}x)` : ''}:</strong> ${details}
+        <div class="hint-suggestion">${suggestionHtml}</div>
       </div>
     `;
-    chat.pane.appendChild(hintDiv);
     hintDiv.scrollIntoView({ behavior: 'smooth', block: 'end' });
   }
 
