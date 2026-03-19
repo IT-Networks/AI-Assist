@@ -84,8 +84,28 @@ def matches_pattern(path: str, patterns: List[str]) -> bool:
 
         # ** Pattern für rekursive Matches
         if "**" in pattern:
-            # Konvertiere ** zu regex
-            regex_pattern = pattern.replace("**", ".*").replace("*", "[^/]*")
+            # Konvertiere Glob zu Regex:
+            # - ** bedeutet "beliebig viele Verzeichnisse (inkl. 0)"
+            # - * bedeutet "beliebige Zeichen außer /"
+            regex_pattern = pattern
+            # Escape Punkte
+            regex_pattern = regex_pattern.replace(".", "\\.")
+            # Zuerst ** durch Platzhalter ersetzen um Konflikte mit * zu vermeiden
+            # **/ am Anfang oder in der Mitte: 0 oder mehr Verzeichnisse
+            regex_pattern = regex_pattern.replace("**/", "\x00STARSTAR_SLASH\x00")
+            # /** am Ende: 0 oder mehr Verzeichnisse
+            regex_pattern = regex_pattern.replace("/**", "\x00SLASH_STARSTAR\x00")
+            # Verbleibende ** (selten)
+            regex_pattern = regex_pattern.replace("**", "\x00STARSTAR\x00")
+            # Einzelne * matchen alles außer /
+            regex_pattern = regex_pattern.replace("*", "[^/]*")
+            # Jetzt Platzhalter durch Regex ersetzen
+            regex_pattern = regex_pattern.replace("\x00STARSTAR_SLASH\x00", "(?:.+/)?")
+            regex_pattern = regex_pattern.replace("\x00SLASH_STARSTAR\x00", "(?:/.*)?")
+            regex_pattern = regex_pattern.replace("\x00STARSTAR\x00", ".*")
+            # Anchors für vollständigen Match
+            regex_pattern = f"^{regex_pattern}$"
+
             if re.match(regex_pattern, path):
                 return True
         elif fnmatch.fnmatch(path, pattern):
