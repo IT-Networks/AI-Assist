@@ -2379,9 +2379,9 @@ async function switchToChat(chatId) {
 
   // Nachrichten-Historie und Mode vom Server laden wenn Chat vom Disk wiederhergestellt wird
   if (incomingChat.needsRestore) {
-    // Loading-Indikator im Sidebar anzeigen
-    const chatItem = document.querySelector(`.chat-item[data-chat-id="${chatId}"]`);
-    if (chatItem) chatItem.classList.add('loading');
+    // Loading-State im Chat-Objekt speichern (überlebt renderChatList)
+    incomingChat.isLoading = true;
+    _updateChatLoadingState(chatId, true);
 
     // Context bar first, then messages
     incomingChat.pane.innerHTML = _contextBarHTML();
@@ -2411,27 +2411,31 @@ async function switchToChat(chatId) {
         }
         // Restore erfolgreich - Flag erst JETZT setzen
         incomingChat.needsRestore = false;
-        if (chatItem) chatItem.classList.remove('loading');
+        incomingChat.isLoading = false;
+        _updateChatLoadingState(chatId, false);
       } else {
         // Server-Fehler (4xx/5xx) - Fallback auf Welcome Screen
         log.error(`[switchToChat] History fetch failed: ${res.status} ${res.statusText}`);
         incomingChat.pane.innerHTML = _contextBarHTML() + welcomeHTML();
         // Bei Fehler auch needsRestore = false setzen, um Endlosschleife zu vermeiden
         incomingChat.needsRestore = false;
-        if (chatItem) chatItem.classList.remove('loading');
+        incomingChat.isLoading = false;
+        _updateChatLoadingState(chatId, false);
         if (res.status !== 404) {
           showErrorToast('Chat-Historie konnte nicht geladen werden');
         }
       }
     } catch (e) {
       if (e.name === 'AbortError') {
-        // Switch wurde abgebrochen - needsRestore bleibt true, aber Loading entfernen
-        if (chatItem) chatItem.classList.remove('loading');
+        // Switch wurde abgebrochen - needsRestore bleibt true, Loading entfernen
+        incomingChat.isLoading = false;
+        _updateChatLoadingState(chatId, false);
         return;
       }
       incomingChat.pane.innerHTML = _contextBarHTML() + welcomeHTML();
       incomingChat.needsRestore = false;
-      if (chatItem) chatItem.classList.remove('loading');
+      incomingChat.isLoading = false;
+      _updateChatLoadingState(chatId, false);
       log.error('Failed to restore chat history:', e);
       showErrorToast('Chat-Historie konnte nicht geladen werden');
     }
@@ -2526,6 +2530,20 @@ async function deleteChat(chatId) {
   }
 }
 
+/**
+ * Aktualisiert den Loading-State eines Chat-Items im DOM
+ */
+function _updateChatLoadingState(chatId, isLoading) {
+  const chatItem = document.querySelector(`.chat-item[data-chat-id="${chatId}"]`);
+  if (chatItem) {
+    if (isLoading) {
+      chatItem.classList.add('loading');
+    } else {
+      chatItem.classList.remove('loading');
+    }
+  }
+}
+
 function renderChatList() {
   const listEl = document.getElementById('chat-list');
   if (!listEl) return;
@@ -2554,14 +2572,21 @@ function renderChatList() {
 
   sorted.forEach(chat => {
     const isActive = chat.id === chatManager.activeId;
+    const isLoading = chat.isLoading === true;
     let item = existingItems.get(chat.id);
 
     if (item) {
-      // Nur active-Class updaten wenn noetig
+      // Active-Class updaten
       if (isActive && !item.classList.contains('active')) {
         item.classList.add('active');
       } else if (!isActive && item.classList.contains('active')) {
         item.classList.remove('active');
+      }
+      // Loading-Class updaten (aus Chat-Objekt, nicht DOM)
+      if (isLoading && !item.classList.contains('loading')) {
+        item.classList.add('loading');
+      } else if (!isLoading && item.classList.contains('loading')) {
+        item.classList.remove('loading');
       }
       // Titel updaten wenn geaendert
       const titleEl = item.querySelector('.chat-item-title');
@@ -2577,7 +2602,7 @@ function renderChatList() {
     } else {
       // Neues Item erstellen
       item = document.createElement('div');
-      item.className = 'chat-item' + (isActive ? ' active' : '');
+      item.className = 'chat-item' + (isActive ? ' active' : '') + (isLoading ? ' loading' : '');
       item.dataset.chatId = chat.id;
 
       item.innerHTML = `
