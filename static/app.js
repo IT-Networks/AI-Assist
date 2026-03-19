@@ -1143,7 +1143,8 @@ const prReviewState = {
   repoOwner: null,
   repoName: null,
   title: '',
-  author: '',
+  author: '',           // GitHub Login
+  authorName: '',       // Vollständiger Name aus Profil
   baseBranch: '',
   headBranch: '',
   additions: 0,
@@ -1233,6 +1234,7 @@ async function loadPRReview(repoOwner, repoName, prNumber) {
     // Update State mit Details
     prReviewState.title = details.title || `PR #${prNumber}`;
     prReviewState.author = details.author || 'unknown';
+    prReviewState.authorName = details.authorName || details.author || 'unknown';
     prReviewState.baseBranch = details.baseBranch || 'main';
     prReviewState.headBranch = details.headBranch || 'feature';
     prReviewState.additions = details.additions || 0;
@@ -1313,6 +1315,7 @@ function openPRFromEvent(data) {
   prReviewState.repoName = data.repoName || '';
   prReviewState.title = data.title || `PR #${data.prNumber}`;
   prReviewState.author = data.author || '';
+  prReviewState.authorName = data.authorName || data.author || '';
   prReviewState.baseBranch = data.baseBranch || 'main';
   prReviewState.headBranch = data.headBranch || 'feature';
   prReviewState.additions = data.additions || 0;
@@ -1575,7 +1578,12 @@ function renderPRReviewPanel() {
   prTitleEl.textContent = state.title || `${state.repoOwner}/${state.repoName}`;
   if (prBranchesEl) prBranchesEl.textContent = `${state.baseBranch || 'main'} ← ${state.headBranch || 'feature'}`;
   if (prStatsEl) prStatsEl.textContent = `+${state.additions || 0} -${state.deletions || 0} | ${state.filesChanged || 0} files`;
-  if (prAuthorEl) prAuthorEl.textContent = `@${state.author || 'unknown'}`;
+  // Zeige Name und Login wenn unterschiedlich, sonst nur Login
+  if (prAuthorEl) {
+    const name = state.authorName || state.author || 'unknown';
+    const login = state.author || 'unknown';
+    prAuthorEl.textContent = (name !== login) ? `${name} (@${login})` : `@${login}`;
+  }
 
   // PR Status Badge anzeigen
   if (state.state === 'merged') {

@@ -132,6 +132,21 @@ Nach einer Datei-Bearbeitung (edit_file, write_file):
 - Frage ob weitere Änderungen gewünscht sind
 
 Wenn du [STOP] oder [HINWEIS] Nachrichten erhältst, befolge diese und höre auf, weitere Tools aufzurufen.
+
+## GitHub Pull Request Analyse
+
+Bei PR-Analysen AUSSCHLIESSLICH GitHub-Tools verwenden:
+- github_pr_details: PR-Metadaten (Titel, Autor, Status)
+- github_pr_diff: Code-Änderungen im PR (Diff)
+- github_get_file: Vollständige Datei aus GitHub-Repo
+
+NIEMALS lokale Tools für GitHub-PRs verwenden:
+- NICHT search_code (durchsucht lokale Dateien, nicht GitHub)
+- NICHT read_file (liest lokale Dateien, nicht GitHub)
+- NICHT search_java_class (für lokale Java-Projekte)
+- NICHT trace_java_references (für lokale Java-Projekte)
+
+Der Diff aus github_pr_diff enthält alle relevanten Änderungen. Analysiere diesen direkt.
 """
 
 _RETRY_DELAYS = [2, 4, 8]  # Exponential Backoff in Sekunden

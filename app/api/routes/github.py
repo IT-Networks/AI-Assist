@@ -293,6 +293,7 @@ async def get_pr_details(owner: str, repo: str, pr_number: int) -> Dict[str, Any
     Holt PR-Details direkt von GitHub (unabhängig vom Chat).
 
     Wird vom Workspace-Panel verwendet für eigenständige PR-Anzeige.
+    Enthält auch vollständigen Autor-Namen aus dem Profil.
     """
     if not settings.github.enabled:
         raise HTTPException(status_code=400, detail="GitHub nicht aktiviert")
@@ -313,12 +314,31 @@ async def get_pr_details(owner: str, repo: str, pr_number: int) -> Dict[str, Any
 
     pr = pr_result["data"]
 
+    # Autor-Details (Login und Name)
+    author_login = pr.get("user", {}).get("login", "unknown")
+    author_name = author_login  # Fallback
+
+    # Versuche vollständigen Namen aus User-Profil zu holen
+    user_url = pr.get("user", {}).get("url")
+    if user_url:
+        user_result = await _github_request(
+            method="GET",
+            url=user_url,
+            token=settings.github.token,
+            verify_ssl=settings.github.verify_ssl,
+            timeout=10,  # Kurzer Timeout für optionalen Call
+        )
+        if user_result["success"]:
+            user_data = user_result["data"]
+            author_name = user_data.get("name") or author_login
+
     return {
         "prNumber": pr.get("number"),
         "title": pr.get("title"),
         "body": (pr.get("body") or "")[:2000],
         "state": "merged" if pr.get("merged") else pr.get("state"),
-        "author": pr.get("user", {}).get("login", "unknown"),
+        "author": author_login,
+        "authorName": author_name,
         "baseBranch": pr.get("base", {}).get("ref", "main"),
         "headBranch": pr.get("head", {}).get("ref", "feature"),
         "additions": pr.get("additions", 0),
