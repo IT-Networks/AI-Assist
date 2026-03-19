@@ -2942,6 +2942,38 @@ Sei präzise und gib detaillierte Analyse-Schritte."""
                 await self._analytics.end_chain(status="timeout", response="Max iterations")
             except Exception:
                 pass
+
+        # Token-Nutzung auch bei max iterations senden (wichtig für korrekte Anzeige)
+        usage_data = {
+            "prompt_tokens": state.total_prompt_tokens,
+            "completion_tokens": state.total_completion_tokens,
+            "total_tokens": state.total_prompt_tokens + state.total_completion_tokens,
+            "finish_reason": "max_iterations",
+            "model": model or settings.llm.default_model,
+            "truncated": True,
+            "max_tokens": settings.llm.max_tokens,
+            # Session-Gesamtwerte
+            "session_total_prompt": state.total_prompt_tokens,
+            "session_total_completion": state.total_completion_tokens,
+            # Budget-Status
+            "budget": budget.get_status() if budget else None,
+            "compaction_count": state.compaction_count
+        }
+
+        # Token-Tracking für Statistiken
+        try:
+            tracker = get_token_tracker()
+            tracker.log_usage(
+                session_id=session_id,
+                model=model or settings.llm.default_model,
+                input_tokens=state.total_prompt_tokens,
+                output_tokens=state.total_completion_tokens,
+                request_type="max_iterations",
+            )
+        except Exception:
+            pass
+
+        yield AgentEvent(AgentEventType.USAGE, usage_data)
         yield AgentEvent(AgentEventType.DONE, {
             "response": "Maximale Iterationen erreicht.",
             "tool_calls_count": len(state.tool_calls_history)

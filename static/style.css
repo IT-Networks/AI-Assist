@@ -8556,6 +8556,8 @@ a:visited {
   padding: 8px 16px;
   background: var(--bg-secondary);
   border-bottom: 1px solid var(--border);
+  position: relative;
+  z-index: 50;
 }
 
 .task-progress-card {
@@ -8734,19 +8736,29 @@ a:visited {
 }
 
 .task-artifacts-toggle {
-  background: none;
-  border: none;
-  color: var(--text-secondary);
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  color: var(--text);
   cursor: pointer;
   font-size: 0.8rem;
-  padding: 4px 0;
+  padding: 6px 10px;
   display: flex;
   align-items: center;
-  gap: 4px;
+  gap: 6px;
+  transition: all 0.2s ease;
+  width: 100%;
+  text-align: left;
 }
 
 .task-artifacts-toggle:hover {
-  color: var(--primary);
+  background: var(--primary);
+  color: var(--bg);
+  border-color: var(--primary);
+}
+
+.task-artifacts-toggle:active {
+  transform: scale(0.98);
 }
 
 .task-artifacts-list {
