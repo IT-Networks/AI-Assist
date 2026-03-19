@@ -477,4 +477,303 @@ def register_junit_tools(registry: ToolRegistry) -> int:
     ))
     count += 1
 
+    # ══════════════════════════════════════════════════════════════════════════════
+    # run_junit_tests
+    # ══════════════════════════════════════════════════════════════════════════════
+
+    async def run_junit_tests(**kwargs: Any) -> ToolResult:
+        """
+        Führt JUnit-Tests aus und zeigt Ergebnisse.
+
+        Nutze dieses Tool um:
+        - Tests für eine Klasse/Package auszuführen
+        - Test-Ergebnisse und Coverage zu sehen
+        - Fehlgeschlagene Tests zu analysieren
+
+        Bei Fehlern: Nutze suggest_test_fix für Lösungsvorschläge.
+        """
+        from app.services.test_execution import get_test_execution_service
+
+        target: str = kwargs.get("target", "").strip()
+        with_coverage: bool = kwargs.get("with_coverage", True)
+        test_method: str = kwargs.get("test_method", "").strip() or None
+
+        if not target:
+            return ToolResult(
+                success=False,
+                error=(
+                    "target ist erforderlich. "
+                    "Beispiele:\n"
+                    "- run_junit_tests(target=\"UserService\")\n"
+                    "- run_junit_tests(target=\"com.example.service\")\n"
+                    "- run_junit_tests(target=\"UserServiceTest\", test_method=\"testCreate\")"
+                )
+            )
+
+        session_id = kwargs.get("_session_id", "default")
+        service = get_test_execution_service()
+
+        results = []
+        output_lines = []
+
+        try:
+            async for event in service.run_tests(target, session_id, with_coverage, test_method):
+                event_type = event.get("type", "")
+
+                if event_type == "output":
+                    # Nur wichtige Zeilen sammeln
+                    line = event.get("data", {}).get("line", "")
+                    if any(k in line for k in ["Running", "Tests run", "PASSED", "FAILED", "ERROR"]):
+                        output_lines.append(line)
+
+                elif event_type in ("started", "test_started", "test_finished", "suite_finished", "finished", "error"):
+                    results.append(event)
+
+        except Exception as e:
+            return ToolResult(success=False, error=f"Test-Ausführung fehlgeschlagen: {str(e)}")
+
+        # Final event finden
+        final_event = next((e for e in reversed(results) if e["type"] == "finished"), None)
+
+        if not final_event:
+            error_event = next((e for e in results if e["type"] == "error"), None)
+            error_msg = error_event.get("data", {}).get("message", "Unbekannter Fehler") if error_event else "Test-Lauf fehlgeschlagen"
+            return ToolResult(success=False, error=error_msg)
+
+        run = final_event["data"]
+
+        # Formatierte Ausgabe
+        output = [
+            f"# Test-Ergebnisse: {run.get('target', target)}",
+            f"Status: {'✓ PASSED' if run.get('status') == 'passed' else '✗ FAILED'}",
+            f"Tests: {run.get('passed_tests', 0)}/{run.get('total_tests', 0)} bestanden",
+            ""
+        ]
+
+        # Build info
+        output.append(f"Build: {run.get('build_tool', 'maven')}")
+        output.append(f"Dauer: {run.get('duration_seconds', 0):.2f}s")
+        output.append("")
+
+        # Suites und Tests
+        for suite in run.get("suites", []):
+            output.append(f"## {suite.get('name', 'Unknown')}")
+            for tc in suite.get("tests", []):
+                status = tc.get("status", "unknown")
+                icon_map = {"passed": "✓", "failed": "✗", "error": "⚠", "skipped": "○"}
+                icon = icon_map.get(status, "?")
+                duration = tc.get("duration_seconds", 0)
+                output.append(f"  {icon} {tc.get('name', 'unknown')} ({duration:.2f}s)")
+
+                if tc.get("failure_message"):
+                    output.append(f"    └─ {tc.get('failure_message', '')[:200]}")
+                    if tc.get("stack_trace"):
+                        # Erste relevante Zeile des Stack Traces
+                        lines = tc.get("stack_trace", "").split("\n")[:3]
+                        for line in lines:
+                            if line.strip():
+                                output.append(f"       {line.strip()[:100]}")
+            output.append("")
+
+        # Coverage
+        if run.get("coverage_percent") is not None:
+            coverage = run.get("coverage_percent", 0)
+            bar_filled = int(coverage / 5)
+            bar_empty = 20 - bar_filled
+            output.append(f"Coverage: {coverage:.1f}% {'█' * bar_filled}{'░' * bar_empty}")
+            output.append("")
+
+        # Summary
+        output.append("---")
+        output.append(f"Passed: {run.get('passed_tests', 0)} | Failed: {run.get('failed_tests', 0)} | Errors: {run.get('error_tests', 0)} | Skipped: {run.get('skipped_tests', 0)}")
+
+        # Empfehlung bei Fehlern
+        if run.get("failed_tests", 0) > 0 or run.get("error_tests", 0) > 0:
+            output.append("")
+            output.append("💡 Tipp: Nutze suggest_test_fix für Fix-Vorschläge")
+
+        return ToolResult(
+            success=run.get("status") == "passed",
+            data="\n".join(output),
+            confirmation_data={"test_run": run}
+        )
+
+    registry.register(Tool(
+        name="run_junit_tests",
+        description=(
+            "Führt JUnit-Tests aus und zeigt Ergebnisse inkl. Coverage. "
+            "Unterstützt Maven und Gradle. "
+            "Parameter: target (Klasse oder Package), with_coverage (bool), test_method (optional, spezifische Methode). "
+            "Bei Fehlern: Nutze suggest_test_fix für Lösungsvorschläge."
+        ),
+        category=ToolCategory.ANALYSIS,
+        parameters=[
+            ToolParameter(
+                name="target",
+                type="string",
+                description="Klasse oder Package zum Testen (z.B. 'UserService' oder 'com.example.service')",
+                required=True
+            ),
+            ToolParameter(
+                name="with_coverage",
+                type="boolean",
+                description="Coverage-Report generieren (default: true)",
+                required=False,
+                default=True
+            ),
+            ToolParameter(
+                name="test_method",
+                type="string",
+                description="Spezifische Test-Methode (optional, z.B. 'testCreate')",
+                required=False
+            ),
+        ],
+        handler=run_junit_tests
+    ))
+    count += 1
+
+    # ══════════════════════════════════════════════════════════════════════════════
+    # suggest_test_fix
+    # ══════════════════════════════════════════════════════════════════════════════
+
+    async def suggest_test_fix(**kwargs: Any) -> ToolResult:
+        """
+        Generiert Fix-Vorschläge für fehlgeschlagene Tests.
+
+        Analysiert den Fehler und schlägt einen Fix vor:
+        - Pattern-basiert für bekannte Fehlertypen
+        - LLM-basiert für komplexe Fälle
+
+        Nutze dieses Tool nach run_junit_tests wenn Tests fehlschlagen.
+        """
+        from app.services.test_execution import (
+            get_test_fix_generator,
+            TestCase,
+            TestStatus
+        )
+
+        test_class: str = kwargs.get("test_class", "").strip()
+        test_method: str = kwargs.get("test_method", "").strip()
+        error_message: str = kwargs.get("error_message", "").strip()
+        stack_trace: str = kwargs.get("stack_trace", "").strip()
+
+        if not test_class or not error_message:
+            return ToolResult(
+                success=False,
+                error=(
+                    "test_class und error_message sind erforderlich.\n"
+                    "Beispiel:\n"
+                    "suggest_test_fix(\n"
+                    "  test_class=\"UserServiceTest\",\n"
+                    "  test_method=\"testUpdateUser\",\n"
+                    "  error_message=\"expected:<John> but was:<Jane>\"\n"
+                    ")"
+                )
+            )
+
+        # TestCase erstellen
+        test_case = TestCase(
+            name=test_method or "unknown",
+            class_name=test_class,
+            status=TestStatus.FAILED,
+            failure_message=error_message,
+            stack_trace=stack_trace or None
+        )
+
+        generator = get_test_fix_generator()
+
+        try:
+            fix = await generator.generate_fix(test_case)
+        except Exception as e:
+            return ToolResult(
+                success=False,
+                error=f"Fix-Generierung fehlgeschlagen: {str(e)}"
+            )
+
+        if not fix:
+            return ToolResult(
+                success=False,
+                error=(
+                    "Konnte keinen Fix generieren.\n"
+                    "Mögliche Gründe:\n"
+                    "- Fehlermeldung nicht erkannt\n"
+                    "- Test-Klasse nicht gefunden\n"
+                    "- Komplexer Fehler der manuelle Analyse erfordert"
+                )
+            )
+
+        # Ausgabe formatieren
+        confidence_bar = "█" * int(fix.confidence * 10) + "░" * (10 - int(fix.confidence * 10))
+        output = [
+            f"# Fix-Vorschlag für {test_class}.{test_method or '?'}",
+            "",
+            f"**Typ:** {fix.fix_type}",
+            f"**Confidence:** {fix.confidence:.0%} {confidence_bar}",
+            "",
+            f"## Beschreibung",
+            fix.description,
+            "",
+        ]
+
+        if fix.file_path:
+            output.append(f"**Datei:** {fix.file_path}")
+            output.append("")
+
+        if fix.diff:
+            output.append("## Vorgeschlagene Änderung")
+            output.append("```diff")
+            output.append(fix.diff)
+            output.append("```")
+            output.append("")
+
+        output.append("---")
+        output.append("💡 Prüfe den Vorschlag sorgfältig bevor du ihn anwendest.")
+
+        return ToolResult(
+            success=True,
+            data="\n".join(output),
+            confirmation_data={
+                "fix": fix.to_dict(),
+                "action": "review_fix"
+            }
+        )
+
+    registry.register(Tool(
+        name="suggest_test_fix",
+        description=(
+            "Generiert Fix-Vorschläge für fehlgeschlagene Tests. "
+            "Analysiert Fehlermeldung und Stack-Trace um einen Fix vorzuschlagen. "
+            "Nutze dieses Tool nach run_junit_tests wenn Tests fehlschlagen."
+        ),
+        category=ToolCategory.ANALYSIS,
+        parameters=[
+            ToolParameter(
+                name="test_class",
+                type="string",
+                description="Name der Test-Klasse (z.B. 'UserServiceTest')",
+                required=True
+            ),
+            ToolParameter(
+                name="test_method",
+                type="string",
+                description="Name der fehlgeschlagenen Test-Methode",
+                required=False
+            ),
+            ToolParameter(
+                name="error_message",
+                type="string",
+                description="Fehlermeldung des Tests",
+                required=True
+            ),
+            ToolParameter(
+                name="stack_trace",
+                type="string",
+                description="Stack-Trace (optional, verbessert Fix-Qualität)",
+                required=False
+            ),
+        ],
+        handler=suggest_test_fix
+    ))
+    count += 1
+
     return count

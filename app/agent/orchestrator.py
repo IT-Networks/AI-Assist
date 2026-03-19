@@ -70,6 +70,7 @@ from app.services.llm_client import (
 )
 from app.services.token_tracker import get_token_tracker
 from app.services.memory_store import get_memory_store
+from app.services.task_tracker import get_task_tracker, TaskTracker, TaskArtifact
 from app.services.context_manager import get_context_manager, ContextManager
 from app.services.transcript_logger import get_transcript_logger, TranscriptLogger, TranscriptEntry
 from app.services.auto_learner import get_auto_learner, AutoLearner
@@ -1352,6 +1353,17 @@ Sei präzise und gib detaillierte Analyse-Schritte."""
                 if enhancer.detector.should_enhance(user_message):
                     logger.info("[agent] Starting MCP prompt enhancement")
 
+                    # ── TaskTracker: Kontext-Sammlung Task ──────────────────────
+                    task_tracker = get_task_tracker(session_id)
+                    enhancement_task_id = task_tracker.create_task(
+                        title="Kontext-Sammlung",
+                        steps=["Anfrage analysieren", "Quellen durchsuchen", "Kontext aufbereiten"],
+                        metadata={"type": "enhancement", "query_preview": user_message[:100]}
+                    )
+                    await task_tracker.start_task(enhancement_task_id)
+                    await task_tracker.start_step(enhancement_task_id, 0, "Analysiere Anfrage...")
+                    # ────────────────────────────────────────────────────────────
+
                     # Enhancement-Start Event
                     yield AgentEvent(AgentEventType.ENHANCEMENT_START, {
                         "query_preview": user_message[:100],
@@ -1362,6 +1374,10 @@ Sei präzise und gib detaillierte Analyse-Schritte."""
                     mcp_queue = self._event_bridge.subscribe()
 
                     try:
+                        # TaskTracker: Schritt 1 abgeschlossen, Schritt 2 starten
+                        await task_tracker.complete_step(enhancement_task_id, 0)
+                        await task_tracker.start_step(enhancement_task_id, 1, "Durchsuche Quellen...")
+
                         # Kontext sammeln in separatem Task für Live-Event-Streaming
                         enhance_task = asyncio.create_task(
                             enhancer.enhance(user_message)
@@ -1374,6 +1390,10 @@ Sei präzise und gib detaillierte Analyse-Schritte."""
                             await asyncio.sleep(0.05)
 
                         enriched = await enhance_task
+
+                        # TaskTracker: Schritt 2 abgeschlossen, Schritt 3 starten
+                        await task_tracker.complete_step(enhancement_task_id, 1)
+                        await task_tracker.start_step(enhancement_task_id, 2, "Bereite Kontext auf...")
                     finally:
                         self._event_bridge.unsubscribe(mcp_queue)
 
@@ -1463,15 +1483,39 @@ Sei präzise und gib detaillierte Analyse-Schritte."""
                             state.pending_enhancement = None
                             logger.info(f"[agent] Enhancement auto-confirmed, context: {len(enriched_context)} chars")
 
+                        # TaskTracker: Enhancement-Task abschließen (mit Artifact)
+                        await task_tracker.complete_step(enhancement_task_id, 2, artifacts=[
+                            TaskArtifact(
+                                id=f"ctx_{enhancement_task_id[:8]}",
+                                type="context",
+                                summary=f"{len(enriched.context_items)} Kontext-Elemente gesammelt",
+                                data={"context_count": len(enriched.context_items), "sources": enriched.context_sources}
+                            )
+                        ])
+                        await task_tracker.complete_task(enhancement_task_id)
+
                     elif enriched.cache_hit:
                         # Cache-Hit ohne neue Items
                         enriched_context = enriched.get_context_for_planner()
                         logger.debug("[agent] Using cached enhancement context")
+                        # TaskTracker: Steps überspringen und Task abschließen (Cache-Hit)
+                        await task_tracker.skip_step(enhancement_task_id, 2, "Cache-Treffer")
+                        await task_tracker.complete_task(enhancement_task_id)
+                    else:
+                        # Kein Kontext gefunden - Task trotzdem abschließen
+                        await task_tracker.skip_step(enhancement_task_id, 2, "Kein Kontext gefunden")
+                        await task_tracker.complete_task(enhancement_task_id)
 
             except ImportError as e:
                 logger.debug(f"[agent] Prompt enhancement not available: {e}")
             except Exception as e:
                 logger.warning(f"[agent] Prompt enhancement failed: {e}")
+                # TaskTracker: Task als fehlgeschlagen markieren (falls erstellt)
+                try:
+                    if 'enhancement_task_id' in locals():
+                        await task_tracker.fail_task(enhancement_task_id, str(e))
+                except Exception:
+                    pass  # Task-Tracking-Fehler nicht propagieren
                 # Fehler-Event emittieren (nicht mehr silent!)
                 yield AgentEvent(AgentEventType.MCP_ERROR, {
                     "mode": "enhancement",
@@ -1955,6 +1999,18 @@ Sei präzise und gib detaillierte Analyse-Schritte."""
         last_finish_reason = ""
         last_model = ""
 
+        # ── TaskTracker: Anfrage-Verarbeitungs-Task ─────────────────────────
+        task_tracker = get_task_tracker(session_id)
+        processing_task_id = task_tracker.create_task(
+            title="Anfrage verarbeiten",
+            steps=["LLM-Analyse"],  # Wird dynamisch erweitert
+            metadata={"type": "processing", "query_preview": user_message[:100]}
+        )
+        await task_tracker.start_task(processing_task_id)
+        await task_tracker.start_step(processing_task_id, 0, "Analysiere Anfrage mit LLM...")
+        tool_step_offset = 1  # Offset für dynamisch hinzugefügte Tool-Steps
+        # ────────────────────────────────────────────────────────────────────
+
         # Debug: Tool-Schemas Anzahl loggen
         logger.debug("[agent] Starting with {len(tool_schemas)} tools, mode={state.mode.value}")
 
@@ -1962,6 +2018,11 @@ Sei präzise und gib detaillierte Analyse-Schritte."""
             try:
                 # Abbruch prüfen
                 if state.cancelled:
+                    # TaskTracker: Task abbrechen
+                    try:
+                        await task_tracker.cancel_task(processing_task_id)
+                    except Exception:
+                        pass
                     yield AgentEvent(AgentEventType.CANCELLED, {"message": "Anfrage wurde abgebrochen"})
                     return
 
@@ -2327,6 +2388,13 @@ Sei präzise und gib detaillierte Analyse-Schritte."""
                         except Exception:
                             pass
 
+                    # TaskTracker: Anfrage-Task abschließen
+                    try:
+                        await task_tracker.complete_step(processing_task_id, 0)
+                        await task_tracker.complete_task(processing_task_id)
+                    except Exception:
+                        pass  # Task-Tracking-Fehler nicht propagieren
+
                     yield AgentEvent(AgentEventType.DONE, {
                         "response": assistant_response,
                         "tool_calls_count": len(state.tool_calls_history),
@@ -2412,6 +2480,20 @@ Sei präzise und gib detaillierte Analyse-Schritte."""
                         "arguments": tool_call.arguments,
                         "model": effective_model
                     })
+
+                    # TaskTracker: Tool-Ausführung als Artifact hinzufügen
+                    try:
+                        await task_tracker.add_artifact(
+                            processing_task_id,
+                            TaskArtifact(
+                                id=tool_call.id,
+                                type="tool_start",
+                                summary=f"Tool: {tool_call.name}",
+                                data={"name": tool_call.name, "arguments": tool_call.arguments}
+                            )
+                        )
+                    except Exception:
+                        pass  # Task-Tracking-Fehler nicht propagieren
 
                     # ── suggest_answers: Display-only Tool im Debug-Modus ────
                     if tool_call.name == "suggest_answers":
@@ -2785,6 +2867,11 @@ Sei präzise und gib detaillierte Analyse-Schritte."""
                             })
 
             except Exception as e:
+                # TaskTracker: Task als fehlgeschlagen markieren
+                try:
+                    await task_tracker.fail_task(processing_task_id, str(e))
+                except Exception:
+                    pass
                 # Analytics: Chain bei Fehler beenden
                 if self._analytics.enabled:
                     try:
@@ -2795,6 +2882,12 @@ Sei präzise und gib detaillierte Analyse-Schritte."""
                 return
 
         # Max iterations erreicht
+        # TaskTracker: Task abschließen (Max-Iterations)
+        try:
+            await task_tracker.complete_step(processing_task_id, 0)
+            await task_tracker.complete_task(processing_task_id)
+        except Exception:
+            pass
         # Analytics: Chain bei Timeout beenden
         if self._analytics.enabled:
             try:

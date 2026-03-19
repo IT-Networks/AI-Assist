@@ -10,7 +10,7 @@
 <body>
 
 <!-- Header -->
-<header id="header">
+<header id="header" role="banner">
   <div class="header-left">
     <h1>AI Code Assistant</h1>
     <div id="mode-indicator" class="mode-badge mode-read-only" title="Agent-Modus">
@@ -77,11 +77,11 @@
 </header>
 
 <!-- Settings Modal -->
-<div id="settings-modal" class="modal" style="display:none">
+<div id="settings-modal" class="modal" style="display:none" role="dialog" aria-modal="true" aria-labelledby="settings-modal-title">
   <div class="modal-overlay" onclick="closeSettings()"></div>
   <div class="modal-content modal-large">
     <div class="modal-header">
-      <h2>&#9881; Einstellungen</h2>
+      <h2 id="settings-modal-title">&#9881; Einstellungen</h2>
       <button class="modal-close" onclick="closeSettings()">&times;</button>
     </div>
     <div class="modal-body">
@@ -230,11 +230,11 @@
 </div>
 
 <!-- Dashboard Modal -->
-<div id="dashboard-modal" class="modal" style="display:none">
+<div id="dashboard-modal" class="modal" style="display:none" role="dialog" aria-modal="true" aria-labelledby="dashboard-modal-title">
   <div class="modal-overlay" onclick="closeDashboard()"></div>
   <div class="modal-content modal-fullscreen">
     <div class="modal-header dashboard-header">
-      <h2>&#128202; Dashboard</h2>
+      <h2 id="dashboard-modal-title">&#128202; Dashboard</h2>
       <div class="dashboard-controls">
         <select id="dashboard-time-range" onchange="loadDashboardData(this.value)">
           <option value="day">Heute</option>
@@ -327,11 +327,11 @@
 </div>
 
 <!-- Pattern Suggestion Modal - Phase 5 Error Pattern Learning -->
-<div id="pattern-modal" class="modal" style="display:none">
+<div id="pattern-modal" class="modal" style="display:none" role="dialog" aria-modal="true" aria-labelledby="pattern-modal-title">
   <div class="modal-overlay" onclick="closePatternModal()"></div>
   <div class="modal-content modal-medium">
     <div class="modal-header pattern-header">
-      <h2>&#128161; Bekanntes Fehler-Pattern erkannt</h2>
+      <h2 id="pattern-modal-title">&#128161; Bekanntes Fehler-Pattern erkannt</h2>
       <button class="modal-close" onclick="closePatternModal()">&times;</button>
     </div>
     <div class="modal-body pattern-body" id="pattern-modal-content">
@@ -341,30 +341,30 @@
 </div>
 
 <!-- Main Layout -->
-<div id="main">
+<div id="main" role="main">
 
   <!-- Left Sidebar - Explorer -->
-  <aside id="sidebar-left" class="sidebar">
-    <div class="sidebar-tabs">
-      <button class="sidebar-tab active" data-panel="chats-panel">Chats</button>
-      <button class="sidebar-tab" data-panel="explorer-panel">Explorer</button>
-      <button class="sidebar-tab" data-panel="handbook-panel">Handbuch</button>
-      <button class="sidebar-tab" data-panel="search-panel">Suche</button>
+  <aside id="sidebar-left" class="sidebar" role="complementary" aria-label="Navigation und Dateien">
+    <div class="sidebar-tabs" role="tablist" aria-label="Sidebar-Tabs">
+      <button class="sidebar-tab active" data-panel="chats-panel" role="tab" aria-selected="true" aria-controls="chats-panel">Chats</button>
+      <button class="sidebar-tab" data-panel="explorer-panel" role="tab" aria-selected="false" aria-controls="explorer-panel">Explorer</button>
+      <button class="sidebar-tab" data-panel="handbook-panel" role="tab" aria-selected="false" aria-controls="handbook-panel">Handbuch</button>
+      <button class="sidebar-tab" data-panel="search-panel" role="tab" aria-selected="false" aria-controls="search-panel">Suche</button>
     </div>
 
     <!-- Chats Panel -->
-    <div class="sidebar-panel active" id="chats-panel">
+    <div class="sidebar-panel active" id="chats-panel" role="tabpanel" aria-labelledby="chats-tab">
       <div class="chats-header">
         <span class="chats-title">Meine Chats</span>
-        <button class="icon-btn" onclick="createNewChat()" title="Neuer Chat">&#43;</button>
+        <button class="icon-btn" onclick="createNewChat()" title="Neuer Chat" aria-label="Neuen Chat erstellen">&#43;</button>
       </div>
-      <div id="chat-list" class="chat-list">
+      <div id="chat-list" class="chat-list" role="list" aria-label="Chat-Verlauf">
         <!-- Rendered by JS -->
       </div>
     </div>
 
     <!-- Explorer Panel -->
-    <div class="sidebar-panel" id="explorer-panel">
+    <div class="sidebar-panel" id="explorer-panel" role="tabpanel" aria-labelledby="explorer-tab">
       <!-- Java Section -->
       <div class="explorer-section">
         <div class="explorer-header" onclick="toggleExplorerSection('java')">
@@ -471,8 +471,8 @@
   </aside>
 
   <!-- Center - Chat Area -->
-  <main id="chat-area">
-    <div id="messages">
+  <main id="chat-area" aria-label="Chat-Bereich">
+    <div id="messages" role="log" aria-live="polite" aria-label="Nachrichten">
       <div class="message system">
         <div class="message-bubble">
           <strong>Willkommen beim AI Code Assistant!</strong><br>
@@ -482,9 +482,12 @@
       </div>
     </div>
 
-    <div id="input-area">
+    <!-- Task Progress Panel - Live-Fortschrittsanzeige -->
+    <div id="task-progress-container" class="task-progress-container" role="status" aria-live="polite" aria-label="Task-Fortschritt"></div>
+
+    <div id="input-area" role="form" aria-label="Nachricht eingeben">
       <!-- Template-Bar: Schnellauswahl für Prompt-Templates -->
-      <div id="template-bar">
+      <div id="template-bar" role="toolbar" aria-label="Prompt-Templates">
         <div class="template-bar-header">
           <span class="template-icon">&#128203;</span>
           <span class="template-label">Templates</span>
@@ -505,8 +508,8 @@
         <div id="suggestion-chips"></div>
       </div>
       <div id="input-row">
-        <textarea id="message-input" placeholder="Frage stellen... (@datei für Kontext, Enter senden)" rows="2"></textarea>
-        <button id="send-btn" onclick="sendMessage()">
+        <textarea id="message-input" placeholder="Frage stellen... (@datei für Kontext, Enter senden)" rows="2" aria-label="Nachricht eingeben"></textarea>
+        <button id="send-btn" onclick="sendMessage()" aria-label="Nachricht senden">
           <span class="send-icon">&#10148;</span>
         </button>
       </div>
@@ -548,6 +551,10 @@
         <span class="tab-icon">&#128209;</span>
         <span class="tab-label" id="workspace-pr-label">PR</span>
         <span class="tab-badge pr-badge" id="workspace-pr-badge" style="display:none">0</span>
+      </button>
+      <button class="workspace-tab" data-tab="graph" onclick="switchWorkspaceTab('graph')">
+        <span class="tab-icon">&#128279;</span>
+        <span class="tab-label">Graph</span>
       </button>
     </div>
     <div class="workspace-content">
@@ -632,6 +639,21 @@
             <button class="btn btn-warning" onclick="submitPRReview('request_changes')">&#8634; Request Changes</button>
             <button class="btn btn-secondary" onclick="submitPRReview('comment')">&#128172; Comment Only</button>
             <button class="btn btn-ghost" onclick="closePRReview()">&times; Schließen</button>
+          </div>
+        </div>
+      </div>
+      <!-- Knowledge Graph Tab -->
+      <div class="workspace-tab-content" id="workspace-graph-content">
+        <div id="knowledge-graph-container" class="knowledge-graph-container">
+          <div class="kg-empty" id="kg-empty-state">
+            <svg width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+              <circle cx="12" cy="5" r="2"/>
+              <circle cx="5" cy="19" r="2"/>
+              <circle cx="19" cy="19" r="2"/>
+              <path d="M12 7v5M7 17l5-5M17 17l-5-5"/>
+            </svg>
+            <p class="kg-empty-text">Knowledge Graph</p>
+            <small>Suche nach einer Klasse oder indexiere ein Projekt</small>
           </div>
         </div>
       </div>
@@ -895,11 +917,11 @@
 </div>
 
 <!-- Arena Mode Modal -->
-<div id="arena-modal" class="modal" style="display:none">
+<div id="arena-modal" class="modal" style="display:none" role="dialog" aria-modal="true" aria-labelledby="arena-modal-title">
   <div class="modal-overlay" onclick="closeArenaModal()"></div>
   <div class="modal-content modal-large">
     <div class="modal-header arena-header">
-      <h2>Arena Mode</h2>
+      <h2 id="arena-modal-title">Arena Mode</h2>
       <button class="modal-close" onclick="closeArenaModal()">&times;</button>
     </div>
     <div class="modal-body arena-body">
@@ -985,11 +1007,11 @@
 </div>
 
 <!-- Token Usage Modal -->
-<div id="tokens-modal" class="modal" style="display:none">
+<div id="tokens-modal" class="modal" style="display:none" role="dialog" aria-modal="true" aria-labelledby="tokens-modal-title">
   <div class="modal-overlay" onclick="closeTokensModal()"></div>
   <div class="modal-content modal-large">
     <div class="modal-header tokens-header">
-      <h2>Token-Nutzung</h2>
+      <h2 id="tokens-modal-title">Token-Nutzung</h2>
       <div class="tokens-period-select">
         <select id="tokens-period" onchange="loadTokenUsage()">
           <option value="day">Heute</option>
@@ -1060,12 +1082,12 @@
 </div>
 
 <!-- Self-Healing Modal -->
-<div id="healing-modal" class="modal" style="display:none">
+<div id="healing-modal" class="modal" style="display:none" role="alertdialog" aria-modal="true" aria-labelledby="healing-modal-title">
   <div class="modal-overlay"></div>
   <div class="modal-content modal-medium">
     <div class="modal-header healing-header">
       <span class="healing-icon">&#9888;</span>
-      <h2>Fehler erkannt</h2>
+      <h2 id="healing-modal-title">Fehler erkannt</h2>
     </div>
     <div class="modal-body healing-body">
       <!-- Error Info -->
@@ -1133,11 +1155,11 @@
 </div>
 
 <!-- Update Modal -->
-<div id="update-modal" class="modal" style="display:none">
+<div id="update-modal" class="modal" style="display:none" role="dialog" aria-modal="true" aria-labelledby="update-modal-title">
   <div class="modal-overlay" onclick="closeUpdateModal()"></div>
   <div class="modal-content">
     <div class="modal-header">
-      <h2>&#128259; App-Update</h2>
+      <h2 id="update-modal-title">&#128259; App-Update</h2>
       <button class="modal-close" onclick="closeUpdateModal()">&times;</button>
     </div>
     <div class="modal-body">
@@ -1208,6 +1230,8 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/python.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/xml.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/diff.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/d3/7.8.5/d3.min.js"></script>
+<script src="/static/knowledge-graph.js"></script>
 <script src="/static/app.js"></script>
 </body>
 </html>

@@ -23,6 +23,114 @@ const TIMING = {
   SCROLL_DELAY: 100,
 };
 
+// ── Focus Trap for Modals (Accessibility) ──
+const focusTrap = {
+  _activeModal: null,
+  _previousFocus: null,
+  _boundHandler: null,
+
+  /**
+   * Aktiviert Focus-Trap für ein Modal
+   * @param {HTMLElement} modal - Das Modal-Element
+   */
+  activate(modal) {
+    if (this._activeModal) this.deactivate();
+    this._activeModal = modal;
+    this._previousFocus = document.activeElement;
+
+    // Fokussierbare Elemente im Modal finden
+    const focusableSelector = 'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])';
+    const focusables = Array.from(modal.querySelectorAll(focusableSelector))
+      .filter(el => !el.disabled && el.offsetParent !== null);
+
+    if (focusables.length === 0) return;
+
+    // Erstes Element fokussieren
+    focusables[0].focus();
+
+    // Tab-Trap Handler
+    this._boundHandler = (e) => {
+      if (e.key !== 'Tab') return;
+      const currentFocusables = Array.from(modal.querySelectorAll(focusableSelector))
+        .filter(el => !el.disabled && el.offsetParent !== null);
+      if (currentFocusables.length === 0) return;
+
+      const first = currentFocusables[0];
+      const last = currentFocusables[currentFocusables.length - 1];
+
+      if (e.shiftKey && document.activeElement === first) {
+        e.preventDefault();
+        last.focus();
+      } else if (!e.shiftKey && document.activeElement === last) {
+        e.preventDefault();
+        first.focus();
+      }
+    };
+    document.addEventListener('keydown', this._boundHandler);
+  },
+
+  /**
+   * Deaktiviert Focus-Trap und stellt vorherigen Fokus wieder her
+   */
+  deactivate() {
+    if (this._boundHandler) {
+      document.removeEventListener('keydown', this._boundHandler);
+      this._boundHandler = null;
+    }
+    if (this._previousFocus && this._previousFocus.focus) {
+      this._previousFocus.focus();
+    }
+    this._activeModal = null;
+    this._previousFocus = null;
+  }
+};
+
+// ── DOM Helper for efficient element creation ──
+const dom = {
+  /**
+   * Erstellt ein Element mit Attributen und Kindern
+   * @param {string} tag - Tag-Name
+   * @param {Object} attrs - Attribute (class, id, data-*, onclick, etc.)
+   * @param {...(string|Node)} children - Text oder Child-Nodes
+   * @returns {HTMLElement}
+   */
+  el(tag, attrs = {}, ...children) {
+    const el = document.createElement(tag);
+    for (const [key, value] of Object.entries(attrs)) {
+      if (key === 'class') el.className = value;
+      else if (key === 'style' && typeof value === 'object') Object.assign(el.style, value);
+      else if (key.startsWith('on') && typeof value === 'function') el[key] = value;
+      else if (key.startsWith('data-')) el.setAttribute(key, value);
+      else if (value !== null && value !== undefined) el.setAttribute(key, value);
+    }
+    for (const child of children) {
+      if (child == null) continue;
+      el.appendChild(typeof child === 'string' ? document.createTextNode(child) : child);
+    }
+    return el;
+  },
+
+  /**
+   * Ersetzt innerHTML effizient für Listen
+   * @param {HTMLElement} container - Container-Element
+   * @param {Array} items - Array von Elementen oder HTML-Strings
+   */
+  replaceChildren(container, items) {
+    const fragment = document.createDocumentFragment();
+    for (const item of items) {
+      if (typeof item === 'string') {
+        const temp = document.createElement('div');
+        temp.innerHTML = item;
+        while (temp.firstChild) fragment.appendChild(temp.firstChild);
+      } else if (item instanceof Node) {
+        fragment.appendChild(item);
+      }
+    }
+    container.innerHTML = '';
+    container.appendChild(fragment);
+  }
+};
+
 // ── File Cache for @-Mention and Explorer Search ──
 const fileCache = {
   java: { files: [], timestamp: 0 },
@@ -1384,11 +1492,14 @@ const arenaState = {
 };
 
 function openArenaModal() {
-  document.getElementById('arena-modal').style.display = 'flex';
+  const modal = document.getElementById('arena-modal');
+  modal.style.display = 'flex';
   loadArenaLeaderboard();
+  focusTrap.activate(modal);
 }
 
 function closeArenaModal() {
+  focusTrap.deactivate();
   document.getElementById('arena-modal').style.display = 'none';
 }
 
@@ -1574,11 +1685,14 @@ async function loadArenaLeaderboard() {
 // ══════════════════════════════════════════════════════════════════════════════
 
 function openTokensModal() {
-  document.getElementById('tokens-modal').style.display = 'flex';
+  const modal = document.getElementById('tokens-modal');
+  modal.style.display = 'flex';
   loadTokenUsage();
+  focusTrap.activate(modal);
 }
 
 function closeTokensModal() {
+  focusTrap.deactivate();
   document.getElementById('tokens-modal').style.display = 'none';
 }
 
@@ -1873,10 +1987,13 @@ function showHealingModal(attempt) {
     document.getElementById('healing-pattern').style.display = 'none';
   }
 
-  document.getElementById('healing-modal').style.display = 'flex';
+  const modal = document.getElementById('healing-modal');
+  modal.style.display = 'flex';
+  focusTrap.activate(modal);
 }
 
 function closeHealingModal() {
+  focusTrap.deactivate();
   document.getElementById('healing-modal').style.display = 'none';
   healingState.attemptId = null;
   healingState.fixId = null;
@@ -1993,10 +2110,14 @@ function setupSidebarTabs() {
       const panelId = tab.dataset.panel;
       const sidebar = tab.closest('.sidebar');
 
-      sidebar.querySelectorAll('.sidebar-tab').forEach(t => t.classList.remove('active'));
+      sidebar.querySelectorAll('.sidebar-tab').forEach(t => {
+        t.classList.remove('active');
+        t.setAttribute('aria-selected', 'false');
+      });
       sidebar.querySelectorAll('.sidebar-panel').forEach(p => p.classList.remove('active'));
 
       tab.classList.add('active');
+      tab.setAttribute('aria-selected', 'true');
       document.getElementById(panelId).classList.add('active');
     });
   });
@@ -2011,14 +2132,20 @@ function switchRightPanel(panelId) {
   if (!sidebar) return;
 
   // Alle Tabs und Panels deaktivieren
-  sidebar.querySelectorAll('.sidebar-tab').forEach(t => t.classList.remove('active'));
+  sidebar.querySelectorAll('.sidebar-tab').forEach(t => {
+    t.classList.remove('active');
+    t.setAttribute('aria-selected', 'false');
+  });
   sidebar.querySelectorAll('.sidebar-panel').forEach(p => p.classList.remove('active'));
 
   // Ziel-Tab und Panel aktivieren
   const tab = sidebar.querySelector(`.sidebar-tab[data-panel="${panelId}"]`);
   const panel = document.getElementById(panelId);
 
-  if (tab) tab.classList.add('active');
+  if (tab) {
+    tab.classList.add('active');
+    tab.setAttribute('aria-selected', 'true');
+  }
   if (panel) panel.classList.add('active');
 }
 
@@ -2281,6 +2408,11 @@ async function switchToChat(chatId) {
   renderContextChips();
   hideConfirmationPanel();
   renderChatList();
+
+  // Task Progress Panel mit Session verbinden
+  if (incomingChat.sessionId && taskProgressPanel) {
+    taskProgressPanel.connect(incomingChat.sessionId);
+  }
 
   messagesContainer.scrollTop = messagesContainer.scrollHeight;
 }
@@ -6045,9 +6177,11 @@ async function openSettings() {
   });
 
   await loadSettings();
+  focusTrap.activate(modal);
 }
 
 function closeSettings() {
+  focusTrap.deactivate();
   const modal = document.getElementById('settings-modal');
   modal.style.display = 'none';
   document.body.style.overflow = '';
@@ -6077,9 +6211,11 @@ async function openDashboard() {
   modal.style.display = 'flex';
   document.body.style.overflow = 'hidden';
   await loadDashboardData(dashboardState.timeRange);
+  focusTrap.activate(modal);
 }
 
 function closeDashboard() {
+  focusTrap.deactivate();
   const modal = document.getElementById('dashboard-modal');
   modal.style.display = 'none';
   document.body.style.overflow = '';
@@ -6566,9 +6702,11 @@ function showPatternModal(pattern, confidence = null) {
 
   modal.style.display = 'flex';
   document.body.style.overflow = 'hidden';
+  focusTrap.activate(modal);
 }
 
 function closePatternModal() {
+  focusTrap.deactivate();
   const modal = document.getElementById('pattern-modal');
   modal.style.display = 'none';
   document.body.style.overflow = '';
@@ -12052,12 +12190,25 @@ async function saveSearchProxyConfig() {
   }, 3000);
 }
 
-// Keyboard shortcut to close modal
+// Keyboard shortcut to close modals (Escape key)
 document.addEventListener('keydown', (e) => {
   if (e.key === 'Escape') {
-    const modal = document.getElementById('settings-modal');
-    if (modal.style.display === 'flex') {
-      closeSettings();
+    // Prioritätsreihenfolge der Modals
+    const modals = [
+      { id: 'healing-modal', close: closeHealingModal },
+      { id: 'update-modal', close: closeUpdateModal },
+      { id: 'tokens-modal', close: closeTokensModal },
+      { id: 'arena-modal', close: closeArenaModal },
+      { id: 'pattern-modal', close: closePatternModal },
+      { id: 'dashboard-modal', close: closeDashboard },
+      { id: 'settings-modal', close: closeSettings },
+    ];
+    for (const { id, close } of modals) {
+      const modal = document.getElementById(id);
+      if (modal && (modal.style.display === 'flex' || modal.style.display === 'block')) {
+        close();
+        return;
+      }
     }
   }
 });
@@ -13365,6 +13516,7 @@ async function initUpdateButton() {
 async function checkForUpdates() {
   const modal = document.getElementById('update-modal');
   modal.style.display = 'block';
+  focusTrap.activate(modal);
 
   // Reset state
   document.getElementById('update-checking').style.display = 'block';
@@ -13529,6 +13681,7 @@ async function restartServer() {
 }
 
 function closeUpdateModal() {
+  focusTrap.deactivate();
   document.getElementById('update-modal').style.display = 'none';
 }
 
@@ -14122,3 +14275,315 @@ async function cleanupAnalytics() {
     showToast(`Fehler: ${e.message}`, 'error');
   }
 }
+
+// ══════════════════════════════════════════════════════════════════════════════
+// Task Progress Panel - Live-Fortschrittsanzeige für Agent-Tasks
+// ══════════════════════════════════════════════════════════════════════════════
+
+const taskProgressPanel = {
+  container: null,
+  tasks: new Map(),
+  expanded: new Set(),
+  eventSource: null,
+  sessionId: null,
+
+  /**
+   * Initialisiert das Panel
+   */
+  init(containerId = 'task-progress-container') {
+    this.container = document.getElementById(containerId);
+    if (!this.container) {
+      // Container dynamisch erstellen wenn nicht vorhanden
+      this.container = document.createElement('div');
+      this.container.id = containerId;
+      this.container.className = 'task-progress-container';
+      // Nach dem Input-Bereich einfügen
+      const inputArea = document.getElementById('input-area');
+      if (inputArea) {
+        inputArea.parentNode.insertBefore(this.container, inputArea);
+      }
+    }
+  },
+
+  /**
+   * Startet SSE-Stream für eine Session
+   */
+  connect(sessionId) {
+    if (this.eventSource) {
+      this.eventSource.close();
+    }
+
+    this.sessionId = sessionId;
+    this.eventSource = new EventSource(`/api/tasks/${sessionId}/stream`);
+
+    this.eventSource.addEventListener('task_snapshot', (e) => {
+      const task = JSON.parse(e.data);
+      this.tasks.set(task.task_id, task);
+      this.render();
+    });
+
+    this.eventSource.addEventListener('task_started', (e) => {
+      const data = JSON.parse(e.data);
+      this.tasks.set(data.task_id, data);
+      this.render();
+    });
+
+    this.eventSource.addEventListener('step_started', (e) => {
+      const data = JSON.parse(e.data);
+      this._updateTask(data.task_id, task => {
+        if (task.steps && task.steps[data.step_index]) {
+          task.steps[data.step_index] = data.step;
+        }
+        task.current_step = data.step.name;
+        task.current_step_index = data.step_index;
+      });
+    });
+
+    this.eventSource.addEventListener('step_progress', (e) => {
+      const data = JSON.parse(e.data);
+      this._updateTask(data.task_id, task => {
+        if (task.steps && task.steps[data.step_index]) {
+          task.steps[data.step_index].progress = data.progress;
+          task.steps[data.step_index].details = data.details;
+        }
+        task.progress_percent = data.total_progress;
+      });
+    });
+
+    this.eventSource.addEventListener('step_completed', (e) => {
+      const data = JSON.parse(e.data);
+      this._updateTask(data.task_id, task => {
+        if (task.steps && task.steps[data.step_index]) {
+          task.steps[data.step_index] = data.step;
+        }
+        task.completed_steps = (task.completed_steps || 0) + 1;
+        task.progress_percent = data.total_progress;
+        task.estimated_remaining_seconds = data.estimated_remaining;
+      });
+    });
+
+    this.eventSource.addEventListener('step_failed', (e) => {
+      const data = JSON.parse(e.data);
+      this._updateTask(data.task_id, task => {
+        if (task.steps && task.steps[data.step_index]) {
+          task.steps[data.step_index] = data.step;
+        }
+      });
+    });
+
+    this.eventSource.addEventListener('task_artifact', (e) => {
+      const data = JSON.parse(e.data);
+      this._updateTask(data.task_id, task => {
+        if (!task.artifacts) task.artifacts = [];
+        task.artifacts.push(data.artifact);
+      });
+    });
+
+    this.eventSource.addEventListener('task_completed', (e) => {
+      const data = JSON.parse(e.data);
+      this.tasks.set(data.task_id, data);
+      this.render();
+      // Nach 5 Sekunden ausblenden
+      setTimeout(() => {
+        this.tasks.delete(data.task_id);
+        this.render();
+      }, 5000);
+    });
+
+    this.eventSource.addEventListener('task_failed', (e) => {
+      const data = JSON.parse(e.data);
+      this.tasks.set(data.task_id, data);
+      this.render();
+    });
+
+    this.eventSource.addEventListener('task_cancelled', (e) => {
+      const data = JSON.parse(e.data);
+      this.tasks.delete(data.task_id);
+      this.render();
+    });
+
+    this.eventSource.onerror = () => {
+      log.warn('[TaskProgress] SSE connection error, reconnecting...');
+      setTimeout(() => this.connect(sessionId), 3000);
+    };
+  },
+
+  /**
+   * Trennt die SSE-Verbindung
+   */
+  disconnect() {
+    if (this.eventSource) {
+      this.eventSource.close();
+      this.eventSource = null;
+    }
+    this.tasks.clear();
+    this.render();
+  },
+
+  /**
+   * Aktualisiert einen Task
+   */
+  _updateTask(taskId, updater) {
+    const task = this.tasks.get(taskId);
+    if (task) {
+      updater(task);
+      this.render();
+    }
+  },
+
+  /**
+   * Rendert alle aktiven Tasks
+   */
+  render() {
+    if (!this.container) return;
+
+    if (this.tasks.size === 0) {
+      this.container.innerHTML = '';
+      this.container.style.display = 'none';
+      return;
+    }
+
+    this.container.style.display = 'block';
+
+    const tasksHtml = Array.from(this.tasks.values())
+      .map(task => this._renderTask(task))
+      .join('');
+
+    this.container.innerHTML = tasksHtml;
+  },
+
+  /**
+   * Rendert einen einzelnen Task
+   */
+  _renderTask(task) {
+    const statusClass = task.status || 'running';
+    const isExpanded = this.expanded.has(task.task_id);
+
+    const stepsHtml = (task.steps || []).map((step, i) => this._renderStep(step, i)).join('');
+
+    const artifactsHtml = (task.artifacts && task.artifacts.length > 0) ? `
+      <div class="task-artifacts">
+        <button class="task-artifacts-toggle" onclick="taskProgressPanel.toggleArtifacts('${task.task_id}')">
+          ${isExpanded ? '&#9660;' : '&#9658;'} Zwischenergebnisse (${task.artifacts.length})
+        </button>
+        ${isExpanded ? `
+          <div class="task-artifacts-list">
+            ${task.artifacts.map(a => this._renderArtifact(a)).join('')}
+          </div>
+        ` : ''}
+      </div>
+    ` : '';
+
+    return `
+      <div class="task-progress-card ${statusClass}" data-task-id="${task.task_id}">
+        <div class="task-header">
+          <span class="task-title">${escapeHtml(task.title)}</span>
+          <span class="task-time">${this._formatRemaining(task.estimated_remaining_seconds)}</span>
+          ${task.status === 'running' ? `
+            <button class="task-cancel" onclick="taskProgressPanel.cancel('${task.task_id}')" title="Abbrechen">
+              &#10005;
+            </button>
+          ` : ''}
+        </div>
+
+        <div class="task-progress-bar">
+          <div class="task-progress-fill" style="width: ${task.progress_percent || 0}%"></div>
+          <span class="task-progress-text">${Math.round(task.progress_percent || 0)}%</span>
+        </div>
+
+        <div class="task-steps">
+          ${stepsHtml}
+        </div>
+
+        ${artifactsHtml}
+
+        ${task.error ? `<div class="task-error">${escapeHtml(task.error)}</div>` : ''}
+      </div>
+    `;
+  },
+
+  /**
+   * Rendert einen Schritt
+   */
+  _renderStep(step, index) {
+    const icons = {
+      pending: '&#9675;',   // ○
+      running: '&#10227;',  // ⟳
+      completed: '&#10003;', // ✓
+      failed: '&#10007;',   // ✗
+      skipped: '&#9676;',   // ◌
+    };
+
+    const icon = icons[step.status] || icons.pending;
+    const statusClass = step.status || 'pending';
+
+    return `
+      <div class="task-step ${statusClass}">
+        <span class="step-icon">${icon}</span>
+        <span class="step-name">${escapeHtml(step.name)}</span>
+        ${step.details ? `<span class="step-details">${escapeHtml(step.details)}</span>` : ''}
+        ${step.status === 'running' && step.progress > 0 && step.progress < 1 ? `
+          <span class="step-progress">${Math.round(step.progress * 100)}%</span>
+        ` : ''}
+      </div>
+    `;
+  },
+
+  /**
+   * Rendert ein Artifact
+   */
+  _renderArtifact(artifact) {
+    return `
+      <div class="task-artifact">
+        <span class="artifact-type">${escapeHtml(artifact.type)}</span>
+        <span class="artifact-content">${escapeHtml(artifact.summary || '')}</span>
+      </div>
+    `;
+  },
+
+  /**
+   * Formatiert verbleibende Zeit
+   */
+  _formatRemaining(seconds) {
+    if (!seconds || seconds <= 0) return '';
+    if (seconds < 60) return `~${seconds}s`;
+    return `~${Math.round(seconds / 60)} min`;
+  },
+
+  /**
+   * Toggled Artifacts-Ansicht
+   */
+  toggleArtifacts(taskId) {
+    if (this.expanded.has(taskId)) {
+      this.expanded.delete(taskId);
+    } else {
+      this.expanded.add(taskId);
+    }
+    this.render();
+  },
+
+  /**
+   * Bricht einen Task ab
+   */
+  async cancel(taskId) {
+    try {
+      const response = await fetch(`/api/tasks/${this.sessionId}/${taskId}/cancel`, {
+        method: 'POST',
+      });
+
+      if (response.ok) {
+        showToast('Task abgebrochen', 'info');
+      } else {
+        const error = await response.json();
+        showToast(error.message || 'Abbruch fehlgeschlagen', 'error');
+      }
+    } catch (e) {
+      showToast(`Fehler: ${e.message}`, 'error');
+    }
+  },
+};
+
+// Initialisiere Task-Panel beim Laden
+document.addEventListener('DOMContentLoaded', () => {
+  taskProgressPanel.init();
+});
