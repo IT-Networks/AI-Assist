@@ -264,6 +264,7 @@ class AgentEventType(str, Enum):
     WORKSPACE_FILE = "workspace_file"                # Gelesene Datei für Workspace Panel
     WORKSPACE_RESEARCH = "workspace_research"        # Research-Ergebnis für Workspace Panel
     WORKSPACE_PR = "workspace_pr"                    # PR-Daten für Workspace Panel
+    WORKSPACE_PR_ANALYSIS = "workspace_pr_analysis"  # PR-Analyse-Ergebnisse für Badges
 
 
 @dataclass
@@ -971,6 +972,7 @@ Sei präzise und gib detaillierte Analyse-Schritte."""
             "workspace_file": AgentEventType.WORKSPACE_FILE,
             "workspace_research": AgentEventType.WORKSPACE_RESEARCH,
             "workspace_pr": AgentEventType.WORKSPACE_PR,
+            "workspace_pr_analysis": AgentEventType.WORKSPACE_PR_ANALYSIS,
         }
 
     async def _drain_mcp_events(self) -> AsyncGenerator[AgentEvent, None]:
@@ -2831,6 +2833,11 @@ Sei präzise und gib detaillierte Analyse-Schritte."""
                                 head_branch = result_data.get("head_branch") or result_data.get("head", {}).get("ref", "") if isinstance(result_data.get("head"), dict) else result_data.get("head", "")
                                 base_branch = result_data.get("base_branch") or result_data.get("base", {}).get("ref", "") if isinstance(result_data.get("base"), dict) else result_data.get("base", "")
 
+                                # PR-Status bestimmen (open, closed, merged)
+                                pr_state = result_data.get("state", "open")
+                                is_merged = result_data.get("merged", False) or result_data.get("merged_at") is not None
+
+                                # Sende zuerst PR-Basisdaten mit loading=true
                                 yield AgentEvent(AgentEventType.WORKSPACE_PR, {
                                     "prNumber": pr_number,
                                     "repoOwner": repo.split("/")[0] if "/" in repo else "",
@@ -2842,10 +2849,36 @@ Sei präzise und gib detaillierte Analyse-Schritte."""
                                     "additions": result_data.get("additions", 0),
                                     "deletions": result_data.get("deletions", 0),
                                     "filesChanged": result_data.get("changed_files", 0),
-                                    "state": result_data.get("state", "open"),
+                                    "state": "merged" if is_merged else pr_state,
                                     "diff": result_data.get("diff", "")[:10000] if tool_call.name == "github_pr_diff" else "",
-                                    "toolCall": tool_call.name
+                                    "toolCall": tool_call.name,
+                                    "loading": True  # Analyse läuft noch
                                 })
+
+                                # Starte Background-PR-Analyse wenn Diff verfügbar
+                                diff_content = result_data.get("diff", "")
+                                if diff_content and len(diff_content) > 50:
+                                    try:
+                                        analysis = await self._analyze_pr_for_workspace(
+                                            pr_number=pr_number,
+                                            title=result_data.get("title", ""),
+                                            diff=diff_content[:15000],  # Limit für LLM
+                                            state="merged" if is_merged else pr_state
+                                        )
+                                        yield AgentEvent(AgentEventType.WORKSPACE_PR_ANALYSIS, {
+                                            "prNumber": pr_number,
+                                            **analysis
+                                        })
+                                    except Exception as e:
+                                        logger.warning(f"[agent] PR analysis failed: {e}")
+                                        # Sende leere Analyse damit Frontend Loading beendet
+                                        yield AgentEvent(AgentEventType.WORKSPACE_PR_ANALYSIS, {
+                                            "prNumber": pr_number,
+                                            "error": str(e),
+                                            "bySeverity": {"critical": 0, "high": 0, "medium": 0, "low": 0, "info": 0},
+                                            "verdict": "comment",
+                                            "findings": []
+                                        })
 
                     state.tool_calls_history.append(tool_call)
 
@@ -3037,6 +3070,133 @@ Sei präzise und gib detaillierte Analyse-Schritte."""
             "tool_calls_count": len(state.tool_calls_history),
             "max_iterations_reached": True
         })
+
+    async def _analyze_pr_for_workspace(
+        self,
+        pr_number: int,
+        title: str,
+        diff: str,
+        state: str
+    ) -> Dict[str, Any]:
+        """
+        Analysiert einen PR für das Workspace-Panel.
+
+        Macht einen separaten LLM-Call mit strukturiertem Output-Format
+        für die Anzeige im PR-Panel (Severity-Badges, Findings, Verdict).
+
+        Returns:
+            Dict mit bySeverity, verdict, findings, canApprove
+        """
+        prompt = f"""Analysiere diesen Pull Request und gib eine strukturierte Bewertung.
+
+PR #{pr_number}: {title}
+Status: {state}
+
+DIFF:
+```
+{diff[:12000]}
+```
+
+Antworte NUR mit einem JSON-Objekt in diesem Format (keine Erklärungen):
+{{
+  "bySeverity": {{
+    "critical": <Anzahl kritischer Issues>,
+    "high": <Anzahl hoher Issues>,
+    "medium": <Anzahl mittlerer Issues>,
+    "low": <Anzahl niedriger Issues>,
+    "info": <Anzahl Info-Hinweise>
+  }},
+  "verdict": "<approve|request_changes|comment>",
+  "findings": [
+    {{
+      "severity": "<critical|high|medium|low|info>",
+      "title": "<Kurztitel>",
+      "file": "<Dateipfad>",
+      "line": <Zeilennummer oder null>,
+      "description": "<Kurze Beschreibung>"
+    }}
+  ],
+  "summary": "<1-2 Sätze Zusammenfassung>"
+}}
+
+Bewertungskriterien:
+- critical: Sicherheitslücken, Datenverlust-Risiko
+- high: Bugs, Breaking Changes, Performance-Probleme
+- medium: Code-Qualität, fehlende Tests, schlechte Patterns
+- low: Style-Issues, Minor Improvements
+- info: Dokumentation, Kommentare
+
+Maximal 10 Findings. Bei closed/merged PRs: verdict="comment"."""
+
+        try:
+            # Schnelles Modell für Analyse
+            model = settings.llm.tool_model or settings.llm.default_model
+            base_url = settings.llm.base_url.rstrip("/")
+
+            headers = {"Content-Type": "application/json"}
+            if settings.llm.api_key and settings.llm.api_key != "none":
+                headers["Authorization"] = f"Bearer {settings.llm.api_key}"
+
+            payload = {
+                "model": model,
+                "messages": [{"role": "user", "content": prompt}],
+                "temperature": 0.2,
+                "max_tokens": 1500,
+                "stream": False
+            }
+
+            async with httpx.AsyncClient(
+                timeout=30,
+                verify=settings.llm.verify_ssl
+            ) as client:
+                response = await client.post(
+                    f"{base_url}/chat/completions",
+                    headers=headers,
+                    json=payload
+                )
+                response.raise_for_status()
+                data = response.json()
+
+                content = data.get("choices", [{}])[0].get("message", {}).get("content", "")
+
+                # JSON aus Response extrahieren
+                import re
+                json_match = re.search(r'\{[\s\S]*\}', content)
+                if json_match:
+                    result = json.loads(json_match.group())
+
+                    # Validierung und Defaults
+                    by_severity = result.get("bySeverity", {})
+                    for sev in ["critical", "high", "medium", "low", "info"]:
+                        by_severity[sev] = int(by_severity.get(sev, 0))
+
+                    verdict = result.get("verdict", "comment")
+                    if verdict not in ("approve", "request_changes", "comment"):
+                        verdict = "comment"
+
+                    # Bei closed/merged immer comment
+                    if state in ("closed", "merged"):
+                        verdict = "comment"
+
+                    return {
+                        "bySeverity": by_severity,
+                        "verdict": verdict,
+                        "findings": result.get("findings", [])[:10],
+                        "summary": result.get("summary", ""),
+                        "canApprove": state == "open"
+                    }
+
+        except Exception as e:
+            logger.warning(f"[agent] PR workspace analysis failed: {e}")
+
+        # Fallback bei Fehler
+        return {
+            "bySeverity": {"critical": 0, "high": 0, "medium": 0, "low": 0, "info": 0},
+            "verdict": "comment",
+            "findings": [],
+            "summary": "Analyse fehlgeschlagen",
+            "canApprove": state == "open"
+        }
 
     async def _stream_final_response(
         self,

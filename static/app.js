@@ -1152,6 +1152,11 @@ const prReviewState = {
   summary: null,
   userComments: {},  // Map of commentId -> user edited text
   dismissedComments: new Set(),
+  // Neue Felder für PR-Status und Analyse
+  state: 'open',        // open, closed, merged
+  loading: false,       // Analyse läuft
+  analysisData: null,   // Ergebnis der PR-Analyse (bySeverity, verdict, findings)
+  canApprove: true,     // Kann PR approved werden (nur bei open)
 };
 
 // Detect PR links in messages
@@ -1236,6 +1241,12 @@ function openPRFromEvent(data) {
   prReviewState.userComments = {};
   prReviewState.dismissedComments = new Set();
 
+  // Neue Felder für Status und Loading
+  prReviewState.state = data.state || 'open';
+  prReviewState.loading = data.loading || false;
+  prReviewState.analysisData = null;
+  prReviewState.canApprove = data.state === 'open';
+
   // Store diff if available (from github_pr_diff)
   if (data.diff) {
     prReviewState.diff = data.diff;
@@ -1249,6 +1260,18 @@ function openPRFromEvent(data) {
     prLabel.textContent = `PR #${data.prNumber}`;
   }
 
+  // Badge mit Loading-Indikator
+  const badge = document.getElementById('workspace-pr-badge');
+  if (badge) {
+    if (prReviewState.loading) {
+      badge.textContent = '...';
+      badge.style.display = 'inline';
+      badge.classList.add('loading');
+    } else {
+      badge.style.display = 'none';
+    }
+  }
+
   // Render panel content
   renderPRReviewPanel();
 
@@ -1257,6 +1280,29 @@ function openPRFromEvent(data) {
     toggleWorkspace();
   }
   switchWorkspaceTab('pr');
+}
+
+// Handle workspace_pr_analysis event - PR-Analyse-Ergebnisse
+function handlePRAnalysis(data) {
+  // Prüfe ob dies für den aktuellen PR ist
+  if (data.prNumber !== prReviewState.prNumber) return;
+
+  prReviewState.loading = false;
+  prReviewState.analysisData = data;
+  prReviewState.canApprove = data.canApprove !== false && prReviewState.state === 'open';
+
+  // Update Badge mit Issue-Count
+  const badge = document.getElementById('workspace-pr-badge');
+  if (badge) {
+    badge.classList.remove('loading');
+    const total = (data.bySeverity?.critical || 0) + (data.bySeverity?.high || 0) +
+                  (data.bySeverity?.medium || 0) + (data.bySeverity?.low || 0);
+    badge.textContent = total;
+    badge.style.display = total > 0 ? 'inline' : 'none';
+  }
+
+  // Re-render panel mit Analyse-Daten
+  renderPRReviewPanel();
 }
 
 function openPRReviewTab(review) {
@@ -1312,47 +1358,126 @@ function renderPRReviewPanel() {
   document.getElementById('pr-stats').textContent = `+${state.additions} -${state.deletions} | ${state.filesChanged} files`;
   document.getElementById('pr-author').textContent = `@${state.author || 'unknown'}`;
 
-  // Summary
-  if (state.summary) {
-    const s = state.summary;
-    document.getElementById('pr-critical').textContent = s.bySeverity?.critical || 0;
-    document.getElementById('pr-high').textContent = s.bySeverity?.high || 0;
-    document.getElementById('pr-medium').textContent = s.bySeverity?.medium || 0;
-    document.getElementById('pr-low').textContent = s.bySeverity?.low || 0;
-    document.getElementById('pr-info').textContent = s.bySeverity?.info || 0;
-
-    const verdictEl = document.getElementById('pr-verdict');
-    const verdict = s.verdict || 'comment';
-    verdictEl.className = `pr-verdict ${verdict}`;
-    verdictEl.innerHTML = verdict === 'approve'
-      ? '<span class="verdict-icon">&#9989;</span><span class="verdict-text">APPROVE</span>'
-      : verdict === 'request_changes'
-        ? '<span class="verdict-icon">&#9888;</span><span class="verdict-text">REQUEST CHANGES</span>'
-        : '<span class="verdict-icon">&#128172;</span><span class="verdict-text">COMMENT</span>';
+  // PR Status Badge anzeigen
+  const prNumberEl = document.getElementById('pr-number');
+  if (state.state === 'merged') {
+    prNumberEl.innerHTML = `#${state.prNumber} <span class="pr-state-badge merged">MERGED</span>`;
+  } else if (state.state === 'closed') {
+    prNumberEl.innerHTML = `#${state.prNumber} <span class="pr-state-badge closed">CLOSED</span>`;
+  } else {
+    prNumberEl.innerHTML = `#${state.prNumber} <span class="pr-state-badge open">OPEN</span>`;
   }
 
-  // Group comments by file
-  const fileComments = {};
-  for (const c of state.comments) {
-    if (!fileComments[c.filePath]) {
-      fileComments[c.filePath] = [];
+  // Severity Badges - aus analysisData oder summary oder loading
+  const analysis = state.analysisData || state.summary;
+
+  if (state.loading) {
+    // Loading-State für Badges
+    document.getElementById('pr-critical').innerHTML = '<span class="loading-dot"></span>';
+    document.getElementById('pr-high').innerHTML = '<span class="loading-dot"></span>';
+    document.getElementById('pr-medium').innerHTML = '<span class="loading-dot"></span>';
+    document.getElementById('pr-low').innerHTML = '<span class="loading-dot"></span>';
+    document.getElementById('pr-info').innerHTML = '<span class="loading-dot"></span>';
+
+    const verdictEl = document.getElementById('pr-verdict');
+    verdictEl.className = 'pr-verdict loading';
+    verdictEl.innerHTML = '<span class="verdict-icon">&#8987;</span><span class="verdict-text">ANALYSING...</span>';
+  } else if (analysis) {
+    const sev = analysis.bySeverity || {};
+    document.getElementById('pr-critical').textContent = sev.critical || 0;
+    document.getElementById('pr-high').textContent = sev.high || 0;
+    document.getElementById('pr-medium').textContent = sev.medium || 0;
+    document.getElementById('pr-low').textContent = sev.low || 0;
+    document.getElementById('pr-info').textContent = sev.info || 0;
+
+    const verdictEl = document.getElementById('pr-verdict');
+    const verdict = analysis.verdict || 'comment';
+    verdictEl.className = `pr-verdict ${verdict}`;
+
+    // Bei closed/merged kein Approve-Button sinnvoll
+    if (state.state === 'merged') {
+      verdictEl.innerHTML = '<span class="verdict-icon">&#128994;</span><span class="verdict-text">MERGED</span>';
+    } else if (state.state === 'closed') {
+      verdictEl.innerHTML = '<span class="verdict-icon">&#128308;</span><span class="verdict-text">CLOSED</span>';
+    } else {
+      verdictEl.innerHTML = verdict === 'approve'
+        ? '<span class="verdict-icon">&#9989;</span><span class="verdict-text">APPROVE</span>'
+        : verdict === 'request_changes'
+          ? '<span class="verdict-icon">&#9888;</span><span class="verdict-text">REQUEST CHANGES</span>'
+          : '<span class="verdict-icon">&#128172;</span><span class="verdict-text">COMMENT</span>';
     }
-    fileComments[c.filePath].push(c);
+  }
+
+  // Findings aus Analyse anzeigen (statt alte comments)
+  const findings = state.analysisData?.findings || [];
+  const comments = state.comments || [];
+  const allItems = findings.length > 0 ? findings : comments;
+
+  // Group items by file
+  const fileComments = {};
+  for (const item of allItems) {
+    const filePath = item.file || item.filePath || 'General';
+    if (!fileComments[filePath]) {
+      fileComments[filePath] = [];
+    }
+    fileComments[filePath].push(item);
   }
 
   // Render files
   const filesContainer = document.getElementById('pr-files');
-  filesContainer.innerHTML = Object.entries(fileComments).map(([filePath, comments]) => `
-    <div class="pr-file">
-      <div class="pr-file-header" onclick="togglePRFile(this)">
-        <span class="pr-file-name">${escapeHtml(filePath)}</span>
-        <span class="pr-file-issues">${comments.length} issues</span>
+
+  if (state.loading) {
+    filesContainer.innerHTML = `
+      <div class="pr-loading">
+        <div class="pr-loading-spinner"></div>
+        <span>Analysiere PR-Änderungen...</span>
       </div>
-      <div class="pr-file-comments">
-        ${comments.map(c => renderPRComment(c)).join('')}
+    `;
+  } else if (Object.keys(fileComments).length === 0) {
+    filesContainer.innerHTML = `
+      <div class="pr-empty">
+        <span class="pr-empty-icon">&#10004;</span>
+        <span>Keine Issues gefunden</span>
       </div>
+    `;
+  } else {
+    filesContainer.innerHTML = Object.entries(fileComments).map(([filePath, items]) => `
+      <div class="pr-file">
+        <div class="pr-file-header" onclick="togglePRFile(this)">
+          <span class="pr-file-name">${escapeHtml(filePath)}</span>
+          <span class="pr-file-issues">${items.length} issues</span>
+        </div>
+        <div class="pr-file-comments">
+          ${items.map(item => renderPRFinding(item)).join('')}
+        </div>
+      </div>
+    `).join('');
+  }
+
+  // Approve-Button nur bei open PRs anzeigen
+  const approveBtn = document.getElementById('pr-approve-btn');
+  if (approveBtn) {
+    approveBtn.style.display = state.canApprove && state.state === 'open' ? 'block' : 'none';
+  }
+}
+
+// Render einzelnes Finding aus der Analyse
+function renderPRFinding(item) {
+  const severity = item.severity || 'info';
+  const title = item.title || 'Issue';
+  const description = item.description || item.body || '';
+  const line = item.line;
+
+  return `
+    <div class="pr-comment ${severity}">
+      <div class="pr-comment-header">
+        ${line ? `<span class="pr-comment-line">Line ${line}</span>` : ''}
+        <span class="pr-comment-severity severity-${severity}">${severity.toUpperCase()}</span>
+        <span class="pr-comment-title">${escapeHtml(title)}</span>
+      </div>
+      <div class="pr-comment-body">${escapeHtml(description)}</div>
     </div>
-  `).join('');
+  `;
 }
 
 function renderPRComment(comment) {
@@ -3812,6 +3937,10 @@ async function processAgentEvent(event, bubble, msgDiv, chat) {
 
     case 'workspace_pr':
       openPRFromEvent(data);
+      break;
+
+    case 'workspace_pr_analysis':
+      handlePRAnalysis(data);
       break;
 
     case 'compaction': {
