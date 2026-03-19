@@ -493,6 +493,25 @@ body {
   color: var(--accent);
 }
 
+.chat-item.loading .chat-item-icon {
+  display: none;
+}
+
+.chat-item.loading .chat-item-spinner {
+  display: inline-block;
+}
+
+.chat-item-spinner {
+  display: none;
+  width: 14px;
+  height: 14px;
+  border: 2px solid var(--border);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+  flex-shrink: 0;
+}
+
 .chat-item-icon {
   flex-shrink: 0;
   font-size: 0.8rem;

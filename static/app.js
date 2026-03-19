@@ -2379,6 +2379,10 @@ async function switchToChat(chatId) {
 
   // Nachrichten-Historie und Mode vom Server laden wenn Chat vom Disk wiederhergestellt wird
   if (incomingChat.needsRestore) {
+    // Loading-Indikator im Sidebar anzeigen
+    const chatItem = document.querySelector(`.chat-item[data-chat-id="${chatId}"]`);
+    if (chatItem) chatItem.classList.add('loading');
+
     // Context bar first, then messages
     incomingChat.pane.innerHTML = _contextBarHTML();
     try {
@@ -2407,20 +2411,27 @@ async function switchToChat(chatId) {
         }
         // Restore erfolgreich - Flag erst JETZT setzen
         incomingChat.needsRestore = false;
+        if (chatItem) chatItem.classList.remove('loading');
       } else {
         // Server-Fehler (4xx/5xx) - Fallback auf Welcome Screen
         log.error(`[switchToChat] History fetch failed: ${res.status} ${res.statusText}`);
         incomingChat.pane.innerHTML = _contextBarHTML() + welcomeHTML();
         // Bei Fehler auch needsRestore = false setzen, um Endlosschleife zu vermeiden
         incomingChat.needsRestore = false;
+        if (chatItem) chatItem.classList.remove('loading');
         if (res.status !== 404) {
           showErrorToast('Chat-Historie konnte nicht geladen werden');
         }
       }
     } catch (e) {
-      if (e.name === 'AbortError') return; // Switch wurde abgebrochen - needsRestore bleibt true!
+      if (e.name === 'AbortError') {
+        // Switch wurde abgebrochen - needsRestore bleibt true, aber Loading entfernen
+        if (chatItem) chatItem.classList.remove('loading');
+        return;
+      }
       incomingChat.pane.innerHTML = _contextBarHTML() + welcomeHTML();
       incomingChat.needsRestore = false;
+      if (chatItem) chatItem.classList.remove('loading');
       log.error('Failed to restore chat history:', e);
       showErrorToast('Chat-Historie konnte nicht geladen werden');
     }
@@ -2570,6 +2581,7 @@ function renderChatList() {
       item.dataset.chatId = chat.id;
 
       item.innerHTML = `
+        <span class="chat-item-spinner"></span>
         <span class="chat-item-icon">💬</span>
         <span class="chat-item-title" title="${escapeHtml(chat.title)}">${escapeHtml(chat.title)}</span>
         <button class="chat-item-rename" title="Umbenennen">✏</button>
