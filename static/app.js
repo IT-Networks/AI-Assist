@@ -14488,8 +14488,16 @@ const taskProgressPanel = {
     });
 
     this.eventSource.onerror = () => {
-      log.warn('[TaskProgress] SSE connection error, reconnecting...');
-      setTimeout(() => this.connect(sessionId), 3000);
+      // Nur reconnecten wenn dies noch die aktive Session ist
+      if (this.sessionId === sessionId) {
+        log.warn('[TaskProgress] SSE connection error, reconnecting...');
+        setTimeout(() => {
+          // Nochmal prüfen vor reconnect
+          if (this.sessionId === sessionId) {
+            this.connect(sessionId);
+          }
+        }, 3000);
+      }
     };
   },
 
