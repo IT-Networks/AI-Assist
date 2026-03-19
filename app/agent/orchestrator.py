@@ -2974,9 +2974,52 @@ Sei präzise und gib detaillierte Analyse-Schritte."""
             pass
 
         yield AgentEvent(AgentEventType.USAGE, usage_data)
+
+        # Zusammenfassung für Folge-Aufruf generieren
+        summary_parts = []
+        summary_parts.append(f"⚠️ **Maximale Iterationen erreicht** ({self.max_iterations} Iterationen)")
+        summary_parts.append("")
+
+        # Tool-Aufrufe zusammenfassen
+        if state.tool_calls_history:
+            tool_counts = {}
+            for tc in state.tool_calls_history:
+                tool_counts[tc.name] = tool_counts.get(tc.name, 0) + 1
+
+            summary_parts.append("**Ausgeführte Tools:**")
+            for tool_name, count in sorted(tool_counts.items(), key=lambda x: -x[1]):
+                summary_parts.append(f"- {tool_name}: {count}x")
+            summary_parts.append("")
+
+        # Letzte Aktivität aus Messages extrahieren
+        recent_activity = []
+        for msg in reversed(state.messages_history[-6:]):
+            if msg.get("role") == "assistant" and msg.get("content"):
+                content = msg["content"]
+                # Nur ersten Satz/kurze Preview
+                preview = content[:200].split("\n")[0]
+                if preview:
+                    recent_activity.append(preview)
+                    break
+
+        if recent_activity:
+            summary_parts.append("**Letzter Stand:**")
+            summary_parts.append(recent_activity[0])
+            if len(recent_activity[0]) >= 200:
+                summary_parts.append("...")
+            summary_parts.append("")
+
+        summary_parts.append("**Für Folgeaufruf:** Die bisherigen Ergebnisse sind im Chat-Kontext erhalten. Formuliere eine spezifischere Anfrage um fortzufahren.")
+
+        summary_response = "\n".join(summary_parts)
+
+        # Summary als Token streamen
+        yield AgentEvent(AgentEventType.TOKEN, summary_response)
+
         yield AgentEvent(AgentEventType.DONE, {
-            "response": "Maximale Iterationen erreicht.",
-            "tool_calls_count": len(state.tool_calls_history)
+            "response": summary_response,
+            "tool_calls_count": len(state.tool_calls_history),
+            "max_iterations_reached": True
         })
 
     async def _stream_final_response(
