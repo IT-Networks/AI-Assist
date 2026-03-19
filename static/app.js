@@ -2612,8 +2612,14 @@ function renderChatList() {
         <button class="chat-item-rename" title="Umbenennen">✏</button>
         <button class="chat-item-delete" title="Chat löschen">✕</button>`;
 
-      item.querySelector('.chat-item-title').addEventListener('click', () => switchToChat(chat.id));
-      item.querySelector('.chat-item-icon').addEventListener('click', () => switchToChat(chat.id));
+      // Click auf gesamtes Item (außer Buttons) wechselt zum Chat
+      item.addEventListener('click', (e) => {
+        // Nicht auslösen wenn auf Button geklickt
+        if (e.target.closest('.chat-item-rename') || e.target.closest('.chat-item-delete')) {
+          return;
+        }
+        switchToChat(chat.id);
+      });
       item.querySelector('.chat-item-rename').addEventListener('click', (e) => {
         e.stopPropagation();
         startInlineRename(chat.id, item);
