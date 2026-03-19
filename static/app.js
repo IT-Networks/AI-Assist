@@ -1189,37 +1189,110 @@ function detectPRInMessage(text) {
   return null;
 }
 
+/**
+ * Lädt PR-Daten direkt von der API (unabhängig vom Chat).
+ * Nutzt die neuen /api/github/pr/ Endpoints.
+ */
 async function loadPRReview(repoOwner, repoName, prNumber) {
-  showToast('Lade PR-Daten...', 'info');
+  log.info('[PR] loadPRReview called (independent)', { repoOwner, repoName, prNumber });
+
+  // Setze Loading-State
+  prReviewState.active = true;
+  prReviewState.prNumber = prNumber;
+  prReviewState.repoOwner = repoOwner;
+  prReviewState.repoName = repoName;
+  prReviewState.loading = true;
+  prReviewState.analysisData = null;
+
+  // Zeige PR-Tab sofort mit Loading
+  const prTab = document.getElementById('workspace-pr-tab');
+  if (prTab) {
+    prTab.style.display = 'flex';
+    const prLabel = document.getElementById('workspace-pr-label');
+    if (prLabel) prLabel.textContent = `PR #${prNumber}`;
+  }
+
+  // Workspace öffnen und zum PR-Tab wechseln
+  if (!workspaceState.visible) {
+    toggleWorkspace();
+  }
+  switchWorkspaceTab('pr');
+  renderPRReviewPanel();
 
   try {
-    // First, fetch PR info from GitHub (mock for now, would need GitHub API)
-    // For now, trigger a review with placeholder data
-    const res = await fetch('/api/reviews/trigger', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        repoOwner,
-        repoName,
-        prNumber,
-        headSha: 'HEAD',
-        baseSha: 'BASE',
-        files: {},  // Would be populated from GitHub diff
-        reviewTypes: ['security', 'quality', 'style'],
-      }),
-    });
-
-    if (!res.ok) {
-      const err = await res.json();
-      throw new Error(err.detail || 'Failed to load PR');
+    // 1. PR-Details laden (unabhängiger API-Call)
+    const detailsRes = await fetch(`/api/github/pr/${repoOwner}/${repoName}/${prNumber}`);
+    if (!detailsRes.ok) {
+      const err = await detailsRes.json();
+      throw new Error(err.detail || 'PR-Details konnten nicht geladen werden');
     }
 
-    const review = await res.json();
-    openPRReviewTab(review);
+    const details = await detailsRes.json();
+    log.info('[PR] PR details loaded', details);
+
+    // Update State mit Details
+    prReviewState.title = details.title || `PR #${prNumber}`;
+    prReviewState.author = details.author || 'unknown';
+    prReviewState.baseBranch = details.baseBranch || 'main';
+    prReviewState.headBranch = details.headBranch || 'feature';
+    prReviewState.additions = details.additions || 0;
+    prReviewState.deletions = details.deletions || 0;
+    prReviewState.filesChanged = details.filesChanged || 0;
+    prReviewState.state = details.state || 'open';
+    prReviewState.canApprove = details.state === 'open';
+
+    // Re-render mit Details (noch loading für Analyse)
+    renderPRReviewPanel();
+
+    // 2. PR-Analyse starten (unabhängiger API-Call)
+    const analyzeRes = await fetch(`/api/github/pr/${repoOwner}/${repoName}/${prNumber}/analyze`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({})
+    });
+
+    if (analyzeRes.ok) {
+      const analysis = await analyzeRes.json();
+      log.info('[PR] PR analysis completed', analysis);
+
+      prReviewState.loading = false;
+      prReviewState.analysisData = analysis;
+      prReviewState.canApprove = analysis.canApprove !== false && prReviewState.state === 'open';
+    } else {
+      // Analyse fehlgeschlagen, aber Details sind da
+      prReviewState.loading = false;
+      prReviewState.analysisData = {
+        bySeverity: { critical: 0, high: 0, medium: 0, low: 0, info: 0 },
+        verdict: 'comment',
+        findings: [],
+        summary: 'Analyse nicht verfügbar'
+      };
+    }
+
+    // Finales Render
+    renderPRReviewPanel();
+
+    // Badge aktualisieren
+    const badge = document.getElementById('workspace-pr-badge');
+    if (badge && prReviewState.analysisData) {
+      badge.classList.remove('loading');
+      const sev = prReviewState.analysisData.bySeverity || {};
+      const total = (sev.critical || 0) + (sev.high || 0) + (sev.medium || 0) + (sev.low || 0);
+      badge.textContent = total;
+      badge.style.display = total > 0 ? 'inline' : 'none';
+    }
 
   } catch (e) {
-    log.error('Failed to load PR review:', e);
-    showToast(`PR-Review fehlgeschlagen: ${e.message}`, 'error');
+    log.error('[PR] Failed to load PR:', e);
+    prReviewState.loading = false;
+    prReviewState.analysisData = {
+      bySeverity: { critical: 0, high: 0, medium: 0, low: 0, info: 0 },
+      verdict: 'comment',
+      findings: [],
+      summary: `Fehler: ${e.message}`
+    };
+    renderPRReviewPanel();
+    showToast(`PR-Laden fehlgeschlagen: ${e.message}`, 'error');
   }
 }
 
@@ -1252,7 +1325,7 @@ function openPRFromEvent(data) {
 
   // Neue Felder für Status und Loading
   prReviewState.state = data.state || 'open';
-  prReviewState.loading = data.loading === true;  // Explicit boolean check
+  prReviewState.loading = data.loading === true;
   prReviewState.analysisData = null;
   prReviewState.canApprove = data.state === 'open';
 
@@ -1261,7 +1334,7 @@ function openPRFromEvent(data) {
     prReviewState.diff = data.diff;
   }
 
-  // Show PR tab - WICHTIG: Erst Tab sichtbar machen
+  // Show PR tab
   const prTab = document.getElementById('workspace-pr-tab');
   const prLabel = document.getElementById('workspace-pr-label');
   if (prTab) {
@@ -1285,10 +1358,21 @@ function openPRFromEvent(data) {
     }
   }
 
-  // WICHTIG: Workspace öffnen BEVOR Panel gerendert wird
+  // Workspace öffnen
   if (!workspaceState.visible) {
     toggleWorkspace();
     log.debug('[PR] Workspace toggled visible');
+  }
+
+  // Wenn Loading und Owner/Repo bekannt: Starte unabhängige Analyse
+  // Das macht das Panel unabhängig vom Chat-Event-Flow
+  if (prReviewState.loading && prReviewState.repoOwner && prReviewState.repoName) {
+    log.info('[PR] Starting independent analysis fetch');
+    _fetchPRAnalysisIndependent(
+      prReviewState.repoOwner,
+      prReviewState.repoName,
+      prReviewState.prNumber
+    );
   }
 
   // Tab wechseln
@@ -1297,6 +1381,61 @@ function openPRFromEvent(data) {
 
   // Render panel content NACH Tab-Wechsel
   renderPRReviewPanel();
+}
+
+/**
+ * Holt PR-Analyse unabhängig vom Chat-Event-Flow.
+ * Wird aufgerufen wenn das Panel loading=true ist aber keine Analyse über Events kommt.
+ */
+async function _fetchPRAnalysisIndependent(owner, repo, prNumber) {
+  try {
+    const res = await fetch(`/api/github/pr/${owner}/${repo}/${prNumber}/analyze`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({})
+    });
+
+    if (res.ok) {
+      const analysis = await res.json();
+      log.info('[PR] Independent analysis completed', analysis);
+
+      // Nur aktualisieren wenn noch der gleiche PR
+      if (prReviewState.prNumber === prNumber) {
+        prReviewState.loading = false;
+        prReviewState.analysisData = analysis;
+        prReviewState.canApprove = analysis.canApprove !== false && prReviewState.state === 'open';
+        renderPRReviewPanel();
+
+        // Badge aktualisieren
+        const badge = document.getElementById('workspace-pr-badge');
+        if (badge) {
+          badge.classList.remove('loading');
+          const sev = analysis.bySeverity || {};
+          const total = (sev.critical || 0) + (sev.high || 0) + (sev.medium || 0) + (sev.low || 0);
+          badge.textContent = total;
+          badge.style.display = total > 0 ? 'inline' : 'none';
+        }
+      }
+    } else {
+      log.warn('[PR] Independent analysis failed', res.status);
+      if (prReviewState.prNumber === prNumber) {
+        prReviewState.loading = false;
+        prReviewState.analysisData = {
+          bySeverity: { critical: 0, high: 0, medium: 0, low: 0, info: 0 },
+          verdict: 'comment',
+          findings: [],
+          summary: 'Analyse nicht verfügbar'
+        };
+        renderPRReviewPanel();
+      }
+    }
+  } catch (e) {
+    log.error('[PR] Independent analysis error', e);
+    if (prReviewState.prNumber === prNumber) {
+      prReviewState.loading = false;
+      renderPRReviewPanel();
+    }
+  }
 }
 
 // Handle workspace_pr_analysis event - PR-Analyse-Ergebnisse

@@ -281,3 +281,245 @@ async def list_repos(
         response["pages_fetched"] = result["pages_fetched"]
 
     return response
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# PR-Endpoints (unabhängig vom Chat)
+# ══════════════════════════════════════════════════════════════════════════════
+
+@router.get("/pr/{owner}/{repo}/{pr_number}")
+async def get_pr_details(owner: str, repo: str, pr_number: int) -> Dict[str, Any]:
+    """
+    Holt PR-Details direkt von GitHub (unabhängig vom Chat).
+
+    Wird vom Workspace-Panel verwendet für eigenständige PR-Anzeige.
+    """
+    if not settings.github.enabled:
+        raise HTTPException(status_code=400, detail="GitHub nicht aktiviert")
+
+    api_url = settings.github.get_api_url()
+
+    # PR-Details holen
+    pr_result = await _github_request(
+        method="GET",
+        url=f"{api_url}/repos/{owner}/{repo}/pulls/{pr_number}",
+        token=settings.github.token,
+        verify_ssl=settings.github.verify_ssl,
+        timeout=settings.github.timeout_seconds,
+    )
+
+    if not pr_result["success"]:
+        raise HTTPException(status_code=502, detail=pr_result["error"])
+
+    pr = pr_result["data"]
+
+    return {
+        "prNumber": pr.get("number"),
+        "title": pr.get("title"),
+        "body": (pr.get("body") or "")[:2000],
+        "state": "merged" if pr.get("merged") else pr.get("state"),
+        "author": pr.get("user", {}).get("login", "unknown"),
+        "baseBranch": pr.get("base", {}).get("ref", "main"),
+        "headBranch": pr.get("head", {}).get("ref", "feature"),
+        "additions": pr.get("additions", 0),
+        "deletions": pr.get("deletions", 0),
+        "filesChanged": pr.get("changed_files", 0),
+        "createdAt": pr.get("created_at"),
+        "updatedAt": pr.get("updated_at"),
+        "mergedAt": pr.get("merged_at"),
+        "repoOwner": owner,
+        "repoName": repo,
+    }
+
+
+@router.get("/pr/{owner}/{repo}/{pr_number}/diff")
+async def get_pr_diff(owner: str, repo: str, pr_number: int) -> Dict[str, Any]:
+    """
+    Holt den PR-Diff direkt von GitHub.
+    """
+    if not settings.github.enabled:
+        raise HTTPException(status_code=400, detail="GitHub nicht aktiviert")
+
+    api_url = settings.github.get_api_url()
+
+    # Diff mit speziellem Accept-Header holen
+    headers = {
+        "Accept": "application/vnd.github.v3.diff",
+        "Authorization": f"token {settings.github.token}",
+    }
+
+    async with httpx.AsyncClient(
+        verify=settings.github.verify_ssl,
+        timeout=settings.github.timeout_seconds
+    ) as client:
+        try:
+            response = await client.get(
+                f"{api_url}/repos/{owner}/{repo}/pulls/{pr_number}",
+                headers=headers,
+            )
+            response.raise_for_status()
+            diff = response.text
+
+            return {
+                "prNumber": pr_number,
+                "diff": diff[:50000],  # Max 50k chars
+                "truncated": len(diff) > 50000,
+            }
+        except httpx.HTTPStatusError as e:
+            raise HTTPException(status_code=e.response.status_code, detail=str(e))
+        except Exception as e:
+            raise HTTPException(status_code=502, detail=str(e))
+
+
+class PRAnalyzeRequest(BaseModel):
+    """Request für PR-Analyse."""
+    diff: str = ""
+
+
+@router.post("/pr/{owner}/{repo}/{pr_number}/analyze")
+async def analyze_pr(
+    owner: str,
+    repo: str,
+    pr_number: int,
+    request: PRAnalyzeRequest = PRAnalyzeRequest()
+) -> Dict[str, Any]:
+    """
+    Analysiert einen PR mit LLM (unabhängig vom Chat).
+
+    Wenn kein Diff im Request, wird er automatisch geholt.
+    """
+    import json as json_module
+
+    if not settings.github.enabled:
+        raise HTTPException(status_code=400, detail="GitHub nicht aktiviert")
+
+    # PR-Details holen
+    pr_details = await get_pr_details(owner, repo, pr_number)
+
+    # Diff holen wenn nicht im Request
+    diff = request.diff
+    if not diff or len(diff) < 50:
+        diff_result = await get_pr_diff(owner, repo, pr_number)
+        diff = diff_result.get("diff", "")
+
+    if not diff or len(diff) < 50:
+        return {
+            "prNumber": pr_number,
+            "bySeverity": {"critical": 0, "high": 0, "medium": 0, "low": 0, "info": 0},
+            "verdict": "comment",
+            "findings": [],
+            "summary": "Kein Diff verfügbar für Analyse",
+            "canApprove": pr_details.get("state") == "open"
+        }
+
+    # LLM-Analyse
+    prompt = f"""Analysiere diesen Pull Request und gib eine strukturierte Bewertung.
+
+PR #{pr_number}: {pr_details.get('title', '')}
+Status: {pr_details.get('state', 'open')}
+
+DIFF:
+```
+{diff[:12000]}
+```
+
+Antworte NUR mit einem JSON-Objekt in diesem Format (keine Erklärungen):
+{{
+  "bySeverity": {{
+    "critical": <Anzahl kritischer Issues>,
+    "high": <Anzahl hoher Issues>,
+    "medium": <Anzahl mittlerer Issues>,
+    "low": <Anzahl niedriger Issues>,
+    "info": <Anzahl Info-Hinweise>
+  }},
+  "verdict": "<approve|request_changes|comment>",
+  "findings": [
+    {{
+      "severity": "<critical|high|medium|low|info>",
+      "title": "<Kurztitel>",
+      "file": "<Dateipfad>",
+      "line": <Zeilennummer oder null>,
+      "description": "<Kurze Beschreibung>"
+    }}
+  ],
+  "summary": "<1-2 Sätze Zusammenfassung>"
+}}
+
+Bewertungskriterien:
+- critical: Sicherheitslücken, Datenverlust-Risiko
+- high: Bugs, Breaking Changes, Performance-Probleme
+- medium: Code-Qualität, fehlende Tests, schlechte Patterns
+- low: Style-Issues, Minor Improvements
+- info: Dokumentation, Kommentare
+
+Maximal 10 Findings. Bei closed/merged PRs: verdict="comment"."""
+
+    try:
+        model = settings.llm.tool_model or settings.llm.default_model
+        base_url = settings.llm.base_url.rstrip("/")
+
+        headers = {"Content-Type": "application/json"}
+        if settings.llm.api_key and settings.llm.api_key != "none":
+            headers["Authorization"] = f"Bearer {settings.llm.api_key}"
+
+        payload = {
+            "model": model,
+            "messages": [{"role": "user", "content": prompt}],
+            "temperature": 0.2,
+            "max_tokens": 1500,
+            "stream": False
+        }
+
+        async with httpx.AsyncClient(
+            timeout=30,
+            verify=settings.llm.verify_ssl
+        ) as client:
+            response = await client.post(
+                f"{base_url}/chat/completions",
+                headers=headers,
+                json=payload
+            )
+            response.raise_for_status()
+            data = response.json()
+
+            content = data.get("choices", [{}])[0].get("message", {}).get("content", "")
+
+            # JSON aus Response extrahieren
+            json_match = re.search(r'\{[\s\S]*\}', content)
+            if json_match:
+                result = json_module.loads(json_match.group())
+
+                # Validierung
+                by_severity = result.get("bySeverity", {})
+                for sev in ["critical", "high", "medium", "low", "info"]:
+                    by_severity[sev] = int(by_severity.get(sev, 0))
+
+                verdict = result.get("verdict", "comment")
+                if verdict not in ("approve", "request_changes", "comment"):
+                    verdict = "comment"
+
+                # Bei closed/merged immer comment
+                if pr_details.get("state") in ("closed", "merged"):
+                    verdict = "comment"
+
+                return {
+                    "prNumber": pr_number,
+                    "bySeverity": by_severity,
+                    "verdict": verdict,
+                    "findings": result.get("findings", [])[:10],
+                    "summary": result.get("summary", ""),
+                    "canApprove": pr_details.get("state") == "open"
+                }
+            else:
+                raise ValueError("Keine JSON-Antwort vom LLM")
+
+    except Exception as e:
+        return {
+            "prNumber": pr_number,
+            "bySeverity": {"critical": 0, "high": 0, "medium": 0, "low": 0, "info": 0},
+            "verdict": "comment",
+            "findings": [],
+            "summary": f"Analyse fehlgeschlagen: {str(e)}",
+            "canApprove": pr_details.get("state") == "open",
+            "error": str(e)
+        }
