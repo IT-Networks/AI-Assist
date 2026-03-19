@@ -56,9 +56,14 @@ async def check_for_updates():
     Returns:
         Dict mit: available, current_version, latest_version, release_notes, download_url
     """
+    from fastapi.responses import JSONResponse
     service = get_update_service()
     result = await service.check_for_updates()
-    return result
+    # Kein Caching - immer frische Daten
+    return JSONResponse(
+        content=result,
+        headers={"Cache-Control": "no-cache, no-store, must-revalidate"}
+    )
 
 
 @router.post("/install")
@@ -281,9 +286,13 @@ async def save_update_config(request: UpdateConfigRequest):
 @router.get("/version")
 async def get_version():
     """Gibt die aktuelle App-Version zurück."""
+    from fastapi.responses import JSONResponse
     from app.services.update_service import get_current_version
 
-    return {
-        "version": get_current_version(),
-        "update_enabled": settings.update.enabled,
-    }
+    return JSONResponse(
+        content={
+            "version": get_current_version(),
+            "update_enabled": settings.update.enabled,
+        },
+        headers={"Cache-Control": "no-cache, no-store, must-revalidate"}
+    )

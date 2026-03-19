@@ -13562,19 +13562,38 @@ async function initUpdateButton() {
         btn.style.display = 'inline-flex';
         // Check on start if configured
         if (config.check_on_start) {
-          const check = await fetch('/api/update/check');
-          if (check.ok) {
-            const result = await check.json();
-            if (result.available) {
-              btn.classList.add('update-available');
-              btn.title = `Update verfügbar: v${result.latest_version}`;
-            }
-          }
+          await refreshUpdateStatus();
         }
+        // Periodisch alle 5 Minuten prüfen
+        setInterval(refreshUpdateStatus, 5 * 60 * 1000);
       }
     }
   } catch (e) {
     log.warn('[update] Init failed:', e);
+  }
+}
+
+async function refreshUpdateStatus() {
+  try {
+    // Cache-Busting mit Timestamp
+    const check = await fetch(`/api/update/check?_t=${Date.now()}`);
+    if (check.ok) {
+      const result = await check.json();
+      const btn = document.getElementById('update-btn');
+      if (btn) {
+        if (result.available) {
+          btn.classList.add('update-available');
+          btn.title = `Update verfügbar: v${result.latest_version}`;
+        } else {
+          btn.classList.remove('update-available');
+          btn.title = 'Nach Updates suchen';
+        }
+      }
+      // Cache für Modal aktualisieren
+      updateState.latestVersion = result.latest_version;
+    }
+  } catch (e) {
+    log.debug('[update] Refresh failed:', e);
   }
 }
 
@@ -13594,7 +13613,8 @@ async function checkForUpdates() {
   updateState.checking = true;
 
   try {
-    const response = await fetch('/api/update/check');
+    // Cache-Busting mit Timestamp für frische Daten
+    const response = await fetch(`/api/update/check?_t=${Date.now()}`);
     const result = await response.json();
 
     document.getElementById('update-checking').style.display = 'none';
