@@ -2975,46 +2975,62 @@ Sei präzise und gib detaillierte Analyse-Schritte."""
 
         yield AgentEvent(AgentEventType.USAGE, usage_data)
 
-        # Zusammenfassung für Folge-Aufruf generieren
-        summary_parts = []
-        summary_parts.append(f"⚠️ **Maximale Iterationen erreicht** ({self.max_iterations} Iterationen)")
-        summary_parts.append("")
+        # Status-Nachricht senden während LLM-Summary generiert wird
+        yield AgentEvent(AgentEventType.TOKEN, f"⚠️ **Maximale Iterationen erreicht** ({self.max_iterations} Iterationen)\n\n")
+        yield AgentEvent(AgentEventType.TOKEN, "🔄 *Generiere Zusammenfassung...*\n\n")
 
-        # Tool-Aufrufe zusammenfassen
-        if state.tool_calls_history:
-            tool_counts = {}
-            for tc in state.tool_calls_history:
-                tool_counts[tc.name] = tool_counts.get(tc.name, 0) + 1
+        # LLM-basierte Zusammenfassung für Folge-Aufruf generieren
+        llm_summary = None
+        try:
+            llm_summary = await self.summarizer.create_max_iterations_summary(
+                user_query=user_message,
+                tool_calls_history=state.tool_calls_history,
+                messages_history=state.messages_history,
+                iterations=self.max_iterations
+            )
+        except Exception as e:
+            logger.warning(f"[agent] Max-iterations summary failed: {e}")
 
-            summary_parts.append("**Ausgeführte Tools:**")
-            for tool_name, count in sorted(tool_counts.items(), key=lambda x: -x[1]):
-                summary_parts.append(f"- {tool_name}: {count}x")
-            summary_parts.append("")
+        if llm_summary:
+            # LLM-Zusammenfassung streamen
+            summary_response = llm_summary
+            yield AgentEvent(AgentEventType.TOKEN, summary_response)
+        else:
+            # Fallback: Statische Zusammenfassung
+            summary_parts = []
 
-        # Letzte Aktivität aus Messages extrahieren
-        recent_activity = []
-        for msg in reversed(state.messages_history[-6:]):
-            if msg.get("role") == "assistant" and msg.get("content"):
-                content = msg["content"]
-                # Nur ersten Satz/kurze Preview
-                preview = content[:200].split("\n")[0]
-                if preview:
-                    recent_activity.append(preview)
-                    break
+            # Tool-Aufrufe zusammenfassen
+            if state.tool_calls_history:
+                tool_counts = {}
+                for tc in state.tool_calls_history:
+                    tool_counts[tc.name] = tool_counts.get(tc.name, 0) + 1
 
-        if recent_activity:
-            summary_parts.append("**Letzter Stand:**")
-            summary_parts.append(recent_activity[0])
-            if len(recent_activity[0]) >= 200:
-                summary_parts.append("...")
-            summary_parts.append("")
+                summary_parts.append("**Ausgeführte Tools:**")
+                for tool_name, count in sorted(tool_counts.items(), key=lambda x: -x[1]):
+                    summary_parts.append(f"- {tool_name}: {count}x")
+                summary_parts.append("")
 
-        summary_parts.append("**Für Folgeaufruf:** Die bisherigen Ergebnisse sind im Chat-Kontext erhalten. Formuliere eine spezifischere Anfrage um fortzufahren.")
+            # Letzte Aktivität aus Messages extrahieren
+            recent_activity = []
+            for msg in reversed(state.messages_history[-6:]):
+                if msg.get("role") == "assistant" and msg.get("content"):
+                    content = msg["content"]
+                    preview = content[:200].split("\n")[0]
+                    if preview:
+                        recent_activity.append(preview)
+                        break
 
-        summary_response = "\n".join(summary_parts)
+            if recent_activity:
+                summary_parts.append("**Letzter Stand:**")
+                summary_parts.append(recent_activity[0])
+                if len(recent_activity[0]) >= 200:
+                    summary_parts.append("...")
+                summary_parts.append("")
 
-        # Summary als Token streamen
-        yield AgentEvent(AgentEventType.TOKEN, summary_response)
+            summary_parts.append("**Für Folgeaufruf:** Die bisherigen Ergebnisse sind im Chat-Kontext erhalten. Formuliere eine spezifischere Anfrage um fortzufahren.")
+
+            summary_response = "\n".join(summary_parts)
+            yield AgentEvent(AgentEventType.TOKEN, summary_response)
 
         yield AgentEvent(AgentEventType.DONE, {
             "response": summary_response,

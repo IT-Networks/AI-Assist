@@ -205,6 +205,128 @@ ZUSAMMENFASSUNG:"""
 
         return "\n".join(parts)
 
+    # Prompt für Max-Iterations Zusammenfassung
+    MAX_ITERATIONS_PROMPT = """Die Anfrage wurde nach {iterations} Iterationen abgebrochen (Limit erreicht).
+
+URSPRÜNGLICHE ANFRAGE:
+{user_query}
+
+AUSGEFÜHRTE AKTIONEN:
+{tool_summary}
+
+LETZTE KONVERSATION:
+{recent_messages}
+
+Erstelle eine kurze Zusammenfassung (max 200 Wörter) die folgendes enthält:
+1. **Erreicht**: Was wurde bereits erledigt/gefunden?
+2. **Offen**: Was fehlt noch zur vollständigen Beantwortung?
+3. **Empfehlung**: Konkreter Vorschlag für den Folge-Prompt
+
+Antworte auf Deutsch und nutze Markdown-Formatierung."""
+
+    async def create_max_iterations_summary(
+        self,
+        user_query: str,
+        tool_calls_history: List,
+        messages_history: List[Dict],
+        iterations: int
+    ) -> Optional[str]:
+        """
+        Erstellt eine LLM-basierte Zusammenfassung bei max iterations.
+
+        Args:
+            user_query: Die ursprüngliche Benutzeranfrage
+            tool_calls_history: Liste der ausgeführten Tool-Calls
+            messages_history: Die Konversations-Historie
+            iterations: Anzahl der durchgeführten Iterationen
+
+        Returns:
+            Zusammenfassung als String oder None bei Fehler
+        """
+        try:
+            # Tool-Aufrufe zusammenfassen
+            tool_summary_parts = []
+            tool_counts = {}
+            for tc in tool_calls_history:
+                tool_name = tc.name if hasattr(tc, 'name') else str(tc)
+                tool_counts[tool_name] = tool_counts.get(tool_name, 0) + 1
+
+            for tool_name, count in sorted(tool_counts.items(), key=lambda x: -x[1]):
+                tool_summary_parts.append(f"- {tool_name}: {count}x aufgerufen")
+
+            tool_summary = "\n".join(tool_summary_parts) if tool_summary_parts else "Keine Tools aufgerufen"
+
+            # Letzte Messages extrahieren (max 4)
+            recent_parts = []
+            for msg in messages_history[-4:]:
+                if msg is None or not isinstance(msg, dict):
+                    continue
+                role = msg.get("role", "unknown")
+                content = msg.get("content", "") or ""
+                # Kürzen auf 300 Zeichen
+                content_preview = content[:300]
+                if len(content) > 300:
+                    content_preview += "..."
+                recent_parts.append(f"{role.upper()}: {content_preview}")
+
+            recent_messages = "\n\n".join(recent_parts) if recent_parts else "Keine Messages"
+
+            # LLM aufrufen
+            prompt = self.MAX_ITERATIONS_PROMPT.format(
+                iterations=iterations,
+                user_query=user_query[:500],  # Begrenzen
+                tool_summary=tool_summary,
+                recent_messages=recent_messages
+            )
+
+            model = settings.llm.tool_model or settings.llm.default_model
+            summary = await self._call_llm_simple(prompt, model, max_tokens=500)
+
+            return summary
+
+        except Exception as e:
+            print(f"[summarizer] Max-Iterations-Summary Fehler: {e}")
+            return None
+
+    async def _call_llm_simple(
+        self,
+        prompt: str,
+        model: str,
+        max_tokens: int = 500
+    ) -> str:
+        """Einfacher LLM-Aufruf für Summaries."""
+        base_url = settings.llm.base_url.rstrip("/")
+
+        headers = {"Content-Type": "application/json"}
+        if settings.llm.api_key and settings.llm.api_key != "none":
+            headers["Authorization"] = f"Bearer {settings.llm.api_key}"
+
+        payload = {
+            "model": model,
+            "messages": [{"role": "user", "content": prompt}],
+            "temperature": 0.3,
+            "max_tokens": max_tokens,
+            "stream": False
+        }
+
+        async with httpx.AsyncClient(
+            timeout=30,
+            verify=settings.llm.verify_ssl
+        ) as client:
+            response = await client.post(
+                f"{base_url}/chat/completions",
+                headers=headers,
+                json=payload
+            )
+            response.raise_for_status()
+            data = response.json()
+
+            choices = data.get("choices", [])
+            if choices:
+                return choices[0].get("message", {}).get("content", "")
+
+        return ""
+
     def estimate_savings(self, messages: List[Dict]) -> Dict:
         """
         Schätzt Token-Einsparung durch Summary.
