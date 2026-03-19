@@ -7987,10 +7987,60 @@ a:visited {
   z-index: 1;
 }
 
+.tokens-chart-bar-stacked {
+  display: flex;
+  flex-direction: column-reverse;
+  background: transparent;
+  overflow: hidden;
+}
+
+.tokens-chart-segment {
+  width: 100%;
+  min-height: 2px;
+  transition: opacity 0.2s ease;
+}
+
+.tokens-chart-bar-stacked:hover .tokens-chart-segment {
+  opacity: 0.85;
+}
+
 .tokens-chart-bar:hover {
   background: linear-gradient(180deg, var(--success) 0%, var(--accent) 100%);
   transform: scaleY(1.02);
   box-shadow: 0 -2px 8px rgba(88, 166, 255, 0.3);
+}
+
+.tokens-chart-bar-stacked:hover {
+  background: transparent;
+  transform: scaleY(1.02);
+}
+
+/* Model legend for stacked chart */
+.tokens-model-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  padding: 8px 12px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-top: none;
+  border-radius: 0 0 8px 8px;
+  justify-content: center;
+}
+
+.tokens-legend-item {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 0.7rem;
+  color: var(--text-muted);
+}
+
+.tokens-legend-color {
+  width: 10px;
+  height: 10px;
+  border-radius: 2px;
+  flex-shrink: 0;
 }
 
 .tokens-chart-x-axis {

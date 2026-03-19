@@ -115,13 +115,19 @@ class TokenBreakdown:
 
 @dataclass
 class HourlyUsage:
-    """Hourly aggregated usage."""
+    """Hourly aggregated usage with model breakdown."""
     hour: str  # ISO format: "2026-03-15T14:00"
     tokens: int = 0
     requests: int = 0
+    by_model: Dict[str, int] = field(default_factory=dict)  # model -> tokens
 
     def to_dict(self) -> Dict[str, Any]:
-        return asdict(self)
+        return {
+            "hour": self.hour,
+            "tokens": self.tokens,
+            "requests": self.requests,
+            "byModel": self.by_model
+        }
 
 
 @dataclass
@@ -421,13 +427,17 @@ class TokenTracker:
                 summary.by_request_type[usage.request_type] = TokenBreakdown()
             summary.by_request_type[usage.request_type].add(usage)
 
-            # By hour
+            # By hour (with model breakdown)
             hour_dt = datetime.fromtimestamp(usage.timestamp / 1000)
             hour_key = hour_dt.strftime("%Y-%m-%dT%H:00")
             if hour_key not in hourly_map:
                 hourly_map[hour_key] = HourlyUsage(hour=hour_key)
             hourly_map[hour_key].tokens += usage.total_tokens
             hourly_map[hour_key].requests += 1
+            # Model breakdown per hour
+            if usage.model not in hourly_map[hour_key].by_model:
+                hourly_map[hour_key].by_model[usage.model] = 0
+            hourly_map[hour_key].by_model[usage.model] += usage.total_tokens
 
         # Convert hourly map to sorted list
         summary.by_hour = sorted(hourly_map.values(), key=lambda h: h.hour)

@@ -41,10 +41,11 @@ class TokenBreakdownResponse(BaseModel):
 
 
 class HourlyUsageResponse(BaseModel):
-    """Hourly usage response."""
+    """Hourly usage response with model breakdown."""
     hour: str
     tokens: int
     requests: int
+    byModel: Dict[str, int] = {}  # model -> tokens
 
 
 class UsageSummaryResponse(BaseModel):
@@ -172,7 +173,12 @@ async def get_usage_summary(
             for k, v in summary.by_request_type.items()
         },
         byHour=[
-            HourlyUsageResponse(hour=h.hour, tokens=h.tokens, requests=h.requests)
+            HourlyUsageResponse(
+                hour=h.hour,
+                tokens=h.tokens,
+                requests=h.requests,
+                byModel=h.by_model
+            )
             for h in summary.by_hour
         ],
         budgetLimit=summary.budget_limit,

@@ -661,6 +661,24 @@ Sei präzise und gib detaillierte Analyse-Schritte."""
             )
             result = response.content or ""
             logger.debug(f"[MCP] LLM callback response length: {len(result)}")
+
+            # Token-Tracking für MCP-Calls
+            if hasattr(response, 'usage') and response.usage:
+                try:
+                    tracker = get_token_tracker()
+                    # Session-ID aus _current_mcp_session oder Fallback
+                    session_id = getattr(self, '_current_mcp_session', 'mcp-default')
+                    model = getattr(response, 'model', None) or settings.llm.default_model
+                    tracker.log_usage(
+                        session_id=session_id,
+                        model=model,
+                        input_tokens=response.usage.prompt_tokens or 0,
+                        output_tokens=response.usage.completion_tokens or 0,
+                        request_type="mcp",
+                    )
+                except Exception as track_err:
+                    logger.debug(f"[MCP] Token tracking failed: {track_err}")
+
             return result
         except Exception as e:
             logger.warning(f"[MCP] LLM callback failed: {e}")
@@ -1266,6 +1284,8 @@ Sei präzise und gib detaillierte Analyse-Schritte."""
         import re
 
         state = self._get_state(session_id)
+        # Session-ID für MCP Token-Tracking setzen
+        self._current_mcp_session = session_id
         # Gelesene Dateien für diese Anfrage zurücksetzen (Loop-Prävention)
         state.read_files_this_request = {}
         # Abbruch-Flag zurücksetzen
@@ -1336,6 +1356,34 @@ Sei präzise und gib detaillierte Analyse-Schritte."""
             # Clear after use
             state.confirmed_enhancement_context = None
             state.enhancement_original_query = None
+
+        # ── FIX: User-Antwort auf Klärungsfragen mit bestehendem Kontext kombinieren ──
+        elif state.pending_enhancement and state.pending_enhancement.context_items:
+            # User hat auf eine Klärungsfrage geantwortet - Kontext beibehalten!
+            from app.agent.prompt_enhancer import ContextItem
+            pending = state.pending_enhancement
+
+            logger.info(f"[agent] Combining clarification answer with existing enhancement context")
+
+            # User-Antwort als zusätzlichen Kontext hinzufügen
+            pending.context_items.append(ContextItem(
+                source="user_clarification",
+                title="User-Antwort auf Klärungsfrage",
+                content=user_message,
+                relevance=1.0
+            ))
+
+            # Kontext mit ursprünglicher Query und User-Antwort kombinieren
+            enriched_context = pending.get_context_for_planner()
+
+            # Ursprüngliche Query wiederherstellen und mit Antwort ergänzen
+            original_query = pending.original_query
+            user_message = f"{original_query}\n\nUser-Klarstellung: {user_message}"
+
+            logger.info(f"[agent] Enhanced context with clarification: {len(enriched_context)} chars")
+
+            # Enhancement als verwendet markieren
+            state.pending_enhancement = None
 
         elif not is_continue and not is_continue_enhanced and settings.task_agents.enabled:
             try:

@@ -1879,13 +1879,24 @@ async function loadTokenUsage() {
       byTypeContainer.innerHTML = '<div class="tokens-breakdown-empty">Keine Typ-Daten verfügbar</div>';
     }
 
-    // Hourly chart with axis labels
+    // Hourly chart with stacked bars by model
     const chartContainer = document.getElementById('tokens-hourly-chart');
     const xAxisContainer = document.getElementById('tokens-x-axis');
     const yAxisContainer = document.getElementById('tokens-y-axis');
 
     if (data.byHour && data.byHour.length > 0) {
       const maxHourly = Math.max(...data.byHour.map(h => h.tokens));
+
+      // Collect all unique models for color mapping
+      const allModels = new Set();
+      data.byHour.forEach(h => {
+        if (h.byModel) Object.keys(h.byModel).forEach(m => allModels.add(m));
+      });
+      const modelColors = {};
+      const colorPalette = ['#6366f1', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899', '#14b8a6', '#f97316'];
+      Array.from(allModels).forEach((model, i) => {
+        modelColors[model] = colorPalette[i % colorPalette.length];
+      });
 
       // Y-Axis labels
       if (yAxisContainer) {
@@ -1896,18 +1907,56 @@ async function loadTokenUsage() {
         `;
       }
 
-      // Chart bars
-      chartContainer.innerHTML = data.byHour.map(h => `
-        <div class="tokens-chart-bar"
-             style="height: ${maxHourly > 0 ? (h.tokens / maxHourly) * 100 : 0}%"
-             title="${h.hour}: ${formatNumber(h.tokens)} tokens">
-        </div>
-      `).join('');
+      // Chart bars - stacked by model
+      chartContainer.innerHTML = data.byHour.map(h => {
+        const barHeight = maxHourly > 0 ? (h.tokens / maxHourly) * 100 : 0;
+
+        // Build stacked segments for this hour
+        let segments = '';
+        if (h.byModel && Object.keys(h.byModel).length > 0 && h.tokens > 0) {
+          // Sort models by token count (largest at bottom)
+          const sortedModels = Object.entries(h.byModel).sort((a, b) => b[1] - a[1]);
+          segments = sortedModels.map(([model, tokens]) => {
+            const segmentPct = (tokens / h.tokens) * 100;
+            const color = modelColors[model] || '#888';
+            return `<div class="tokens-chart-segment" style="height:${segmentPct}%; background:${color};" title="${model}: ${formatNumber(tokens)}"></div>`;
+          }).join('');
+        }
+
+        // Build tooltip with model breakdown
+        let tooltip = `${h.hour}: ${formatNumber(h.tokens)} tokens`;
+        if (h.byModel && Object.keys(h.byModel).length > 0) {
+          const breakdown = Object.entries(h.byModel)
+            .sort((a, b) => b[1] - a[1])
+            .map(([m, t]) => `${m}: ${formatNumber(t)}`)
+            .join(', ');
+          tooltip += ` (${breakdown})`;
+        }
+
+        return `
+          <div class="tokens-chart-bar tokens-chart-bar-stacked"
+               style="height: ${barHeight}%"
+               title="${tooltip}">
+            ${segments}
+          </div>
+        `;
+      }).join('');
 
       // X-Axis labels (show every 3rd hour)
       if (xAxisContainer) {
         xAxisContainer.innerHTML = data.byHour.map((h, i) =>
-          `<span>${i % 3 === 0 ? h.hour : ''}</span>`
+          `<span>${i % 3 === 0 ? h.hour.split('T')[1] || h.hour : ''}</span>`
+        ).join('');
+      }
+
+      // Model legend below chart
+      const legendContainer = document.getElementById('tokens-model-legend');
+      if (legendContainer && allModels.size > 0) {
+        legendContainer.innerHTML = Array.from(allModels).map(model =>
+          `<span class="tokens-legend-item">
+            <span class="tokens-legend-color" style="background:${modelColors[model]}"></span>
+            ${model}
+          </span>`
         ).join('');
       }
     } else {
