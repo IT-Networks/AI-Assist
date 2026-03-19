@@ -494,14 +494,29 @@ async def health_check() -> Dict[str, Any]:
     }
 
 
-# Static files (frontend)
+# Static files (frontend) mit Cache-Control
 static_dir = Path(__file__).parent / "static"
 if static_dir.exists():
     app.mount("/static", StaticFiles(directory=str(static_dir)), name="static")
 
     @app.get("/", include_in_schema=False)
     async def serve_ui():
-        return FileResponse(str(static_dir / "index.html"))
+        # index.html ohne Cache um Updates sofort zu laden
+        return FileResponse(
+            str(static_dir / "index.html"),
+            headers={"Cache-Control": "no-cache, no-store, must-revalidate"}
+        )
+
+# Middleware für Cache-Control auf statische Dateien
+@app.middleware("http")
+async def add_cache_control(request, call_next):
+    response = await call_next(request)
+    # JS/CSS Dateien nicht cachen (für Update-Kompatibilität)
+    if request.url.path.startswith("/static/") and (
+        request.url.path.endswith(".js") or request.url.path.endswith(".css")
+    ):
+        response.headers["Cache-Control"] = "no-cache, must-revalidate"
+    return response
 
 
 if __name__ == "__main__":
