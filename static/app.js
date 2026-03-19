@@ -14804,21 +14804,49 @@ const taskProgressPanel = {
    * Startet SSE-Stream für eine Session
    */
   connect(sessionId) {
+    // Alte Verbindung schließen
     if (this.eventSource) {
       this.eventSource.close();
+      this.eventSource = null;
+    }
+
+    // WICHTIG: Tasks der alten Session leeren beim Wechsel
+    if (this.sessionId !== sessionId) {
+      log.debug('[TaskProgress] Session changed, clearing tasks', {
+        oldSession: this.sessionId,
+        newSession: sessionId
+      });
+      this.tasks.clear();
+      this.expanded.clear();
+      this.render();  // Sofort leeres Panel rendern
     }
 
     this.sessionId = sessionId;
+    log.info('[TaskProgress] Connecting to session', sessionId);
     this.eventSource = new EventSource(`/api/tasks/${sessionId}/stream`);
+
+    this.eventSource.onopen = () => {
+      log.info('[TaskProgress] SSE connection opened', sessionId);
+    };
 
     this.eventSource.addEventListener('task_snapshot', (e) => {
       const task = JSON.parse(e.data);
+      log.info('[TaskProgress] task_snapshot received', {
+        taskId: task.task_id,
+        title: task.title,
+        session: sessionId
+      });
       this.tasks.set(task.task_id, task);
       this.render();
     });
 
     this.eventSource.addEventListener('task_started', (e) => {
       const data = JSON.parse(e.data);
+      log.info('[TaskProgress] task_started received', {
+        taskId: data.task_id,
+        title: data.title,
+        session: sessionId
+      });
       this.tasks.set(data.task_id, data);
       this.render();
     });
@@ -14870,6 +14898,11 @@ const taskProgressPanel = {
 
     this.eventSource.addEventListener('task_artifact', (e) => {
       const data = JSON.parse(e.data);
+      log.info('[TaskProgress] task_artifact received', {
+        taskId: data.task_id,
+        artifactType: data.artifact?.type,
+        session: sessionId
+      });
       this._updateTask(data.task_id, task => {
         if (!task.artifacts) task.artifacts = [];
         task.artifacts.push(data.artifact);
@@ -14940,14 +14973,23 @@ const taskProgressPanel = {
    * Rendert alle aktiven Tasks
    */
   render() {
-    if (!this.container) return;
+    if (!this.container) {
+      log.warn('[TaskProgress] No container found');
+      return;
+    }
 
     if (this.tasks.size === 0) {
       this.container.innerHTML = '';
       this.container.style.display = 'none';
+      log.debug('[TaskProgress] No tasks, hiding container');
       return;
     }
 
+    log.debug('[TaskProgress] Rendering tasks', {
+      count: this.tasks.size,
+      taskIds: Array.from(this.tasks.keys()),
+      session: this.sessionId
+    });
     this.container.style.display = 'block';
 
     const tasksHtml = Array.from(this.tasks.values())
