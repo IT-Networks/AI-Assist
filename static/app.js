@@ -2391,15 +2391,27 @@ async function switchToChat(chatId) {
       if (res.ok) {
         const data = await res.json();
         const { messages, mode } = data;
-        for (const msg of messages) {
-          if (msg.role === 'user' || msg.role === 'assistant') {
-            appendMessageToPane(incomingChat.pane, msg.role, msg.content);
+        if (messages && messages.length > 0) {
+          for (const msg of messages) {
+            if (msg.role === 'user' || msg.role === 'assistant') {
+              appendMessageToPane(incomingChat.pane, msg.role, msg.content);
+            }
           }
+        } else {
+          // Keine Nachrichten - Welcome Screen zeigen
+          incomingChat.pane.innerHTML = _contextBarHTML() + welcomeHTML();
         }
         // Mode vom Server synchronisieren
         if (mode) {
           log.info(`[switchToChat] Restored mode from server: ${mode}`);
           syncModeUI(mode);
+        }
+      } else {
+        // Server-Fehler (4xx/5xx) - Fallback auf Welcome Screen
+        log.error(`[switchToChat] History fetch failed: ${res.status} ${res.statusText}`);
+        incomingChat.pane.innerHTML = _contextBarHTML() + welcomeHTML();
+        if (res.status !== 404) {
+          showErrorToast('Chat-Historie konnte nicht geladen werden');
         }
       }
     } catch (e) {

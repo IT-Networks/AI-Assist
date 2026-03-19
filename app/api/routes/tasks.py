@@ -112,6 +112,54 @@ async def get_active_tasks(session_id: str) -> TaskListResponse:
     )
 
 
+@router.get("/{session_id}/stream")
+async def task_stream(session_id: str) -> StreamingResponse:
+    """
+    SSE Stream für Task-Updates.
+
+    Streamt Events für alle Task-Änderungen der Session.
+
+    Event-Typen:
+    - task_started: Task wurde gestartet
+    - step_started: Schritt wurde gestartet
+    - step_progress: Schritt-Fortschritt aktualisiert
+    - step_completed: Schritt abgeschlossen
+    - step_failed: Schritt fehlgeschlagen
+    - step_skipped: Schritt übersprungen
+    - task_artifact: Neues Zwischenergebnis
+    - task_completed: Task erfolgreich abgeschlossen
+    - task_failed: Task fehlgeschlagen
+    - task_cancelled: Task abgebrochen
+    """
+    tracker = get_task_tracker(session_id)
+
+    async def event_generator():
+        # Initial: Sende alle aktiven Tasks
+        active_tasks = tracker.get_active_tasks()
+        for task in active_tasks:
+            yield f"event: task_snapshot\ndata: {_json_dumps(task.to_dict())}\n\n"
+
+        # Dann: Stream neue Events
+        try:
+            async for event in tracker.get_events():
+                event_type = event.get("type", "update")
+                event_data = _json_dumps(event)
+                yield f"event: {event_type}\ndata: {event_data}\n\n"
+        except asyncio.CancelledError:
+            logger.debug(f"[Tasks] SSE stream cancelled for session {session_id}")
+            raise
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        }
+    )
+
+
 @router.get("/{session_id}/{task_id}")
 async def get_task(session_id: str, task_id: str) -> TaskResponse:
     """
@@ -162,54 +210,6 @@ async def cancel_task(session_id: str, task_id: str) -> CancelResponse:
     return CancelResponse(
         success=success,
         message="Task abgebrochen" if success else "Abbruch fehlgeschlagen"
-    )
-
-
-@router.get("/{session_id}/stream")
-async def task_stream(session_id: str) -> StreamingResponse:
-    """
-    SSE Stream für Task-Updates.
-
-    Streamt Events für alle Task-Änderungen der Session.
-
-    Event-Typen:
-    - task_started: Task wurde gestartet
-    - step_started: Schritt wurde gestartet
-    - step_progress: Schritt-Fortschritt aktualisiert
-    - step_completed: Schritt abgeschlossen
-    - step_failed: Schritt fehlgeschlagen
-    - step_skipped: Schritt übersprungen
-    - task_artifact: Neues Zwischenergebnis
-    - task_completed: Task erfolgreich abgeschlossen
-    - task_failed: Task fehlgeschlagen
-    - task_cancelled: Task abgebrochen
-    """
-    tracker = get_task_tracker(session_id)
-
-    async def event_generator():
-        # Initial: Sende alle aktiven Tasks
-        active_tasks = tracker.get_active_tasks()
-        for task in active_tasks:
-            yield f"event: task_snapshot\ndata: {_json_dumps(task.to_dict())}\n\n"
-
-        # Dann: Stream neue Events
-        try:
-            async for event in tracker.get_events():
-                event_type = event.get("type", "update")
-                event_data = _json_dumps(event)
-                yield f"event: {event_type}\ndata: {event_data}\n\n"
-        except asyncio.CancelledError:
-            logger.debug(f"[Tasks] SSE stream cancelled for session {session_id}")
-            raise
-
-    return StreamingResponse(
-        event_generator(),
-        media_type="text/event-stream",
-        headers={
-            "Cache-Control": "no-cache",
-            "Connection": "keep-alive",
-            "X-Accel-Buffering": "no",
-        }
     )
 
 
