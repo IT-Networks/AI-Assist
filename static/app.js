@@ -14893,6 +14893,14 @@ const taskProgressPanel = {
       .join('');
 
     this.container.innerHTML = tasksHtml;
+
+    // Event-Listener für Artifact-Toggles (statt inline onclick)
+    this.container.querySelectorAll('.task-artifacts-toggle').forEach(btn => {
+      btn.addEventListener('click', (e) => {
+        const taskId = btn.dataset.taskId;
+        if (taskId) this.toggleArtifacts(taskId);
+      });
+    });
   },
 
   /**
@@ -14904,16 +14912,17 @@ const taskProgressPanel = {
 
     const stepsHtml = (task.steps || []).map((step, i) => this._renderStep(step, i)).join('');
 
+    const safeTaskId = escapeHtml(task.task_id || '');
     const artifactsHtml = (task.artifacts && task.artifacts.length > 0) ? `
-      <div class="task-artifacts">
-        <button class="task-artifacts-toggle" onclick="taskProgressPanel.toggleArtifacts('${task.task_id}')">
-          ${isExpanded ? '&#9660;' : '&#9658;'} Zwischenergebnisse (${task.artifacts.length})
+      <div class="task-artifacts ${isExpanded ? 'expanded' : ''}">
+        <button class="task-artifacts-toggle" data-task-id="${safeTaskId}" title="Klicken zum ${isExpanded ? 'Einklappen' : 'Ausklappen'}">
+          <span class="toggle-icon">${isExpanded ? '▼' : '▶'}</span>
+          <span class="toggle-label">Zwischenergebnisse</span>
+          <span class="toggle-count">${task.artifacts.length}</span>
         </button>
-        ${isExpanded ? `
-          <div class="task-artifacts-list">
-            ${task.artifacts.map(a => this._renderArtifact(a)).join('')}
-          </div>
-        ` : ''}
+        <div class="task-artifacts-list" style="${isExpanded ? '' : 'display: none;'}">
+          ${task.artifacts.map(a => this._renderArtifact(a)).join('')}
+        </div>
       </div>
     ` : '';
 
@@ -14976,10 +14985,27 @@ const taskProgressPanel = {
    * Rendert ein Artifact
    */
   _renderArtifact(artifact) {
+    const typeIcons = {
+      'finding': '💡',
+      'code': '📄',
+      'error': '❌',
+      'warning': '⚠️',
+      'info': 'ℹ️',
+      'search': '🔍',
+      'file': '📁',
+      'result': '✓',
+    };
+    const icon = typeIcons[artifact.type?.toLowerCase()] || '📋';
+    const summary = artifact.summary || artifact.content || '';
+    const truncated = summary.length > 150 ? summary.substring(0, 150) + '...' : summary;
+
     return `
       <div class="task-artifact">
-        <span class="artifact-type">${escapeHtml(artifact.type)}</span>
-        <span class="artifact-content">${escapeHtml(artifact.summary || '')}</span>
+        <span class="artifact-icon">${icon}</span>
+        <div class="artifact-body">
+          <span class="artifact-type">${escapeHtml(artifact.type || 'Result')}</span>
+          <span class="artifact-content">${escapeHtml(truncated)}</span>
+        </div>
       </div>
     `;
   },
