@@ -3002,12 +3002,13 @@ Sei präzise und gib detaillierte Analyse-Schritte."""
                                 is_merged = result_data.get("merged", False) or result_data.get("merged_at") is not None
 
                                 # Debug-Logging für PR-Daten
-                                logger.debug(f"[agent] PR workspace data: PR #{pr_number}, "
+                                logger.info(f"[agent] Emitting WORKSPACE_PR event: PR #{pr_number}, "
                                             f"title={result_data.get('title')}, author={author}, "
                                             f"head={head_branch}, base={base_branch}, "
                                             f"additions={result_data.get('additions')}, "
                                             f"deletions={result_data.get('deletions')}, "
-                                            f"files={result_data.get('changed_files')}")
+                                            f"files={result_data.get('changed_files')}, "
+                                            f"state={pr_state}, merged={is_merged}")
 
                                 # Sende zuerst PR-Basisdaten mit loading=true
                                 yield AgentEvent(AgentEventType.WORKSPACE_PR, {

@@ -1224,6 +1224,14 @@ async function loadPRReview(repoOwner, repoName, prNumber) {
 
 // Handle workspace_pr event from backend (when github_pr_details/github_pr_diff is called)
 function openPRFromEvent(data) {
+  log.info('[PR] openPRFromEvent called', {
+    prNumber: data.prNumber,
+    title: data.title,
+    loading: data.loading,
+    state: data.state,
+    author: data.author
+  });
+
   // Update prReviewState with data from the event
   prReviewState.active = true;
   prReviewState.prNumber = data.prNumber;
@@ -1243,7 +1251,7 @@ function openPRFromEvent(data) {
 
   // Neue Felder für Status und Loading
   prReviewState.state = data.state || 'open';
-  prReviewState.loading = data.loading || false;
+  prReviewState.loading = data.loading === true;  // Explicit boolean check
   prReviewState.analysisData = null;
   prReviewState.canApprove = data.state === 'open';
 
@@ -1252,12 +1260,15 @@ function openPRFromEvent(data) {
     prReviewState.diff = data.diff;
   }
 
-  // Show PR tab
+  // Show PR tab - WICHTIG: Erst Tab sichtbar machen
   const prTab = document.getElementById('workspace-pr-tab');
   const prLabel = document.getElementById('workspace-pr-label');
   if (prTab) {
     prTab.style.display = 'flex';
-    prLabel.textContent = `PR #${data.prNumber}`;
+    if (prLabel) prLabel.textContent = `PR #${data.prNumber}`;
+    log.debug('[PR] PR tab shown');
+  } else {
+    log.error('[PR] workspace-pr-tab element not found!');
   }
 
   // Badge mit Loading-Indikator
@@ -1269,23 +1280,42 @@ function openPRFromEvent(data) {
       badge.classList.add('loading');
     } else {
       badge.style.display = 'none';
+      badge.classList.remove('loading');
     }
   }
 
-  // Render panel content
-  renderPRReviewPanel();
-
-  // Switch to PR tab and show workspace
+  // WICHTIG: Workspace öffnen BEVOR Panel gerendert wird
   if (!workspaceState.visible) {
     toggleWorkspace();
+    log.debug('[PR] Workspace toggled visible');
   }
+
+  // Tab wechseln
   switchWorkspaceTab('pr');
+  log.debug('[PR] Switched to PR tab');
+
+  // Render panel content NACH Tab-Wechsel
+  renderPRReviewPanel();
 }
 
 // Handle workspace_pr_analysis event - PR-Analyse-Ergebnisse
 function handlePRAnalysis(data) {
+  log.info('[PR] handlePRAnalysis called', {
+    dataPrNumber: data.prNumber,
+    currentPrNumber: prReviewState.prNumber,
+    bySeverity: data.bySeverity,
+    verdict: data.verdict,
+    findingsCount: data.findings?.length
+  });
+
   // Prüfe ob dies für den aktuellen PR ist
-  if (data.prNumber !== prReviewState.prNumber) return;
+  if (data.prNumber !== prReviewState.prNumber) {
+    log.warn('[PR] Analysis for different PR, ignoring', {
+      received: data.prNumber,
+      current: prReviewState.prNumber
+    });
+    return;
+  }
 
   prReviewState.loading = false;
   prReviewState.analysisData = data;
@@ -1299,6 +1329,7 @@ function handlePRAnalysis(data) {
                   (data.bySeverity?.medium || 0) + (data.bySeverity?.low || 0);
     badge.textContent = total;
     badge.style.display = total > 0 ? 'inline' : 'none';
+    log.debug('[PR] Badge updated', { total });
   }
 
   // Re-render panel mit Analyse-Daten
@@ -1352,12 +1383,30 @@ function renderPRReviewPanel() {
   const state = prReviewState;
 
   // Debug-Logging
-  log.debug('[PR] renderPRReviewPanel called', {
+  log.info('[PR] renderPRReviewPanel called', {
     prNumber: state.prNumber,
     title: state.title,
+    author: state.author,
     loading: state.loading,
-    hasAnalysis: !!state.analysisData
+    state: state.state,
+    hasAnalysis: !!state.analysisData,
+    baseBranch: state.baseBranch,
+    headBranch: state.headBranch
   });
+
+  // Prüfe ob PR-Content-Tab aktiv ist
+  const prContent = document.getElementById('workspace-pr-content');
+  if (prContent) {
+    // Stelle sicher dass der Content sichtbar ist
+    if (!prContent.classList.contains('active')) {
+      log.warn('[PR] PR content not active, forcing activation');
+      document.querySelectorAll('.workspace-tab-content').forEach(c => c.classList.remove('active'));
+      prContent.classList.add('active');
+    }
+  } else {
+    log.error('[PR] workspace-pr-content element not found!');
+    return;
+  }
 
   // Header - mit null-checks
   const prNumberEl = document.getElementById('pr-number');
@@ -1367,9 +1416,20 @@ function renderPRReviewPanel() {
   const prAuthorEl = document.getElementById('pr-author');
 
   if (!prNumberEl || !prTitleEl) {
-    log.error('[PR] PR panel elements not found in DOM');
+    log.error('[PR] PR panel elements not found in DOM', {
+      prNumberEl: !!prNumberEl,
+      prTitleEl: !!prTitleEl
+    });
     return;
   }
+
+  // Header-Daten setzen
+  log.debug('[PR] Setting header data', {
+    prNumber: state.prNumber,
+    title: state.title,
+    author: state.author,
+    branches: `${state.baseBranch} <- ${state.headBranch}`
+  });
 
   prNumberEl.textContent = `#${state.prNumber}`;
   prTitleEl.textContent = state.title || `${state.repoOwner}/${state.repoName}`;
@@ -4007,10 +4067,12 @@ async function processAgentEvent(event, bubble, msgDiv, chat) {
       break;
 
     case 'workspace_pr':
+      log.info('[SSE] workspace_pr event received', data);
       openPRFromEvent(data);
       break;
 
     case 'workspace_pr_analysis':
+      log.info('[SSE] workspace_pr_analysis event received', data);
       handlePRAnalysis(data);
       break;
 
