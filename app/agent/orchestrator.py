@@ -3043,6 +3043,18 @@ Sei präzise und gib detaillierte Analyse-Schritte."""
                                     )
                                     state.pending_pr_number = pr_number
                                     state.pending_pr_state = "merged" if is_merged else pr_state
+                                else:
+                                    # Kein Diff vorhanden (z.B. bei github_pr_details ohne Diff)
+                                    # → Sofort leeres Analyse-Event senden um Loading zu beenden
+                                    logger.debug(f"[agent] No diff for PR #{pr_number}, sending empty analysis")
+                                    yield AgentEvent(AgentEventType.WORKSPACE_PR_ANALYSIS, {
+                                        "prNumber": pr_number,
+                                        "bySeverity": {"critical": 0, "high": 0, "medium": 0, "low": 0, "info": 0},
+                                        "verdict": "comment",
+                                        "findings": [],
+                                        "summary": "Kein Diff verfügbar - nutze github_pr_diff für Analyse",
+                                        "canApprove": pr_state == "open"
+                                    })
 
                     state.tool_calls_history.append(tool_call)
 

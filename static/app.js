@@ -15090,6 +15090,9 @@ const taskProgressPanel = {
    * Rendert ein Artifact
    */
   _renderArtifact(artifact) {
+    // Null-check für artifact
+    if (!artifact) return '';
+
     const typeIcons = {
       'finding': '💡',
       'code': '📄',
