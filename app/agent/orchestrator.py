@@ -2982,13 +2982,32 @@ Sei präzise und gib detaillierte Analyse-Schritte."""
                                 if isinstance(author, dict):
                                     author = author.get("login", "")
 
-                                # Branches: Tool gibt "head_branch"/"base_branch" zurück, nicht nested objects
-                                head_branch = result_data.get("head_branch") or result_data.get("head", {}).get("ref", "") if isinstance(result_data.get("head"), dict) else result_data.get("head", "")
-                                base_branch = result_data.get("base_branch") or result_data.get("base", {}).get("ref", "") if isinstance(result_data.get("base"), dict) else result_data.get("base", "")
+                                # Branches: Tool gibt "head_branch"/"base_branch" zurück (String)
+                                # Fallback auf nested dict falls direkte API-Response
+                                head_raw = result_data.get("head")
+                                base_raw = result_data.get("base")
+                                head_branch = (
+                                    result_data.get("head_branch") or
+                                    (head_raw.get("ref", "") if isinstance(head_raw, dict) else "") or
+                                    "feature"
+                                )
+                                base_branch = (
+                                    result_data.get("base_branch") or
+                                    (base_raw.get("ref", "") if isinstance(base_raw, dict) else "") or
+                                    "main"
+                                )
 
                                 # PR-Status bestimmen (open, closed, merged)
                                 pr_state = result_data.get("state", "open")
                                 is_merged = result_data.get("merged", False) or result_data.get("merged_at") is not None
+
+                                # Debug-Logging für PR-Daten
+                                logger.debug(f"[agent] PR workspace data: PR #{pr_number}, "
+                                            f"title={result_data.get('title')}, author={author}, "
+                                            f"head={head_branch}, base={base_branch}, "
+                                            f"additions={result_data.get('additions')}, "
+                                            f"deletions={result_data.get('deletions')}, "
+                                            f"files={result_data.get('changed_files')}")
 
                                 # Sende zuerst PR-Basisdaten mit loading=true
                                 yield AgentEvent(AgentEventType.WORKSPACE_PR, {

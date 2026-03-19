@@ -1351,15 +1351,33 @@ function openPRReviewTab(review) {
 function renderPRReviewPanel() {
   const state = prReviewState;
 
-  // Header
-  document.getElementById('pr-number').textContent = `#${state.prNumber}`;
-  document.getElementById('pr-title').textContent = state.title || `${state.repoOwner}/${state.repoName}`;
-  document.getElementById('pr-branches').textContent = `${state.baseBranch || 'main'} ← ${state.headBranch || 'feature'}`;
-  document.getElementById('pr-stats').textContent = `+${state.additions} -${state.deletions} | ${state.filesChanged} files`;
-  document.getElementById('pr-author').textContent = `@${state.author || 'unknown'}`;
+  // Debug-Logging
+  log.debug('[PR] renderPRReviewPanel called', {
+    prNumber: state.prNumber,
+    title: state.title,
+    loading: state.loading,
+    hasAnalysis: !!state.analysisData
+  });
+
+  // Header - mit null-checks
+  const prNumberEl = document.getElementById('pr-number');
+  const prTitleEl = document.getElementById('pr-title');
+  const prBranchesEl = document.getElementById('pr-branches');
+  const prStatsEl = document.getElementById('pr-stats');
+  const prAuthorEl = document.getElementById('pr-author');
+
+  if (!prNumberEl || !prTitleEl) {
+    log.error('[PR] PR panel elements not found in DOM');
+    return;
+  }
+
+  prNumberEl.textContent = `#${state.prNumber}`;
+  prTitleEl.textContent = state.title || `${state.repoOwner}/${state.repoName}`;
+  if (prBranchesEl) prBranchesEl.textContent = `${state.baseBranch || 'main'} ← ${state.headBranch || 'feature'}`;
+  if (prStatsEl) prStatsEl.textContent = `+${state.additions || 0} -${state.deletions || 0} | ${state.filesChanged || 0} files`;
+  if (prAuthorEl) prAuthorEl.textContent = `@${state.author || 'unknown'}`;
 
   // PR Status Badge anzeigen
-  const prNumberEl = document.getElementById('pr-number');
   if (state.state === 'merged') {
     prNumberEl.innerHTML = `#${state.prNumber} <span class="pr-state-badge merged">MERGED</span>`;
   } else if (state.state === 'closed') {
@@ -1370,41 +1388,49 @@ function renderPRReviewPanel() {
 
   // Severity Badges - aus analysisData oder summary oder loading
   const analysis = state.analysisData || state.summary;
+  const verdictEl = document.getElementById('pr-verdict');
+  const criticalEl = document.getElementById('pr-critical');
+  const highEl = document.getElementById('pr-high');
+  const mediumEl = document.getElementById('pr-medium');
+  const lowEl = document.getElementById('pr-low');
+  const infoEl = document.getElementById('pr-info');
 
   if (state.loading) {
     // Loading-State für Badges
-    document.getElementById('pr-critical').innerHTML = '<span class="loading-dot"></span>';
-    document.getElementById('pr-high').innerHTML = '<span class="loading-dot"></span>';
-    document.getElementById('pr-medium').innerHTML = '<span class="loading-dot"></span>';
-    document.getElementById('pr-low').innerHTML = '<span class="loading-dot"></span>';
-    document.getElementById('pr-info').innerHTML = '<span class="loading-dot"></span>';
+    if (criticalEl) criticalEl.innerHTML = '<span class="loading-dot"></span>';
+    if (highEl) highEl.innerHTML = '<span class="loading-dot"></span>';
+    if (mediumEl) mediumEl.innerHTML = '<span class="loading-dot"></span>';
+    if (lowEl) lowEl.innerHTML = '<span class="loading-dot"></span>';
+    if (infoEl) infoEl.innerHTML = '<span class="loading-dot"></span>';
 
-    const verdictEl = document.getElementById('pr-verdict');
-    verdictEl.className = 'pr-verdict loading';
-    verdictEl.innerHTML = '<span class="verdict-icon">&#8987;</span><span class="verdict-text">ANALYSING...</span>';
+    if (verdictEl) {
+      verdictEl.className = 'pr-verdict loading';
+      verdictEl.innerHTML = '<span class="verdict-icon">&#8987;</span><span class="verdict-text">ANALYSING...</span>';
+    }
   } else if (analysis) {
     const sev = analysis.bySeverity || {};
-    document.getElementById('pr-critical').textContent = sev.critical || 0;
-    document.getElementById('pr-high').textContent = sev.high || 0;
-    document.getElementById('pr-medium').textContent = sev.medium || 0;
-    document.getElementById('pr-low').textContent = sev.low || 0;
-    document.getElementById('pr-info').textContent = sev.info || 0;
+    if (criticalEl) criticalEl.textContent = sev.critical || 0;
+    if (highEl) highEl.textContent = sev.high || 0;
+    if (mediumEl) mediumEl.textContent = sev.medium || 0;
+    if (lowEl) lowEl.textContent = sev.low || 0;
+    if (infoEl) infoEl.textContent = sev.info || 0;
 
-    const verdictEl = document.getElementById('pr-verdict');
-    const verdict = analysis.verdict || 'comment';
-    verdictEl.className = `pr-verdict ${verdict}`;
+    if (verdictEl) {
+      const verdict = analysis.verdict || 'comment';
+      verdictEl.className = `pr-verdict ${verdict}`;
 
-    // Bei closed/merged kein Approve-Button sinnvoll
-    if (state.state === 'merged') {
-      verdictEl.innerHTML = '<span class="verdict-icon">&#128994;</span><span class="verdict-text">MERGED</span>';
-    } else if (state.state === 'closed') {
-      verdictEl.innerHTML = '<span class="verdict-icon">&#128308;</span><span class="verdict-text">CLOSED</span>';
-    } else {
-      verdictEl.innerHTML = verdict === 'approve'
-        ? '<span class="verdict-icon">&#9989;</span><span class="verdict-text">APPROVE</span>'
-        : verdict === 'request_changes'
-          ? '<span class="verdict-icon">&#9888;</span><span class="verdict-text">REQUEST CHANGES</span>'
-          : '<span class="verdict-icon">&#128172;</span><span class="verdict-text">COMMENT</span>';
+      // Bei closed/merged kein Approve-Button sinnvoll
+      if (state.state === 'merged') {
+        verdictEl.innerHTML = '<span class="verdict-icon">&#128994;</span><span class="verdict-text">MERGED</span>';
+      } else if (state.state === 'closed') {
+        verdictEl.innerHTML = '<span class="verdict-icon">&#128308;</span><span class="verdict-text">CLOSED</span>';
+      } else {
+        verdictEl.innerHTML = verdict === 'approve'
+          ? '<span class="verdict-icon">&#9989;</span><span class="verdict-text">APPROVE</span>'
+          : verdict === 'request_changes'
+            ? '<span class="verdict-icon">&#9888;</span><span class="verdict-text">REQUEST CHANGES</span>'
+            : '<span class="verdict-icon">&#128172;</span><span class="verdict-text">COMMENT</span>';
+      }
     }
   }
 
@@ -1426,32 +1452,34 @@ function renderPRReviewPanel() {
   // Render files
   const filesContainer = document.getElementById('pr-files');
 
-  if (state.loading) {
-    filesContainer.innerHTML = `
-      <div class="pr-loading">
-        <div class="pr-loading-spinner"></div>
-        <span>Analysiere PR-Änderungen...</span>
-      </div>
-    `;
-  } else if (Object.keys(fileComments).length === 0) {
-    filesContainer.innerHTML = `
-      <div class="pr-empty">
-        <span class="pr-empty-icon">&#10004;</span>
-        <span>Keine Issues gefunden</span>
-      </div>
-    `;
-  } else {
-    filesContainer.innerHTML = Object.entries(fileComments).map(([filePath, items]) => `
-      <div class="pr-file">
-        <div class="pr-file-header" onclick="togglePRFile(this)">
-          <span class="pr-file-name">${escapeHtml(filePath)}</span>
-          <span class="pr-file-issues">${items.length} issues</span>
+  if (filesContainer) {
+    if (state.loading) {
+      filesContainer.innerHTML = `
+        <div class="pr-loading">
+          <div class="pr-loading-spinner"></div>
+          <span>Analysiere PR-Änderungen...</span>
         </div>
-        <div class="pr-file-comments">
-          ${items.map(item => renderPRFinding(item)).join('')}
+      `;
+    } else if (Object.keys(fileComments).length === 0) {
+      filesContainer.innerHTML = `
+        <div class="pr-empty">
+          <span class="pr-empty-icon">&#10004;</span>
+          <span>Keine Issues gefunden</span>
         </div>
-      </div>
-    `).join('');
+      `;
+    } else {
+      filesContainer.innerHTML = Object.entries(fileComments).map(([filePath, items]) => `
+        <div class="pr-file">
+          <div class="pr-file-header" onclick="togglePRFile(this)">
+            <span class="pr-file-name">${escapeHtml(filePath)}</span>
+            <span class="pr-file-issues">${items.length} issues</span>
+          </div>
+          <div class="pr-file-comments">
+            ${items.map(item => renderPRFinding(item)).join('')}
+          </div>
+        </div>
+      `).join('');
+    }
   }
 
   // Approve-Button nur bei open PRs anzeigen
@@ -2539,15 +2567,19 @@ async function switchToChat(chatId) {
         incomingChat.isLoading = false;
         _updateChatLoadingState(chatId, false);
       } else {
-        // Server-Fehler (4xx/5xx) - Fallback auf Welcome Screen
+        // Server-Fehler (4xx/5xx)
         log.error(`[switchToChat] History fetch failed: ${res.status} ${res.statusText}`);
-        incomingChat.pane.innerHTML = _contextBarHTML() + welcomeHTML();
-        // Bei Fehler auch needsRestore = false setzen, um Endlosschleife zu vermeiden
-        incomingChat.needsRestore = false;
         incomingChat.isLoading = false;
         _updateChatLoadingState(chatId, false);
-        if (res.status !== 404) {
-          showErrorToast('Chat-Historie konnte nicht geladen werden');
+
+        if (res.status === 404) {
+          // Chat existiert nicht mehr - permanent, kein Retry
+          incomingChat.pane.innerHTML = _contextBarHTML() + welcomeHTML();
+          incomingChat.needsRestore = false;
+        } else {
+          // Temporärer Fehler (5xx) - needsRestore bleibt true für Retry
+          incomingChat.pane.innerHTML = _contextBarHTML() + _chatLoadErrorHTML(chatId);
+          showErrorToast('Chat-Historie konnte nicht geladen werden. Klicke auf "Erneut laden" zum Wiederholen.');
         }
       }
     } catch (e) {
@@ -2557,12 +2589,12 @@ async function switchToChat(chatId) {
         _updateChatLoadingState(chatId, false);
         return;
       }
-      incomingChat.pane.innerHTML = _contextBarHTML() + welcomeHTML();
-      incomingChat.needsRestore = false;
+      // Netzwerk-/temporärer Fehler - needsRestore bleibt true für Retry
+      incomingChat.pane.innerHTML = _contextBarHTML() + _chatLoadErrorHTML(chatId);
       incomingChat.isLoading = false;
       _updateChatLoadingState(chatId, false);
       log.error('Failed to restore chat history:', e);
-      showErrorToast('Chat-Historie konnte nicht geladen werden');
+      showErrorToast('Chat-Historie konnte nicht geladen werden. Klicke auf "Erneut laden" zum Wiederholen.');
     }
   } else {
     // Bestehender Chat - Mode aus Chat-Objekt oder Server laden
@@ -2929,6 +2961,45 @@ function welcomeHTML() {
       <small>Modus: <span id="welcome-mode">Nur Lesen</span> | Skills aktivieren im Header</small>
     </div>
   </div>`;
+}
+
+/**
+ * Generiert HTML für den Chat-Ladefehler mit Retry-Button.
+ * @param {string} chatId - ID des Chats für den Retry
+ * @returns {string} HTML-String
+ */
+function _chatLoadErrorHTML(chatId) {
+  return `<div class="message system chat-load-error">
+    <div class="message-bubble">
+      <strong>Chat konnte nicht geladen werden</strong><br>
+      Es gab ein Problem beim Laden der Chat-Historie.<br>
+      <button class="retry-chat-btn" onclick="retryChatLoad('${chatId}')">
+        <span class="retry-icon">↻</span> Erneut laden
+      </button>
+    </div>
+  </div>`;
+}
+
+/**
+ * Versucht einen fehlgeschlagenen Chat erneut zu laden.
+ * @param {string} chatId - ID des Chats
+ */
+async function retryChatLoad(chatId) {
+  const chat = chatManager.get(chatId);
+  if (!chat) return;
+
+  // Sicherstellen dass needsRestore true ist
+  chat.needsRestore = true;
+
+  // Wenn es der aktive Chat ist, direkt neu laden
+  if (chatId === chatManager.activeId) {
+    // Aktiven Chat temporär resetten und neu switchen
+    chatManager.activeId = null;
+    await switchToChat(chatId);
+  } else {
+    // Nicht-aktiver Chat - beim nächsten Switch wird er neu geladen
+    await switchToChat(chatId);
+  }
 }
 
 async function setAgentMode(mode) {
@@ -14673,10 +14744,12 @@ const taskProgressPanel = {
     this.eventSource.addEventListener('step_started', (e) => {
       const data = JSON.parse(e.data);
       this._updateTask(data.task_id, task => {
-        if (task.steps && task.steps[data.step_index]) {
-          task.steps[data.step_index] = data.step;
+        if (data.step) {
+          if (task.steps && task.steps[data.step_index]) {
+            task.steps[data.step_index] = data.step;
+          }
+          task.current_step = data.step.name || `Step ${data.step_index + 1}`;
         }
-        task.current_step = data.step.name;
         task.current_step_index = data.step_index;
       });
     });
@@ -14695,7 +14768,7 @@ const taskProgressPanel = {
     this.eventSource.addEventListener('step_completed', (e) => {
       const data = JSON.parse(e.data);
       this._updateTask(data.task_id, task => {
-        if (task.steps && task.steps[data.step_index]) {
+        if (data.step && task.steps && task.steps[data.step_index]) {
           task.steps[data.step_index] = data.step;
         }
         task.completed_steps = (task.completed_steps || 0) + 1;
