@@ -1852,6 +1852,61 @@ function renderPRReviewPanel() {
 /**
  * Rendert PR-Panel für einen spezifischen Tab
  */
+/**
+ * Stellt die PR-Panel-Struktur wieder her falls sie durch clearWorkspace ersetzt wurde
+ */
+function _ensurePRPanelStructure() {
+  const prContent = document.getElementById('workspace-pr-content');
+  if (!prContent) return false;
+
+  // Prüfe ob Panel-Elemente existieren
+  if (document.getElementById('pr-number')) return true;
+
+  // Panel-Struktur wiederherstellen
+  log.debug('[PR] Restoring PR panel structure');
+  prContent.innerHTML = `
+    <div class="pr-review-panel" id="pr-review-panel">
+      <div class="pr-header">
+        <div class="pr-title-row">
+          <span class="pr-number" id="pr-number">#0</span>
+          <span class="pr-title" id="pr-title">PR Title</span>
+        </div>
+        <div class="pr-meta">
+          <span class="pr-branches" id="pr-branches">main ← feature</span>
+          <span class="pr-stats" id="pr-stats">+0 -0 | 0 files</span>
+          <span class="pr-author" id="pr-author">@author</span>
+        </div>
+      </div>
+      <div class="pr-summary" id="pr-summary">
+        <div class="pr-summary-title">AI Review Summary</div>
+        <div class="pr-severity-badges">
+          <span class="severity-badge critical" id="pr-critical">0</span>
+          <span class="severity-badge high" id="pr-high">0</span>
+          <span class="severity-badge medium" id="pr-medium">0</span>
+          <span class="severity-badge low" id="pr-low">0</span>
+          <span class="severity-badge info" id="pr-info">0</span>
+        </div>
+        <div class="pr-verdict" id="pr-verdict">
+          <span class="verdict-icon">&#9989;</span>
+          <span class="verdict-text">APPROVE</span>
+        </div>
+      </div>
+      <div class="pr-files" id="pr-files"></div>
+      <div class="pr-overall-comment">
+        <label>Gesamtkommentar (optional)</label>
+        <textarea id="pr-overall-comment-input" placeholder="Optionaler Kommentar zum gesamten PR..."></textarea>
+      </div>
+      <div class="pr-actions">
+        <button class="btn btn-success" onclick="submitPRReview('approve')">&#10003; Approve</button>
+        <button class="btn btn-warning" onclick="submitPRReview('request_changes')">&#8634; Request Changes</button>
+        <button class="btn btn-secondary" onclick="submitPRReview('comment')">&#128172; Comment Only</button>
+        <button class="btn btn-ghost" onclick="closePRReview()">&times; Schließen</button>
+      </div>
+    </div>
+  `;
+  return true;
+}
+
 function renderPRReviewPanelForTab(tab) {
   if (!tab) return;
 
@@ -1876,6 +1931,12 @@ function renderPRReviewPanelForTab(tab) {
     return;
   }
 
+  // Panel-Struktur wiederherstellen falls nötig
+  if (!_ensurePRPanelStructure()) {
+    log.error('[PR] Could not restore PR panel structure');
+    return;
+  }
+
   // Header - mit null-checks
   const prNumberEl = document.getElementById('pr-number');
   const prTitleEl = document.getElementById('pr-title');
@@ -1884,7 +1945,7 @@ function renderPRReviewPanelForTab(tab) {
   const prAuthorEl = document.getElementById('pr-author');
 
   if (!prNumberEl || !prTitleEl) {
-    log.error('[PR] PR panel elements not found in DOM');
+    log.error('[PR] PR panel elements not found in DOM after restore');
     return;
   }
 
