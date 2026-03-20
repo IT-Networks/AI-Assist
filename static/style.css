@@ -6090,6 +6090,52 @@ a:visited {
   opacity: 0.7;
 }
 
+/* PR Opened Hint im Chat */
+.pr-opened-hint {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  background: var(--accent-bg);
+  border: 1px solid var(--accent);
+  border-radius: 6px;
+  font-size: 0.9rem;
+  margin: 4px 0;
+}
+
+.pr-opened-hint .pr-hint-icon {
+  font-size: 1.1rem;
+}
+
+.pr-opened-hint .pr-hint-text {
+  color: var(--text);
+}
+
+.pr-opened-hint .pr-hint-text strong {
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.pr-opened-hint .pr-hint-link {
+  color: var(--accent);
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+.pr-opened-hint .pr-hint-link:hover {
+  color: var(--accent-hover);
+}
+
+.pr-opened-hint .pr-hint-title {
+  color: var(--text-secondary);
+  font-size: 0.85rem;
+  margin-left: 4px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 200px;
+}
+
 /* Content Area */
 .workspace-content {
   flex: 1;
@@ -9662,4 +9708,48 @@ a:visited {
   0% { transform: scale(1); }
   50% { transform: scale(1.02); box-shadow: 0 6px 16px rgba(0,0,0,0.2); }
   100% { transform: scale(1); }
+}
+
+/* ══════════════════════════════════════════════════════════════════════════════
+   Alert Styles
+   ══════════════════════════════════════════════════════════════════════════════ */
+
+.alert {
+  padding: 12px 16px;
+  border-radius: 6px;
+  margin: 8px 0;
+  font-size: 0.875rem;
+  line-height: 1.5;
+}
+
+.alert-info {
+  background: var(--info-bg, rgba(59, 130, 246, 0.15));
+  border: 1px solid var(--info, #3b82f6);
+  color: var(--info, #3b82f6);
+}
+
+.alert-success {
+  background: var(--success-bg, rgba(34, 197, 94, 0.15));
+  border: 1px solid var(--success, #22c55e);
+  color: var(--success, #22c55e);
+}
+
+.alert-error {
+  background: var(--danger-bg, rgba(239, 68, 68, 0.15));
+  border: 1px solid var(--danger, #ef4444);
+  color: var(--danger, #ef4444);
+}
+
+.alert-warning {
+  background: var(--warning-bg, rgba(245, 158, 11, 0.15));
+  border: 1px solid var(--warning, #f59e0b);
+  color: var(--warning, #f59e0b);
+}
+
+/* Knowledge Graph Empty State */
+.kg-empty-actions {
+  display: flex;
+  gap: 8px;
+  justify-content: center;
+  flex-wrap: wrap;
 }

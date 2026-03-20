@@ -650,7 +650,15 @@
               <path d="M12 7v5M7 17l5-5M17 17l-5-5"/>
             </svg>
             <p class="kg-empty-text">Knowledge Graph</p>
-            <small>Suche nach einer Klasse oder indexiere ein Projekt</small>
+            <small id="kg-empty-hint">Suche nach einer Klasse oder indexiere ein Projekt</small>
+            <div class="kg-empty-actions" style="margin-top: 1rem;">
+              <button class="btn btn-primary btn-sm" onclick="showGraphIndexDialog()">
+                &#128269; Graph indexieren
+              </button>
+              <button class="btn btn-secondary btn-sm" onclick="loadGraphStats()" title="Status prüfen">
+                &#128200; Status
+              </button>
+            </div>
           </div>
         </div>
       </div>
@@ -911,6 +919,44 @@
 
   </aside>
 
+</div>
+
+<!-- Graph Index Modal -->
+<div id="graph-index-modal" class="modal" style="display:none" role="dialog" aria-modal="true" aria-labelledby="graph-index-modal-title">
+  <div class="modal-overlay" onclick="closeGraphIndexDialog()"></div>
+  <div class="modal-content modal-medium">
+    <div class="modal-header">
+      <h2 id="graph-index-modal-title">Knowledge Graph indexieren</h2>
+      <button class="modal-close" onclick="closeGraphIndexDialog()">&times;</button>
+    </div>
+    <div class="modal-body">
+      <div class="form-group">
+        <label for="graph-index-path">Verzeichnis-Pfad:</label>
+        <input type="text" id="graph-index-path" class="form-control" placeholder="z.B. C:\Projects\MyApp\src" />
+        <small class="form-hint">Absoluter Pfad zum Quellcode-Verzeichnis</small>
+      </div>
+      <div class="form-group">
+        <label for="graph-index-lang">Sprache:</label>
+        <select id="graph-index-lang" class="form-control">
+          <option value="java">Java</option>
+          <option value="python">Python</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label>
+          <input type="checkbox" id="graph-index-clear" />
+          Bestehenden Graph löschen
+        </label>
+      </div>
+      <div id="graph-index-status" class="alert" style="display:none;"></div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-secondary" onclick="closeGraphIndexDialog()">Abbrechen</button>
+      <button class="btn btn-primary" onclick="startGraphIndex()" id="graph-index-btn">
+        &#128269; Indexieren
+      </button>
+    </div>
+  </div>
 </div>
 
 <!-- Arena Mode Modal -->

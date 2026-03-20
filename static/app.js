@@ -1775,6 +1775,40 @@ function handlePRAnalysis(data) {
   }
 }
 
+/**
+ * Zeigt kurzen Hinweis im Chat an: "PR #X im Workspace geöffnet"
+ */
+function handlePROpenedHint(data, chat, bubble) {
+  const prNumber = data.prNumber;
+  const title = data.title || `PR #${prNumber}`;
+  const tabId = `${data.repoOwner}/${data.repoName}#${prNumber}`;
+
+  // Kurze Nachricht als Chat-Hinweis erstellen
+  const hint = document.createElement('div');
+  hint.className = 'pr-opened-hint';
+  hint.innerHTML = `
+    <span class="pr-hint-icon">&#128209;</span>
+    <span class="pr-hint-text">
+      <strong>PR #${prNumber}</strong> im
+      <a href="#" class="pr-hint-link" onclick="prTabsManager.activateTab('${tabId}'); return false;">Workspace</a>
+      geöffnet
+    </span>
+    <span class="pr-hint-title">${escapeHtml(title)}</span>
+  `;
+
+  // In aktuellen Bubble einfügen (falls vorhanden) oder als eigene Nachricht
+  if (bubble) {
+    bubble.appendChild(hint);
+  } else if (chat && chat.pane) {
+    const hintBubble = document.createElement('div');
+    hintBubble.className = 'message assistant';
+    hintBubble.appendChild(hint);
+    chat.pane.appendChild(hintBubble);
+  }
+
+  log.debug('[PR] PR opened hint displayed', { prNumber, tabId });
+}
+
 function openPRReviewTab(review) {
   // Öffne/aktiviere Tab
   const { tab } = prTabsManager.openTab(review.repoOwner, review.repoName, review.prNumber);
@@ -2154,6 +2188,106 @@ function openArenaModal() {
 function closeArenaModal() {
   focusTrap.deactivate();
   document.getElementById('arena-modal').style.display = 'none';
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// Knowledge Graph Index Functions
+// ══════════════════════════════════════════════════════════════════════════════
+
+function showGraphIndexDialog() {
+  const modal = document.getElementById('graph-index-modal');
+  if (!modal) return;
+
+  // Reset form
+  document.getElementById('graph-index-path').value = '';
+  document.getElementById('graph-index-lang').value = 'java';
+  document.getElementById('graph-index-clear').checked = false;
+  document.getElementById('graph-index-status').style.display = 'none';
+  document.getElementById('graph-index-btn').disabled = false;
+
+  modal.style.display = 'flex';
+  document.getElementById('graph-index-path').focus();
+}
+
+function closeGraphIndexDialog() {
+  const modal = document.getElementById('graph-index-modal');
+  if (modal) modal.style.display = 'none';
+}
+
+async function startGraphIndex() {
+  const path = document.getElementById('graph-index-path').value.trim();
+  const lang = document.getElementById('graph-index-lang').value;
+  const clear = document.getElementById('graph-index-clear').checked;
+  const statusEl = document.getElementById('graph-index-status');
+  const btn = document.getElementById('graph-index-btn');
+
+  if (!path) {
+    showToast('Bitte gib einen Verzeichnis-Pfad ein', 'warning');
+    return;
+  }
+
+  // Show loading state
+  btn.disabled = true;
+  btn.innerHTML = '&#9203; Indexiere...';
+  statusEl.className = 'alert alert-info';
+  statusEl.textContent = 'Indexierung läuft...';
+  statusEl.style.display = 'block';
+
+  try {
+    const res = await fetch(`/api/graph/index?path=${encodeURIComponent(path)}&language=${lang}&clear=${clear}`, {
+      method: 'POST'
+    });
+
+    if (!res.ok) {
+      const err = await res.json();
+      throw new Error(err.detail || 'Indexierung fehlgeschlagen');
+    }
+
+    const result = await res.json();
+
+    statusEl.className = 'alert alert-success';
+    statusEl.innerHTML = `
+      <strong>Indexierung abgeschlossen!</strong><br>
+      ${result.files_processed} Dateien verarbeitet<br>
+      ${result.nodes_added} Nodes, ${result.edges_added} Edges hinzugefügt
+      ${result.errors?.length ? `<br><small>${result.errors.length} Fehler</small>` : ''}
+    `;
+
+    showToast(`Graph indexiert: ${result.nodes_added} Nodes`, 'success');
+
+    // Update empty state hint
+    const hint = document.getElementById('kg-empty-hint');
+    if (hint) hint.textContent = 'Graph indexiert! Suche nach einer Klasse.';
+
+  } catch (e) {
+    statusEl.className = 'alert alert-error';
+    statusEl.textContent = `Fehler: ${e.message}`;
+    showToast(`Indexierung fehlgeschlagen: ${e.message}`, 'error');
+  } finally {
+    btn.disabled = false;
+    btn.innerHTML = '&#128269; Indexieren';
+  }
+}
+
+async function loadGraphStats() {
+  try {
+    const res = await fetch('/api/graph/stats');
+    if (!res.ok) throw new Error('Stats nicht verfügbar');
+
+    const stats = await res.json();
+
+    if (stats.total_nodes === 0) {
+      showToast('Graph ist leer. Klicke auf "Graph indexieren" um zu starten.', 'info');
+    } else {
+      showToast(`Graph: ${stats.total_nodes} Nodes, ${stats.total_edges} Edges`, 'success');
+
+      // Update empty state
+      const hint = document.getElementById('kg-empty-hint');
+      if (hint) hint.textContent = `${stats.total_nodes} Nodes geladen. Suche nach einer Klasse.`;
+    }
+  } catch (e) {
+    showToast('Graph-Status konnte nicht geladen werden', 'error');
+  }
 }
 
 async function startArenaMatch() {
@@ -4514,6 +4648,11 @@ async function processAgentEvent(event, bubble, msgDiv, chat) {
     case 'workspace_pr_analysis':
       log.info('[SSE] workspace_pr_analysis event received', data);
       handlePRAnalysis(data);
+      break;
+
+    case 'pr_opened_hint':
+      log.info('[SSE] pr_opened_hint event received', data);
+      handlePROpenedHint(data, chat, bubble);
       break;
 
     case 'compaction': {

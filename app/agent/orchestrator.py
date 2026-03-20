@@ -280,6 +280,7 @@ class AgentEventType(str, Enum):
     WORKSPACE_RESEARCH = "workspace_research"        # Research-Ergebnis für Workspace Panel
     WORKSPACE_PR = "workspace_pr"                    # PR-Daten für Workspace Panel
     WORKSPACE_PR_ANALYSIS = "workspace_pr_analysis"  # PR-Analyse-Ergebnisse für Badges
+    PR_OPENED_HINT = "pr_opened_hint"                # Kurzer Chat-Hinweis: "PR im Workspace"
     # Progress & Stuck Detection Events
     STUCK_DETECTED = "stuck_detected"                # Agent dreht sich im Kreis
     PROGRESS_UPDATE = "progress_update"              # Neues Wissen gewonnen
@@ -3012,10 +3013,13 @@ Sei präzise und gib detaillierte Analyse-Schritte."""
                                             f"state={pr_state}, merged={is_merged}")
 
                                 # Sende zuerst PR-Basisdaten mit loading=true
+                                repo_owner = repo.split("/")[0] if "/" in repo else ""
+                                repo_name = repo.split("/")[1] if "/" in repo else repo
+
                                 yield AgentEvent(AgentEventType.WORKSPACE_PR, {
                                     "prNumber": pr_number,
-                                    "repoOwner": repo.split("/")[0] if "/" in repo else "",
-                                    "repoName": repo.split("/")[1] if "/" in repo else repo,
+                                    "repoOwner": repo_owner,
+                                    "repoName": repo_name,
                                     "title": result_data.get("title", f"PR #{pr_number}"),
                                     "author": author or "unknown",
                                     "baseBranch": base_branch or "main",
@@ -3027,6 +3031,14 @@ Sei präzise und gib detaillierte Analyse-Schritte."""
                                     "diff": result_data.get("diff", "")[:10000] if tool_call.name == "github_pr_diff" else "",
                                     "toolCall": tool_call.name,
                                     "loading": True  # Analyse läuft noch
+                                })
+
+                                # Kurzer Hinweis für Chat: "PR im Workspace geöffnet"
+                                yield AgentEvent(AgentEventType.PR_OPENED_HINT, {
+                                    "prNumber": pr_number,
+                                    "repoOwner": repo_owner,
+                                    "repoName": repo_name,
+                                    "title": result_data.get("title", f"PR #{pr_number}"),
                                 })
 
                                 # PR-Analyse starten (läuft als Background-Task, Event wird
