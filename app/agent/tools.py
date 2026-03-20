@@ -1181,32 +1181,69 @@ async def trace_java_references(
     found_classes = {}
     visited = set()
 
+    def is_excluded(file_path: Path) -> bool:
+        """Prüft ob eine Datei in einem ausgeschlossenen Verzeichnis liegt."""
+        path_parts = file_path.parts
+        for ex_dir in settings.java.exclude_dirs:
+            if ex_dir in path_parts:
+                return True
+        return False
+
     def find_java_file(name: str) -> Optional[Path]:
         """Findet eine Java-Datei nach Klassennamen oder Dateipfad."""
+        import logging
+        logger = logging.getLogger(__name__)
+
+        logger.debug(f"[trace_java] Suche nach: '{name}' in repo: {repo_path}")
+
         # Prüfe ob es ein Dateipfad ist (enthält / oder \ oder endet mit .java)
         if "/" in name or "\\" in name or name.endswith(".java"):
             # Es ist ein Pfad - Klassennamen extrahieren
             path_obj = Path(name)
-            # Entferne .java Extension falls vorhanden
             simple_name = path_obj.stem  # z.B. "MyClass" aus "MyClass.java"
+            logger.debug(f"[trace_java] Pfad erkannt, Klassenname: {simple_name}")
 
             # Prüfe ob der exakte Pfad existiert (relativ zum repo)
             exact_path = repo_path / name
             if exact_path.exists():
+                logger.debug(f"[trace_java] Exakter Pfad gefunden: {exact_path}")
                 return exact_path
 
             # Sonst nach dem Dateinamen suchen
             for java_file in repo_path.rglob(f"{simple_name}.java"):
-                if any(ex in str(java_file) for ex in settings.java.exclude_dirs):
+                if is_excluded(java_file):
+                    logger.debug(f"[trace_java] Übersprungen (excluded): {java_file}")
                     continue
+                logger.debug(f"[trace_java] Gefunden: {java_file}")
                 return java_file
         else:
             # Klassennamen - einfache oder vollqualifizierte (com.example.MyClass)
             simple_name = name.split(".")[-1]
-            for java_file in repo_path.rglob(f"{simple_name}.java"):
-                if any(ex in str(java_file) for ex in settings.java.exclude_dirs):
+            logger.debug(f"[trace_java] Klassenname: {simple_name}")
+
+            # Suche mit rglob
+            search_pattern = f"**/{simple_name}.java"
+            found_files = list(repo_path.glob(search_pattern))
+            logger.debug(f"[trace_java] glob '{search_pattern}' fand {len(found_files)} Dateien")
+
+            for java_file in found_files:
+                if is_excluded(java_file):
+                    logger.debug(f"[trace_java] Übersprungen (excluded): {java_file}")
                     continue
+                logger.debug(f"[trace_java] Gefunden: {java_file}")
                 return java_file
+
+            # Fallback: rglob mit *simple_name* (falls Dateiname anders geschrieben)
+            if not found_files:
+                logger.debug(f"[trace_java] Fallback-Suche mit rglob...")
+                for java_file in repo_path.rglob("*.java"):
+                    if simple_name.lower() in java_file.stem.lower():
+                        if is_excluded(java_file):
+                            continue
+                        logger.debug(f"[trace_java] Fallback gefunden: {java_file}")
+                        return java_file
+
+        logger.debug(f"[trace_java] Keine Datei gefunden für: {name}")
         return None
 
     def extract_class_info(file_path: Path) -> Dict:
