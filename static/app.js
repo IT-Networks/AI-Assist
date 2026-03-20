@@ -1714,31 +1714,10 @@ function openPRFromEvent(data) {
   prTabsManager.renderTabs();
   prTabsManager.renderActivePanel();
 
-  // Wenn Loading: Starte unabhängige Analyse
-  if (tab.loadingAnalysis && owner && repo) {
-    log.info('[PR] Starting independent analysis fetch');
-    _fetchPRAnalysis(owner, repo, number).then(analysis => {
-      if (!prTabsManager.hasTab(tab.id)) return;
-
-      if (!analysis.error) {
-        tab.analysisData = analysis;
-        tab.canApprove = analysis.canApprove !== false && tab.state === 'open';
-      } else {
-        tab.analysisData = {
-          bySeverity: { critical: 0, high: 0, medium: 0, low: 0, info: 0 },
-          verdict: 'comment',
-          findings: [],
-          summary: 'Analyse nicht verfügbar'
-        };
-      }
-      tab.loadingAnalysis = false;
-      tab.loading = false;
-
-      prTabsManager.renderTabs();
-      if (prTabsManager.activeTabId === tab.id) {
-        prTabsManager.renderActivePanel();
-      }
-    });
+  // Analyse-Daten kommen via SSE workspace_pr_analysis Event vom Backend
+  // Kein separater Fetch nötig - vermeidet Race Condition
+  if (tab.loadingAnalysis) {
+    log.info('[PR] Waiting for SSE workspace_pr_analysis event');
   }
 }
 

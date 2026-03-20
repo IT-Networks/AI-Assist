@@ -480,6 +480,7 @@ def register_github_tools(registry: ToolRegistry) -> int:
         """
         Holt die Code-Änderungen (Diff) eines Pull Requests.
         Zeigt welche Dateien geändert wurden und den konkreten Code-Diff.
+        Inkludiert auch PR-Metadaten (Author, Status, etc.) für Workspace-Anzeige.
         """
         if not settings.github.enabled:
             return ToolResult(success=False, error="GitHub ist nicht aktiviert")
@@ -496,6 +497,36 @@ def register_github_tools(registry: ToolRegistry) -> int:
             return ToolResult(success=False, error="pr_number ist erforderlich")
 
         api_url = settings.github.get_api_url()
+
+        # PR-Details holen (für Metadaten: Author, Status, etc.)
+        pr_result = await _github_request(
+            method="GET",
+            url=f"{api_url}/repos/{repo}/pulls/{pr_number}",
+            token=settings.github.token,
+            verify_ssl=settings.github.verify_ssl,
+            timeout=settings.github.timeout_seconds,
+        )
+
+        pr_metadata = {}
+        if pr_result["success"] and isinstance(pr_result["data"], dict):
+            pr = pr_result["data"]
+            user_data = pr.get("user", {})
+            merged_by_data = pr.get("merged_by", {})
+            pr_metadata = {
+                "title": pr.get("title", ""),
+                "state": pr.get("state", "open"),
+                "user": user_data.get("login", "") if user_data else "",
+                "user_name": user_data.get("name") or user_data.get("login", "") if user_data else "",
+                "merged": pr.get("merged"),
+                "merged_at": pr.get("merged_at"),
+                "merged_by": merged_by_data.get("login", "") if merged_by_data else "",
+                "head_branch": pr.get("head", {}).get("ref", ""),
+                "base_branch": pr.get("base", {}).get("ref", ""),
+                "additions": pr.get("additions", 0),
+                "deletions": pr.get("deletions", 0),
+                "changed_files": pr.get("changed_files", 0),
+                "commits": pr.get("commits", 0),
+            }
 
         # Geänderte Dateien holen (mit Patch/Diff)
         result = await _github_paginated_request(
@@ -560,20 +591,22 @@ def register_github_tools(registry: ToolRegistry) -> int:
                 combined_diff_parts.append(f["patch"])
         combined_diff = "\n".join(combined_diff_parts)
 
-        return ToolResult(
-            success=True,
-            data={
-                "repo": repo,
-                "pr_number": pr_number,
-                "total_files_in_pr": len(result["data"]),
-                "files_returned": len(files),
-                "total_additions": total_additions,
-                "total_deletions": total_deletions,
-                "file_filter": file_filter or "(none)",
-                "files": files,
-                "diff": combined_diff,  # Kombiniertes Diff für Analyse
-            },
-        )
+        # Kombinierte Daten: Metadaten + Diff
+        data = {
+            "repo": repo,
+            "pr_number": pr_number,
+            "total_files_in_pr": len(result["data"]),
+            "files_returned": len(files),
+            "total_additions": total_additions,
+            "total_deletions": total_deletions,
+            "file_filter": file_filter or "(none)",
+            "files": files,
+            "diff": combined_diff,  # Kombiniertes Diff für Analyse
+        }
+        # PR-Metadaten hinzufügen (für Workspace-Panel)
+        data.update(pr_metadata)
+
+        return ToolResult(success=True, data=data)
 
     registry.register(Tool(
         name="github_pr_diff",
