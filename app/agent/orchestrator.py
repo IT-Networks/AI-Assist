@@ -42,6 +42,37 @@ _RE_JSON_BLOCK = re.compile(r'```(?:json)?\s*\n(.*?)\n```', re.DOTALL)
 _RE_INLINE_NAME = re.compile(r'\{[^{}]*"name"\s*:\s*"([^"]+)"[^{}]*\}')
 _RE_MCP_FORCE = re.compile(r'^\[MCP:(\w+)\]\s*(.+)$', re.DOTALL)
 _RE_PLAN_BLOCK = re.compile(r'\[PLAN\](.*?)\[/PLAN\]', re.DOTALL)
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Parallelisierbare Tools (Read-Only, keine Seiteneffekte)
+# ══════════════════════════════════════════════════════════════════════════════
+PARALLELIZABLE_TOOL_PREFIXES = (
+    "search_",      # search_code, search_confluence, search_jira, etc.
+    "read_",        # read_file, read_confluence_page, etc.
+    "get_",         # get_active_repositories, etc.
+    "list_",        # list_files, list_database_tables, etc.
+    "glob_",        # glob_files
+    "github_",      # github_search_code, github_get_file, github_pr_diff, etc.
+    "describe_",    # describe_database_table, etc.
+    "grep_",        # grep_content
+)
+
+# Tools die NICHT parallelisiert werden dürfen (Schreibend, Confirmations, MCP)
+SEQUENTIAL_ONLY_TOOLS = {
+    "write_file", "edit_file", "create_file", "batch_write_files",
+    "execute_command", "run_sql_query",
+    "suggest_answers",  # Benötigt User-Interaktion
+    "sequential_thinking", "seq_think", "brainstorm", "design", "implement", "analyze",
+}
+
+def _is_parallelizable_tool(tool_name: str) -> bool:
+    """Prüft ob ein Tool parallel ausgeführt werden kann."""
+    if tool_name in SEQUENTIAL_ONLY_TOOLS:
+        return False
+    if tool_name.startswith("mcp_"):
+        return False  # MCP-Tools immer sequentiell
+    return tool_name.startswith(PARALLELIZABLE_TOOL_PREFIXES)
+
 # Debug hint patterns
 _RE_HINT_TOOL = re.compile(r'\[TOOL', re.IGNORECASE)
 _RE_HINT_XML_TOOL = re.compile(r'<tool', re.IGNORECASE)
@@ -764,6 +795,63 @@ Sei präzise und gib detaillierte Analyse-Schritte."""
         # Transcript-Logger mit Projekt konfigurieren
         if project_id:
             self.transcript_logger.project_id = project_id
+
+    async def _execute_tools_parallel_batch(
+        self,
+        tool_calls: List[ToolCall],
+        state: "AgentState"
+    ) -> List[ToolResult]:
+        """
+        Führt mehrere Read-Only-Tools parallel aus.
+
+        Args:
+            tool_calls: Liste von ToolCall-Objekten (alle müssen parallelisierbar sein)
+            state: Aktueller Agent-State für Caching/Budget
+
+        Returns:
+            Liste von ToolResult in gleicher Reihenfolge wie tool_calls
+        """
+        import time as _time
+
+        async def execute_single(tc: ToolCall) -> ToolResult:
+            """Einzelnes Tool mit Caching ausführen."""
+            # Cache prüfen
+            cached = self._tool_cache.get(tc.name, tc.arguments)
+            if cached is not None:
+                logger.debug(f"[parallel] Cache HIT: {tc.name}")
+                if state.tool_budget:
+                    state.tool_budget.record_tool_call(tc.name, duration_ms=0, cached=True)
+                return cached
+
+            # Tool ausführen
+            _start = _time.time()
+            try:
+                result = await self.tools.execute(tc.name, **tc.arguments)
+            except Exception as e:
+                logger.warning(f"[parallel] Tool {tc.name} failed: {e}")
+                result = ToolResult(success=False, error=str(e))
+
+            _duration_ms = int((_time.time() - _start) * 1000)
+
+            # Cachen und Budget tracken
+            if result.success:
+                self._tool_cache.set(tc.name, tc.arguments, result)
+            if state.tool_budget:
+                state.tool_budget.record_tool_call(tc.name, duration_ms=_duration_ms, cached=False)
+
+            logger.debug(f"[parallel] {tc.name} completed in {_duration_ms}ms")
+            return result
+
+        # Alle Tools parallel ausführen
+        logger.info(f"[parallel] Executing {len(tool_calls)} tools in parallel: {[tc.name for tc in tool_calls]}")
+        _batch_start = _time.time()
+
+        results = await asyncio.gather(*[execute_single(tc) for tc in tool_calls])
+
+        _batch_duration = int((_time.time() - _batch_start) * 1000)
+        logger.info(f"[parallel] Batch completed in {_batch_duration}ms (vs sequential estimate: {sum(r.data.get('duration_ms', 500) if isinstance(r.data, dict) else 500 for r in results)}ms)")
+
+        return list(results)
 
     async def _emit_mcp_event(self, event_type: str, data: Dict[str, Any]) -> None:
         """
@@ -2554,22 +2642,131 @@ Sei präzise und gib detaillierte Analyse-Schritte."""
 
                 # Tools ausführen
                 current_tool_calls_for_messages = []
-                for tc in tool_calls[:self.max_tool_calls_per_iter]:
+
+                # ══════════════════════════════════════════════════════════════
+                # PARALLELISIERUNG: Prüfe ob Tools parallel ausgeführt werden können
+                # ══════════════════════════════════════════════════════════════
+                tools_to_process = tool_calls[:self.max_tool_calls_per_iter]
+
+                # Parse alle Tool-Calls vorab
+                parsed_tool_calls: List[ToolCall] = []
+                for tc in tools_to_process:
                     raw_args = tc["function"]["arguments"]
                     if isinstance(raw_args, str):
                         try:
                             parsed_args = json.loads(raw_args)
-                        except json.JSONDecodeError as e:
-                            logger.debug("[agent] Malformed tool arguments JSON: {e} — raw: {raw_args[:100]}")
+                        except json.JSONDecodeError:
                             parsed_args = {}
                     else:
                         parsed_args = raw_args
 
-                    tool_call = ToolCall(
+                    parsed_tool_calls.append(ToolCall(
                         id=tc.get("id", f"call_{len(state.tool_calls_history)}"),
                         name=tc["function"]["name"],
                         arguments=parsed_args
-                    )
+                    ))
+
+                # Prüfe ob parallele Ausführung möglich (alle Tools parallelisierbar)
+                all_parallelizable = (
+                    len(parsed_tool_calls) >= 2 and
+                    all(_is_parallelizable_tool(tc.name) for tc in parsed_tool_calls)
+                )
+
+                if all_parallelizable:
+                    # ══════════════════════════════════════════════════════════
+                    # FAST PATH: Parallele Ausführung aller Tools
+                    # ══════════════════════════════════════════════════════════
+                    logger.info(f"[agent] Parallel execution: {len(parsed_tool_calls)} tools")
+
+                    # TOOL_START Events für alle Tools emittieren
+                    for tc in parsed_tool_calls:
+                        is_pr_workspace_tool = tc.name in ("github_pr_details", "github_pr_diff")
+                        yield AgentEvent(AgentEventType.TOOL_START, {
+                            "id": tc.id,
+                            "name": tc.name,
+                            "arguments": tc.arguments,
+                            "model": settings.llm.tool_model or settings.llm.default_model,
+                            "workspaceOnly": is_pr_workspace_tool,
+                            "parallel": True  # Markiert als parallel
+                        })
+
+                    # Parallele Ausführung
+                    parallel_results = await self._execute_tools_parallel_batch(parsed_tool_calls, state)
+
+                    # Ergebnisse verarbeiten
+                    for i, (tc, result) in enumerate(zip(parsed_tool_calls, parallel_results)):
+                        tc.result = result
+                        has_used_tools = True
+                        current_tool_calls_for_messages.append(tools_to_process[i])
+
+                        # TOOL_RESULT Event
+                        yield AgentEvent(AgentEventType.TOOL_RESULT, {
+                            "id": tc.id,
+                            "name": tc.name,
+                            "success": result.success,
+                            "data": result.to_context()[:500] if result.success else (result.error or "")[:500],
+                        })
+
+                        # Entity Tracker
+                        if result.success:
+                            _source_path = tc.arguments.get("path", "") or tc.arguments.get("query", "")
+                            state.entity_tracker.extract_from_tool_result(
+                                tool_name=tc.name,
+                                result_text=result.to_context(),
+                                source_path=_source_path
+                            )
+
+                        # Stuck Detection
+                        stuck_result = progress_tracker.record_call(
+                            tool_name=tc.name,
+                            args=tc.arguments,
+                            result=result,
+                            iteration=iteration
+                        )
+                        if stuck_result.is_stuck:
+                            yield AgentEvent(AgentEventType.STUCK_DETECTED, {
+                                "reason": stuck_result.reason.value if stuck_result.reason else "unknown",
+                                "details": stuck_result.details,
+                                "suggestion": stuck_result.suggestion,
+                            })
+                            messages.append({"role": "system", "content": stuck_result.get_hint()})
+
+                        state.tool_calls_history.append(tc)
+
+                    # Messages für nächste Iteration aufbauen (natives Format)
+                    if native_tools:
+                        messages.append({
+                            "role": "assistant",
+                            "content": content if content else None,
+                            "tool_calls": current_tool_calls_for_messages
+                        })
+                        for tc in parsed_tool_calls:
+                            if tc.result:
+                                messages.append({
+                                    "role": "tool",
+                                    "tool_call_id": tc.id,
+                                    "content": _truncate_result(tc.result.to_context(), tool_name=tc.name)
+                                })
+                    else:
+                        messages.append({"role": "assistant", "content": content or ""})
+                        results_parts = [
+                            f"### Tool-Ergebnis: {tc.name}\n{_truncate_result(tc.result.to_context(), tool_name=tc.name)}"
+                            for tc in parsed_tool_calls if tc.result
+                        ]
+                        if results_parts:
+                            messages.append({
+                                "role": "user",
+                                "content": "Tool-Ergebnisse:\n\n" + "\n\n---\n\n".join(results_parts)
+                            })
+
+                    # Skip zum nächsten Iteration-Loop (keine sequentielle Verarbeitung nötig)
+                    continue
+
+                # ══════════════════════════════════════════════════════════════
+                # STANDARD PATH: Sequentielle Ausführung (für Write-Tools, MCP, etc.)
+                # ══════════════════════════════════════════════════════════════
+                for idx, tc in enumerate(tools_to_process):
+                    tool_call = parsed_tool_calls[idx]
 
                     # Loop-Prävention: read_file max 2x pro Datei erlauben
                     if tool_call.name == "read_file":
