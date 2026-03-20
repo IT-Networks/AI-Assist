@@ -516,12 +516,21 @@ class KnowledgeGraphViewer {
       .on('click', (e, d) => this._selectNode(d, e))
       .on('dblclick', (e, d) => this._expandNode(d));
 
-    // Node circles
+    // Invisible hit area (larger than visible circle for easier clicking)
     node.append('circle')
+      .attr('class', 'kg-node-hitarea')
+      .attr('r', d => this._getNodeRadius(d) + 8)
+      .attr('fill', 'transparent')
+      .attr('stroke', 'none');
+
+    // Node circles (visible)
+    node.append('circle')
+      .attr('class', 'kg-node-circle')
       .attr('r', d => this._getNodeRadius(d))
       .attr('fill', d => this._getNodeColor(d))
       .attr('stroke', d => d.id === this.currentCenter ? '#fff' : 'none')
-      .attr('stroke-width', d => d.id === this.currentCenter ? 3 : 0);
+      .attr('stroke-width', d => d.id === this.currentCenter ? 3 : 0)
+      .style('pointer-events', 'none');  // Let hitarea handle events
 
     // Node labels
     node.append('text')
@@ -572,7 +581,7 @@ class KnowledgeGraphViewer {
 
     // Visual feedback
     if (this.g) {
-      this.g.selectAll('.kg-node circle')
+      this.g.selectAll('.kg-node-circle')
         .attr('stroke', d => d.id === node.id ? '#fff' : (d.id === this.currentCenter ? '#fff' : 'none'))
         .attr('stroke-width', d => d.id === node.id ? 2 : (d.id === this.currentCenter ? 3 : 0));
     }
