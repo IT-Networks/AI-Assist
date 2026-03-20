@@ -3361,6 +3361,14 @@ Sei präzise und gib detaillierte Analyse-Schritte."""
                                 if isinstance(author, dict):
                                     author = author.get("login", "")
 
+                                # Author Name (vollständiger Name, falls verfügbar)
+                                author_name = result_data.get("user_name", "") or author
+
+                                # Zusätzliche PR-Metadaten
+                                commits_count = result_data.get("commits", 0)
+                                merged_by = result_data.get("merged_by", "")
+                                merged_at = result_data.get("merged_at", "")
+
                                 # Branches: Tool gibt "head_branch"/"base_branch" zurück (String)
                                 # Fallback auf nested dict falls direkte API-Response
                                 head_raw = result_data.get("head")
@@ -3400,12 +3408,16 @@ Sei präzise und gib detaillierte Analyse-Schritte."""
                                     "repoName": repo_name,
                                     "title": result_data.get("title", f"PR #{pr_number}"),
                                     "author": author or "unknown",
+                                    "authorName": author_name or author or "unknown",  # NEU
                                     "baseBranch": base_branch or "main",
                                     "headBranch": head_branch or "feature",
                                     "additions": result_data.get("additions", 0),
                                     "deletions": result_data.get("deletions", 0),
                                     "filesChanged": result_data.get("changed_files", 0),
+                                    "commits": commits_count,  # NEU
                                     "state": "merged" if is_merged else pr_state,
+                                    "mergedAt": merged_at,  # NEU
+                                    "mergedBy": merged_by,  # NEU
                                     "diff": result_data.get("diff", "")[:10000] if tool_call.name == "github_pr_diff" else "",
                                     "toolCall": tool_call.name,
                                     "loading": True  # Analyse läuft noch

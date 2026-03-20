@@ -7533,6 +7533,41 @@ a:visited {
   border-radius: 10px;
 }
 
+/* Gruppierte Dateien (SQL, .ser, etc.) */
+.pr-file-group {
+  border-left: 3px solid var(--accent);
+}
+
+.pr-file-group .pr-file-header {
+  background: color-mix(in srgb, var(--accent) 10%, var(--surface));
+}
+
+.pr-file-group .pr-file-name {
+  color: var(--accent);
+}
+
+.pr-group-summary {
+  padding: 8px 12px;
+  background: var(--surface);
+  border-radius: 4px;
+  margin-bottom: 8px;
+  font-size: 0.85rem;
+}
+
+.pr-group-files {
+  margin: 4px 0 0 0;
+  padding-left: 20px;
+  max-height: 100px;
+  overflow-y: auto;
+  font-family: var(--font-mono);
+  font-size: 0.8rem;
+  color: var(--text-secondary);
+}
+
+.pr-group-files li {
+  margin: 2px 0;
+}
+
 .pr-file-comments {
   padding: 8px;
 }

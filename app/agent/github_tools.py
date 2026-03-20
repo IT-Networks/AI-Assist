@@ -413,6 +413,15 @@ def register_github_tools(registry: ToolRegistry) -> int:
             params={"per_page": 1},
         )
 
+        # Author-Daten extrahieren
+        user_data = pr.get("user", {})
+        author_login = user_data.get("login", "")
+        author_name = user_data.get("name") or author_login  # Fallback auf Login
+
+        # Merged-By extrahieren (falls gemerged)
+        merged_by_data = pr.get("merged_by", {})
+        merged_by = merged_by_data.get("login", "") if merged_by_data else ""
+
         return ToolResult(
             success=True,
             data={
@@ -420,10 +429,13 @@ def register_github_tools(registry: ToolRegistry) -> int:
                 "title": pr.get("title"),
                 "body": (pr.get("body") or "")[:2000],  # Truncate
                 "state": pr.get("state"),
-                "user": pr.get("user", {}).get("login"),
+                "user": author_login,
+                "user_name": author_name,  # NEU: Vollständiger Name
                 "created_at": pr.get("created_at"),
                 "updated_at": pr.get("updated_at"),
                 "merged": pr.get("merged"),
+                "merged_at": pr.get("merged_at"),  # NEU: Merge-Zeitpunkt
+                "merged_by": merged_by,  # NEU: Wer hat gemerged
                 "mergeable": pr.get("mergeable"),
                 "mergeable_state": pr.get("mergeable_state"),
                 "head_branch": pr.get("head", {}).get("ref"),
@@ -431,6 +443,7 @@ def register_github_tools(registry: ToolRegistry) -> int:
                 "additions": pr.get("additions"),
                 "deletions": pr.get("deletions"),
                 "changed_files": pr.get("changed_files"),
+                "commits": pr.get("commits", 0),  # NEU: Anzahl Commits
                 "reviews": reviews,
                 "comment_count": pr.get("comments", 0) + pr.get("review_comments", 0),
             },

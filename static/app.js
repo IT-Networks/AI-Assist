@@ -1676,7 +1676,10 @@ function openPRFromEvent(data) {
     additions: data.additions || 0,
     deletions: data.deletions || 0,
     filesChanged: data.filesChanged || 0,
+    commits: data.commits || 0,  // NEU: Anzahl Commits
     state: data.state || 'open',
+    mergedAt: data.mergedAt || null,  // NEU: Merge-Zeitpunkt
+    mergedBy: data.mergedBy || '',  // NEU: Wer hat gemerged
     canApprove: data.state === 'open'
   });
 
@@ -1889,12 +1892,26 @@ function renderPRReviewPanelForTab(tab) {
   prNumberEl.textContent = `#${tab.number}`;
   prTitleEl.textContent = tab.title || `${tab.owner}/${tab.repo}`;
   if (prBranchesEl) prBranchesEl.textContent = `${tab.baseBranch || 'main'} ← ${tab.headBranch || 'feature'}`;
-  if (prStatsEl) prStatsEl.textContent = `+${tab.additions || 0} -${tab.deletions || 0} | ${tab.filesChanged || 0} files`;
-  // Zeige Name und Login wenn unterschiedlich, sonst nur Login
+
+  // Stats: +N -M | X files | Y commits
+  if (prStatsEl) {
+    let statsText = `+${tab.additions || 0} -${tab.deletions || 0} | ${tab.filesChanged || 0} files`;
+    if (tab.commits > 0) {
+      statsText += ` | ${tab.commits} commit${tab.commits > 1 ? 's' : ''}`;
+    }
+    prStatsEl.textContent = statsText;
+  }
+
+  // Author: Name und Login
   if (prAuthorEl) {
     const name = tab.authorName || tab.author || 'unknown';
     const login = tab.author || 'unknown';
-    prAuthorEl.textContent = (name !== login) ? `${name} (@${login})` : `@${login}`;
+    let authorText = (name !== login) ? `${name} (@${login})` : `@${login}`;
+    // Bei merged: Merged-Info hinzufügen
+    if (tab.state === 'merged' && tab.mergedBy) {
+      authorText += ` · merged by @${tab.mergedBy}`;
+    }
+    prAuthorEl.textContent = authorText;
   }
 
   // PR Status Badge anzeigen
@@ -1969,6 +1986,9 @@ function renderPRReviewPanelForTab(tab) {
     fileComments[filePath].push(item);
   }
 
+  // Gruppiere generierte/ähnliche Dateien (SQL, .ser, etc.)
+  const groupedFiles = _groupGeneratedFiles(fileComments);
+
   // Render files
   const filesContainer = document.getElementById('pr-files');
 
@@ -1980,7 +2000,7 @@ function renderPRReviewPanelForTab(tab) {
           <span>Analysiere PR-Änderungen...</span>
         </div>
       `;
-    } else if (Object.keys(fileComments).length === 0) {
+    } else if (Object.keys(groupedFiles.individual).length === 0 && groupedFiles.summaries.length === 0) {
       filesContainer.innerHTML = `
         <div class="pr-empty">
           <span class="pr-empty-icon">&#10004;</span>
@@ -1988,7 +2008,26 @@ function renderPRReviewPanelForTab(tab) {
         </div>
       `;
     } else {
-      filesContainer.innerHTML = Object.entries(fileComments).map(([filePath, items]) => `
+      // Erst Summaries für gruppierte Dateien, dann individuelle Dateien
+      const summaryHTML = groupedFiles.summaries.map(summary => `
+        <div class="pr-file pr-file-group">
+          <div class="pr-file-header" onclick="togglePRFile(this)">
+            <span class="pr-file-name">${escapeHtml(summary.label)}</span>
+            <span class="pr-file-issues">${summary.totalIssues} issues in ${summary.fileCount} files</span>
+          </div>
+          <div class="pr-file-comments" style="display: none;">
+            <div class="pr-group-summary">
+              <strong>Enthaltene Dateien:</strong>
+              <ul class="pr-group-files">
+                ${summary.files.map(f => `<li>${escapeHtml(f)}</li>`).join('')}
+              </ul>
+            </div>
+            ${summary.items.map(item => renderPRFinding(item)).join('')}
+          </div>
+        </div>
+      `).join('');
+
+      const individualHTML = Object.entries(groupedFiles.individual).map(([filePath, items]) => `
         <div class="pr-file">
           <div class="pr-file-header" onclick="togglePRFile(this)">
             <span class="pr-file-name">${escapeHtml(filePath)}</span>
@@ -1999,6 +2038,8 @@ function renderPRReviewPanelForTab(tab) {
           </div>
         </div>
       `).join('');
+
+      filesContainer.innerHTML = summaryHTML + individualHTML;
     }
   }
 
@@ -2007,6 +2048,60 @@ function renderPRReviewPanelForTab(tab) {
   if (approveBtn) {
     approveBtn.style.display = tab.canApprove && tab.state === 'open' ? 'block' : 'none';
   }
+}
+
+/**
+ * Gruppiert generierte/ähnliche Dateien (SQL, .ser, etc.)
+ * Wenn mehr als 3 Dateien eines Typs: Zusammenfassen zu einer Gruppe
+ */
+function _groupGeneratedFiles(fileComments) {
+  const GROUPABLE_EXTENSIONS = {
+    '.sql': 'SQL-Dateien',
+    '.ser': 'Serialisierte Dateien',
+    '.xml': 'XML-Konfigurationen',
+    '.json': 'JSON-Dateien',
+    '.properties': 'Property-Dateien',
+  };
+  const MIN_FILES_TO_GROUP = 3;
+
+  // Dateien nach Extension sortieren
+  const byExtension = {};
+  const individual = {};
+
+  for (const [filePath, items] of Object.entries(fileComments)) {
+    const ext = filePath.substring(filePath.lastIndexOf('.')).toLowerCase();
+
+    if (GROUPABLE_EXTENSIONS[ext]) {
+      if (!byExtension[ext]) {
+        byExtension[ext] = { files: [], items: [], label: GROUPABLE_EXTENSIONS[ext] };
+      }
+      byExtension[ext].files.push(filePath);
+      byExtension[ext].items.push(...items);
+    } else {
+      individual[filePath] = items;
+    }
+  }
+
+  // Gruppen mit weniger als MIN_FILES zurück zu individual
+  const summaries = [];
+  for (const [ext, group] of Object.entries(byExtension)) {
+    if (group.files.length >= MIN_FILES_TO_GROUP) {
+      summaries.push({
+        label: `${group.label} (${group.files.length})`,
+        fileCount: group.files.length,
+        totalIssues: group.items.length,
+        files: group.files,
+        items: group.items,
+      });
+    } else {
+      // Zu wenige Dateien - einzeln anzeigen
+      for (const filePath of group.files) {
+        individual[filePath] = fileComments[filePath];
+      }
+    }
+  }
+
+  return { individual, summaries };
 }
 
 // Render einzelnes Finding aus der Analyse
