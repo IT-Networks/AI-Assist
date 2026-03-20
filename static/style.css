@@ -9393,12 +9393,36 @@ a:visited {
   font-size: 0.85rem;
 }
 
+.kg-filter-label {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 0.8rem;
+  color: var(--text-secondary);
+  cursor: pointer;
+  padding: 4px 8px;
+  border-radius: 4px;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+}
+
+.kg-filter-label:hover {
+  background: var(--surface-hover);
+}
+
+.kg-filter-label input {
+  cursor: pointer;
+}
+
 .kg-info {
   display: flex;
   gap: 12px;
   color: var(--text-secondary);
   font-size: 0.85rem;
   margin-left: auto;
+  padding: 4px 8px;
+  background: var(--bg-secondary);
+  border-radius: 4px;
 }
 
 .kg-message {

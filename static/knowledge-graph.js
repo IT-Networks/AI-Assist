@@ -22,6 +22,7 @@ class KnowledgeGraphViewer {
     this.zoom = null;
     this.currentCenter = null;
     this.currentDepth = 2;
+    this.hideAccessors = true;  // Getter/Setter standardmäßig ausblenden
 
     // Node colors by type
     this.colors = {
@@ -80,6 +81,10 @@ class KnowledgeGraphViewer {
           <option value="2" selected>Tiefe: 2</option>
           <option value="3">Tiefe: 3</option>
         </select>
+        <label class="kg-filter-label" title="Getter/Setter/Is-Methoden ausblenden">
+          <input type="checkbox" id="kg-hide-accessors" checked />
+          <span>Accessors ausblenden</span>
+        </label>
       </div>
       <div class="kg-info" id="kg-info">
         <span id="kg-node-count">0 Nodes</span>
@@ -111,6 +116,40 @@ class KnowledgeGraphViewer {
         this.loadSubgraph(this.currentCenter, this.currentDepth);
       }
     });
+
+    document.getElementById('kg-hide-accessors')?.addEventListener('change', (e) => {
+      this.hideAccessors = e.target.checked;
+      if (this.nodes.length > 0) {
+        this.render();  // Re-render mit neuem Filter
+      }
+    });
+  }
+
+  /**
+   * Prüft ob ein Node ein Accessor (Getter/Setter/Is) ist.
+   */
+  _isAccessorMethod(node) {
+    if (node.type !== 'method') return false;
+    const name = node.name || '';
+    // Java-Style: getXxx, setXxx, isXxx
+    // Auch: hashCode, equals, toString (Standard-Methoden)
+    return /^(get|set|is)[A-Z]/.test(name) ||
+           /^(hashCode|equals|toString|clone|compareTo)$/.test(name);
+  }
+
+  /**
+   * Filtert Nodes basierend auf aktuellen Einstellungen.
+   */
+  _filterNodes(nodes) {
+    if (!this.hideAccessors) return nodes;
+    return nodes.filter(n => !this._isAccessorMethod(n));
+  }
+
+  /**
+   * Filtert Edges basierend auf gefilterten Nodes.
+   */
+  _filterEdges(edges, nodeIds) {
+    return edges.filter(e => nodeIds.has(e.from_id) && nodeIds.has(e.to_id));
   }
 
   _handleSearchInput(query) {
@@ -331,10 +370,17 @@ class KnowledgeGraphViewer {
   }
 
   _updateInfo() {
-    const nodeCount = document.getElementById('kg-node-count');
-    const edgeCount = document.getElementById('kg-edge-count');
-    if (nodeCount) nodeCount.textContent = `${this.nodes.length} Nodes`;
-    if (edgeCount) edgeCount.textContent = `${this.edges.length} Edges`;
+    const filteredNodes = this._filterNodes(this.nodes);
+    const nodeIds = new Set(filteredNodes.map(n => n.id));
+    const filteredEdges = this._filterEdges(this.edges, nodeIds);
+    this._updateInfoFiltered(filteredNodes.length, filteredEdges.length);
+  }
+
+  _updateInfoFiltered(nodeCount, edgeCount) {
+    const nodeEl = document.getElementById('kg-node-count');
+    const edgeEl = document.getElementById('kg-edge-count');
+    if (nodeEl) nodeEl.textContent = `${nodeCount} Nodes`;
+    if (edgeEl) edgeEl.textContent = `${edgeCount} Edges`;
   }
 
   render() {
@@ -352,7 +398,23 @@ class KnowledgeGraphViewer {
       return;
     }
 
-    console.log('[KnowledgeGraph] Rendering', this.nodes.length, 'nodes,', this.edges.length, 'edges');
+    // Filter nodes and edges based on settings
+    const filteredNodes = this._filterNodes(this.nodes);
+    const nodeIds = new Set(filteredNodes.map(n => n.id));
+    const filteredEdges = this._filterEdges(this.edges, nodeIds);
+
+    console.log('[KnowledgeGraph] Rendering', filteredNodes.length, '/', this.nodes.length, 'nodes,',
+                filteredEdges.length, '/', this.edges.length, 'edges (filtered)');
+
+    // Update info with filtered counts
+    this._updateInfoFiltered(filteredNodes.length, filteredEdges.length);
+
+    // Check if any nodes remain after filtering
+    if (filteredNodes.length === 0) {
+      console.warn('[KnowledgeGraph] All nodes filtered out');
+      this._showMessage('Alle Nodes gefiltert - deaktiviere "Accessors ausblenden"');
+      return;
+    }
 
     // Hide empty state
     const emptyState = document.getElementById('kg-empty-state');
@@ -402,11 +464,11 @@ class KnowledgeGraphViewer {
       .attr('d', 'M 0,-5 L 10,0 L 0,5')
       .attr('fill', 'var(--border-color, #475569)');
 
-    // Create node id map for edge linking
-    const nodeMap = new Map(this.nodes.map(n => [n.id, n]));
+    // Create node id map for edge linking (use filtered nodes)
+    const nodeMap = new Map(filteredNodes.map(n => [n.id, n]));
 
     // Filter edges to only include those with valid nodes
-    const validEdges = this.edges.filter(e =>
+    const validEdges = filteredEdges.filter(e =>
       nodeMap.has(e.from_id) && nodeMap.has(e.to_id)
     ).map(e => ({
       ...e,
@@ -414,8 +476,8 @@ class KnowledgeGraphViewer {
       target: e.to_id
     }));
 
-    // Force simulation
-    this.simulation = d3.forceSimulation(this.nodes)
+    // Force simulation with filtered nodes
+    this.simulation = d3.forceSimulation(filteredNodes)
       .force('link', d3.forceLink(validEdges)
         .id(d => d.id)
         .distance(100))
@@ -443,11 +505,11 @@ class KnowledgeGraphViewer {
       .text(d => d.type)
       .style('opacity', 0);
 
-    // Nodes
+    // Nodes (use filtered)
     const node = this.g.append('g')
       .attr('class', 'kg-nodes')
       .selectAll('g')
-      .data(this.nodes)
+      .data(filteredNodes)
       .join('g')
       .attr('class', d => `kg-node kg-node-${d.type}`)
       .call(this._drag(this.simulation))
