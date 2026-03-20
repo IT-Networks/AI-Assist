@@ -78,6 +78,106 @@ _RE_HINT_TOOL = re.compile(r'\[TOOL', re.IGNORECASE)
 _RE_HINT_XML_TOOL = re.compile(r'<tool', re.IGNORECASE)
 _RE_HINT_XML_FUNC = re.compile(r'<function', re.IGNORECASE)
 _RE_HINT_NAME = re.compile(r'"name"\s*:')
+
+# ══════════════════════════════════════════════════════════════════════════════
+# PR-Context Detection - Filtert Tools bei GitHub PR-Analysen
+# ══════════════════════════════════════════════════════════════════════════════
+# Pattern: github.com/owner/repo/pull/123 oder github.enterprise.com/.../pull/456
+_RE_GITHUB_PR_URL = re.compile(
+    r'github[.\w-]*\.com/[\w.-]+/[\w.-]+/pull/\d+',
+    re.IGNORECASE
+)
+
+# Tools die bei PR-Analysen erlaubt sind (GitHub-Tools + Basis-Infos)
+PR_CONTEXT_ALLOWED_TOOLS = {
+    # GitHub-Tools für PR-Analyse
+    "github_pr_details",
+    "github_pr_diff",
+    "github_get_file",
+    "github_search_code",
+    "github_commit_diff",
+    "github_recent_commits",
+    "github_list_branches",
+    # Allgemeine Hilfstools
+    "sequential_thinking",
+    "seq_think",
+}
+
+# Tools die bei PR-Context explizit VERBOTEN sind (lokale Dateien)
+PR_CONTEXT_FORBIDDEN_TOOLS = {
+    "search_code",          # Durchsucht lokales Dateisystem
+    "read_file",            # Liest lokale Dateien
+    "batch_read_files",     # Liest mehrere lokale Dateien
+    "grep_content",         # Grep in lokalen Dateien
+    "glob_files",           # Glob in lokalem Dateisystem
+    "find_files",           # Findet lokale Dateien
+    "search_java_class",    # Java-Suche lokal
+    "trace_java_references",# Java-Referenzen lokal
+    "search_python_class",  # Python-Suche lokal
+}
+
+
+def _detect_pr_context(user_message: str) -> Optional[str]:
+    """
+    Erkennt ob die User-Message eine GitHub PR-URL enthält.
+
+    Args:
+        user_message: Die Nachricht des Users
+
+    Returns:
+        Die PR-URL wenn gefunden, sonst None
+    """
+    match = _RE_GITHUB_PR_URL.search(user_message)
+    if match:
+        return match.group(0)
+    return None
+
+
+def _filter_tools_for_pr_context(
+    tool_schemas: List[Dict[str, Any]],
+    pr_url: str
+) -> List[Dict[str, Any]]:
+    """
+    Filtert Tool-Schemas für PR-Context.
+
+    Entfernt lokale Datei-Tools und behält nur GitHub-Tools.
+
+    Args:
+        tool_schemas: Alle verfügbaren Tool-Schemas
+        pr_url: Die erkannte PR-URL
+
+    Returns:
+        Gefilterte Tool-Schemas (nur PR-relevante Tools)
+    """
+    filtered = []
+    removed = []
+
+    for schema in tool_schemas:
+        tool_name = schema.get("function", {}).get("name", "")
+
+        # Explizit verbotene Tools entfernen
+        if tool_name in PR_CONTEXT_FORBIDDEN_TOOLS:
+            removed.append(tool_name)
+            continue
+
+        # GitHub-Tools und erlaubte Tools behalten
+        if (tool_name.startswith("github_") or
+            tool_name in PR_CONTEXT_ALLOWED_TOOLS or
+            tool_name.startswith("mcp_")):  # MCP-Tools für Reasoning behalten
+            filtered.append(schema)
+        else:
+            # Andere Tools entfernen (z.B. search_confluence, search_jira)
+            # Diese sind für PR-Analyse nicht relevant
+            removed.append(tool_name)
+
+    if removed:
+        logger.info(
+            f"[PR-Context] Erkannt: {pr_url[:60]}... | "
+            f"Entfernte {len(removed)} lokale Tools, {len(filtered)} Tools verfügbar"
+        )
+        logger.debug(f"[PR-Context] Entfernte Tools: {removed[:10]}...")
+
+    return filtered
 _RE_HINT_TOOL_KEY = re.compile(r'"tool"\s*:')
 
 from app.agent.tools import ToolRegistry, ToolResult, get_tool_registry
@@ -1854,6 +1954,19 @@ Sei präzise und gib detaillierte Analyse-Schritte."""
             except Exception as e:
                 logger.debug("[agent] MCP bridge initialization failed: {e}")
 
+        # PR-Context-Erkennung: Filtere Tools wenn PR-URL in der Nachricht
+        pr_url = _detect_pr_context(user_message)
+        if pr_url:
+            tool_schemas = _filter_tools_for_pr_context(tool_schemas, pr_url)
+            # Zusätzlicher Hinweis im System-Prompt
+            system_prompt += (
+                "\n\n## WICHTIG: PR-Analyse-Modus\n"
+                f"Du analysierst den Pull Request: {pr_url}\n"
+                "Verwende NUR GitHub-Tools (github_pr_diff, github_get_file, etc.).\n"
+                "Lokale Tools wie read_file oder search_code sind NICHT verfügbar.\n"
+                "Die PR-Analyse erscheint automatisch im Workspace-Panel."
+            )
+
         # Agent-Instruktionen
         agent_instructions = self._build_agent_instructions(state.mode, state.plan_approved)
         system_prompt += f"\n\n{agent_instructions}"
@@ -1939,11 +2052,40 @@ Sei präzise und gib detaillierte Analyse-Schritte."""
                 logger.debug("[agent] Nutzer-Kontext injiziert: {hint_parts}")
 
         # Konversations-Historie hinzufügen (für Multi-Turn)
-        # context_items werden NICHT als separate System-Message eingefügt,
-        # da Tool-Results bereits korrekt als role="tool" Messages im Verlauf erscheinen.
-        # Das verhindert Dopplung und reduziert LLM-Loop-Verhalten.
+        # SANDWICH-Ansatz: Erste Nachrichten (Eingangsfrage) + Letzte Nachrichten (aktueller Kontext)
+        # Das verhindert, dass Follow-up Fragen den initialen Kontext verlieren
         history_tokens = 0
-        for hist_msg in state.messages_history[-state.max_history_messages:]:
+        history_len = len(state.messages_history)
+
+        if history_len <= state.max_history_messages:
+            # Alle Nachrichten passen - normal hinzufügen
+            history_to_add = state.messages_history
+        else:
+            # Sandwich: Erste N + Letzte M (wobei N + M <= max_history_messages)
+            keep_initial = min(state.keep_initial_messages, history_len)
+            remaining_slots = state.max_history_messages - keep_initial
+
+            initial_msgs = state.messages_history[:keep_initial]
+            recent_msgs = state.messages_history[-remaining_slots:] if remaining_slots > 0 else []
+
+            # Duplikate vermeiden wenn initial und recent überlappen
+            recent_start_idx = history_len - remaining_slots if remaining_slots > 0 else history_len
+            if recent_start_idx <= keep_initial:
+                # Überlappung - einfach alle von Anfang bis Ende nehmen
+                history_to_add = state.messages_history[:state.max_history_messages]
+            else:
+                # Sandwich zusammenbauen mit Marker für ausgelassene Nachrichten
+                skipped_count = recent_start_idx - keep_initial
+                history_to_add = initial_msgs.copy()
+                if skipped_count > 0:
+                    history_to_add.append({
+                        "role": "system",
+                        "content": f"[... {skipped_count} Nachrichten ausgelassen, Kontext zusammengefasst ...]"
+                    })
+                history_to_add.extend(recent_msgs)
+                logger.debug(f"[agent] Sandwich-History: {keep_initial} initial + {len(recent_msgs)} recent, {skipped_count} übersprungen")
+
+        for hist_msg in history_to_add:
             messages.append(hist_msg)
             history_tokens += estimate_tokens(hist_msg.get("content", ""))
         budget.set("conversation", history_tokens)
