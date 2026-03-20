@@ -13,6 +13,7 @@ Features:
 """
 
 import asyncio
+import base64
 import fnmatch
 import io
 import logging
@@ -186,20 +187,17 @@ class UpdateService:
         Prüft auf verfügbare Updates.
 
         Args:
-            force_refresh: Wenn True, wird GitHub-Cache mit speziellen Headers umgangen
+            force_refresh: Ignoriert (GitHub API wird immer direkt abgefragt)
 
         Returns:
             Dict mit: available, current_version, latest_version, release_notes, download_url
+
+        Note:
+            Verwendet GitHub Contents API statt raw.githubusercontent.com,
+            da das CDN Dateien ~5 Minuten cacht und Query-Parameter ignoriert.
         """
-        # Extra Headers für Force-Refresh um GitHub-Cache zu umgehen
-        if force_refresh:
-            self._force_headers = {
-                "Cache-Control": "no-cache, no-store, must-revalidate",
-                "Pragma": "no-cache",
-                "If-None-Match": "",  # ETag ignorieren
-            }
-        else:
-            self._force_headers = {}
+        # force_refresh wird nicht mehr benötigt - GitHub Contents API ist immer aktuell
+        self._force_headers = {}
         config = settings.update
 
         current = get_current_version()
@@ -238,13 +236,15 @@ class UpdateService:
                         commit_date = commit.get("commit", {}).get("committer", {}).get("date", "")
                         commit_msg = commit.get("commit", {}).get("message", "").split("\n")[0]
 
-                        # VERSION-Datei aus dem Branch lesen (mit Cache-Busting)
+                        # VERSION-Datei via Contents API (sofortige Aktualisierung, kein CDN-Cache)
                         version_url = self._add_cache_bust(
-                            f"https://raw.githubusercontent.com/{owner}/{repo}/{branch}/VERSION"
+                            f"https://api.github.com/repos/{owner}/{repo}/contents/VERSION?ref={branch}"
                         )
                         version_response = await client.get(version_url)
                         if version_response.status_code == 200:
-                            latest = version_response.text.strip()
+                            version_data = version_response.json()
+                            content_b64 = version_data.get("content", "")
+                            latest = base64.b64decode(content_b64).decode("utf-8").strip()
                         else:
                             latest = f"{branch}@{commit_sha}"
 
