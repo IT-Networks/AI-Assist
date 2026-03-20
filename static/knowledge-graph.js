@@ -377,28 +377,59 @@ class KnowledgeGraphViewer {
     // Pfad-Gruppe sichtbar im Create-Modus
     if (pathInput?.parentElement) pathInput.parentElement.style.display = '';
 
-    // Existing repos dropdown befüllen
+    // Repos aus Settings laden (Java + Python)
     if (existingSelect) {
-      existingSelect.innerHTML = '<option value="">-- Neues Repo eingeben --</option>';
+      existingSelect.innerHTML = '<option value="">-- Pfad manuell eingeben --</option>';
       try {
-        const response = await fetch('/api/graph/graphs');
-        if (response.ok) {
-          const graphs = await response.json();
-          console.log('[KnowledgeGraph] Loaded graphs for dropdown:', graphs.length);
-          for (const g of graphs) {
+        // Beide Sprachen abfragen
+        const [javaRes, pythonRes] = await Promise.all([
+          fetch('/api/settings/repos/java'),
+          fetch('/api/settings/repos/python')
+        ]);
+
+        const allRepos = [];
+
+        if (javaRes.ok) {
+          const javaData = await javaRes.json();
+          if (javaData.repos) {
+            for (const r of javaData.repos) {
+              allRepos.push({ ...r, language: 'java' });
+            }
+          }
+        }
+
+        if (pythonRes.ok) {
+          const pythonData = await pythonRes.json();
+          if (pythonData.repos) {
+            for (const r of pythonData.repos) {
+              allRepos.push({ ...r, language: 'python' });
+            }
+          }
+        }
+
+        console.log('[KnowledgeGraph] Loaded repos from settings:', allRepos.length);
+
+        for (const repo of allRepos) {
+          if (repo.path) {
             const option = document.createElement('option');
-            option.value = g.id;
-            // Zeige Pfad wenn vorhanden, sonst nur Name
-            option.textContent = g.path
-              ? `${g.name} (${g.path})`
-              : `${g.name} (kein Pfad)`;
-            option.dataset.path = g.path || '';
-            option.dataset.name = g.name;
+            option.value = repo.path;
+            option.textContent = `${repo.name} (${repo.language})`;
+            option.dataset.path = repo.path;
+            option.dataset.name = repo.name;
+            option.dataset.language = repo.language;
             existingSelect.appendChild(option);
           }
         }
+
+        // Falls keine Repos konfiguriert
+        if (allRepos.length === 0) {
+          const emptyOption = document.createElement('option');
+          emptyOption.disabled = true;
+          emptyOption.textContent = '-- Keine Repos in Einstellungen --';
+          existingSelect.appendChild(emptyOption);
+        }
       } catch (e) {
-        console.error('[KnowledgeGraph] Failed to load graphs for dropdown:', e);
+        console.error('[KnowledgeGraph] Failed to load repos from settings:', e);
       }
     }
 
