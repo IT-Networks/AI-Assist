@@ -930,8 +930,16 @@
       <button class="modal-close" onclick="closeGraphIndexDialog()">&times;</button>
     </div>
     <div class="modal-body">
+      <!-- Repo Auswahl -->
       <div class="form-group">
-        <label for="graph-index-path">Verzeichnis-Pfad:</label>
+        <label for="graph-index-repo">Repository auswählen:</label>
+        <select id="graph-index-repo" class="form-control" onchange="onGraphRepoSelect()">
+          <option value="">-- Manuell Pfad eingeben --</option>
+        </select>
+      </div>
+      <!-- Oder manueller Pfad -->
+      <div class="form-group" id="graph-index-path-group">
+        <label for="graph-index-path">Oder Verzeichnis-Pfad:</label>
         <input type="text" id="graph-index-path" class="form-control" placeholder="z.B. C:\Projects\MyApp\src" />
         <small class="form-hint">Absoluter Pfad zum Quellcode-Verzeichnis</small>
       </div>

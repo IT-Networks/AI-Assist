@@ -1,9 +1,12 @@
 """Wiki-Agent – durchsucht Confluence-Dokumentation mit intelligentem Ranking."""
 
+import logging
 import re
-from typing import Dict, List, Optional, Set
+from typing import Any, Dict, List, Optional, Set
 
 from app.agent.sub_agent import SubAgent, SubAgentResult
+
+logger = logging.getLogger(__name__)
 
 
 class WikiAgent(SubAgent):
@@ -12,9 +15,10 @@ class WikiAgent(SubAgent):
 
     Features:
     - Relevanz-basierte Seiten-Auswahl (Titel-Match > Excerpt-Match)
-    - Budget-bewusste Strategie (max 9 Seiten)
+    - Budget-bewusste Strategie (max 6 Seiten)
     - Quellenreferenzen mit Seiten-IDs
     - Early-Exit bei wenig relevanten Treffern
+    - Content-Extraktion für große Seiten (verhindert Context-Overflow)
     """
 
     name = "wiki_agent"
@@ -49,14 +53,19 @@ Jedes Finding als: "[ID:12345 - Seitentitel] Konkrete Information..."
         "read_confluence_page",
     ]
 
+    # Content-Extraktion für große Confluence-Seiten aktivieren
+    content_extraction_tools = ["read_confluence_page"]
+
     # Tracking für Relevanz-Ranking
     _search_results: List[Dict] = []
     _pages_read: Set[str] = set()
+    _extractor = None  # Lazy init
 
     def __init__(self):
         super().__init__()
         self._search_results = []
         self._pages_read = set()
+        self._extractor = None
 
     async def run(
         self,
@@ -70,13 +79,87 @@ Jedes Finding als: "[ID:12345 - Seitentitel] Konkrete Information..."
         Überschreibt die Basis-Implementierung um:
         1. Suchergebnisse zu ranken bevor Seiten gelesen werden
         2. Budget-bewusst nur relevante Seiten zu lesen
+        3. Große Seiten intelligent zu komprimieren
         """
         # Reset Tracking
         self._search_results = []
         self._pages_read = set()
+        self._extractor = None  # Reset für neuen Run
 
         # Standard-Implementierung mit verbessertem Prompt verwenden
         return await super().run(query, llm_client, tool_registry)
+
+    async def _process_tool_result(
+        self,
+        tool_name: str,
+        content: str,
+        args: Dict[str, Any],
+        llm_client,
+    ) -> str:
+        """
+        Verarbeitet Confluence-Seiten mit intelligenter Content-Extraktion.
+
+        Bei großen Seiten (>6000 Tokens):
+        1. Chunking nach Dokumentstruktur
+        2. Parallele Relevanz-Bewertung
+        3. Nur relevante Teile behalten
+        4. Zusammenfassung wenn nötig
+
+        Args:
+            tool_name: "read_confluence_page"
+            content: Rohes Seiten-Ergebnis (kann 80.000+ Tokens sein)
+            args: Tool-Argumente (enthält page_id)
+            llm_client: LLMClient für Bewertungs-Calls
+
+        Returns:
+            Komprimierter, relevanter Content
+        """
+        # Lazy init des ContentExtractor
+        if self._extractor is None:
+            from app.agent.content_extractor import ContentExtractor
+            self._extractor = ContentExtractor(llm_client)
+
+        # Seiten-ID für Logging extrahieren
+        page_id = args.get("page_id", "unknown")
+        source_name = f"Confluence:{page_id}"
+
+        # Extraktion durchführen
+        try:
+            result = await self._extractor.extract_relevant(
+                content=content,
+                query=self._current_query,
+                source_name=source_name,
+                model=self._model,
+            )
+
+            if result.is_relevant:
+                # Relevanten Content mit Metadaten zurückgeben
+                header = (
+                    f"[{source_name}] "
+                    f"Score: {result.relevance_score:.2f} | "
+                    f"{result.original_tokens:,} → {result.extracted_tokens:,} Tokens | "
+                    f"{result.chunks_kept}/{result.chunks_total} Chunks"
+                )
+                return f"{header}\n\n{result.extracted_content}"
+            else:
+                # Nicht relevant - nur kurze Markierung
+                self._pages_read.add(page_id)
+                return (
+                    f"[{source_name}] NICHT RELEVANT\n"
+                    f"Seite enthält keine Informationen zu: {self._current_query[:100]}\n"
+                    f"({result.original_tokens:,} Tokens übersprungen)"
+                )
+
+        except Exception as e:
+            logger.warning(f"[WikiAgent] Content-Extraktion fehlgeschlagen: {e}")
+            # Fallback: Truncation auf sichere Größe
+            max_chars = 20000  # ~5000 Tokens
+            if len(content) > max_chars:
+                return (
+                    f"[{source_name}] (gekürzt wegen Fehler)\n\n"
+                    f"{content[:max_chars]}\n\n[...{len(content) - max_chars} Zeichen gekürzt...]"
+                )
+            return content
 
     @staticmethod
     def rank_search_results(

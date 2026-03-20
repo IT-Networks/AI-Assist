@@ -334,6 +334,8 @@ class KnowledgeGraphViewer {
   }
 
   render() {
+    if (!this.container) return;
+
     // Clear existing
     const graphContainer = this.container.querySelector('.kg-graph');
     if (graphContainer) graphContainer.remove();
@@ -482,9 +484,11 @@ class KnowledgeGraphViewer {
     this.selectedNode = node;
 
     // Visual feedback
-    this.g.selectAll('.kg-node circle')
-      .attr('stroke', d => d.id === node.id ? '#fff' : (d.id === this.currentCenter ? '#fff' : 'none'))
-      .attr('stroke-width', d => d.id === node.id ? 2 : (d.id === this.currentCenter ? 3 : 0));
+    if (this.g) {
+      this.g.selectAll('.kg-node circle')
+        .attr('stroke', d => d.id === node.id ? '#fff' : (d.id === this.currentCenter ? '#fff' : 'none'))
+        .attr('stroke-width', d => d.id === node.id ? 2 : (d.id === this.currentCenter ? 3 : 0));
+    }
 
     // Dispatch event for external handlers
     this.container.dispatchEvent(new CustomEvent('nodeSelected', {
@@ -496,6 +500,8 @@ class KnowledgeGraphViewer {
   }
 
   _showNodeDetails(node) {
+    if (!this.container) return;
+
     let details = this.container.querySelector('.kg-details');
     if (!details) {
       details = document.createElement('div');
@@ -558,22 +564,26 @@ class KnowledgeGraphViewer {
   }
 
   _handleZoom(event) {
+    if (!this.g) return;
     this.g.attr('transform', event.transform);
   }
 
   _zoomIn() {
+    if (!this.svg || !this.zoom) return;
     this.svg.transition().duration(300).call(
       this.zoom.scaleBy, 1.3
     );
   }
 
   _zoomOut() {
+    if (!this.svg || !this.zoom) return;
     this.svg.transition().duration(300).call(
       this.zoom.scaleBy, 0.7
     );
   }
 
   _resetView() {
+    if (!this.svg || !this.zoom) return;
     this.svg.transition().duration(500).call(
       this.zoom.transform,
       d3.zoomIdentity
@@ -584,7 +594,9 @@ class KnowledgeGraphViewer {
     if (this.simulation) {
       this.simulation.stop();
     }
-    this.container.innerHTML = '';
+    if (this.container) {
+      this.container.innerHTML = '';
+    }
   }
 }
 

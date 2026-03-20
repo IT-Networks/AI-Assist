@@ -2196,14 +2196,24 @@ function closeArenaModal() {
 
 function showGraphIndexDialog() {
   const modal = document.getElementById('graph-index-modal');
-  if (!modal) return;
+  if (!modal) {
+    console.error('[Graph] Modal not found: graph-index-modal');
+    return;
+  }
 
-  // Reset form
-  document.getElementById('graph-index-path').value = '';
-  document.getElementById('graph-index-lang').value = 'java';
-  document.getElementById('graph-index-clear').checked = false;
-  document.getElementById('graph-index-status').style.display = 'none';
-  document.getElementById('graph-index-btn').disabled = false;
+  // Reset form - mit Null-Checks
+  const pathInput = document.getElementById('graph-index-path');
+  const langSelect = document.getElementById('graph-index-lang');
+  const clearCheckbox = document.getElementById('graph-index-clear');
+  const statusEl = document.getElementById('graph-index-status');
+  const btn = document.getElementById('graph-index-btn');
+  const pathGroup = document.getElementById('graph-index-path-group');
+
+  if (pathInput) pathInput.value = '';
+  if (langSelect) langSelect.value = 'java';
+  if (clearCheckbox) clearCheckbox.checked = false;
+  if (statusEl) statusEl.style.display = 'none';
+  if (btn) btn.disabled = false;
 
   // Populate repo dropdown from explorerRepoState
   const repoSelect = document.getElementById('graph-index-repo');
@@ -2211,7 +2221,7 @@ function showGraphIndexDialog() {
     repoSelect.innerHTML = '<option value="">-- Manuell Pfad eingeben --</option>';
 
     // Java Repos
-    const javaRepos = explorerRepoState.java?.repos || [];
+    const javaRepos = explorerRepoState?.java?.repos || [];
     if (javaRepos.length > 0) {
       const javaGroup = document.createElement('optgroup');
       javaGroup.label = 'Java Repositories';
@@ -2225,7 +2235,7 @@ function showGraphIndexDialog() {
     }
 
     // Python Repos
-    const pythonRepos = explorerRepoState.python?.repos || [];
+    const pythonRepos = explorerRepoState?.python?.repos || [];
     if (pythonRepos.length > 0) {
       const pyGroup = document.createElement('optgroup');
       pyGroup.label = 'Python Repositories';
@@ -2242,7 +2252,7 @@ function showGraphIndexDialog() {
   }
 
   // Show path input by default
-  document.getElementById('graph-index-path-group').style.display = 'block';
+  if (pathGroup) pathGroup.style.display = 'block';
 
   modal.style.display = 'flex';
 }
@@ -2253,21 +2263,25 @@ function onGraphRepoSelect() {
   const pathInput = document.getElementById('graph-index-path');
   const langSelect = document.getElementById('graph-index-lang');
 
+  if (!repoSelect) return;
+
   if (repoSelect.value) {
     // Repo selected - parse JSON and fill fields
     try {
       const repo = JSON.parse(repoSelect.value);
-      pathInput.value = repo.path;
-      langSelect.value = repo.lang;
-      pathGroup.style.opacity = '0.5';
+      if (pathInput) pathInput.value = repo.path;
+      if (langSelect) langSelect.value = repo.lang;
+      if (pathGroup) pathGroup.style.opacity = '0.5';
     } catch (e) {
       console.error('Error parsing repo selection:', e);
     }
   } else {
     // Manual path - clear and enable
-    pathInput.value = '';
-    pathGroup.style.opacity = '1';
-    pathInput.focus();
+    if (pathInput) {
+      pathInput.value = '';
+      pathInput.focus();
+    }
+    if (pathGroup) pathGroup.style.opacity = '1';
   }
 }
 
@@ -2278,14 +2292,18 @@ function closeGraphIndexDialog() {
 
 async function startGraphIndex() {
   const repoSelect = document.getElementById('graph-index-repo');
-  let path = document.getElementById('graph-index-path').value.trim();
-  let lang = document.getElementById('graph-index-lang').value;
-  const clear = document.getElementById('graph-index-clear').checked;
+  const pathInput = document.getElementById('graph-index-path');
+  const langSelect = document.getElementById('graph-index-lang');
+  const clearCheckbox = document.getElementById('graph-index-clear');
   const statusEl = document.getElementById('graph-index-status');
   const btn = document.getElementById('graph-index-btn');
 
+  let path = pathInput?.value?.trim() || '';
+  let lang = langSelect?.value || 'java';
+  const clear = clearCheckbox?.checked || false;
+
   // If repo selected, use its path
-  if (repoSelect.value) {
+  if (repoSelect?.value) {
     try {
       const repo = JSON.parse(repoSelect.value);
       path = repo.path;
@@ -2301,11 +2319,15 @@ async function startGraphIndex() {
   }
 
   // Show loading state
-  btn.disabled = true;
-  btn.innerHTML = '&#9203; Indexiere...';
-  statusEl.className = 'alert alert-info';
-  statusEl.textContent = 'Indexierung läuft...';
-  statusEl.style.display = 'block';
+  if (btn) {
+    btn.disabled = true;
+    btn.innerHTML = '&#9203; Indexiere...';
+  }
+  if (statusEl) {
+    statusEl.className = 'alert alert-info';
+    statusEl.textContent = 'Indexierung läuft...';
+    statusEl.style.display = 'block';
+  }
 
   try {
     const res = await fetch(`/api/graph/index?path=${encodeURIComponent(path)}&language=${lang}&clear=${clear}`, {
@@ -2319,13 +2341,15 @@ async function startGraphIndex() {
 
     const result = await res.json();
 
-    statusEl.className = 'alert alert-success';
-    statusEl.innerHTML = `
-      <strong>Indexierung abgeschlossen!</strong><br>
-      ${result.files_processed} Dateien verarbeitet<br>
-      ${result.nodes_added} Nodes, ${result.edges_added} Edges hinzugefügt
-      ${result.errors?.length ? `<br><small>${result.errors.length} Fehler</small>` : ''}
-    `;
+    if (statusEl) {
+      statusEl.className = 'alert alert-success';
+      statusEl.innerHTML = `
+        <strong>Indexierung abgeschlossen!</strong><br>
+        ${result.files_processed} Dateien verarbeitet<br>
+        ${result.nodes_added} Nodes, ${result.edges_added} Edges hinzugefügt
+        ${result.errors?.length ? `<br><small>${result.errors.length} Fehler</small>` : ''}
+      `;
+    }
 
     showToast(`Graph indexiert: ${result.nodes_added} Nodes`, 'success');
 
@@ -2334,12 +2358,16 @@ async function startGraphIndex() {
     if (hint) hint.textContent = 'Graph indexiert! Suche nach einer Klasse.';
 
   } catch (e) {
-    statusEl.className = 'alert alert-error';
-    statusEl.textContent = `Fehler: ${e.message}`;
+    if (statusEl) {
+      statusEl.className = 'alert alert-error';
+      statusEl.textContent = `Fehler: ${e.message}`;
+    }
     showToast(`Indexierung fehlgeschlagen: ${e.message}`, 'error');
   } finally {
-    btn.disabled = false;
-    btn.innerHTML = '&#128269; Indexieren';
+    if (btn) {
+      btn.disabled = false;
+      btn.innerHTML = '&#128269; Indexieren';
+    }
   }
 }
 

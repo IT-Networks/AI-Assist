@@ -198,6 +198,7 @@ class SubAgent:
     - Läuft in eigenem Mini-LLM-Loop (max 5 Iterationen, überschreibbar via max_iterations)
     - Gibt eine komprimierte Zusammenfassung zurück
     - Nutzt das tool_model (schnelles Modell) für alle LLM-Calls
+    - Kann Tool-Ergebnisse via _process_tool_result() nachbearbeiten
     """
 
     name: str = "base"
@@ -206,8 +207,13 @@ class SubAgent:
     allowed_tools: List[str] = []   # Tool-Whitelist aus bestehendem ToolRegistry
     max_iterations: Optional[int] = None  # None = settings.sub_agents.max_iterations verwenden
 
+    # Tools für die Content-Extraktion aktiviert werden soll
+    # Subklassen können dies überschreiben
+    content_extraction_tools: List[str] = []
+
     def __init__(self):
         self._model: str = settings.llm.tool_model or settings.llm.default_model
+        self._current_query: str = ""  # Wird in run() gesetzt für Hooks
 
     async def run(
         self,
@@ -228,6 +234,9 @@ class SubAgent:
         """
         start_ms = int(time.time() * 1000)
         max_iterations = self.max_iterations or settings.sub_agents.max_iterations
+
+        # Query speichern für Hooks (z.B. Content-Extraktion)
+        self._current_query = query
 
         # Fokussierter System-Prompt für diesen Sub-Agent
         system_prompt = (
@@ -344,6 +353,13 @@ class SubAgent:
                     try:
                         result = await tool_registry.execute(tc_name, **args)
                         tool_content = result.to_context()
+
+                        # Hook: Content-Extraktion für große Ergebnisse
+                        if tc_name in self.content_extraction_tools:
+                            tool_content = await self._process_tool_result(
+                                tc_name, tool_content, args, llm_client
+                            )
+
                         # Token-Schätzung (grob: 1 Token ≈ 4 Zeichen)
                         total_tokens += len(tool_content) // 4
                     except Exception as e:
@@ -428,6 +444,33 @@ class SubAgent:
                 logger.debug(f"  Content (erste 300 Zeichen): {response.content[:300]}")
 
         return response.content or "", response.tool_calls
+
+    async def _process_tool_result(
+        self,
+        tool_name: str,
+        content: str,
+        args: Dict[str, Any],
+        llm_client,
+    ) -> str:
+        """
+        Hook für Subklassen: Verarbeitet Tool-Ergebnisse vor dem Einfügen in den Context.
+
+        Standardimplementierung: Gibt Content unverändert zurück.
+        Subklassen können dies überschreiben für:
+        - Content-Extraktion bei großen Dokumenten
+        - Relevanz-Filterung
+        - Zusammenfassungen
+
+        Args:
+            tool_name: Name des aufgerufenen Tools
+            content: Rohes Tool-Ergebnis
+            args: Argumente des Tool-Calls
+            llm_client: LLMClient für weitere Calls
+
+        Returns:
+            Verarbeiteter Content (kann kürzer sein als Original)
+        """
+        return content
 
     def _parse_final_response(self, text: str) -> SubAgentResult:
         """Parst die finale JSON-Antwort des Sub-Agenten."""
