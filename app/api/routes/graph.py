@@ -178,6 +178,23 @@ async def activate_graph(graph_id: str):
     return {"status": "activated", "graph_id": graph_id}
 
 
+class RenameGraphRequest(BaseModel):
+    name: str
+
+
+@router.post("/graphs/{graph_id}/rename")
+async def rename_graph(graph_id: str, request: RenameGraphRequest):
+    """
+    Benennt einen Knowledge Graph um.
+    """
+    registry = get_graph_registry()
+
+    if not registry.rename_graph(graph_id, request.name):
+        raise HTTPException(status_code=404, detail=f"Graph not found: {graph_id}")
+
+    return {"status": "renamed", "graph_id": graph_id, "name": request.name}
+
+
 @router.delete("/graphs/{graph_id}")
 async def delete_graph(graph_id: str):
     """

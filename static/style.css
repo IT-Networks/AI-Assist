@@ -9616,6 +9616,145 @@ a:visited {
   border-color: var(--danger, #ef4444);
 }
 
+/* Graph Modal */
+.kg-modal {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.6);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 10000;
+}
+
+.kg-modal-content {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  width: 90%;
+  max-width: 480px;
+  box-shadow: 0 20px 40px rgba(0, 0, 0, 0.4);
+}
+
+.kg-modal-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 16px 20px;
+  border-bottom: 1px solid var(--border);
+}
+
+.kg-modal-header h3 {
+  margin: 0;
+  font-size: 1.1rem;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.kg-modal-close {
+  background: none;
+  border: none;
+  font-size: 1.5rem;
+  color: var(--text-secondary);
+  cursor: pointer;
+  padding: 0;
+  line-height: 1;
+}
+
+.kg-modal-close:hover {
+  color: var(--text);
+}
+
+.kg-modal-body {
+  padding: 20px;
+}
+
+.kg-form-group {
+  margin-bottom: 16px;
+}
+
+.kg-form-group:last-child {
+  margin-bottom: 0;
+}
+
+.kg-form-group label {
+  display: block;
+  margin-bottom: 6px;
+  font-size: 0.9rem;
+  font-weight: 500;
+  color: var(--text);
+}
+
+.kg-form-group input,
+.kg-form-group select {
+  width: 100%;
+  padding: 10px 12px;
+  background: var(--input-bg, var(--background));
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text);
+  font-size: 0.95rem;
+}
+
+.kg-form-group input:focus,
+.kg-form-group select:focus {
+  outline: none;
+  border-color: var(--primary);
+  box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.2);
+}
+
+.kg-form-group input:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.kg-form-group small {
+  display: block;
+  margin-top: 4px;
+  font-size: 0.8rem;
+  color: var(--text-secondary);
+}
+
+.kg-modal-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  padding: 16px 20px;
+  border-top: 1px solid var(--border);
+}
+
+.kg-btn-secondary {
+  padding: 8px 16px;
+  background: var(--surface-hover, var(--surface));
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text);
+  cursor: pointer;
+  font-size: 0.9rem;
+}
+
+.kg-btn-secondary:hover {
+  background: var(--border);
+}
+
+.kg-btn-primary {
+  padding: 8px 16px;
+  background: var(--primary);
+  border: 1px solid var(--primary);
+  border-radius: 6px;
+  color: white;
+  cursor: pointer;
+  font-size: 0.9rem;
+  font-weight: 500;
+}
+
+.kg-btn-primary:hover {
+  background: var(--primary-hover, #4f46e5);
+}
+
 .kg-search {
   display: flex;
   gap: 4px;

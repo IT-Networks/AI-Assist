@@ -552,6 +552,14 @@ def register_github_tools(registry: ToolRegistry) -> int:
             if len(files) >= max_files:
                 break
 
+        # Kombiniertes Diff aus allen Patches für PR-Analyse
+        combined_diff_parts = []
+        for f in files:
+            if f.get("patch"):
+                combined_diff_parts.append(f"--- {f['filename']} ---")
+                combined_diff_parts.append(f["patch"])
+        combined_diff = "\n".join(combined_diff_parts)
+
         return ToolResult(
             success=True,
             data={
@@ -563,6 +571,7 @@ def register_github_tools(registry: ToolRegistry) -> int:
                 "total_deletions": total_deletions,
                 "file_filter": file_filter or "(none)",
                 "files": files,
+                "diff": combined_diff,  # Kombiniertes Diff für Analyse
             },
         )
 

@@ -629,6 +629,15 @@ class GraphRegistry:
         self._save_registry()
         return True
 
+    def rename_graph(self, graph_id: str, new_name: str) -> bool:
+        """Benennt einen Graph um."""
+        if graph_id not in self.graphs:
+            return False
+
+        self.graphs[graph_id].name = new_name
+        self._save_registry()
+        return True
+
     def update_stats(self, graph_id: str, node_count: int, edge_count: int):
         """Aktualisiert die Statistiken eines Graphs."""
         if graph_id in self.graphs:
