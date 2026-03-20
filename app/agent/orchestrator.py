@@ -2779,16 +2779,18 @@ Sei präzise und gib detaillierte Analyse-Schritte."""
                     # ── Pending PR-Analyse abschließen (vor DONE) ──
                     if state.pending_pr_analysis is not None:
                         try:
-                            # Warte max 5 Sekunden auf Abschluss
+                            # Warte max 30 Sekunden auf Abschluss (LLM-Call braucht Zeit!)
+                            logger.info("[agent] Waiting for PR analysis to complete...")
                             pr_result = await asyncio.wait_for(
-                                state.pending_pr_analysis, timeout=5.0
+                                state.pending_pr_analysis, timeout=30.0
                             )
+                            logger.info(f"[agent] PR analysis completed: {len(pr_result.get('findings', []))} findings")
                             yield AgentEvent(AgentEventType.WORKSPACE_PR_ANALYSIS, {
                                 "prNumber": state.pending_pr_number,
                                 **pr_result
                             })
                         except asyncio.TimeoutError:
-                            logger.debug("[agent] PR analysis timeout, sending fallback")
+                            logger.warning("[agent] PR analysis timeout after 30s, sending fallback")
                             yield AgentEvent(AgentEventType.WORKSPACE_PR_ANALYSIS, {
                                 "prNumber": state.pending_pr_number,
                                 "bySeverity": {"critical": 0, "high": 0, "medium": 0, "low": 0, "info": 0},
@@ -3673,6 +3675,8 @@ Sei präzise und gib detaillierte Analyse-Schritte."""
         Returns:
             Dict mit bySeverity, verdict, findings, canApprove
         """
+        logger.info(f"[agent] Starting PR analysis for PR #{pr_number}, diff length: {len(diff)}")
+
         prompt = f"""Analysiere diesen Pull Request und gib eine strukturierte Bewertung.
 WICHTIG: Alle Texte (title, description, summary) MÜSSEN auf DEUTSCH sein!
 
