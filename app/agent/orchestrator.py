@@ -3354,8 +3354,29 @@ Sei präzise und gib detaillierte Analyse-Schritte."""
                             elif tool_call.name in ("github_pr_details", "github_pr_diff"):
                                 # PR-Daten für Workspace Panel
                                 pr_number = tool_call.arguments.get("pr_number")
-                                # Parse result data
-                                result_data = result.data if hasattr(result, 'data') and isinstance(result.data, dict) else {}
+
+                                # DEBUG: Parse result data - check type
+                                logger.info(f"[agent] PR #{pr_number}: result type={type(result)}, "
+                                            f"has data={hasattr(result, 'data')}, "
+                                            f"data type={type(result.data) if hasattr(result, 'data') else 'N/A'}")
+
+                                # Parse result data - handle various formats
+                                result_data = {}
+                                if hasattr(result, 'data'):
+                                    if isinstance(result.data, dict):
+                                        result_data = result.data
+                                    elif isinstance(result.data, str):
+                                        # Fallback: Versuche JSON zu parsen wenn String
+                                        try:
+                                            result_data = json.loads(result.data)
+                                            logger.info(f"[agent] PR #{pr_number}: Parsed data from JSON string")
+                                        except (json.JSONDecodeError, TypeError):
+                                            logger.warning(f"[agent] PR #{pr_number}: data is string but not JSON: {result.data[:200]}")
+                                    else:
+                                        logger.warning(f"[agent] PR #{pr_number}: Unexpected data type: {type(result.data)}")
+
+                                logger.info(f"[agent] PR #{pr_number}: result_data keys={list(result_data.keys())[:10]}")
+
                                 # Repo aus result_data (resolved) oder fallback auf arguments (unresolved)
                                 repo = result_data.get("repo") or tool_call.arguments.get("repo", "")
 
