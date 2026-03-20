@@ -384,15 +384,17 @@ class KnowledgeGraphViewer {
         const response = await fetch('/api/graph/graphs');
         if (response.ok) {
           const graphs = await response.json();
+          console.log('[KnowledgeGraph] Loaded graphs for dropdown:', graphs.length);
           for (const g of graphs) {
-            if (g.path) {
-              const option = document.createElement('option');
-              option.value = g.id;
-              option.textContent = `${g.name} (${g.path})`;
-              option.dataset.path = g.path;
-              option.dataset.name = g.name;
-              existingSelect.appendChild(option);
-            }
+            const option = document.createElement('option');
+            option.value = g.id;
+            // Zeige Pfad wenn vorhanden, sonst nur Name
+            option.textContent = g.path
+              ? `${g.name} (${g.path})`
+              : `${g.name} (kein Pfad)`;
+            option.dataset.path = g.path || '';
+            option.dataset.name = g.name;
+            existingSelect.appendChild(option);
           }
         }
       } catch (e) {
