@@ -2624,11 +2624,15 @@ Sei präzise und gib detaillierte Analyse-Schritte."""
                     tool_specific_model = settings.llm.tool_models.get(tool_call.name, "")
                     effective_model = tool_specific_model or settings.llm.tool_model or settings.llm.default_model
 
+                    # PR-Tools: Card im Chat unterdrücken (gehen in Workspace)
+                    is_pr_workspace_tool = tool_call.name in ("github_pr_details", "github_pr_diff")
+
                     yield AgentEvent(AgentEventType.TOOL_START, {
                         "id": tool_call.id,
                         "name": tool_call.name,
                         "arguments": tool_call.arguments,
-                        "model": effective_model
+                        "model": effective_model,
+                        "workspaceOnly": is_pr_workspace_tool  # Card im Chat unterdrücken
                     })
 
                     # TaskTracker: Tool-Ausführung als Artifact hinzufügen

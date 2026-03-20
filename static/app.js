@@ -2205,8 +2205,70 @@ function showGraphIndexDialog() {
   document.getElementById('graph-index-status').style.display = 'none';
   document.getElementById('graph-index-btn').disabled = false;
 
+  // Populate repo dropdown from explorerRepoState
+  const repoSelect = document.getElementById('graph-index-repo');
+  if (repoSelect) {
+    repoSelect.innerHTML = '<option value="">-- Manuell Pfad eingeben --</option>';
+
+    // Java Repos
+    const javaRepos = explorerRepoState.java?.repos || [];
+    if (javaRepos.length > 0) {
+      const javaGroup = document.createElement('optgroup');
+      javaGroup.label = 'Java Repositories';
+      javaRepos.forEach(repo => {
+        const opt = document.createElement('option');
+        opt.value = JSON.stringify({ path: repo.path, lang: 'java', name: repo.name });
+        opt.textContent = repo.name;
+        javaGroup.appendChild(opt);
+      });
+      repoSelect.appendChild(javaGroup);
+    }
+
+    // Python Repos
+    const pythonRepos = explorerRepoState.python?.repos || [];
+    if (pythonRepos.length > 0) {
+      const pyGroup = document.createElement('optgroup');
+      pyGroup.label = 'Python Repositories';
+      pythonRepos.forEach(repo => {
+        const opt = document.createElement('option');
+        opt.value = JSON.stringify({ path: repo.path, lang: 'python', name: repo.name });
+        opt.textContent = repo.name;
+        pyGroup.appendChild(opt);
+      });
+      repoSelect.appendChild(pyGroup);
+    }
+
+    repoSelect.value = '';
+  }
+
+  // Show path input by default
+  document.getElementById('graph-index-path-group').style.display = 'block';
+
   modal.style.display = 'flex';
-  document.getElementById('graph-index-path').focus();
+}
+
+function onGraphRepoSelect() {
+  const repoSelect = document.getElementById('graph-index-repo');
+  const pathGroup = document.getElementById('graph-index-path-group');
+  const pathInput = document.getElementById('graph-index-path');
+  const langSelect = document.getElementById('graph-index-lang');
+
+  if (repoSelect.value) {
+    // Repo selected - parse JSON and fill fields
+    try {
+      const repo = JSON.parse(repoSelect.value);
+      pathInput.value = repo.path;
+      langSelect.value = repo.lang;
+      pathGroup.style.opacity = '0.5';
+    } catch (e) {
+      console.error('Error parsing repo selection:', e);
+    }
+  } else {
+    // Manual path - clear and enable
+    pathInput.value = '';
+    pathGroup.style.opacity = '1';
+    pathInput.focus();
+  }
 }
 
 function closeGraphIndexDialog() {
@@ -2215,14 +2277,26 @@ function closeGraphIndexDialog() {
 }
 
 async function startGraphIndex() {
-  const path = document.getElementById('graph-index-path').value.trim();
-  const lang = document.getElementById('graph-index-lang').value;
+  const repoSelect = document.getElementById('graph-index-repo');
+  let path = document.getElementById('graph-index-path').value.trim();
+  let lang = document.getElementById('graph-index-lang').value;
   const clear = document.getElementById('graph-index-clear').checked;
   const statusEl = document.getElementById('graph-index-status');
   const btn = document.getElementById('graph-index-btn');
 
+  // If repo selected, use its path
+  if (repoSelect.value) {
+    try {
+      const repo = JSON.parse(repoSelect.value);
+      path = repo.path;
+      lang = repo.lang;
+    } catch (e) {
+      console.error('Error parsing repo:', e);
+    }
+  }
+
   if (!path) {
-    showToast('Bitte gib einen Verzeichnis-Pfad ein', 'warning');
+    showToast('Bitte wähle ein Repository oder gib einen Pfad ein', 'warning');
     return;
   }
 
@@ -4529,17 +4603,23 @@ async function processAgentEvent(event, bubble, msgDiv, chat) {
 
   switch (type) {
     case 'tool_start': {
-      const toolCard = createToolCard(data.name, data.arguments, 'running', data.model);
-      bubble.appendChild(toolCard);
+      // PR-Tools: Keine Card im Chat (gehen in Workspace Panel)
+      if (!data.workspaceOnly) {
+        const toolCard = createToolCard(data.name, data.arguments, 'running', data.model);
+        bubble.appendChild(toolCard);
+      }
       // Tool-History per-Chat pflegen, bei aktivem Chat in state spiegeln
-      chat.toolHistory.unshift({ id: data.id, name: data.name, args: data.arguments, status: 'running', result: null });
+      chat.toolHistory.unshift({ id: data.id, name: data.name, args: data.arguments, status: 'running', result: null, workspaceOnly: data.workspaceOnly });
       if (isActive) { state.toolHistory = [...chat.toolHistory]; renderToolHistory(); }
-      if (document.contains(chat.pane)) scrollToBottom();
+      if (document.contains(chat.pane) && !data.workspaceOnly) scrollToBottom();
       break;
     }
     case 'tool_result': {
-      updateToolCard(data.id, data.success ? 'success' : 'error', data.data, chat.pane);
-      const tool = chat.toolHistory[0];
+      // PR-Tools: Keine Card-Update nötig (wurde nicht erstellt)
+      const tool = chat.toolHistory.find(t => t.id === data.id);
+      if (tool && !tool.workspaceOnly) {
+        updateToolCard(data.id, data.success ? 'success' : 'error', data.data, chat.pane);
+      }
       if (tool) { tool.status = data.success ? 'success' : 'error'; tool.result = data.data; }
       if (isActive) { state.toolHistory = [...chat.toolHistory]; renderToolHistory(); }
       break;
