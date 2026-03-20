@@ -1182,14 +1182,31 @@ async def trace_java_references(
     visited = set()
 
     def find_java_file(name: str) -> Optional[Path]:
-        """Findet eine Java-Datei nach Klassennamen."""
-        # Einfache Klasse oder vollqualifizierter Name
-        simple_name = name.split(".")[-1]
-        for java_file in repo_path.rglob(f"{simple_name}.java"):
-            # Prüfen ob in excluded dirs
-            if any(ex in str(java_file) for ex in settings.java.exclude_dirs):
-                continue
-            return java_file
+        """Findet eine Java-Datei nach Klassennamen oder Dateipfad."""
+        # Prüfe ob es ein Dateipfad ist (enthält / oder \ oder endet mit .java)
+        if "/" in name or "\\" in name or name.endswith(".java"):
+            # Es ist ein Pfad - Klassennamen extrahieren
+            path_obj = Path(name)
+            # Entferne .java Extension falls vorhanden
+            simple_name = path_obj.stem  # z.B. "MyClass" aus "MyClass.java"
+
+            # Prüfe ob der exakte Pfad existiert (relativ zum repo)
+            exact_path = repo_path / name
+            if exact_path.exists():
+                return exact_path
+
+            # Sonst nach dem Dateinamen suchen
+            for java_file in repo_path.rglob(f"{simple_name}.java"):
+                if any(ex in str(java_file) for ex in settings.java.exclude_dirs):
+                    continue
+                return java_file
+        else:
+            # Klassennamen - einfache oder vollqualifizierte (com.example.MyClass)
+            simple_name = name.split(".")[-1]
+            for java_file in repo_path.rglob(f"{simple_name}.java"):
+                if any(ex in str(java_file) for ex in settings.java.exclude_dirs):
+                    continue
+                return java_file
         return None
 
     def extract_class_info(file_path: Path) -> Dict:
