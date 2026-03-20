@@ -1377,6 +1377,46 @@ Sei präzise und gib detaillierte Analyse-Schritte."""
                 "error": str(e)
             })
 
+    def _extract_conversation_context(self, messages: List[Dict], max_messages: int = 4) -> Optional[str]:
+        """
+        Extrahiert einen kurzen Kontext aus den letzten Konversations-Nachrichten.
+
+        Gibt den Sub-Agenten Kontext über die vorherige Konversation,
+        sodass Follow-up-Fragen wie "aus meiner Eingangsfrage" verstanden werden.
+
+        Args:
+            messages: Die vollständige Message-Liste
+            max_messages: Max Anzahl User/Assistant-Nachrichten zum Extrahieren
+
+        Returns:
+            Kontext-String oder None wenn keine relevanten Nachrichten
+        """
+        # Nur User/Assistant-Nachrichten extrahieren (keine System-Prompts)
+        relevant = [
+            m for m in messages
+            if m.get("role") in ("user", "assistant") and m.get("content")
+        ]
+
+        if len(relevant) <= 1:
+            return None  # Keine vorherige Konversation
+
+        # Letzte N Nachrichten nehmen (ohne die aktuelle User-Nachricht, die ist die Query)
+        recent = relevant[-(max_messages + 1):-1] if len(relevant) > max_messages else relevant[:-1]
+
+        if not recent:
+            return None
+
+        # Als kompakten Kontext-String formatieren
+        context_parts = []
+        for msg in recent:
+            role = "User" if msg["role"] == "user" else "Assistant"
+            content = str(msg.get("content", ""))[:300]  # Kürzen
+            if len(str(msg.get("content", ""))) > 300:
+                content += "..."
+            context_parts.append(f"{role}: {content}")
+
+        return "\n\n".join(context_parts)
+
     async def _run_sub_agents_phase(
         self,
         user_message: str,
@@ -1435,6 +1475,10 @@ Sei präzise und gib detaillierte Analyse-Schritte."""
             logger.debug("[sub_agents] Keine relevanten Agenten ermittelt – überspringe Phase")
             return
 
+        # Konversations-Kontext für Sub-Agenten extrahieren
+        # Letzte 3-4 User/Assistant-Nachrichten als Kurzkontext
+        conversation_context = self._extract_conversation_context(messages)
+
         # Phase 3: Ausgewählte Agenten parallel ausführen
         try:
             results = await dispatcher.dispatch_selected(
@@ -1442,6 +1486,7 @@ Sei präzise und gib detaillierte Analyse-Schritte."""
                 agents=selected_agents,
                 llm_client=llm_client,
                 tool_registry=self.tools,
+                conversation_context=conversation_context,
             )
         except Exception as e:
             logger.debug("[sub_agents] Dispatch fehlgeschlagen: {e}")
@@ -2066,7 +2111,16 @@ Sei präzise und gib detaillierte Analyse-Schritte."""
         # da Tool-Results bereits korrekt als role="tool" Messages im Verlauf erscheinen.
         # Das verhindert Dopplung und reduziert LLM-Loop-Verhalten.
         history_tokens = 0
-        for hist_msg in state.messages_history[-state.max_history_messages:]:
+        history_count = len(state.messages_history)
+        history_to_add = state.messages_history[-state.max_history_messages:]
+        logger.info(f"[agent] Conversation history: {history_count} total, adding {len(history_to_add)} messages")
+        if history_to_add:
+            # Log ersten und letzten Eintrag für Debug
+            first_msg = history_to_add[0]
+            last_msg = history_to_add[-1] if len(history_to_add) > 1 else first_msg
+            logger.debug(f"[agent] History first: role={first_msg.get('role')}, content[:100]={str(first_msg.get('content', ''))[:100]}")
+            logger.debug(f"[agent] History last: role={last_msg.get('role')}, content[:100]={str(last_msg.get('content', ''))[:100]}")
+        for hist_msg in history_to_add:
             messages.append(hist_msg)
             history_tokens += estimate_tokens(hist_msg.get("content", ""))
         budget.set("conversation", history_tokens)

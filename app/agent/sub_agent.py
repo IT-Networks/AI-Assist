@@ -220,6 +220,7 @@ class SubAgent:
         query: str,
         llm_client,
         tool_registry,
+        conversation_context: Optional[str] = None,
     ) -> SubAgentResult:
         """
         Führt den Sub-Agent-Loop aus und gibt eine Zusammenfassung zurück.
@@ -228,6 +229,8 @@ class SubAgent:
             query: Die ursprüngliche Nutzer-Anfrage
             llm_client: LLMClient-Singleton
             tool_registry: ToolRegistry-Singleton
+            conversation_context: Optionaler Kontext aus vorheriger Konversation
+                                  (z.B. "User fragte ursprünglich nach X...")
 
         Returns:
             SubAgentResult mit Zusammenfassung und Key-Findings
@@ -239,12 +242,17 @@ class SubAgent:
         self._current_query = query
 
         # Fokussierter System-Prompt für diesen Sub-Agent
+        context_section = ""
+        if conversation_context:
+            context_section = f"\n\n=== KONVERSATIONS-KONTEXT ===\n{conversation_context}\n=== ENDE KONTEXT ===\n"
+
         system_prompt = (
             f"Du bist ein spezialisierter Such-Agent: {self.display_name}.\n"
             f"{self.description}\n\n"
             "Deine Aufgabe: Suche alle relevanten Informationen zur Anfrage des Nutzers. "
             "Führe mehrere gezielte Suchen durch. "
-            "Fasse am Ende deine wichtigsten Findings kompakt zusammen.\n\n"
+            "Fasse am Ende deine wichtigsten Findings kompakt zusammen."
+            f"{context_section}\n\n"
             "Antworte abschließend NUR mit diesem JSON-Format:\n"
             "{\n"
             '  "summary": "Kurze Zusammenfassung der Findings (3-5 Sätze)",\n'
@@ -640,6 +648,7 @@ class SubAgentDispatcher:
         query: str,
         llm_client,
         tool_registry,
+        conversation_context: Optional[str] = None,
     ) -> List[SubAgentResult]:
         """
         Bestimmt relevante Sub-Agenten und führt sie parallel aus.
@@ -648,6 +657,7 @@ class SubAgentDispatcher:
             query: Nutzer-Anfrage
             llm_client: LLMClient-Singleton
             tool_registry: ToolRegistry-Singleton
+            conversation_context: Optionaler Kontext aus vorheriger Konversation
 
         Returns:
             Liste von SubAgentResult (auch fehlgeschlagene)
@@ -668,7 +678,7 @@ class SubAgentDispatcher:
             agent = self._agents[agent_name]
             try:
                 return await asyncio.wait_for(
-                    agent.run(query, llm_client, tool_registry),
+                    agent.run(query, llm_client, tool_registry, conversation_context),
                     timeout=timeout,
                 )
             except asyncio.TimeoutError:
@@ -704,6 +714,7 @@ class SubAgentDispatcher:
         agents: List[str],
         llm_client,
         tool_registry,
+        conversation_context: Optional[str] = None,
     ) -> List[SubAgentResult]:
         """
         Führt eine bereits geroutete Liste von Agenten parallel aus.
@@ -723,7 +734,7 @@ class SubAgentDispatcher:
             agent = self._agents[agent_name]
             try:
                 return await asyncio.wait_for(
-                    agent.run(query, llm_client, tool_registry),
+                    agent.run(query, llm_client, tool_registry, conversation_context),
                     timeout=timeout,
                 )
             except asyncio.TimeoutError:

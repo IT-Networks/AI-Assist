@@ -72,6 +72,7 @@ Jedes Finding als: "[ID:12345 - Seitentitel] Konkrete Information..."
         query: str,
         llm_client,
         tool_registry,
+        conversation_context: Optional[str] = None,
     ) -> SubAgentResult:
         """
         Führt die Wiki-Recherche mit Relevanz-Ranking aus.
@@ -87,7 +88,7 @@ Jedes Finding als: "[ID:12345 - Seitentitel] Konkrete Information..."
         self._extractor = None  # Reset für neuen Run
 
         # Standard-Implementierung mit verbessertem Prompt verwenden
-        return await super().run(query, llm_client, tool_registry)
+        return await super().run(query, llm_client, tool_registry, conversation_context)
 
     async def _process_tool_result(
         self,

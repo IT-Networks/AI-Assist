@@ -167,9 +167,13 @@ class KnowledgeGraphViewer {
       return `
         <div class="kg-search-result" data-index="${index}" data-id="${node.id}">
           <span class="kg-search-result-icon ${typeClass}">${typeIcon}</span>
-          <span class="kg-search-result-name">${name}</span>
-          <span class="kg-search-result-type">${node.type}</span>
-          ${node.file_path ? `<span class="kg-search-result-path">${this._shortenPath(node.file_path)}</span>` : ''}
+          <div class="kg-search-result-info">
+            <div class="kg-search-result-header">
+              <span class="kg-search-result-name">${name}</span>
+              <span class="kg-search-result-type">${node.type}</span>
+            </div>
+            ${node.file_path ? `<span class="kg-search-result-path">${this._shortenPath(node.file_path)}</span>` : ''}
+          </div>
         </div>
       `;
     }).join('');
@@ -336,6 +340,24 @@ class KnowledgeGraphViewer {
   render() {
     if (!this.container) return;
 
+    // Check D3 availability
+    if (typeof d3 === 'undefined') {
+      console.error('[KnowledgeGraph] D3.js not loaded');
+      return;
+    }
+
+    // Check if we have nodes
+    if (!this.nodes || this.nodes.length === 0) {
+      console.warn('[KnowledgeGraph] No nodes to render');
+      return;
+    }
+
+    console.log('[KnowledgeGraph] Rendering', this.nodes.length, 'nodes,', this.edges.length, 'edges');
+
+    // Hide empty state
+    const emptyState = document.getElementById('kg-empty-state');
+    if (emptyState) emptyState.style.display = 'none';
+
     // Clear existing
     const graphContainer = this.container.querySelector('.kg-graph');
     if (graphContainer) graphContainer.remove();
@@ -344,8 +366,11 @@ class KnowledgeGraphViewer {
     wrapper.className = 'kg-graph';
     this.container.appendChild(wrapper);
 
-    const width = wrapper.offsetWidth || 800;
-    const height = wrapper.offsetHeight || 500;
+    // Force layout calculation and use explicit dimensions
+    const rect = wrapper.getBoundingClientRect();
+    const width = rect.width > 100 ? rect.width : 800;
+    const height = rect.height > 100 ? rect.height : 500;
+    console.log('[KnowledgeGraph] Graph dimensions:', width, 'x', height);
 
     // Create SVG
     this.svg = d3.select(wrapper)
