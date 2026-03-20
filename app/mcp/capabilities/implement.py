@@ -103,9 +103,10 @@ class ImplementCapability(BaseCapability):
     @property
     def description(self) -> str:
         return (
-            "Code-Implementierung basierend auf Design oder Requirements. "
-            "Generiert produktionsreifen Code mit Best Practices. "
-            "Verwende für: Feature-Implementation, Code-Generierung, Refactoring."
+            "CODE-GENERIERUNG: Implementiert Software-Features und Code-Komponenten. "
+            "Generiert produktionsreifen Python/JavaScript/etc. Code. "
+            "NUR für: Feature-Implementation, Code-Generierung, Refactoring, APIs. "
+            "NICHT für: Texte schreiben, Dokumentation, Reports, allgemeine Recherche."
         )
 
     @property

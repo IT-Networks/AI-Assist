@@ -37,10 +37,10 @@ class DesignCapability(BaseCapability):
     @property
     def description(self) -> str:
         return (
-            "System- und Komponentendesign. Erstellt Architektur, "
-            "API-Spezifikationen und Komponenten-Designs basierend auf "
-            "Requirements. Verwende für: Architekturplanung, API-Design, "
-            "Komponenten-Interfaces, Datenbank-Schemas."
+            "SOFTWARE-ARCHITEKTUR: System- und Komponentendesign für Code-Projekte. "
+            "Erstellt Architektur, API-Spezifikationen und Komponenten-Designs. "
+            "NUR für: Architekturplanung, API-Design, Datenbank-Schemas, Code-Strukturen. "
+            "NICHT für: Texte schreiben, Dokumentation erstellen, Reports, Recherche."
         )
 
     @property

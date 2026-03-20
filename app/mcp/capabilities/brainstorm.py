@@ -36,10 +36,10 @@ class BrainstormCapability(BaseCapability):
     @property
     def description(self) -> str:
         return (
-            "Interaktives Brainstorming für Requirements Discovery. "
-            "Transformiert vage Ideen in konkrete Spezifikationen durch "
-            "strukturierte Exploration und Sokratischen Dialog. "
-            "Verwende für: Neue Features, Projektplanung, Konzeptvalidierung."
+            "SOFTWARE-ENTWICKLUNG: Interaktives Brainstorming für Requirements Discovery. "
+            "Transformiert vage Software-Ideen in konkrete technische Spezifikationen. "
+            "NUR für: Neue Code-Features, Software-Architektur, technische Konzepte. "
+            "NICHT für: Texte schreiben, Dokumentation, Reports, allgemeine Recherche."
         )
 
     @property
