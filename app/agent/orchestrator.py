@@ -2779,18 +2779,15 @@ Sei präzise und gib detaillierte Analyse-Schritte."""
                     # ── Pending PR-Analyse abschließen (vor DONE) ──
                     if state.pending_pr_analysis is not None:
                         try:
-                            # Warte max 30 Sekunden auf Abschluss (LLM-Call braucht Zeit!)
-                            logger.info("[agent] Waiting for PR analysis to complete...")
+                            # Warte max 30 Sekunden auf Abschluss
                             pr_result = await asyncio.wait_for(
                                 state.pending_pr_analysis, timeout=30.0
                             )
-                            logger.info(f"[agent] PR analysis completed: {len(pr_result.get('findings', []))} findings")
                             yield AgentEvent(AgentEventType.WORKSPACE_PR_ANALYSIS, {
                                 "prNumber": state.pending_pr_number,
                                 **pr_result
                             })
                         except asyncio.TimeoutError:
-                            logger.warning("[agent] PR analysis timeout after 30s, sending fallback")
                             yield AgentEvent(AgentEventType.WORKSPACE_PR_ANALYSIS, {
                                 "prNumber": state.pending_pr_number,
                                 "bySeverity": {"critical": 0, "high": 0, "medium": 0, "low": 0, "info": 0},
@@ -3355,11 +3352,6 @@ Sei präzise und gib detaillierte Analyse-Schritte."""
                                 # PR-Daten für Workspace Panel
                                 pr_number = tool_call.arguments.get("pr_number")
 
-                                # DEBUG: Parse result data - check type
-                                logger.info(f"[agent] PR #{pr_number}: result type={type(result)}, "
-                                            f"has data={hasattr(result, 'data')}, "
-                                            f"data type={type(result.data) if hasattr(result, 'data') else 'N/A'}")
-
                                 # Parse result data - handle various formats
                                 result_data = {}
                                 if hasattr(result, 'data'):
@@ -3369,13 +3361,8 @@ Sei präzise und gib detaillierte Analyse-Schritte."""
                                         # Fallback: Versuche JSON zu parsen wenn String
                                         try:
                                             result_data = json.loads(result.data)
-                                            logger.info(f"[agent] PR #{pr_number}: Parsed data from JSON string")
                                         except (json.JSONDecodeError, TypeError):
-                                            logger.warning(f"[agent] PR #{pr_number}: data is string but not JSON: {result.data[:200]}")
-                                    else:
-                                        logger.warning(f"[agent] PR #{pr_number}: Unexpected data type: {type(result.data)}")
-
-                                logger.info(f"[agent] PR #{pr_number}: result_data keys={list(result_data.keys())[:10]}")
+                                            logger.warning(f"[agent] PR #{pr_number}: data is string but not JSON")
 
                                 # Repo aus result_data (resolved) oder fallback auf arguments (unresolved)
                                 repo = result_data.get("repo") or tool_call.arguments.get("repo", "")
@@ -3455,13 +3442,9 @@ Sei präzise und gib detaillierte Analyse-Schritte."""
                                     "title": result_data.get("title", f"PR #{pr_number}"),
                                 })
 
-                                # PR-Analyse starten (läuft als Background-Task, Event wird
-                                # über pending_pr_analysis im State gespeichert und am Ende
-                                # jeder Iteration abgefragt)
+                                # PR-Analyse starten (läuft als Background-Task)
                                 diff_content = result_data.get("diff", "")
-                                logger.info(f"[agent] PR #{pr_number} diff_content length: {len(diff_content) if diff_content else 0}")
                                 if diff_content and len(diff_content) > 50:
-                                    logger.info(f"[agent] Starting background analysis task for PR #{pr_number}")
                                     state.pending_pr_analysis = asyncio.create_task(
                                         self._analyze_pr_for_workspace(
                                             pr_number=pr_number,
@@ -3698,7 +3681,6 @@ Sei präzise und gib detaillierte Analyse-Schritte."""
         Returns:
             Dict mit bySeverity, verdict, findings, canApprove
         """
-        logger.info(f"[agent] Starting PR analysis for PR #{pr_number}, diff length: {len(diff)}")
 
         prompt = f"""Analysiere diesen Pull Request und gib eine strukturierte Bewertung.
 WICHTIG: Alle Texte (title, description, summary) MÜSSEN auf DEUTSCH sein!
@@ -3761,8 +3743,6 @@ ALLE AUSGABEN AUF DEUTSCH!"""
                 "stream": False
             }
 
-            logger.info(f"[agent] PR analysis: Calling LLM {model} at {base_url}")
-
             async with httpx.AsyncClient(
                 timeout=30,
                 verify=settings.llm.verify_ssl
@@ -3772,22 +3752,16 @@ ALLE AUSGABEN AUF DEUTSCH!"""
                     headers=headers,
                     json=payload
                 )
-                logger.info(f"[agent] PR analysis: LLM response status {response.status_code}")
                 response.raise_for_status()
                 data = response.json()
 
                 content = data.get("choices", [{}])[0].get("message", {}).get("content", "")
-                logger.info(f"[agent] PR analysis: Got content length {len(content)}")
-                logger.debug(f"[agent] PR analysis raw response: {content[:500]}...")
 
                 # JSON aus Response extrahieren
                 import re
                 json_match = re.search(r'\{[\s\S]*\}', content)
                 if json_match:
-                    json_str = json_match.group()
-                    logger.debug(f"[agent] PR analysis extracted JSON: {json_str[:300]}...")
-                    result = json.loads(json_str)
-                    logger.info(f"[agent] PR analysis parsed: findings={len(result.get('findings', []))}, verdict={result.get('verdict')}")
+                    result = json.loads(json_match.group())
 
                     # Validierung und Defaults
                     by_severity = result.get("bySeverity", {})
@@ -3814,12 +3788,9 @@ ALLE AUSGABEN AUF DEUTSCH!"""
                     logger.warning(f"[agent] PR analysis: No JSON found in response: {content[:200]}")
 
         except Exception as e:
-            import traceback
             logger.warning(f"[agent] PR workspace analysis failed: {e}")
-            logger.warning(f"[agent] PR analysis traceback: {traceback.format_exc()}")
 
         # Fallback bei Fehler
-        logger.warning("[agent] PR analysis using fallback (no findings)")
         return {
             "bySeverity": {"critical": 0, "high": 0, "medium": 0, "low": 0, "info": 0},
             "verdict": "comment",
