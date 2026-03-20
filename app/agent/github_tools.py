@@ -1079,7 +1079,11 @@ def register_github_tools(registry: ToolRegistry) -> int:
             ToolParameter(
                 name="path",
                 type="string",
-                description="Dateipfad im Repository (z.B. 'src/main/java/Service.java')",
+                description=(
+                    "Dateipfad im Repository (NICHT lokal!). "
+                    "Format: Relativer Pfad vom Repo-Root, z.B. 'src/main/java/Service.java'. "
+                    "TIPP: Pfade aus github_pr_diff (filename) direkt verwenden."
+                ),
                 required=True,
             ),
             ToolParameter(

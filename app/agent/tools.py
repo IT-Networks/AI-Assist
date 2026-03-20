@@ -1770,11 +1770,12 @@ async def debug_java_with_testdata(
 SEARCH_CODE_TOOL = Tool(
     name="search_code",
     description=(
-        "Durchsucht das LOKALE Repository per ripgrep/grep (KEIN Index nötig!). "
-        "Unterstützt Regex-Patterns und zeigt Kontext-Zeilen. "
-        "WICHTIG: Nur für LOKALE Dateien! Für GitHub-PRs verwende github_pr_diff. "
-        "Nutze für: Klassennamen, Methodennamen, SQL-Patterns, Fehlermeldungen, Code-Patterns. "
-        "ERGEBNIS enthält relative Pfade die direkt mit read_file verwendet werden können."
+        "PRIMÄRES SUCH-TOOL für Code im LOKALEN Repository. "
+        "Durchsucht alle Dateien per ripgrep mit Sprach-/Dateifilter. "
+        "BEVORZUGE DIESES TOOL für: Klassennamen, Methodennamen, Fehlermeldungen, Code-Patterns. "
+        "Gibt relative Pfade zurück → direkt mit read_file oder trace_java_references verwendbar. "
+        "UNTERSCHIED zu grep_content: search_code hat Sprachfilter (java/python/sql), grep_content ist flexibler für Pfade. "
+        "WICHTIG: Nur LOKALE Dateien! Für GitHub: github_pr_diff verwenden."
     ),
     category=ToolCategory.SEARCH,
     parameters=[
@@ -1889,10 +1890,11 @@ GLOB_FILES_TOOL = Tool(
 GREP_CONTENT_TOOL = Tool(
     name="grep_content",
     description=(
-        "Durchsucht Dateiinhalte mit ripgrep/grep (KEIN Index nötig!). "
-        "Nutze für: Funktionen ('def process_'), Klassen ('class.*Handler'), Imports, Fehlermeldungen. "
-        "PFAD: Bei '.' wird im aktiven Java/Python-Repo gesucht. "
-        "TIPP: Extrahiere Klassennamen aus Stacktraces und suche mit pattern='class ClassName'. "
+        "FLEXIBLES SUCH-TOOL mit frei wählbarem Pfad und Glob-Pattern. "
+        "NUTZE WENN: Du in einem SPEZIFISCHEN Verzeichnis/Pfad suchen willst. "
+        "Für ALLGEMEINE Code-Suche: search_code ist einfacher (hat Sprachfilter). "
+        "UNTERSCHIED zu search_code: grep_content erlaubt freie Pfadangabe + beliebige Glob-Patterns. "
+        "PFAD: '.' = aktives Repository, oder spezifischer Pfad wie 'src/main/java/com/example'. "
         "Zeigt Kontext-Zeilen vor/nach dem Treffer."
     ),
     category=ToolCategory.SEARCH,
@@ -2035,7 +2037,12 @@ READ_SQLJ_FILE_TOOL = Tool(
     ),
     category=ToolCategory.ANALYSIS,
     parameters=[
-        ToolParameter("path", "string", "Pfad zur SQLJ-Datei (relativ zum Repository oder absolut)"),
+        ToolParameter("path", "string",
+            "Pfad zur SQLJ-Datei. Akzeptiert: "
+            "1) Relativer Pfad aus search_code: 'src/main/java/Dao.sqlj', "
+            "2) Absoluter Pfad: 'C:/repo/src/Dao.sqlj', "
+            "3) Klassenname mit .sqlj: 'CustomerDao.sqlj'"
+        ),
     ],
     handler=read_sqlj_file
 )
@@ -2049,7 +2056,13 @@ DEBUG_JAVA_TESTDATA_TOOL = Tool(
     ),
     category=ToolCategory.ANALYSIS,
     parameters=[
-        ToolParameter("class_name", "string", "PFLICHT: Java-Klassenname (z.B. 'CustomerService'). Tool schlägt fehl wenn leer — zuerst search_code aufrufen um den Namen zu ermitteln."),
+        ToolParameter("class_name", "string",
+            "PFLICHT: Java-Klasse. Akzeptiert: "
+            "1) Klassenname: 'CustomerService', "
+            "2) Vollqualifiziert: 'com.example.CustomerService', "
+            "3) Dateipfad: 'src/main/java/CustomerService.java'. "
+            "Tool schlägt fehl wenn leer — zuerst search_code aufrufen."
+        ),
         ToolParameter("method_name", "string", "Name der Methode (optional, filtert SQL auf diese Methode)", required=False, default=""),
         ToolParameter("test_parameters", "object", "Testdaten als Key-Value-Objekt, z.B. {\"customerId\": \"12345\", \"date\": \"2024-01-01\"}. Keys entsprechen den SQLJ-Host-Variablen (:varName)", required=False, default={}),
     ],
@@ -2065,7 +2078,12 @@ TRACE_JAVA_REFERENCES_TOOL = Tool(
     ),
     category=ToolCategory.ANALYSIS,
     parameters=[
-        ToolParameter("class_name", "string", "Name der Klasse (einfach oder vollqualifiziert)"),
+        ToolParameter("class_name", "string",
+            "Klassenname ODER Dateipfad. Akzeptiert: "
+            "1) Einfacher Name: 'CustomerService', "
+            "2) Vollqualifiziert: 'com.example.CustomerService', "
+            "3) Dateipfad: 'src/main/java/CustomerService.java'"
+        ),
         ToolParameter("include_interfaces", "boolean", "Interfaces verfolgen", required=False, default=True),
         ToolParameter("include_parent_classes", "boolean", "Parent-Klassen verfolgen", required=False, default=True),
         ToolParameter("max_depth", "integer", "Maximale Tiefe der Hierarchie", required=False, default=5),
