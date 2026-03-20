@@ -3352,9 +3352,10 @@ Sei präzise und gib detaillierte Analyse-Schritte."""
                             elif tool_call.name in ("github_pr_details", "github_pr_diff"):
                                 # PR-Daten für Workspace Panel
                                 pr_number = tool_call.arguments.get("pr_number")
-                                repo = tool_call.arguments.get("repo", "")
                                 # Parse result data
                                 result_data = result.data if hasattr(result, 'data') and isinstance(result.data, dict) else {}
+                                # Repo aus result_data (resolved) oder fallback auf arguments (unresolved)
+                                repo = result_data.get("repo") or tool_call.arguments.get("repo", "")
 
                                 # Author kann String sein (von github_pr_details) oder Dict (von GitHub API direkt)
                                 author = result_data.get("user", "")
