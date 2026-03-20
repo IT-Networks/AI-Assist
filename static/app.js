@@ -2007,11 +2007,21 @@ function renderPRReviewPanelForTab(tab) {
     }
   } else if (analysis) {
     const sev = analysis.bySeverity || {};
-    if (criticalEl) criticalEl.textContent = sev.critical || 0;
-    if (highEl) highEl.textContent = sev.high || 0;
-    if (mediumEl) mediumEl.textContent = sev.medium || 0;
-    if (lowEl) lowEl.textContent = sev.low || 0;
-    if (infoEl) infoEl.textContent = sev.info || 0;
+    const activeFilter = tab.activeFilter || null;
+
+    // Badge-Werte setzen + Click-Handler + Active-State
+    const setupBadge = (el, severity, count) => {
+      if (!el) return;
+      el.textContent = count || 0;
+      el.onclick = () => toggleSeverityFilter(severity);
+      el.classList.toggle('active', activeFilter === severity);
+    };
+
+    setupBadge(criticalEl, 'critical', sev.critical);
+    setupBadge(highEl, 'high', sev.high);
+    setupBadge(mediumEl, 'medium', sev.medium);
+    setupBadge(lowEl, 'low', sev.low);
+    setupBadge(infoEl, 'info', sev.info);
 
     if (verdictEl) {
       const verdict = analysis.verdict || 'comment';
@@ -2035,7 +2045,21 @@ function renderPRReviewPanelForTab(tab) {
   // Findings aus Analyse anzeigen (statt alte comments)
   const findings = tab.analysisData?.findings || [];
   const comments = tab.comments || [];
-  const allItems = findings.length > 0 ? findings : comments;
+  let allItems = findings.length > 0 ? findings : comments;
+
+  // Filter anwenden wenn aktiv
+  const activeFilter = tab.activeFilter || null;
+  if (activeFilter) {
+    allItems = allItems.filter(item => item.severity === activeFilter);
+  }
+
+  // Filter-Indikator HTML
+  const filterIndicatorHTML = activeFilter ? `
+    <div class="pr-filter-indicator">
+      <span>Filter: <strong>${activeFilter.toUpperCase()}</strong></span>
+      <span class="pr-filter-reset" onclick="toggleSeverityFilter('${activeFilter}')">× Zurücksetzen</span>
+    </div>
+  ` : '';
 
   // Group items by file
   const fileComments = {};
@@ -2069,38 +2093,61 @@ function renderPRReviewPanelForTab(tab) {
         </div>
       `;
     } else {
+      // Finding-Index für Modal-Klicks tracken
+      let findingIndex = 0;
+
       // Erst Summaries für gruppierte Dateien, dann individuelle Dateien
-      const summaryHTML = groupedFiles.summaries.map(summary => `
-        <div class="pr-file pr-file-group">
-          <div class="pr-file-header" onclick="togglePRFile(this)">
-            <span class="pr-file-name">${escapeHtml(summary.label)}</span>
-            <span class="pr-file-issues">${summary.totalIssues} issues in ${summary.fileCount} files</span>
-          </div>
-          <div class="pr-file-comments" style="display: none;">
-            <div class="pr-group-summary">
-              <strong>Enthaltene Dateien:</strong>
-              <ul class="pr-group-files">
-                ${summary.files.map(f => `<li>${escapeHtml(f)}</li>`).join('')}
-              </ul>
+      const summaryHTML = groupedFiles.summaries.map(summary => {
+        const itemsHTML = summary.items.map(item => {
+          const html = renderPRFinding(item, findingIndex);
+          findingIndex++;
+          return html;
+        }).join('');
+
+        return `
+          <div class="pr-file pr-file-group">
+            <div class="pr-file-header" onclick="togglePRFile(this)">
+              <span class="pr-file-name">${escapeHtml(summary.label)}</span>
+              <span class="pr-file-issues">${summary.totalIssues} Issues in ${summary.fileCount} Dateien</span>
             </div>
-            ${summary.items.map(item => renderPRFinding(item)).join('')}
+            <div class="pr-file-comments" style="display: none;">
+              <div class="pr-group-summary">
+                <strong>Enthaltene Dateien:</strong>
+                <ul class="pr-group-files">
+                  ${summary.files.map(f => `<li>${escapeHtml(f)}</li>`).join('')}
+                </ul>
+              </div>
+              ${itemsHTML}
+            </div>
           </div>
-        </div>
-      `).join('');
+        `;
+      }).join('');
 
-      const individualHTML = Object.entries(groupedFiles.individual).map(([filePath, items]) => `
-        <div class="pr-file">
-          <div class="pr-file-header" onclick="togglePRFile(this)">
-            <span class="pr-file-name">${escapeHtml(filePath)}</span>
-            <span class="pr-file-issues">${items.length} issues</span>
-          </div>
-          <div class="pr-file-comments">
-            ${items.map(item => renderPRFinding(item)).join('')}
-          </div>
-        </div>
-      `).join('');
+      const individualHTML = Object.entries(groupedFiles.individual).map(([filePath, items]) => {
+        const { className, packagePath } = _extractClassName(filePath);
+        const itemsHTML = items.map(item => {
+          const html = renderPRFinding(item, findingIndex);
+          findingIndex++;
+          return html;
+        }).join('');
 
-      filesContainer.innerHTML = summaryHTML + individualHTML;
+        return `
+          <div class="pr-file">
+            <div class="pr-file-header" onclick="togglePRFile(this)">
+              <div class="pr-file-info">
+                <span class="pr-file-classname">${escapeHtml(className)}</span>
+                ${packagePath ? `<span class="pr-file-path">${escapeHtml(packagePath)}</span>` : ''}
+              </div>
+              <span class="pr-file-issues">${items.length} Issues</span>
+            </div>
+            <div class="pr-file-comments">
+              ${itemsHTML}
+            </div>
+          </div>
+        `;
+      }).join('');
+
+      filesContainer.innerHTML = filterIndicatorHTML + summaryHTML + individualHTML;
     }
   }
 
@@ -2165,21 +2212,52 @@ function _groupGeneratedFiles(fileComments) {
   return { individual, summaries };
 }
 
-// Render einzelnes Finding aus der Analyse
-function renderPRFinding(item) {
+/**
+ * Extrahiert Klassennamen aus Dateipfad
+ * "com/example/service/OrderService.java" → { className: "OrderService.java", packagePath: "com/example/service" }
+ */
+function _extractClassName(filePath) {
+  const normalized = filePath.replace(/\\/g, '/');
+  const parts = normalized.split('/');
+  const fileName = parts[parts.length - 1] || filePath;
+
+  return {
+    className: fileName,
+    fullPath: filePath,
+    packagePath: parts.length > 1 ? parts.slice(0, -1).join('/') : null
+  };
+}
+
+/**
+ * Toggle Severity-Filter für PR-Findings
+ */
+function toggleSeverityFilter(severity) {
+  const tab = prTabsManager.getActiveTab();
+  if (!tab) return;
+
+  // Toggle: gleiche Severity = reset, andere = filter setzen
+  tab.activeFilter = (tab.activeFilter === severity) ? null : severity;
+
+  // Panel neu rendern
+  prTabsManager.renderActivePanel();
+}
+
+// Render einzelnes Finding aus der Analyse (klickbar für Modal)
+function renderPRFinding(item, index = 0) {
   const severity = item.severity || 'info';
   const title = item.title || 'Issue';
   const description = item.description || item.body || '';
   const line = item.line;
 
   return `
-    <div class="pr-comment ${severity}">
+    <div class="pr-comment ${severity} clickable" onclick="openFindingModal(${index})" data-finding-index="${index}">
       <div class="pr-comment-header">
-        ${line ? `<span class="pr-comment-line">Line ${line}</span>` : ''}
+        ${line ? `<span class="pr-comment-line">Zeile ${line}</span>` : ''}
         <span class="pr-comment-severity severity-${severity}">${severity.toUpperCase()}</span>
         <span class="pr-comment-title">${escapeHtml(title)}</span>
       </div>
       <div class="pr-comment-body">${escapeHtml(description)}</div>
+      <div class="pr-comment-hint">Klicken für Details</div>
     </div>
   `;
 }
@@ -2318,6 +2396,250 @@ function closePRReview() {
   if (prTabsManager.tabs.size === 0) {
     switchWorkspaceTab('code');
   }
+}
+
+// ── Finding Modal Functions ──
+
+/**
+ * Öffnet das Finding-Modal mit Code-Ansicht
+ */
+function openFindingModal(findingIndex) {
+  const tab = prTabsManager.getActiveTab();
+  if (!tab || !tab.analysisData?.findings) return;
+
+  // Bei aktivem Filter: Index im gefilterten Array != Index im Original
+  let findings = tab.analysisData.findings;
+  if (tab.activeFilter) {
+    findings = findings.filter(f => f.severity === tab.activeFilter);
+  }
+
+  const finding = findings[findingIndex];
+  if (!finding) {
+    log.error('[PR] Finding not found at index', findingIndex);
+    return;
+  }
+
+  // Existierendes Modal entfernen
+  const existing = document.getElementById('finding-modal-overlay');
+  if (existing) existing.remove();
+
+  // Modal einfügen
+  document.body.insertAdjacentHTML('beforeend', _createFindingModalHTML(finding, findingIndex, tab));
+
+  // Keyboard Handler für ESC
+  const handleEsc = (e) => {
+    if (e.key === 'Escape') closeFindingModal();
+  };
+  document.addEventListener('keydown', handleEsc);
+  document.getElementById('finding-modal-overlay')._escHandler = handleEsc;
+
+  // Focus auf Textarea
+  setTimeout(() => {
+    const input = document.getElementById('finding-comment-input');
+    if (input) input.focus();
+  }, 100);
+}
+
+/**
+ * Erstellt das HTML für das Finding-Modal
+ */
+function _createFindingModalHTML(finding, index, tab) {
+  const { className, packagePath } = _extractClassName(finding.file || 'Unbekannt');
+  const lineInfo = finding.line ? `Zeile ${finding.line}` : '';
+
+  // Code-Snippet aus Finding oder Platzhalter
+  const codeSnippet = finding.codeSnippet || finding.code || '// Code nicht im Diff verfügbar';
+
+  // Inline-Kommentare für dieses Finding
+  const inlineComments = tab.inlineComments?.[index] || {};
+
+  // Code mit Highlighting rendern
+  const highlightedCode = _highlightCodeLines(codeSnippet, finding.line, inlineComments);
+
+  // Existierender Kommentar
+  const existingComment = tab.findingComments?.[index] || '';
+
+  return `
+    <div class="finding-modal-overlay" id="finding-modal-overlay" onclick="closeFindingModal(event)">
+      <div class="finding-modal" onclick="event.stopPropagation()">
+        <div class="finding-modal-header">
+          <div class="finding-modal-title">
+            <span class="severity-tag ${finding.severity}">${finding.severity.toUpperCase()}</span>
+            <span>${escapeHtml(finding.title)}</span>
+          </div>
+          <button class="modal-close" onclick="closeFindingModal()">&times;</button>
+        </div>
+
+        <div class="finding-modal-file">
+          <span class="file-icon">📄</span>
+          <span class="file-name">${escapeHtml(className)}</span>
+          ${lineInfo ? `<span class="file-line">${lineInfo}</span>` : ''}
+        </div>
+
+        <div class="finding-modal-code">
+          <pre><code>${highlightedCode}</code></pre>
+        </div>
+
+        <div class="finding-modal-description">
+          <h4>⚠ Beschreibung</h4>
+          <p>${escapeHtml(finding.description || 'Keine Beschreibung verfügbar.')}</p>
+        </div>
+
+        <div class="finding-modal-comment">
+          <h4>💬 Kommentar hinzufügen</h4>
+          <textarea
+            id="finding-comment-input"
+            placeholder="Kommentar für dieses Finding..."
+            data-finding-index="${index}"
+          >${escapeHtml(existingComment)}</textarea>
+          <div class="finding-modal-actions">
+            <button class="btn btn-primary" onclick="saveFindingComment()">Speichern</button>
+            <button class="btn btn-ghost" onclick="closeFindingModal()">Schließen</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+/**
+ * Rendert Code-Zeilen mit Highlighting und Inline-Kommentar-Buttons
+ */
+function _highlightCodeLines(code, highlightLine, inlineComments = {}) {
+  const lines = code.split('\n');
+  // Start-Zeile berechnen (3 Zeilen vor highlighted line wenn vorhanden)
+  const startLine = Math.max(1, (highlightLine || 1) - 3);
+
+  return lines.map((line, idx) => {
+    const lineNum = startLine + idx;
+    const isHighlighted = lineNum === highlightLine;
+    const comment = inlineComments[lineNum];
+    const lineClass = isHighlighted ? 'code-line highlighted' : 'code-line';
+    const marker = isHighlighted ? '▶' : ' ';
+
+    let html = `<span class="${lineClass}" data-line="${lineNum}">` +
+      `<span class="line-num">${lineNum.toString().padStart(4)}</span>` +
+      `<span class="line-marker">${marker}</span>` +
+      `<span class="line-content">${escapeHtml(line)}</span>` +
+      `<button class="inline-comment-btn" onclick="addInlineComment(${lineNum}); event.stopPropagation();" title="Kommentar hinzufügen">💬</button>` +
+      `</span>`;
+
+    // Inline-Kommentar anzeigen wenn vorhanden
+    if (comment) {
+      html += `<span class="inline-comment" data-line="${lineNum}">` +
+        `<span class="inline-comment-icon">💬</span>` +
+        `<span class="inline-comment-text">${escapeHtml(comment)}</span>` +
+        `<button class="inline-comment-remove" onclick="removeInlineComment(${lineNum}); event.stopPropagation();" title="Entfernen">&times;</button>` +
+        `</span>`;
+    }
+
+    return html;
+  }).join('\n');
+}
+
+/**
+ * Schließt das Finding-Modal
+ */
+function closeFindingModal(event) {
+  // Nur schließen wenn auf Overlay geklickt oder explizit aufgerufen
+  if (event && event.target.id !== 'finding-modal-overlay') return;
+
+  const modal = document.getElementById('finding-modal-overlay');
+  if (modal) {
+    // ESC-Handler entfernen
+    if (modal._escHandler) {
+      document.removeEventListener('keydown', modal._escHandler);
+    }
+    modal.remove();
+  }
+}
+
+/**
+ * Speichert den Kommentar für ein Finding
+ */
+function saveFindingComment() {
+  const input = document.getElementById('finding-comment-input');
+  if (!input) return;
+
+  const findingIndex = parseInt(input.dataset.findingIndex, 10);
+  const comment = input.value.trim();
+
+  const tab = prTabsManager.getActiveTab();
+  if (tab) {
+    if (!tab.findingComments) tab.findingComments = {};
+    if (comment) {
+      tab.findingComments[findingIndex] = comment;
+      showToast('Kommentar gespeichert', 'success');
+    } else {
+      delete tab.findingComments[findingIndex];
+    }
+  }
+
+  closeFindingModal();
+}
+
+/**
+ * Fügt einen Inline-Kommentar zu einer Code-Zeile hinzu
+ */
+function addInlineComment(lineNumber) {
+  const comment = prompt(`Kommentar für Zeile ${lineNumber}:`);
+  if (!comment || !comment.trim()) return;
+
+  const input = document.getElementById('finding-comment-input');
+  const findingIndex = parseInt(input?.dataset.findingIndex || '0', 10);
+
+  const tab = prTabsManager.getActiveTab();
+  if (tab) {
+    if (!tab.inlineComments) tab.inlineComments = {};
+    if (!tab.inlineComments[findingIndex]) tab.inlineComments[findingIndex] = {};
+    tab.inlineComments[findingIndex][lineNumber] = comment.trim();
+
+    // Modal neu rendern
+    _refreshFindingModal(findingIndex);
+  }
+}
+
+/**
+ * Entfernt einen Inline-Kommentar
+ */
+function removeInlineComment(lineNumber) {
+  const input = document.getElementById('finding-comment-input');
+  const findingIndex = parseInt(input?.dataset.findingIndex || '0', 10);
+
+  const tab = prTabsManager.getActiveTab();
+  if (tab?.inlineComments?.[findingIndex]) {
+    delete tab.inlineComments[findingIndex][lineNumber];
+    _refreshFindingModal(findingIndex);
+  }
+}
+
+/**
+ * Aktualisiert das Modal mit neuem Inhalt
+ */
+function _refreshFindingModal(findingIndex) {
+  const tab = prTabsManager.getActiveTab();
+  if (!tab) return;
+
+  let findings = tab.analysisData?.findings || [];
+  if (tab.activeFilter) {
+    findings = findings.filter(f => f.severity === tab.activeFilter);
+  }
+
+  const finding = findings[findingIndex];
+  if (!finding) return;
+
+  // Aktuellen Kommentar-Text speichern
+  const currentComment = document.getElementById('finding-comment-input')?.value || '';
+
+  // Modal entfernen und neu erstellen
+  const modal = document.getElementById('finding-modal-overlay');
+  if (modal) modal.remove();
+
+  document.body.insertAdjacentHTML('beforeend', _createFindingModalHTML(finding, findingIndex, tab));
+
+  // Kommentar-Text wiederherstellen
+  const newInput = document.getElementById('finding-comment-input');
+  if (newInput) newInput.value = currentComment;
 }
 
 // ══════════════════════════════════════════════════════════════════════════════

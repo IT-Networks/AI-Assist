@@ -3673,6 +3673,7 @@ Sei präzise und gib detaillierte Analyse-Schritte."""
             Dict mit bySeverity, verdict, findings, canApprove
         """
         prompt = f"""Analysiere diesen Pull Request und gib eine strukturierte Bewertung.
+WICHTIG: Alle Texte (title, description, summary) MÜSSEN auf DEUTSCH sein!
 
 PR #{pr_number}: {title}
 Status: {state}
@@ -3695,13 +3696,14 @@ Antworte NUR mit einem JSON-Objekt in diesem Format (keine Erklärungen):
   "findings": [
     {{
       "severity": "<critical|high|medium|low|info>",
-      "title": "<Kurztitel>",
+      "title": "<Kurzer deutscher Titel>",
       "file": "<Dateipfad>",
       "line": <Zeilennummer oder null>,
-      "description": "<Kurze Beschreibung>"
+      "description": "<Kurze deutsche Beschreibung>",
+      "codeSnippet": "<Betroffene Code-Zeilen wenn relevant, sonst null>"
     }}
   ],
-  "summary": "<1-2 Sätze Zusammenfassung>"
+  "summary": "<1-2 Sätze deutsche Zusammenfassung>"
 }}
 
 Bewertungskriterien:
@@ -3711,7 +3713,8 @@ Bewertungskriterien:
 - low: Style-Issues, Minor Improvements
 - info: Dokumentation, Kommentare
 
-Maximal 10 Findings. Bei closed/merged PRs: verdict="comment"."""
+Maximal 10 Findings. Bei closed/merged PRs: verdict="comment".
+ALLE AUSGABEN AUF DEUTSCH!"""
 
         try:
             # Schnelles Modell für Analyse

@@ -7337,8 +7337,8 @@ a:visited {
 }
 
 .severity-badge.low {
-  background: var(--info, rgba(163, 113, 247, 0.15));
-  color: var(--info, #a371f7);
+  background: rgba(163, 113, 247, 0.15);
+  color: #a371f7;
 }
 
 .severity-badge.low::before {
@@ -7764,6 +7764,350 @@ a:visited {
 
 .pr-comment.dismissed .pr-comment-input {
   display: none;
+}
+
+/* ── Klickbare Severity Badges ── */
+.severity-badge {
+  cursor: pointer;
+  transition: transform 0.15s, box-shadow 0.15s;
+}
+
+.severity-badge:hover {
+  transform: scale(1.08);
+  box-shadow: 0 2px 8px rgba(0,0,0,0.25);
+}
+
+.severity-badge.active {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.pr-filter-indicator {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px;
+  background: var(--surface);
+  border-radius: 4px;
+  font-size: 0.8rem;
+  margin: 8px 0;
+}
+
+.pr-filter-reset {
+  cursor: pointer;
+  color: var(--accent);
+  text-decoration: underline;
+}
+
+.pr-filter-reset:hover {
+  color: var(--text);
+}
+
+/* ── Verbesserte Datei-Info (Klassenname + Pfad) ── */
+.pr-file-info {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex: 1;
+  min-width: 0;
+}
+
+.pr-file-classname {
+  font-weight: 600;
+  font-size: 0.9rem;
+  color: var(--text);
+}
+
+.pr-file-path {
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* ── Klickbare Findings ── */
+.pr-comment.clickable {
+  cursor: pointer;
+  transition: background 0.15s, transform 0.1s;
+}
+
+.pr-comment.clickable:hover {
+  background: var(--surface);
+  transform: translateX(4px);
+}
+
+.pr-comment-hint {
+  font-size: 0.7rem;
+  color: var(--text-muted);
+  margin-top: 6px;
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+
+.pr-comment.clickable:hover .pr-comment-hint {
+  opacity: 1;
+}
+
+/* ── Finding Modal ── */
+.finding-modal-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.6);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  animation: fadeIn 0.15s ease-out;
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+.finding-modal {
+  background: var(--bg);
+  border-radius: 12px;
+  max-width: 850px;
+  width: 92%;
+  max-height: 85vh;
+  overflow-y: auto;
+  box-shadow: 0 20px 60px rgba(0,0,0,0.4);
+  animation: slideUp 0.2s ease-out;
+}
+
+@keyframes slideUp {
+  from { transform: translateY(20px); opacity: 0; }
+  to { transform: translateY(0); opacity: 1; }
+}
+
+.finding-modal-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 16px 20px;
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+  position: sticky;
+  top: 0;
+  z-index: 10;
+}
+
+.finding-modal-title {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-weight: 600;
+  font-size: 1rem;
+}
+
+.severity-tag {
+  padding: 4px 8px;
+  border-radius: 4px;
+  font-size: 0.7rem;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.severity-tag.critical { background: var(--danger-bg); color: var(--danger); }
+.severity-tag.high { background: rgba(255,140,0,0.15); color: #ff8c00; }
+.severity-tag.medium { background: var(--warning-bg); color: var(--warning); }
+.severity-tag.low { background: rgba(163,113,247,0.15); color: #a371f7; }
+.severity-tag.info { background: var(--surface); color: var(--text-secondary); }
+
+.modal-close {
+  background: none;
+  border: none;
+  font-size: 1.5rem;
+  color: var(--text-muted);
+  cursor: pointer;
+  padding: 4px 8px;
+  line-height: 1;
+}
+
+.modal-close:hover {
+  color: var(--text);
+}
+
+.finding-modal-file {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 20px;
+  background: var(--bg-secondary);
+  font-family: var(--font-mono);
+  font-size: 0.85rem;
+  border-bottom: 1px solid var(--border);
+}
+
+.finding-modal-file .file-icon {
+  font-size: 1rem;
+}
+
+.finding-modal-file .file-name {
+  font-weight: 500;
+  color: var(--text);
+}
+
+.finding-modal-file .file-line {
+  color: var(--accent);
+  margin-left: auto;
+}
+
+.finding-modal-code {
+  background: #1a1a2e;
+  overflow-x: auto;
+  border-bottom: 1px solid var(--border);
+}
+
+.finding-modal-code pre {
+  margin: 0;
+  padding: 16px;
+  font-size: 0.85rem;
+  line-height: 1.6;
+  font-family: var(--font-mono);
+}
+
+.finding-modal-code .code-line {
+  display: flex;
+  align-items: center;
+  min-height: 24px;
+  position: relative;
+}
+
+.finding-modal-code .code-line.highlighted {
+  background: rgba(255, 200, 0, 0.12);
+  border-left: 3px solid var(--warning);
+  margin-left: -3px;
+  padding-left: 3px;
+}
+
+.finding-modal-code .line-num {
+  color: var(--text-muted);
+  margin-right: 16px;
+  user-select: none;
+  min-width: 40px;
+  text-align: right;
+}
+
+.finding-modal-code .line-marker {
+  color: var(--warning);
+  margin-right: 8px;
+  font-weight: bold;
+}
+
+.finding-modal-code .line-content {
+  flex: 1;
+  white-space: pre;
+}
+
+.finding-modal-code .inline-comment-btn {
+  opacity: 0;
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 2px 6px;
+  font-size: 0.85rem;
+  transition: opacity 0.15s;
+  margin-left: 8px;
+}
+
+.finding-modal-code .code-line:hover .inline-comment-btn {
+  opacity: 0.6;
+}
+
+.finding-modal-code .inline-comment-btn:hover {
+  opacity: 1 !important;
+}
+
+.finding-modal-code .inline-comment {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px 8px 60px;
+  background: rgba(100, 150, 255, 0.1);
+  border-left: 3px solid var(--accent);
+  font-size: 0.85rem;
+  margin-left: -3px;
+}
+
+.finding-modal-code .inline-comment-icon {
+  font-size: 0.9rem;
+}
+
+.finding-modal-code .inline-comment-text {
+  flex: 1;
+  color: var(--text);
+}
+
+.finding-modal-code .inline-comment-remove {
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  padding: 2px 6px;
+  font-size: 1rem;
+}
+
+.finding-modal-code .inline-comment-remove:hover {
+  color: var(--danger);
+}
+
+.finding-modal-description {
+  padding: 16px 20px;
+  border-bottom: 1px solid var(--border);
+}
+
+.finding-modal-description h4 {
+  margin: 0 0 8px 0;
+  font-size: 0.9rem;
+  color: var(--text-secondary);
+}
+
+.finding-modal-description p {
+  margin: 0;
+  line-height: 1.6;
+  color: var(--text);
+}
+
+.finding-modal-comment {
+  padding: 16px 20px;
+}
+
+.finding-modal-comment h4 {
+  margin: 0 0 10px 0;
+  font-size: 0.9rem;
+  color: var(--text-secondary);
+}
+
+.finding-modal-comment textarea {
+  width: 100%;
+  min-height: 80px;
+  padding: 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--text);
+  font-family: inherit;
+  font-size: 0.85rem;
+  resize: vertical;
+}
+
+.finding-modal-comment textarea:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.finding-modal-actions {
+  display: flex;
+  gap: 10px;
+  margin-top: 12px;
+  justify-content: flex-end;
 }
 
 /* ══════════════════════════════════════════════════════════════════════════════
