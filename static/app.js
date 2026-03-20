@@ -295,15 +295,28 @@ function toggleWorkspaceCollapse() {
 function switchWorkspaceTab(tabName) {
   workspaceState.activeTab = tabName;
 
-  // Update tab buttons
-  document.querySelectorAll('.workspace-tab').forEach(tab => {
+  // Update statische Tab-Buttons (nicht PR-Tabs)
+  document.querySelectorAll('.workspace-tab:not(.pr-tab)').forEach(tab => {
     tab.classList.toggle('active', tab.dataset.tab === tabName);
   });
+
+  // PR-Tabs: Deaktiviere alle wenn nicht 'pr', sonst von prTabsManager gehandhabt
+  if (tabName !== 'pr') {
+    document.querySelectorAll('.workspace-tab.pr-tab').forEach(tab => {
+      tab.classList.remove('active');
+    });
+  }
 
   // Update tab content
   document.querySelectorAll('.workspace-tab-content').forEach(content => {
     content.classList.toggle('active', content.id === `workspace-${tabName}-content`);
   });
+
+  // Bei PR-Tab: Panel für aktiven Tab rendern
+  if (tabName === 'pr' && typeof prTabsManager !== 'undefined') {
+    prTabsManager.renderTabs();
+    prTabsManager.renderActivePanel();
+  }
 }
 
 function updateWorkspaceBadges() {
@@ -334,6 +347,25 @@ function clearWorkspace() {
   renderWorkspaceTab('research');
   renderWorkspaceTab('files');
   updateWorkspaceBadges();
+
+  // PR-Tabs auch leeren
+  if (typeof prTabsManager !== 'undefined') {
+    prTabsManager.tabs.clear();
+    prTabsManager.activeTabId = null;
+    prTabsManager.renderTabs();
+
+    // Leeren Zustand für PR-Content anzeigen
+    const prContent = document.getElementById('workspace-pr-content');
+    if (prContent) {
+      prContent.innerHTML = `
+        <div class="pr-empty-state">
+          <span class="empty-icon">&#128209;</span>
+          <p>Keine PRs geöffnet</p>
+          <small>Öffne einen PR über den Chat oder per Link</small>
+        </div>
+      `;
+    }
+  }
 }
 
 function exportWorkspace() {
@@ -1133,33 +1165,334 @@ function rejectCodeChange(itemId) {
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
-// PR Review Workspace Tab
+// PR Review Workspace Tab - Multi-Tab Support
 // ══════════════════════════════════════════════════════════════════════════════
 
-const prReviewState = {
-  active: false,
-  reviewId: null,
-  prNumber: null,
-  repoOwner: null,
-  repoName: null,
-  title: '',
-  author: '',           // GitHub Login
-  authorName: '',       // Vollständiger Name aus Profil
-  baseBranch: '',
-  headBranch: '',
-  additions: 0,
-  deletions: 0,
-  filesChanged: 0,
-  comments: [],
-  summary: null,
-  userComments: {},  // Map of commentId -> user edited text
-  dismissedComments: new Set(),
-  // Neue Felder für PR-Status und Analyse
-  state: 'open',        // open, closed, merged
-  loading: false,       // Analyse läuft
-  analysisData: null,   // Ergebnis der PR-Analyse (bySeverity, verdict, findings)
-  canApprove: true,     // Kann PR approved werden (nur bei open)
+/**
+ * PRTabState - State für einen einzelnen PR-Tab
+ */
+class PRTabState {
+  constructor(owner, repo, number) {
+    this.id = `${owner}/${repo}#${number}`;
+    this.owner = owner;
+    this.repo = repo;
+    this.number = number;
+
+    // Metadaten
+    this.title = `PR #${number}`;
+    this.author = '';
+    this.authorName = '';
+    this.baseBranch = '';
+    this.headBranch = '';
+    this.additions = 0;
+    this.deletions = 0;
+    this.filesChanged = 0;
+    this.state = 'open';
+
+    // Analyse
+    this.loading = true;
+    this.loadingDetails = true;
+    this.loadingAnalysis = true;
+    this.analysisData = null;
+    this.diff = null;
+    this.error = null;
+
+    // UI/Review
+    this.canApprove = false;
+    this.userComments = {};
+    this.dismissedComments = new Set();
+    this.comments = [];
+    this.summary = null;
+    this.reviewId = null;
+
+    // Zeitstempel für LRU
+    this.openedAt = Date.now();
+    this.lastActiveAt = Date.now();
+  }
+
+  updateLastActive() {
+    this.lastActiveAt = Date.now();
+  }
+}
+
+/**
+ * prTabsManager - Verwaltet mehrere PR-Tabs (max 5)
+ */
+const prTabsManager = {
+  tabs: new Map(),      // Key: "owner/repo#number" → PRTabState
+  activeTabId: null,    // Aktuell aktiver Tab
+  MAX_TABS: 5,          // Maximal offene Tabs
+
+  getTabId(owner, repo, number) {
+    return `${owner}/${repo}#${number}`;
+  },
+
+  hasTab(tabId) {
+    return this.tabs.has(tabId);
+  },
+
+  getTab(tabId) {
+    return this.tabs.get(tabId);
+  },
+
+  getActiveTab() {
+    return this.activeTabId ? this.tabs.get(this.activeTabId) : null;
+  },
+
+  /**
+   * Öffnet neuen Tab oder aktiviert existierenden
+   * @returns {{ isNew: boolean, tab: PRTabState }}
+   */
+  openTab(owner, repo, number) {
+    const tabId = this.getTabId(owner, repo, number);
+
+    // Bereits offen? → Nur aktivieren
+    if (this.hasTab(tabId)) {
+      const tab = this.tabs.get(tabId);
+      tab.updateLastActive();
+      this.activateTab(tabId);
+      return { isNew: false, tab };
+    }
+
+    // Max erreicht? → Ältesten (LRU) schließen
+    if (this.tabs.size >= this.MAX_TABS) {
+      let oldestId = null;
+      let oldestTime = Infinity;
+      for (const [id, tab] of this.tabs) {
+        if (tab.lastActiveAt < oldestTime) {
+          oldestTime = tab.lastActiveAt;
+          oldestId = id;
+        }
+      }
+      if (oldestId) {
+        this.closeTab(oldestId, false);  // Ohne Re-render
+      }
+    }
+
+    // Neuen Tab erstellen
+    const tab = new PRTabState(owner, repo, number);
+    this.tabs.set(tabId, tab);
+    this.activeTabId = tabId;
+
+    return { isNew: true, tab };
+  },
+
+  /**
+   * Schließt einen Tab
+   */
+  closeTab(tabId, render = true) {
+    if (!this.tabs.has(tabId)) return;
+
+    this.tabs.delete(tabId);
+    log.info('[PR] Tab closed:', tabId);
+
+    // Wenn aktiver Tab geschlossen wurde → nächsten aktivieren
+    if (this.activeTabId === tabId) {
+      const remaining = [...this.tabs.keys()];
+      this.activeTabId = remaining.length > 0 ? remaining[remaining.length - 1] : null;
+    }
+
+    if (render) {
+      this.renderTabs();
+      this.renderActivePanel();
+
+      // Wenn keine Tabs mehr → PR-Content ausblenden
+      if (this.tabs.size === 0) {
+        const prContent = document.getElementById('workspace-pr-content');
+        if (prContent) {
+          prContent.innerHTML = `
+            <div class="pr-empty-state">
+              <span class="empty-icon">&#128209;</span>
+              <p>Keine PRs geöffnet</p>
+              <small>Öffne einen PR über den Chat oder per Link</small>
+            </div>
+          `;
+        }
+      }
+    }
+  },
+
+  /**
+   * Aktiviert einen Tab
+   */
+  activateTab(tabId) {
+    if (!this.tabs.has(tabId)) return;
+
+    const tab = this.tabs.get(tabId);
+    tab.updateLastActive();
+    this.activeTabId = tabId;
+
+    this.renderTabs();
+    this.renderActivePanel();
+
+    // Workspace öffnen und PR-Tab wechseln
+    if (!workspaceState.visible) {
+      toggleWorkspace();
+    }
+    switchWorkspaceTab('pr');
+  },
+
+  /**
+   * Berechnet höchste Severity für Badge-Farbe
+   */
+  getHighestSeverity(tab) {
+    if (!tab.analysisData?.bySeverity) return 'ok';
+    const s = tab.analysisData.bySeverity;
+    if (s.critical > 0) return 'critical';
+    if (s.high > 0) return 'high';
+    if (s.medium > 0) return 'medium';
+    return 'ok';
+  },
+
+  /**
+   * Zählt Issues für Badge
+   */
+  getIssueCount(tab) {
+    if (!tab.analysisData?.bySeverity) return 0;
+    const s = tab.analysisData.bySeverity;
+    return (s.critical || 0) + (s.high || 0) + (s.medium || 0);
+  },
+
+  /**
+   * Rendert die PR-Tab-Leiste
+   */
+  renderTabs() {
+    const container = document.getElementById('workspace-pr-tabs');
+    if (!container) return;
+
+    if (this.tabs.size === 0) {
+      container.style.display = 'none';
+      container.innerHTML = '';
+      return;
+    }
+
+    container.style.display = 'flex';
+    container.innerHTML = '';
+
+    for (const [tabId, tab] of this.tabs) {
+      const isActive = tabId === this.activeTabId;
+      const severity = this.getHighestSeverity(tab);
+      const issueCount = this.getIssueCount(tab);
+      const isLoading = tab.loading;
+
+      const button = document.createElement('button');
+      button.className = `workspace-tab pr-tab ${isActive ? 'active' : ''} ${isLoading ? 'loading' : ''}`;
+      button.dataset.prTab = tabId;
+      button.title = `${tab.owner}/${tab.repo}: ${tab.title}`;
+
+      // Click-Handler für Tab-Aktivierung
+      button.onclick = (e) => {
+        if (!e.target.classList.contains('tab-close')) {
+          this.activateTab(tabId);
+        }
+      };
+
+      // Mittlere Maustaste zum Schließen
+      button.onmousedown = (e) => {
+        if (e.button === 1) {
+          e.preventDefault();
+        }
+      };
+      button.onauxclick = (e) => {
+        if (e.button === 1) {
+          e.preventDefault();
+          e.stopPropagation();
+          this.closeTab(tabId);
+        }
+      };
+
+      // Tab-Inhalt
+      const iconSpan = document.createElement('span');
+      iconSpan.className = 'tab-icon';
+      iconSpan.innerHTML = isLoading ? '&#8987;' : '&#128209;';
+
+      const labelSpan = document.createElement('span');
+      labelSpan.className = 'tab-label';
+      labelSpan.textContent = `PR #${tab.number}`;
+
+      button.appendChild(iconSpan);
+      button.appendChild(labelSpan);
+
+      // Badge nur wenn nicht loading und Issues vorhanden
+      if (!isLoading && issueCount > 0) {
+        const badge = document.createElement('span');
+        badge.className = 'tab-badge';
+        badge.dataset.severity = severity;
+        badge.textContent = issueCount;
+        button.appendChild(badge);
+      }
+
+      // Close-Button
+      const closeBtn = document.createElement('button');
+      closeBtn.className = 'tab-close';
+      closeBtn.innerHTML = '&times;';
+      closeBtn.title = 'Tab schließen';
+      closeBtn.onclick = (e) => {
+        e.stopPropagation();
+        this.closeTab(tabId);
+      };
+      button.appendChild(closeBtn);
+
+      container.appendChild(button);
+    }
+  },
+
+  /**
+   * Rendert das Panel für den aktiven Tab
+   */
+  renderActivePanel() {
+    const tab = this.getActiveTab();
+    if (!tab) {
+      // Kein aktiver Tab
+      const prContent = document.getElementById('workspace-pr-content');
+      if (prContent && this.tabs.size === 0) {
+        prContent.innerHTML = `
+          <div class="pr-empty-state">
+            <span class="empty-icon">&#128209;</span>
+            <p>Keine PRs geöffnet</p>
+            <small>Öffne einen PR über den Chat oder per Link</small>
+          </div>
+        `;
+      }
+      return;
+    }
+
+    // Panel für aktiven Tab rendern
+    renderPRReviewPanelForTab(tab);
+  }
 };
+
+// Legacy-Kompatibilität: prReviewState zeigt auf aktiven Tab
+// DEPRECATED - verwende prTabsManager.getActiveTab()
+const prReviewState = new Proxy({}, {
+  get(target, prop) {
+    const activeTab = prTabsManager.getActiveTab();
+    if (!activeTab) {
+      // Fallback-Werte für leeren State
+      const defaults = {
+        active: false, prNumber: null, repoOwner: null, repoName: null,
+        title: '', author: '', authorName: '', baseBranch: '', headBranch: '',
+        additions: 0, deletions: 0, filesChanged: 0, comments: [], summary: null,
+        userComments: {}, dismissedComments: new Set(), state: 'open',
+        loading: false, analysisData: null, canApprove: true
+      };
+      return defaults[prop];
+    }
+    // Map alte Property-Namen auf neue
+    const mapping = { repoOwner: 'owner', repoName: 'repo' };
+    const key = mapping[prop] || prop;
+    return activeTab[key];
+  },
+  set(target, prop, value) {
+    const activeTab = prTabsManager.getActiveTab();
+    if (activeTab) {
+      const mapping = { repoOwner: 'owner', repoName: 'repo' };
+      const key = mapping[prop] || prop;
+      activeTab[key] = value;
+    }
+    return true;
+  }
+});
 
 // Detect PR links in messages
 const PR_LINK_REGEX = /https?:\/\/github\.com\/([^\/]+)\/([^\/]+)\/pull\/(\d+)/gi;
@@ -1191,110 +1524,123 @@ function detectPRInMessage(text) {
 }
 
 /**
- * Lädt PR-Daten direkt von der API (unabhängig vom Chat).
- * Nutzt die neuen /api/github/pr/ Endpoints.
+ * Lädt PR-Daten parallel (Details + Analyse gleichzeitig).
+ * Nutzt Multi-Tab-System für mehrere PRs.
  */
 async function loadPRReview(repoOwner, repoName, prNumber) {
-  log.info('[PR] loadPRReview called (independent)', { repoOwner, repoName, prNumber });
+  log.info('[PR] loadPRReview called', { repoOwner, repoName, prNumber });
 
-  // Setze Loading-State
-  prReviewState.active = true;
-  prReviewState.prNumber = prNumber;
-  prReviewState.repoOwner = repoOwner;
-  prReviewState.repoName = repoName;
-  prReviewState.loading = true;
-  prReviewState.analysisData = null;
+  // Tab öffnen (oder existierenden aktivieren)
+  const { isNew, tab } = prTabsManager.openTab(repoOwner, repoName, prNumber);
 
-  // Zeige PR-Tab sofort mit Loading
-  const prTab = document.getElementById('workspace-pr-tab');
-  if (prTab) {
-    prTab.style.display = 'flex';
-    const prLabel = document.getElementById('workspace-pr-label');
-    if (prLabel) prLabel.textContent = `PR #${prNumber}`;
-  }
-
-  // Workspace öffnen und zum PR-Tab wechseln
+  // Workspace öffnen und PR-Tab wechseln
   if (!workspaceState.visible) {
     toggleWorkspace();
   }
   switchWorkspaceTab('pr');
-  renderPRReviewPanel();
 
-  try {
-    // 1. PR-Details laden (unabhängiger API-Call)
-    const detailsRes = await fetch(`/api/github/pr/${repoOwner}/${repoName}/${prNumber}`);
-    if (!detailsRes.ok) {
-      const err = await detailsRes.json();
-      throw new Error(err.detail || 'PR-Details konnten nicht geladen werden');
+  // Tabs und Panel rendern
+  prTabsManager.renderTabs();
+  prTabsManager.renderActivePanel();
+
+  // Wenn Tab bereits existiert, nicht neu laden
+  if (!isNew) {
+    log.info('[PR] Tab already exists, just activating');
+    return tab;
+  }
+
+  // Parallele Requests starten
+  const detailsPromise = _fetchPRDetails(repoOwner, repoName, prNumber);
+  const analysisPromise = _fetchPRAnalysis(repoOwner, repoName, prNumber);
+
+  // Details verarbeiten sobald verfügbar
+  detailsPromise.then(details => {
+    if (!prTabsManager.hasTab(tab.id)) return; // Tab wurde geschlossen
+
+    if (!details.error) {
+      Object.assign(tab, {
+        title: details.title || `PR #${prNumber}`,
+        author: details.author || '',
+        authorName: details.authorName || details.author || '',
+        baseBranch: details.baseBranch || 'main',
+        headBranch: details.headBranch || '',
+        additions: details.additions || 0,
+        deletions: details.deletions || 0,
+        filesChanged: details.filesChanged || 0,
+        state: details.state || 'open',
+        loadingDetails: false
+      });
+    } else {
+      tab.error = details.error;
+      tab.loadingDetails = false;
     }
+    tab.loading = tab.loadingDetails || tab.loadingAnalysis;
 
-    const details = await detailsRes.json();
-    log.info('[PR] PR details loaded', details);
+    prTabsManager.renderTabs();
+    if (prTabsManager.activeTabId === tab.id) {
+      prTabsManager.renderActivePanel();
+    }
+  });
 
-    // Update State mit Details
-    prReviewState.title = details.title || `PR #${prNumber}`;
-    prReviewState.author = details.author || 'unknown';
-    prReviewState.authorName = details.authorName || details.author || 'unknown';
-    prReviewState.baseBranch = details.baseBranch || 'main';
-    prReviewState.headBranch = details.headBranch || 'feature';
-    prReviewState.additions = details.additions || 0;
-    prReviewState.deletions = details.deletions || 0;
-    prReviewState.filesChanged = details.filesChanged || 0;
-    prReviewState.state = details.state || 'open';
-    prReviewState.canApprove = details.state === 'open';
+  // Analyse verarbeiten sobald verfügbar
+  analysisPromise.then(analysis => {
+    if (!prTabsManager.hasTab(tab.id)) return; // Tab wurde geschlossen
 
-    // Re-render mit Details (noch loading für Analyse)
-    renderPRReviewPanel();
+    if (!analysis.error) {
+      tab.analysisData = analysis;
+      tab.canApprove = analysis.canApprove !== false && tab.state === 'open';
+    } else {
+      tab.analysisData = {
+        bySeverity: { critical: 0, high: 0, medium: 0, low: 0, info: 0 },
+        verdict: 'comment',
+        findings: [],
+        summary: analysis.error || 'Analyse nicht verfügbar'
+      };
+    }
+    tab.loadingAnalysis = false;
+    tab.loading = tab.loadingDetails || tab.loadingAnalysis;
 
-    // 2. PR-Analyse starten (unabhängiger API-Call)
-    const analyzeRes = await fetch(`/api/github/pr/${repoOwner}/${repoName}/${prNumber}/analyze`, {
+    prTabsManager.renderTabs();
+    if (prTabsManager.activeTabId === tab.id) {
+      prTabsManager.renderActivePanel();
+    }
+  });
+
+  return tab;
+}
+
+/**
+ * Holt PR-Details von der API
+ */
+async function _fetchPRDetails(owner, repo, number) {
+  try {
+    const res = await fetch(`/api/github/pr/${owner}/${repo}/${number}`);
+    if (!res.ok) {
+      const err = await res.json();
+      return { error: err.detail || 'PR nicht gefunden' };
+    }
+    return await res.json();
+  } catch (e) {
+    return { error: e.message };
+  }
+}
+
+/**
+ * Holt PR-Analyse von der API
+ */
+async function _fetchPRAnalysis(owner, repo, number) {
+  try {
+    const res = await fetch(`/api/github/pr/${owner}/${repo}/${number}/analyze`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({})
     });
-
-    if (analyzeRes.ok) {
-      const analysis = await analyzeRes.json();
-      log.info('[PR] PR analysis completed', analysis);
-
-      prReviewState.loading = false;
-      prReviewState.analysisData = analysis;
-      prReviewState.canApprove = analysis.canApprove !== false && prReviewState.state === 'open';
-    } else {
-      // Analyse fehlgeschlagen, aber Details sind da
-      prReviewState.loading = false;
-      prReviewState.analysisData = {
-        bySeverity: { critical: 0, high: 0, medium: 0, low: 0, info: 0 },
-        verdict: 'comment',
-        findings: [],
-        summary: 'Analyse nicht verfügbar'
-      };
+    if (!res.ok) {
+      return { error: 'Analyse fehlgeschlagen' };
     }
-
-    // Finales Render
-    renderPRReviewPanel();
-
-    // Badge aktualisieren
-    const badge = document.getElementById('workspace-pr-badge');
-    if (badge && prReviewState.analysisData) {
-      badge.classList.remove('loading');
-      const sev = prReviewState.analysisData.bySeverity || {};
-      const total = (sev.critical || 0) + (sev.high || 0) + (sev.medium || 0) + (sev.low || 0);
-      badge.textContent = total;
-      badge.style.display = total > 0 ? 'inline' : 'none';
-    }
-
+    return await res.json();
   } catch (e) {
-    log.error('[PR] Failed to load PR:', e);
-    prReviewState.loading = false;
-    prReviewState.analysisData = {
-      bySeverity: { critical: 0, high: 0, medium: 0, low: 0, info: 0 },
-      verdict: 'comment',
-      findings: [],
-      summary: `Fehler: ${e.message}`
-    };
-    renderPRReviewPanel();
-    showToast(`PR-Laden fehlgeschlagen: ${e.message}`, 'error');
+    return { error: e.message };
   }
 }
 
@@ -1308,57 +1654,46 @@ function openPRFromEvent(data) {
     author: data.author
   });
 
-  // Update prReviewState with data from the event
-  prReviewState.active = true;
-  prReviewState.prNumber = data.prNumber;
-  prReviewState.repoOwner = data.repoOwner || '';
-  prReviewState.repoName = data.repoName || '';
-  prReviewState.title = data.title || `PR #${data.prNumber}`;
-  prReviewState.author = data.author || '';
-  prReviewState.authorName = data.authorName || data.author || '';
-  prReviewState.baseBranch = data.baseBranch || 'main';
-  prReviewState.headBranch = data.headBranch || 'feature';
-  prReviewState.additions = data.additions || 0;
-  prReviewState.deletions = data.deletions || 0;
-  prReviewState.filesChanged = data.filesChanged || 0;
-  prReviewState.comments = [];
-  prReviewState.summary = null;
-  prReviewState.userComments = {};
-  prReviewState.dismissedComments = new Set();
+  const owner = data.repoOwner || '';
+  const repo = data.repoName || '';
+  const number = data.prNumber;
 
-  // Neue Felder für Status und Loading
-  prReviewState.state = data.state || 'open';
-  prReviewState.loading = data.loading === true;
-  prReviewState.analysisData = null;
-  prReviewState.canApprove = data.state === 'open';
+  if (!owner || !repo || !number) {
+    log.error('[PR] Missing required PR data', { owner, repo, number });
+    return;
+  }
 
-  // Store diff if available (from github_pr_diff)
+  // Tab öffnen oder aktivieren
+  const { isNew, tab } = prTabsManager.openTab(owner, repo, number);
+
+  // Daten aus Event übernehmen
+  Object.assign(tab, {
+    title: data.title || `PR #${number}`,
+    author: data.author || '',
+    authorName: data.authorName || data.author || '',
+    baseBranch: data.baseBranch || 'main',
+    headBranch: data.headBranch || 'feature',
+    additions: data.additions || 0,
+    deletions: data.deletions || 0,
+    filesChanged: data.filesChanged || 0,
+    state: data.state || 'open',
+    canApprove: data.state === 'open'
+  });
+
+  // Loading-Status aus Event
+  if (data.loading === true) {
+    tab.loading = true;
+    tab.loadingDetails = false;  // Details kommen aus Event
+    tab.loadingAnalysis = true;
+  } else if (data.loading === false) {
+    tab.loading = false;
+    tab.loadingDetails = false;
+    tab.loadingAnalysis = false;
+  }
+
+  // Diff speichern falls vorhanden
   if (data.diff) {
-    prReviewState.diff = data.diff;
-  }
-
-  // Show PR tab
-  const prTab = document.getElementById('workspace-pr-tab');
-  const prLabel = document.getElementById('workspace-pr-label');
-  if (prTab) {
-    prTab.style.display = 'flex';
-    if (prLabel) prLabel.textContent = `PR #${data.prNumber}`;
-    log.debug('[PR] PR tab shown');
-  } else {
-    log.error('[PR] workspace-pr-tab element not found!');
-  }
-
-  // Badge mit Loading-Indikator
-  const badge = document.getElementById('workspace-pr-badge');
-  if (badge) {
-    if (prReviewState.loading) {
-      badge.textContent = '...';
-      badge.style.display = 'inline';
-      badge.classList.add('loading');
-    } else {
-      badge.style.display = 'none';
-      badge.classList.remove('loading');
-    }
+    tab.diff = data.diff;
   }
 
   // Workspace öffnen
@@ -1367,77 +1702,38 @@ function openPRFromEvent(data) {
     log.debug('[PR] Workspace toggled visible');
   }
 
-  // Wenn Loading und Owner/Repo bekannt: Starte unabhängige Analyse
-  // Das macht das Panel unabhängig vom Chat-Event-Flow
-  if (prReviewState.loading && prReviewState.repoOwner && prReviewState.repoName) {
-    log.info('[PR] Starting independent analysis fetch');
-    _fetchPRAnalysisIndependent(
-      prReviewState.repoOwner,
-      prReviewState.repoName,
-      prReviewState.prNumber
-    );
-  }
-
-  // Tab wechseln
+  // PR-Tab wechseln
   switchWorkspaceTab('pr');
-  log.debug('[PR] Switched to PR tab');
 
-  // Render panel content NACH Tab-Wechsel
-  renderPRReviewPanel();
-}
+  // Tabs und Panel rendern
+  prTabsManager.renderTabs();
+  prTabsManager.renderActivePanel();
 
-/**
- * Holt PR-Analyse unabhängig vom Chat-Event-Flow.
- * Wird aufgerufen wenn das Panel loading=true ist aber keine Analyse über Events kommt.
- */
-async function _fetchPRAnalysisIndependent(owner, repo, prNumber) {
-  try {
-    const res = await fetch(`/api/github/pr/${owner}/${repo}/${prNumber}/analyze`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({})
-    });
+  // Wenn Loading: Starte unabhängige Analyse
+  if (tab.loadingAnalysis && owner && repo) {
+    log.info('[PR] Starting independent analysis fetch');
+    _fetchPRAnalysis(owner, repo, number).then(analysis => {
+      if (!prTabsManager.hasTab(tab.id)) return;
 
-    if (res.ok) {
-      const analysis = await res.json();
-      log.info('[PR] Independent analysis completed', analysis);
-
-      // Nur aktualisieren wenn noch der gleiche PR
-      if (prReviewState.prNumber === prNumber) {
-        prReviewState.loading = false;
-        prReviewState.analysisData = analysis;
-        prReviewState.canApprove = analysis.canApprove !== false && prReviewState.state === 'open';
-        renderPRReviewPanel();
-
-        // Badge aktualisieren
-        const badge = document.getElementById('workspace-pr-badge');
-        if (badge) {
-          badge.classList.remove('loading');
-          const sev = analysis.bySeverity || {};
-          const total = (sev.critical || 0) + (sev.high || 0) + (sev.medium || 0) + (sev.low || 0);
-          badge.textContent = total;
-          badge.style.display = total > 0 ? 'inline' : 'none';
-        }
-      }
-    } else {
-      log.warn('[PR] Independent analysis failed', res.status);
-      if (prReviewState.prNumber === prNumber) {
-        prReviewState.loading = false;
-        prReviewState.analysisData = {
+      if (!analysis.error) {
+        tab.analysisData = analysis;
+        tab.canApprove = analysis.canApprove !== false && tab.state === 'open';
+      } else {
+        tab.analysisData = {
           bySeverity: { critical: 0, high: 0, medium: 0, low: 0, info: 0 },
           verdict: 'comment',
           findings: [],
           summary: 'Analyse nicht verfügbar'
         };
-        renderPRReviewPanel();
       }
-    }
-  } catch (e) {
-    log.error('[PR] Independent analysis error', e);
-    if (prReviewState.prNumber === prNumber) {
-      prReviewState.loading = false;
-      renderPRReviewPanel();
-    }
+      tab.loadingAnalysis = false;
+      tab.loading = false;
+
+      prTabsManager.renderTabs();
+      if (prTabsManager.activeTabId === tab.id) {
+        prTabsManager.renderActivePanel();
+      }
+    });
   }
 }
 
@@ -1445,96 +1741,89 @@ async function _fetchPRAnalysisIndependent(owner, repo, prNumber) {
 function handlePRAnalysis(data) {
   log.info('[PR] handlePRAnalysis called', {
     dataPrNumber: data.prNumber,
-    currentPrNumber: prReviewState.prNumber,
     bySeverity: data.bySeverity,
     verdict: data.verdict,
     findingsCount: data.findings?.length
   });
 
-  // Prüfe ob dies für den aktuellen PR ist
-  if (data.prNumber !== prReviewState.prNumber) {
-    log.warn('[PR] Analysis for different PR, ignoring', {
-      received: data.prNumber,
-      current: prReviewState.prNumber
-    });
+  // Finde passenden Tab
+  let targetTab = null;
+  for (const [tabId, tab] of prTabsManager.tabs) {
+    if (tab.number === data.prNumber) {
+      targetTab = tab;
+      break;
+    }
+  }
+
+  if (!targetTab) {
+    log.warn('[PR] Analysis for unknown PR, ignoring', { prNumber: data.prNumber });
     return;
   }
 
-  prReviewState.loading = false;
-  prReviewState.analysisData = data;
-  prReviewState.canApprove = data.canApprove !== false && prReviewState.state === 'open';
+  // Analyse-Daten aktualisieren
+  targetTab.loading = false;
+  targetTab.loadingAnalysis = false;
+  targetTab.analysisData = data;
+  targetTab.canApprove = data.canApprove !== false && targetTab.state === 'open';
 
-  // Update Badge mit Issue-Count
-  const badge = document.getElementById('workspace-pr-badge');
-  if (badge) {
-    badge.classList.remove('loading');
-    const total = (data.bySeverity?.critical || 0) + (data.bySeverity?.high || 0) +
-                  (data.bySeverity?.medium || 0) + (data.bySeverity?.low || 0);
-    badge.textContent = total;
-    badge.style.display = total > 0 ? 'inline' : 'none';
-    log.debug('[PR] Badge updated', { total });
+  // Tabs rendern (Badge-Update)
+  prTabsManager.renderTabs();
+
+  // Panel nur rendern wenn dieser Tab aktiv ist
+  if (prTabsManager.activeTabId === targetTab.id) {
+    prTabsManager.renderActivePanel();
   }
-
-  // Re-render panel mit Analyse-Daten
-  renderPRReviewPanel();
 }
 
 function openPRReviewTab(review) {
-  // Store review data
-  prReviewState.active = true;
-  prReviewState.reviewId = review.id;
-  prReviewState.prNumber = review.prNumber;
-  prReviewState.repoOwner = review.repoOwner;
-  prReviewState.repoName = review.repoName;
-  prReviewState.comments = review.comments || [];
-  prReviewState.summary = review.summary;
-  prReviewState.userComments = {};
-  prReviewState.dismissedComments = new Set();
+  // Öffne/aktiviere Tab
+  const { tab } = prTabsManager.openTab(review.repoOwner, review.repoName, review.prNumber);
+
+  // Review-Daten übernehmen
+  tab.reviewId = review.id;
+  tab.comments = review.comments || [];
+  tab.summary = review.summary;
+  tab.userComments = {};
+  tab.dismissedComments = new Set();
 
   // Initialize user comments with AI suggestions
-  for (const c of prReviewState.comments) {
-    prReviewState.userComments[c.id] = c.body;
+  for (const c of tab.comments) {
+    tab.userComments[c.id] = c.body;
   }
 
-  // Show PR tab
-  const prTab = document.getElementById('workspace-pr-tab');
-  const prLabel = document.getElementById('workspace-pr-label');
-  if (prTab) {
-    prTab.style.display = 'flex';
-    prLabel.textContent = `PR #${review.prNumber}`;
-  }
-
-  // Update badge with issue count
-  const badge = document.getElementById('workspace-pr-badge');
-  if (badge && review.summary) {
-    const total = review.summary.totalComments || 0;
-    badge.textContent = total;
-    badge.style.display = total > 0 ? 'inline' : 'none';
-  }
-
-  // Render panel content
-  renderPRReviewPanel();
-
-  // Switch to PR tab
+  // Workspace öffnen und PR-Tab wechseln
   if (!workspaceState.visible) {
     toggleWorkspace();
   }
   switchWorkspaceTab('pr');
+
+  // Tabs und Panel rendern
+  prTabsManager.renderTabs();
+  prTabsManager.renderActivePanel();
 }
 
+/**
+ * Legacy-Wrapper: Rendert Panel für aktiven Tab
+ */
 function renderPRReviewPanel() {
-  const state = prReviewState;
+  const tab = prTabsManager.getActiveTab();
+  if (tab) {
+    renderPRReviewPanelForTab(tab);
+  }
+}
+
+/**
+ * Rendert PR-Panel für einen spezifischen Tab
+ */
+function renderPRReviewPanelForTab(tab) {
+  if (!tab) return;
 
   // Debug-Logging
-  log.info('[PR] renderPRReviewPanel called', {
-    prNumber: state.prNumber,
-    title: state.title,
-    author: state.author,
-    loading: state.loading,
-    state: state.state,
-    hasAnalysis: !!state.analysisData,
-    baseBranch: state.baseBranch,
-    headBranch: state.headBranch
+  log.debug('[PR] renderPRReviewPanelForTab', {
+    prNumber: tab.number,
+    title: tab.title,
+    loading: tab.loading,
+    state: tab.state
   });
 
   // Prüfe ob PR-Content-Tab aktiv ist
@@ -1542,7 +1831,6 @@ function renderPRReviewPanel() {
   if (prContent) {
     // Stelle sicher dass der Content sichtbar ist
     if (!prContent.classList.contains('active')) {
-      log.warn('[PR] PR content not active, forcing activation');
       document.querySelectorAll('.workspace-tab-content').forEach(c => c.classList.remove('active'));
       prContent.classList.add('active');
     }
@@ -1559,43 +1847,33 @@ function renderPRReviewPanel() {
   const prAuthorEl = document.getElementById('pr-author');
 
   if (!prNumberEl || !prTitleEl) {
-    log.error('[PR] PR panel elements not found in DOM', {
-      prNumberEl: !!prNumberEl,
-      prTitleEl: !!prTitleEl
-    });
+    log.error('[PR] PR panel elements not found in DOM');
     return;
   }
 
   // Header-Daten setzen
-  log.debug('[PR] Setting header data', {
-    prNumber: state.prNumber,
-    title: state.title,
-    author: state.author,
-    branches: `${state.baseBranch} <- ${state.headBranch}`
-  });
-
-  prNumberEl.textContent = `#${state.prNumber}`;
-  prTitleEl.textContent = state.title || `${state.repoOwner}/${state.repoName}`;
-  if (prBranchesEl) prBranchesEl.textContent = `${state.baseBranch || 'main'} ← ${state.headBranch || 'feature'}`;
-  if (prStatsEl) prStatsEl.textContent = `+${state.additions || 0} -${state.deletions || 0} | ${state.filesChanged || 0} files`;
+  prNumberEl.textContent = `#${tab.number}`;
+  prTitleEl.textContent = tab.title || `${tab.owner}/${tab.repo}`;
+  if (prBranchesEl) prBranchesEl.textContent = `${tab.baseBranch || 'main'} ← ${tab.headBranch || 'feature'}`;
+  if (prStatsEl) prStatsEl.textContent = `+${tab.additions || 0} -${tab.deletions || 0} | ${tab.filesChanged || 0} files`;
   // Zeige Name und Login wenn unterschiedlich, sonst nur Login
   if (prAuthorEl) {
-    const name = state.authorName || state.author || 'unknown';
-    const login = state.author || 'unknown';
+    const name = tab.authorName || tab.author || 'unknown';
+    const login = tab.author || 'unknown';
     prAuthorEl.textContent = (name !== login) ? `${name} (@${login})` : `@${login}`;
   }
 
   // PR Status Badge anzeigen
-  if (state.state === 'merged') {
-    prNumberEl.innerHTML = `#${state.prNumber} <span class="pr-state-badge merged">MERGED</span>`;
-  } else if (state.state === 'closed') {
-    prNumberEl.innerHTML = `#${state.prNumber} <span class="pr-state-badge closed">CLOSED</span>`;
+  if (tab.state === 'merged') {
+    prNumberEl.innerHTML = `#${tab.number} <span class="pr-state-badge merged">MERGED</span>`;
+  } else if (tab.state === 'closed') {
+    prNumberEl.innerHTML = `#${tab.number} <span class="pr-state-badge closed">CLOSED</span>`;
   } else {
-    prNumberEl.innerHTML = `#${state.prNumber} <span class="pr-state-badge open">OPEN</span>`;
+    prNumberEl.innerHTML = `#${tab.number} <span class="pr-state-badge open">OPEN</span>`;
   }
 
   // Severity Badges - aus analysisData oder summary oder loading
-  const analysis = state.analysisData || state.summary;
+  const analysis = tab.analysisData || tab.summary;
   const verdictEl = document.getElementById('pr-verdict');
   const criticalEl = document.getElementById('pr-critical');
   const highEl = document.getElementById('pr-high');
@@ -1603,7 +1881,7 @@ function renderPRReviewPanel() {
   const lowEl = document.getElementById('pr-low');
   const infoEl = document.getElementById('pr-info');
 
-  if (state.loading) {
+  if (tab.loading) {
     // Loading-State für Badges
     if (criticalEl) criticalEl.innerHTML = '<span class="loading-dot"></span>';
     if (highEl) highEl.innerHTML = '<span class="loading-dot"></span>';
@@ -1628,9 +1906,9 @@ function renderPRReviewPanel() {
       verdictEl.className = `pr-verdict ${verdict}`;
 
       // Bei closed/merged kein Approve-Button sinnvoll
-      if (state.state === 'merged') {
+      if (tab.state === 'merged') {
         verdictEl.innerHTML = '<span class="verdict-icon">&#128994;</span><span class="verdict-text">MERGED</span>';
-      } else if (state.state === 'closed') {
+      } else if (tab.state === 'closed') {
         verdictEl.innerHTML = '<span class="verdict-icon">&#128308;</span><span class="verdict-text">CLOSED</span>';
       } else {
         verdictEl.innerHTML = verdict === 'approve'
@@ -1643,8 +1921,8 @@ function renderPRReviewPanel() {
   }
 
   // Findings aus Analyse anzeigen (statt alte comments)
-  const findings = state.analysisData?.findings || [];
-  const comments = state.comments || [];
+  const findings = tab.analysisData?.findings || [];
+  const comments = tab.comments || [];
   const allItems = findings.length > 0 ? findings : comments;
 
   // Group items by file
@@ -1661,7 +1939,7 @@ function renderPRReviewPanel() {
   const filesContainer = document.getElementById('pr-files');
 
   if (filesContainer) {
-    if (state.loading) {
+    if (tab.loading) {
       filesContainer.innerHTML = `
         <div class="pr-loading">
           <div class="pr-loading-spinner"></div>
@@ -1693,7 +1971,7 @@ function renderPRReviewPanel() {
   // Approve-Button nur bei open PRs anzeigen
   const approveBtn = document.getElementById('pr-approve-btn');
   if (approveBtn) {
-    approveBtn.style.display = state.canApprove && state.state === 'open' ? 'block' : 'none';
+    approveBtn.style.display = tab.canApprove && tab.state === 'open' ? 'block' : 'none';
   }
 }
 
@@ -1717,8 +1995,9 @@ function renderPRFinding(item) {
 }
 
 function renderPRComment(comment) {
-  const isDismissed = prReviewState.dismissedComments.has(comment.id);
-  const userText = prReviewState.userComments[comment.id] || comment.body;
+  const tab = prTabsManager.getActiveTab();
+  const isDismissed = tab?.dismissedComments?.has(comment.id) || false;
+  const userText = tab?.userComments?.[comment.id] || comment.body;
 
   return `
     <div class="pr-comment ${comment.severity} ${isDismissed ? 'dismissed' : ''}" data-comment-id="${comment.id}">
@@ -1754,20 +2033,29 @@ function togglePRFile(headerEl) {
 }
 
 function updatePRComment(commentId, text) {
-  prReviewState.userComments[commentId] = text;
+  const tab = prTabsManager.getActiveTab();
+  if (tab) {
+    tab.userComments[commentId] = text;
+  }
 }
 
 function dismissPRComment(commentId) {
-  if (prReviewState.dismissedComments.has(commentId)) {
-    prReviewState.dismissedComments.delete(commentId);
+  const tab = prTabsManager.getActiveTab();
+  if (!tab) return;
+
+  if (tab.dismissedComments.has(commentId)) {
+    tab.dismissedComments.delete(commentId);
   } else {
-    prReviewState.dismissedComments.add(commentId);
+    tab.dismissedComments.add(commentId);
   }
   renderPRReviewPanel();
 }
 
 function applyPRFix(commentId) {
-  const comment = prReviewState.comments.find(c => c.id === commentId);
+  const tab = prTabsManager.getActiveTab();
+  if (!tab) return;
+
+  const comment = tab.comments.find(c => c.id === commentId);
   if (comment && comment.suggestedFix) {
     // Add to code workspace tab
     addCodeChangeToWorkspace({
@@ -1782,15 +2070,19 @@ function applyPRFix(commentId) {
 }
 
 async function submitPRReview(verdict) {
-  const state = prReviewState;
+  const tab = prTabsManager.getActiveTab();
+  if (!tab) {
+    showToast('Kein PR aktiv', 'error');
+    return;
+  }
 
   // Collect non-dismissed comments with user edits
-  const comments = state.comments
-    .filter(c => !state.dismissedComments.has(c.id))
+  const comments = (tab.comments || [])
+    .filter(c => !tab.dismissedComments.has(c.id))
     .map(c => ({
       filePath: c.filePath,
       line: c.line,
-      body: state.userComments[c.id] || c.body,
+      body: tab.userComments[c.id] || c.body,
     }));
 
   const overallComment = document.getElementById('pr-overall-comment-input')?.value || '';
@@ -1800,7 +2092,7 @@ async function submitPRReview(verdict) {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        reviewId: state.reviewId,
+        reviewId: tab.reviewId,
         verdict,
         overallComment,
         comments,
@@ -1817,7 +2109,7 @@ async function submitPRReview(verdict) {
     closePRReview();
 
     // Add confirmation to chat
-    appendMessage('system', `PR #${state.prNumber} Review: **${verdict.toUpperCase().replace('_', ' ')}** (${comments.length} Kommentare)`);
+    appendMessage('system', `PR #${tab.number} Review: **${verdict.toUpperCase().replace('_', ' ')}** (${comments.length} Kommentare)`);
 
   } catch (e) {
     log.error('Submit PR review failed:', e);
@@ -1826,16 +2118,16 @@ async function submitPRReview(verdict) {
 }
 
 function closePRReview() {
-  prReviewState.active = false;
-
-  // Hide PR tab
-  const prTab = document.getElementById('workspace-pr-tab');
-  if (prTab) {
-    prTab.style.display = 'none';
+  // Schließe aktiven Tab
+  const activeTab = prTabsManager.getActiveTab();
+  if (activeTab) {
+    prTabsManager.closeTab(activeTab.id);
   }
 
-  // Switch to another tab
-  switchWorkspaceTab('code');
+  // Wenn keine Tabs mehr offen, zu Code-Tab wechseln
+  if (prTabsManager.tabs.size === 0) {
+    switchWorkspaceTab('code');
+  }
 }
 
 // ══════════════════════════════════════════════════════════════════════════════

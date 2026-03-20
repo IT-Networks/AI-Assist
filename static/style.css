@@ -5974,6 +5974,122 @@ a:visited {
 .workspace-tab[data-tab="research"] .tab-badge { background: var(--tab-research); }
 .workspace-tab[data-tab="files"] .tab-badge { background: var(--tab-files); }
 
+/* PR-Tabs Container (dynamisch) */
+.workspace-pr-tabs {
+  display: flex;
+  flex-shrink: 0;
+  overflow-x: auto;
+  max-width: 450px;
+  scrollbar-width: thin;
+}
+
+.workspace-pr-tabs:empty {
+  display: none;
+}
+
+/* PR-Tab mit Close-Button */
+.workspace-tab.pr-tab {
+  position: relative;
+  padding-right: 26px;
+  min-width: 85px;
+  max-width: 160px;
+  border-bottom-color: var(--accent);
+}
+
+.workspace-tab.pr-tab.active {
+  border-bottom-color: var(--primary);
+}
+
+.workspace-tab.pr-tab .tab-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Close-Button (X) */
+.workspace-tab .tab-close {
+  position: absolute;
+  right: 4px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 18px;
+  height: 18px;
+  border: none;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: 14px;
+  line-height: 1;
+  padding: 0;
+  border-radius: 3px;
+  opacity: 0;
+  transition: opacity 0.15s, background 0.15s, color 0.15s;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.workspace-tab.pr-tab:hover .tab-close {
+  opacity: 0.7;
+}
+
+.workspace-tab .tab-close:hover {
+  background: rgba(255, 100, 100, 0.2);
+  color: var(--danger, #dc2626);
+  opacity: 1;
+}
+
+/* Severity-basierte Badge-Farben */
+.workspace-tab .tab-badge[data-severity="critical"] {
+  background: var(--severity-critical, #dc2626);
+}
+.workspace-tab .tab-badge[data-severity="high"] {
+  background: var(--severity-high, #f97316);
+}
+.workspace-tab .tab-badge[data-severity="medium"] {
+  background: var(--severity-medium, #eab308);
+}
+.workspace-tab .tab-badge[data-severity="ok"] {
+  background: var(--success, #22c55e);
+}
+
+/* Loading-Animation im Tab */
+.workspace-tab.pr-tab.loading .tab-icon {
+  animation: pr-tab-spin 1s linear infinite;
+}
+
+@keyframes pr-tab-spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+/* PR Empty State (wenn keine Tabs offen) */
+.pr-empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  color: var(--text-muted);
+  text-align: center;
+  padding: 40px;
+}
+
+.pr-empty-state .empty-icon {
+  font-size: 3rem;
+  margin-bottom: 12px;
+  opacity: 0.5;
+}
+
+.pr-empty-state p {
+  margin: 0 0 8px;
+  font-size: 1rem;
+}
+
+.pr-empty-state small {
+  opacity: 0.7;
+}
+
 /* Content Area */
 .workspace-content {
   flex: 1;
