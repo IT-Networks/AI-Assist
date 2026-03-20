@@ -23,6 +23,7 @@ from app.services.knowledge_graph import (
     EdgeType,
     GraphInfo
 )
+from app.services.graph_query_service import get_graph_query_service
 from app.services.graph_builder import (
     get_graph_builder,
     IndexResult
@@ -500,4 +501,125 @@ async def get_edges(
             metadata=e.metadata
         )
         for e in edges
+    ]
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Query Service Endpoints (Impact, Context, Path)
+# ══════════════════════════════════════════════════════════════════════════════
+
+@router.get("/impact/{node_id:path}")
+async def get_impact_analysis(
+    node_id: str,
+    depth: int = Query(2, ge=1, le=5, description="Analysetiefe")
+):
+    """
+    Impact-Analyse: Was ist betroffen wenn dieses Element geändert wird?
+
+    Gibt zurück:
+    - Direkte Abhängigkeiten
+    - Transitive Abhängigkeiten
+    - Betroffene Dateien
+    - Risiko-Score
+    """
+    service = get_graph_query_service()
+    result = await service.analyze_impact(node_id, max_depth=depth)
+    return result.to_dict()
+
+
+@router.get("/context/{node_id:path}")
+async def get_element_context(node_id: str):
+    """
+    Reichhaltiger Kontext für ein Code-Element.
+
+    Gibt zurück:
+    - Vererbung (extends, implements)
+    - Abhängigkeiten (uses, calls)
+    - Verwender (used_by, called_by)
+    - Datei-Position
+    """
+    service = get_graph_query_service()
+    result = await service.get_context(node_id)
+
+    if not result:
+        raise HTTPException(status_code=404, detail=f"Element not found: {node_id}")
+
+    return result.to_dict()
+
+
+@router.get("/context/file")
+async def get_file_context(path: str = Query(..., description="Dateipfad")):
+    """
+    Kontext für alle Elemente in einer Datei.
+    """
+    service = get_graph_query_service()
+    results = await service.get_context_for_file(path)
+    return [r.to_dict() for r in results]
+
+
+@router.get("/connection")
+async def find_connection(
+    from_id: str = Query(..., alias="from", description="Start-Element"),
+    to_id: str = Query(..., alias="to", description="Ziel-Element"),
+    max_hops: int = Query(5, ge=1, le=10, description="Maximale Pfadlänge")
+):
+    """
+    Findet die Verbindung zwischen zwei Code-Elementen.
+    """
+    service = get_graph_query_service()
+    result = await service.find_connection(from_id, to_id, max_hops)
+    return result.to_dict()
+
+
+@router.post("/smart-search")
+async def smart_search(
+    query: str = Query(..., description="Suchanfrage"),
+    type_filter: Optional[str] = Query(None, description="Typ-Filter (class, method, etc.)"),
+    limit: int = Query(20, ge=1, le=100, description="Max. Ergebnisse")
+):
+    """
+    Intelligente Suche mit natürlicher Sprache.
+
+    Unterstützt Patterns wie:
+    - "verwendet UserService" → findet alle Verwender
+    - "implementiert PaymentGateway" → findet Implementierungen
+    """
+    service = get_graph_query_service()
+    filters = {"type": type_filter} if type_filter else None
+    results = await service.smart_search(query, filters, limit)
+
+    return [
+        NodeResponse(
+            id=n.id,
+            type=n.type.value,
+            name=n.name,
+            file_path=n.file_path,
+            line_number=n.line_number,
+            metadata=n.metadata
+        )
+        for n in results
+    ]
+
+
+@router.get("/dependents/{node_id:path}")
+async def get_dependents_extended(
+    node_id: str,
+    include_tests: bool = Query(True, description="Auch Test-Klassen")
+):
+    """
+    Zeigt alle Elemente die das angegebene Element verwenden.
+    """
+    service = get_graph_query_service()
+    nodes = await service.get_dependents(node_id, include_tests=include_tests)
+
+    return [
+        NodeResponse(
+            id=n.id,
+            type=n.type.value,
+            name=n.name,
+            file_path=n.file_path,
+            line_number=n.line_number,
+            metadata=n.metadata
+        )
+        for n in nodes
     ]

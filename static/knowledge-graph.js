@@ -516,19 +516,36 @@ class KnowledgeGraphViewer {
   }
 
   async loadSubgraph(centerId, depth = 2) {
+    console.log('[KnowledgeGraph] loadSubgraph called:', centerId, 'depth:', depth);
+
     this.currentCenter = centerId;
     this.currentDepth = depth;
 
     try {
-      const response = await fetch(`/api/graph/subgraph?center=${encodeURIComponent(centerId)}&depth=${depth}`);
-      if (!response.ok) throw new Error('Failed to load subgraph');
+      const url = `/api/graph/subgraph?center=${encodeURIComponent(centerId)}&depth=${depth}`;
+      console.log('[KnowledgeGraph] Fetching:', url);
+
+      const response = await fetch(url);
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.error('[KnowledgeGraph] API error:', response.status, errorText);
+        throw new Error(`Failed to load subgraph: ${response.status}`);
+      }
 
       const data = await response.json();
-      this.nodes = data.nodes;
-      this.edges = data.edges;
+      console.log('[KnowledgeGraph] Loaded:', data.nodes?.length, 'nodes,', data.edges?.length, 'edges');
+
+      this.nodes = data.nodes || [];
+      this.edges = data.edges || [];
+
+      if (this.nodes.length === 0) {
+        this._showMessage(`Keine Daten für "${centerId}" gefunden`);
+        return;
+      }
 
       this._updateInfo();
       this.render();
+      this._showMessage(`Center: ${centerId.split('.').pop()}`);
     } catch (e) {
       console.error('[KnowledgeGraph] Load error:', e);
       this._showMessage('Laden fehlgeschlagen');
@@ -782,16 +799,19 @@ class KnowledgeGraphViewer {
       this.container.appendChild(details);
     }
 
+    // Escape node.id für sichere HTML-Darstellung
+    const escapedId = node.id.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+
     details.innerHTML = `
       <div class="kg-details-header">
         <span class="kg-details-type kg-type-${node.type}">${node.type}</span>
         <span class="kg-details-name">${node.name}</span>
-        <button class="kg-details-close" onclick="this.parentElement.parentElement.remove()">x</button>
+        <button class="kg-details-close" data-action="close">×</button>
       </div>
       <div class="kg-details-body">
         <div class="kg-details-row">
           <span class="kg-details-label">ID:</span>
-          <span class="kg-details-value">${node.id}</span>
+          <span class="kg-details-value">${escapedId}</span>
         </div>
         ${node.file_path ? `
         <div class="kg-details-row">
@@ -807,14 +827,24 @@ class KnowledgeGraphViewer {
         ` : ''}
       </div>
       <div class="kg-details-actions">
-        <button onclick="window.knowledgeGraph?.loadSubgraph('${node.id}', ${this.currentDepth})">
-          Als Center laden
-        </button>
+        <button data-action="load-center">Als Center laden</button>
       </div>
     `;
+
+    // Event Listeners (sicherer als inline onclick)
+    details.querySelector('[data-action="close"]')?.addEventListener('click', () => {
+      details.remove();
+    });
+
+    details.querySelector('[data-action="load-center"]')?.addEventListener('click', () => {
+      console.log('[KnowledgeGraph] Loading as center:', node.id);
+      this.loadSubgraph(node.id, this.currentDepth);
+      details.remove();  // Panel schließen nach Laden
+    });
   }
 
   async _expandNode(node) {
+    console.log('[KnowledgeGraph] Doppelklick - Expanding node:', node.id, node.name);
     await this.loadSubgraph(node.id, this.currentDepth);
   }
 

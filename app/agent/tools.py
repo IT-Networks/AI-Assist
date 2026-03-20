@@ -2410,6 +2410,10 @@ def create_default_registry() -> ToolRegistry:
     from app.agent.git_tools import register_git_tools
     register_git_tools(registry)
 
+    # Graph Tools (lokale Code-Analyse über Knowledge Graph)
+    from app.agent.graph_tools import register_graph_tools
+    register_graph_tools(registry)
+
     # API Tools (SOAP/REST)
     from app.agent.api_tools import register_api_tools
     register_api_tools(registry)

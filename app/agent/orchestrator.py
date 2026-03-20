@@ -3729,7 +3729,7 @@ ALLE AUSGABEN AUF DEUTSCH!"""
                 "model": model,
                 "messages": [{"role": "user", "content": prompt}],
                 "temperature": 0.2,
-                "max_tokens": 1500,
+                "max_tokens": 2500,  # Erhöht für codeSnippet
                 "stream": False
             }
 
@@ -3746,12 +3746,16 @@ ALLE AUSGABEN AUF DEUTSCH!"""
                 data = response.json()
 
                 content = data.get("choices", [{}])[0].get("message", {}).get("content", "")
+                logger.debug(f"[agent] PR analysis raw response: {content[:500]}...")
 
                 # JSON aus Response extrahieren
                 import re
                 json_match = re.search(r'\{[\s\S]*\}', content)
                 if json_match:
-                    result = json.loads(json_match.group())
+                    json_str = json_match.group()
+                    logger.debug(f"[agent] PR analysis extracted JSON: {json_str[:300]}...")
+                    result = json.loads(json_str)
+                    logger.info(f"[agent] PR analysis parsed: findings={len(result.get('findings', []))}, verdict={result.get('verdict')}")
 
                     # Validierung und Defaults
                     by_severity = result.get("bySeverity", {})
@@ -3774,10 +3778,14 @@ ALLE AUSGABEN AUF DEUTSCH!"""
                         "canApprove": state == "open"
                     }
 
+                else:
+                    logger.warning(f"[agent] PR analysis: No JSON found in response: {content[:200]}")
+
         except Exception as e:
             logger.warning(f"[agent] PR workspace analysis failed: {e}")
 
         # Fallback bei Fehler
+        logger.info("[agent] PR analysis using fallback (no findings)")
         return {
             "bySeverity": {"critical": 0, "high": 0, "medium": 0, "low": 0, "info": 0},
             "verdict": "comment",
