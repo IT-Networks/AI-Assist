@@ -468,15 +468,236 @@ class KnowledgeGraphStore:
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# Singleton-Accessor
+# Graph Registry & Multi-Graph Support
 # ══════════════════════════════════════════════════════════════════════════════
 
-_store: Optional[KnowledgeGraphStore] = None
+GRAPHS_DIR = Path("data/graphs")
+REGISTRY_FILE = GRAPHS_DIR / "index.json"
 
 
-def get_knowledge_graph_store(db_path: str = "data/knowledge_graph.db") -> KnowledgeGraphStore:
-    """Gibt die singleton KnowledgeGraphStore-Instanz zurück."""
-    global _store
-    if _store is None:
-        _store = KnowledgeGraphStore(db_path)
-    return _store
+@dataclass
+class GraphInfo:
+    """Information über einen Graph."""
+    id: str                         # Unique ID (slug)
+    name: str                       # Display name
+    path: str                       # Relativer Pfad zum Indexieren
+    db_path: str                    # Pfad zur SQLite DB
+    created_at: str                 # ISO timestamp
+    node_count: int = 0
+    edge_count: int = 0
+
+    def to_dict(self) -> Dict[str, Any]:
+        return asdict(self)
+
+
+class GraphRegistry:
+    """Verwaltet mehrere Knowledge Graphs."""
+
+    def __init__(self):
+        GRAPHS_DIR.mkdir(parents=True, exist_ok=True)
+        self._load_registry()
+
+    def _load_registry(self):
+        """Lädt den Registry-Index."""
+        if REGISTRY_FILE.exists():
+            try:
+                with open(REGISTRY_FILE, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                    self.graphs: Dict[str, GraphInfo] = {
+                        k: GraphInfo(**v) for k, v in data.get("graphs", {}).items()
+                    }
+                    self.active_id: Optional[str] = data.get("active")
+            except Exception as e:
+                logger.error(f"[GraphRegistry] Failed to load registry: {e}")
+                self.graphs = {}
+                self.active_id = None
+        else:
+            self.graphs = {}
+            self.active_id = None
+            # Migriere bestehenden Graph falls vorhanden
+            self._migrate_legacy_graph()
+
+    def _migrate_legacy_graph(self):
+        """Migriert den alten knowledge_graph.db falls vorhanden."""
+        legacy_db = Path("data/knowledge_graph.db")
+        if legacy_db.exists():
+            logger.info("[GraphRegistry] Migrating legacy graph...")
+            # Erstelle Default-Eintrag
+            graph_id = "default"
+            new_db_path = str(GRAPHS_DIR / f"{graph_id}.db")
+
+            # Verschiebe DB
+            import shutil
+            shutil.move(str(legacy_db), new_db_path)
+
+            self.graphs[graph_id] = GraphInfo(
+                id=graph_id,
+                name="Default Graph",
+                path="",
+                db_path=new_db_path,
+                created_at=datetime.now().isoformat()
+            )
+            self.active_id = graph_id
+            self._save_registry()
+
+    def _save_registry(self):
+        """Speichert den Registry-Index."""
+        data = {
+            "graphs": {k: v.to_dict() for k, v in self.graphs.items()},
+            "active": self.active_id
+        }
+        with open(REGISTRY_FILE, "w", encoding="utf-8") as f:
+            json.dump(data, f, indent=2)
+
+    def _generate_id(self, name: str) -> str:
+        """Generiert eine sichere ID aus dem Namen."""
+        import re
+        # Slug aus Name erstellen
+        slug = re.sub(r'[^a-zA-Z0-9]+', '-', name.lower()).strip('-')
+        if not slug:
+            slug = "graph"
+        # Bei Duplikat Suffix anhängen
+        base = slug
+        counter = 1
+        while slug in self.graphs:
+            slug = f"{base}-{counter}"
+            counter += 1
+        return slug
+
+    def list_graphs(self) -> List[GraphInfo]:
+        """Listet alle verfügbaren Graphs."""
+        return list(self.graphs.values())
+
+    def get_active_id(self) -> Optional[str]:
+        """Gibt die ID des aktiven Graphs zurück."""
+        return self.active_id
+
+    def get_active(self) -> Optional[GraphInfo]:
+        """Gibt den aktiven Graph zurück."""
+        if self.active_id and self.active_id in self.graphs:
+            return self.graphs[self.active_id]
+        return None
+
+    def set_active(self, graph_id: str) -> bool:
+        """Setzt den aktiven Graph."""
+        if graph_id not in self.graphs:
+            return False
+        self.active_id = graph_id
+        self._save_registry()
+        return True
+
+    def create_graph(self, name: str, path: str = "") -> GraphInfo:
+        """Erstellt einen neuen Graph."""
+        graph_id = self._generate_id(name)
+        db_path = str(GRAPHS_DIR / f"{graph_id}.db")
+
+        graph = GraphInfo(
+            id=graph_id,
+            name=name,
+            path=path,
+            db_path=db_path,
+            created_at=datetime.now().isoformat()
+        )
+
+        self.graphs[graph_id] = graph
+
+        # Wenn erster Graph, automatisch aktivieren
+        if self.active_id is None:
+            self.active_id = graph_id
+
+        self._save_registry()
+        return graph
+
+    def delete_graph(self, graph_id: str) -> bool:
+        """Löscht einen Graph."""
+        if graph_id not in self.graphs:
+            return False
+
+        graph = self.graphs[graph_id]
+
+        # DB-Datei löschen
+        db_file = Path(graph.db_path)
+        if db_file.exists():
+            db_file.unlink()
+
+        del self.graphs[graph_id]
+
+        # Falls aktiver Graph gelöscht wurde, anderen aktivieren
+        if self.active_id == graph_id:
+            self.active_id = next(iter(self.graphs.keys()), None)
+
+        self._save_registry()
+        return True
+
+    def update_stats(self, graph_id: str, node_count: int, edge_count: int):
+        """Aktualisiert die Statistiken eines Graphs."""
+        if graph_id in self.graphs:
+            self.graphs[graph_id].node_count = node_count
+            self.graphs[graph_id].edge_count = edge_count
+            self._save_registry()
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Singleton-Accessors
+# ══════════════════════════════════════════════════════════════════════════════
+
+_registry: Optional[GraphRegistry] = None
+_stores: Dict[str, KnowledgeGraphStore] = {}
+
+
+def get_graph_registry() -> GraphRegistry:
+    """Gibt die singleton GraphRegistry-Instanz zurück."""
+    global _registry
+    if _registry is None:
+        _registry = GraphRegistry()
+    return _registry
+
+
+def get_knowledge_graph_store(db_path: str = None) -> KnowledgeGraphStore:
+    """
+    Gibt die KnowledgeGraphStore-Instanz für den aktiven Graph zurück.
+
+    Args:
+        db_path: Optional direkter Pfad (überschreibt aktiven Graph)
+    """
+    global _stores
+
+    registry = get_graph_registry()
+
+    # Wenn kein db_path, aktiven Graph verwenden
+    if db_path is None:
+        active = registry.get_active()
+        if active:
+            db_path = active.db_path
+        else:
+            # Fallback: Default-Graph erstellen
+            graph = registry.create_graph("Default", "")
+            db_path = graph.db_path
+
+    # Store aus Cache oder neu erstellen
+    if db_path not in _stores:
+        _stores[db_path] = KnowledgeGraphStore(db_path)
+
+    return _stores[db_path]
+
+
+def switch_graph(graph_id: str) -> Optional[KnowledgeGraphStore]:
+    """
+    Wechselt zum angegebenen Graph.
+
+    Args:
+        graph_id: ID des Graphs
+
+    Returns:
+        KnowledgeGraphStore oder None wenn nicht gefunden
+    """
+    registry = get_graph_registry()
+
+    if not registry.set_active(graph_id):
+        return None
+
+    graph = registry.get_active()
+    if graph:
+        return get_knowledge_graph_store(graph.db_path)
+
+    return None

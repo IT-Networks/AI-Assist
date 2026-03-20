@@ -13,12 +13,15 @@ from pydantic import BaseModel
 
 from app.services.knowledge_graph import (
     get_knowledge_graph_store,
+    get_graph_registry,
+    switch_graph,
     KnowledgeGraphStore,
     GraphNode,
     GraphEdge,
     SubGraph,
     NodeType,
-    EdgeType
+    EdgeType,
+    GraphInfo
 )
 from app.services.graph_builder import (
     get_graph_builder,
@@ -77,6 +80,116 @@ class StatsResponse(BaseModel):
     nodes_by_type: Dict[str, int]
     edges_by_type: Dict[str, int]
     top_connected_nodes: List[Dict[str, Any]]
+
+
+class GraphInfoResponse(BaseModel):
+    id: str
+    name: str
+    path: str
+    db_path: str
+    created_at: str
+    node_count: int = 0
+    edge_count: int = 0
+
+
+class CreateGraphRequest(BaseModel):
+    name: str
+    path: str = ""
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Multi-Graph Management Endpoints
+# ══════════════════════════════════════════════════════════════════════════════
+
+@router.get("/graphs", response_model=List[GraphInfoResponse])
+async def list_graphs():
+    """
+    Listet alle verfügbaren Knowledge Graphs.
+    """
+    registry = get_graph_registry()
+    return [
+        GraphInfoResponse(
+            id=g.id,
+            name=g.name,
+            path=g.path,
+            db_path=g.db_path,
+            created_at=g.created_at,
+            node_count=g.node_count,
+            edge_count=g.edge_count
+        )
+        for g in registry.list_graphs()
+    ]
+
+
+@router.get("/graphs/active")
+async def get_active_graph():
+    """
+    Gibt den aktuell aktiven Graph zurück.
+    """
+    registry = get_graph_registry()
+    active = registry.get_active()
+
+    if not active:
+        return {"active": None}
+
+    return {
+        "active": GraphInfoResponse(
+            id=active.id,
+            name=active.name,
+            path=active.path,
+            db_path=active.db_path,
+            created_at=active.created_at,
+            node_count=active.node_count,
+            edge_count=active.edge_count
+        )
+    }
+
+
+@router.post("/graphs", response_model=GraphInfoResponse)
+async def create_graph(request: CreateGraphRequest):
+    """
+    Erstellt einen neuen Knowledge Graph.
+    """
+    registry = get_graph_registry()
+    graph = registry.create_graph(request.name, request.path)
+
+    return GraphInfoResponse(
+        id=graph.id,
+        name=graph.name,
+        path=graph.path,
+        db_path=graph.db_path,
+        created_at=graph.created_at,
+        node_count=graph.node_count,
+        edge_count=graph.edge_count
+    )
+
+
+@router.post("/graphs/{graph_id}/activate")
+async def activate_graph(graph_id: str):
+    """
+    Aktiviert einen Graph als aktuellen Arbeitsgraph.
+    """
+    store = switch_graph(graph_id)
+
+    if not store:
+        raise HTTPException(status_code=404, detail=f"Graph not found: {graph_id}")
+
+    return {"status": "activated", "graph_id": graph_id}
+
+
+@router.delete("/graphs/{graph_id}")
+async def delete_graph(graph_id: str):
+    """
+    Löscht einen Knowledge Graph.
+
+    WARNUNG: Diese Operation ist nicht rückgängig zu machen!
+    """
+    registry = get_graph_registry()
+
+    if not registry.delete_graph(graph_id):
+        raise HTTPException(status_code=404, detail=f"Graph not found: {graph_id}")
+
+    return {"status": "deleted", "graph_id": graph_id}
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -282,7 +395,8 @@ async def reindex(
     background_tasks: BackgroundTasks,
     path: str = Query(..., description="Verzeichnis zum Indexieren"),
     language: str = Query("java", description="Sprache (java, python)"),
-    clear: bool = Query(False, description="Vorhandenen Graph löschen")
+    clear: bool = Query(False, description="Vorhandenen Graph löschen"),
+    graph_id: Optional[str] = Query(None, description="Graph ID (optional, verwendet aktiven)")
 ):
     """
     Re-indexiert den Knowledge Graph.
@@ -297,18 +411,28 @@ async def reindex(
     if not directory.is_dir():
         raise HTTPException(status_code=400, detail=f"Not a directory: {path}")
 
-    store = get_knowledge_graph_store()
+    # Wenn graph_id angegeben, zu diesem Graph wechseln
+    if graph_id:
+        store = switch_graph(graph_id)
+        if not store:
+            raise HTTPException(status_code=404, detail=f"Graph not found: {graph_id}")
+    else:
+        store = get_knowledge_graph_store()
 
     if clear:
         store.clear()
 
     builder = get_graph_builder(language, store)
 
-    # Indexierung im Hintergrund für große Projekte
-    if language.lower() == "python":
-        result = await builder.index_directory(directory)
-    else:
-        result = await builder.index_directory(directory)
+    # Indexierung
+    result = await builder.index_directory(directory)
+
+    # Stats im Registry aktualisieren
+    registry = get_graph_registry()
+    active = registry.get_active()
+    if active:
+        stats = store.get_stats()
+        registry.update_stats(active.id, stats["total_nodes"], stats["total_edges"])
 
     return IndexResponse(
         status="completed",

@@ -1646,12 +1646,14 @@ async function _fetchPRAnalysis(owner, repo, number) {
 
 // Handle workspace_pr event from backend (when github_pr_details/github_pr_diff is called)
 function openPRFromEvent(data) {
-  log.info('[PR] openPRFromEvent called', {
+  console.log('[PR] openPRFromEvent called', {
     prNumber: data.prNumber,
     title: data.title,
     loading: data.loading,
     state: data.state,
-    author: data.author
+    author: data.author,
+    repoOwner: data.repoOwner,
+    repoName: data.repoName
   });
 
   const owner = data.repoOwner || '';
@@ -1659,7 +1661,7 @@ function openPRFromEvent(data) {
   const number = data.prNumber;
 
   if (!owner || !repo || !number) {
-    log.error('[PR] Missing required PR data', { owner, repo, number });
+    console.error('[PR] Missing required PR data', { owner, repo, number });
     return;
   }
 
@@ -1742,11 +1744,12 @@ function openPRFromEvent(data) {
 
 // Handle workspace_pr_analysis event - PR-Analyse-Ergebnisse
 function handlePRAnalysis(data) {
-  log.info('[PR] handlePRAnalysis called', {
+  console.log('[PR] handlePRAnalysis called', {
     dataPrNumber: data.prNumber,
     bySeverity: data.bySeverity,
     verdict: data.verdict,
-    findingsCount: data.findings?.length
+    findingsCount: data.findings?.length,
+    findings: data.findings
   });
 
   // Finde passenden Tab
@@ -1908,14 +1911,19 @@ function _ensurePRPanelStructure() {
 }
 
 function renderPRReviewPanelForTab(tab) {
-  if (!tab) return;
+  if (!tab) {
+    console.warn('[PR] renderPRReviewPanelForTab: no tab provided');
+    return;
+  }
 
-  // Debug-Logging
-  log.debug('[PR] renderPRReviewPanelForTab', {
+  // Debug-Logging (immer aktiv für Debugging)
+  console.log('[PR] renderPRReviewPanelForTab', {
     prNumber: tab.number,
     title: tab.title,
     loading: tab.loading,
-    state: tab.state
+    state: tab.state,
+    hasAnalysisData: !!tab.analysisData,
+    findingsCount: tab.analysisData?.findings?.length || 0
   });
 
   // Prüfe ob PR-Content-Tab aktiv ist
@@ -5227,12 +5235,12 @@ async function processAgentEvent(event, bubble, msgDiv, chat) {
       break;
 
     case 'workspace_pr':
-      log.info('[SSE] workspace_pr event received', data);
+      console.log('[SSE] workspace_pr event received', data);
       openPRFromEvent(data);
       break;
 
     case 'workspace_pr_analysis':
-      log.info('[SSE] workspace_pr_analysis event received', data);
+      console.log('[SSE] workspace_pr_analysis event received', data);
       handlePRAnalysis(data);
       break;
 

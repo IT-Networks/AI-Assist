@@ -9570,6 +9570,52 @@ a:visited {
   flex-wrap: wrap;
 }
 
+/* Graph Selector */
+.kg-graph-selector {
+  display: flex;
+  gap: 4px;
+  align-items: center;
+}
+
+.kg-graph-selector select {
+  min-width: 160px;
+  max-width: 220px;
+  padding: 6px 8px;
+  background: var(--input-bg, var(--surface));
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text);
+  font-size: 13px;
+}
+
+.kg-graph-selector button {
+  padding: 6px 8px;
+  background: var(--surface-hover, var(--surface));
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.15s, border-color 0.15s;
+}
+
+.kg-graph-selector button:hover:not(:disabled) {
+  background: var(--primary);
+  border-color: var(--primary);
+}
+
+.kg-graph-selector button:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.kg-graph-selector .kg-btn-danger:hover:not(:disabled) {
+  background: var(--danger, #ef4444);
+  border-color: var(--danger, #ef4444);
+}
+
 .kg-search {
   display: flex;
   gap: 4px;

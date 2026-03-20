@@ -57,6 +57,21 @@ class KnowledgeGraphViewer {
     const controls = document.createElement('div');
     controls.className = 'kg-controls';
     controls.innerHTML = `
+      <div class="kg-graph-selector">
+        <select id="kg-graph-select" title="Graph auswählen">
+          <option value="">-- Graph wählen --</option>
+        </select>
+        <button id="kg-new-graph" title="Neuen Graph erstellen">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M12 5v14M5 12h14"/>
+          </svg>
+        </button>
+        <button id="kg-delete-graph" title="Graph löschen" class="kg-btn-danger">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M3 6h18M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6M8 6V4a2 2 0 012-2h4a2 2 0 012 2v2"/>
+          </svg>
+        </button>
+      </div>
       <div class="kg-search">
         <input type="text" id="kg-search-input" placeholder="Suche Klasse/Interface..." autocomplete="off" />
         <button id="kg-search-btn" title="Suchen">
@@ -93,6 +108,9 @@ class KnowledgeGraphViewer {
     `;
     this.container.insertBefore(controls, this.container.firstChild);
 
+    // Graph list laden
+    this._loadGraphList();
+
     // Search debounce
     this._searchTimeout = null;
     this._selectedResultIndex = -1;
@@ -123,6 +141,165 @@ class KnowledgeGraphViewer {
         this.render();  // Re-render mit neuem Filter
       }
     });
+
+    // Graph selector events
+    document.getElementById('kg-graph-select')?.addEventListener('change', (e) => {
+      const graphId = e.target.value;
+      if (graphId) {
+        this._switchGraph(graphId);
+      }
+    });
+
+    document.getElementById('kg-new-graph')?.addEventListener('click', () => {
+      this._showNewGraphDialog();
+    });
+
+    document.getElementById('kg-delete-graph')?.addEventListener('click', () => {
+      this._deleteCurrentGraph();
+    });
+  }
+
+  async _loadGraphList() {
+    try {
+      const [graphsRes, activeRes] = await Promise.all([
+        fetch('/api/graph/graphs'),
+        fetch('/api/graph/graphs/active')
+      ]);
+
+      if (!graphsRes.ok || !activeRes.ok) return;
+
+      const graphs = await graphsRes.json();
+      const activeData = await activeRes.json();
+      this.activeGraphId = activeData.active?.id || null;
+
+      const select = document.getElementById('kg-graph-select');
+      if (!select) return;
+
+      select.innerHTML = graphs.length === 0
+        ? '<option value="">-- Kein Graph --</option>'
+        : graphs.map(g => `
+            <option value="${g.id}" ${g.id === this.activeGraphId ? 'selected' : ''}>
+              ${g.name} (${g.node_count} Nodes)
+            </option>
+          `).join('');
+
+      // Delete-Button nur aktiv wenn Graphs vorhanden
+      const deleteBtn = document.getElementById('kg-delete-graph');
+      if (deleteBtn) {
+        deleteBtn.disabled = graphs.length === 0;
+      }
+
+    } catch (e) {
+      console.error('[KnowledgeGraph] Failed to load graph list:', e);
+    }
+  }
+
+  async _switchGraph(graphId) {
+    try {
+      const response = await fetch(`/api/graph/graphs/${graphId}/activate`, {
+        method: 'POST'
+      });
+
+      if (!response.ok) throw new Error('Switch failed');
+
+      this.activeGraphId = graphId;
+      this._showMessage('Graph gewechselt');
+
+      // Reset view
+      this.nodes = [];
+      this.edges = [];
+      this.currentCenter = null;
+
+      // Graph-Container leeren
+      const graphContainer = this.container?.querySelector('.kg-graph');
+      if (graphContainer) graphContainer.remove();
+
+      // Stats neu laden
+      const stats = await this.loadStats();
+      if (stats) {
+        this._updateInfoFiltered(stats.total_nodes, stats.total_edges);
+      }
+
+    } catch (e) {
+      console.error('[KnowledgeGraph] Switch failed:', e);
+      this._showMessage('Wechsel fehlgeschlagen');
+    }
+  }
+
+  _showNewGraphDialog() {
+    const name = prompt('Name des neuen Graphs:');
+    if (!name || !name.trim()) return;
+
+    const path = prompt('Verzeichnis zum Indexieren (optional):', '');
+
+    this._createGraph(name.trim(), path || '');
+  }
+
+  async _createGraph(name, path) {
+    try {
+      const response = await fetch('/api/graph/graphs', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name, path })
+      });
+
+      if (!response.ok) throw new Error('Create failed');
+
+      const graph = await response.json();
+      this._showMessage(`Graph "${graph.name}" erstellt`);
+
+      // Graph-Liste neu laden
+      await this._loadGraphList();
+
+      // Automatisch zum neuen Graph wechseln
+      await this._switchGraph(graph.id);
+
+    } catch (e) {
+      console.error('[KnowledgeGraph] Create failed:', e);
+      this._showMessage('Erstellen fehlgeschlagen');
+    }
+  }
+
+  async _deleteCurrentGraph() {
+    const select = document.getElementById('kg-graph-select');
+    const graphId = select?.value;
+
+    if (!graphId) {
+      this._showMessage('Kein Graph ausgewählt');
+      return;
+    }
+
+    const selectedOption = select.options[select.selectedIndex];
+    const graphName = selectedOption?.textContent || graphId;
+
+    if (!confirm(`Graph "${graphName}" wirklich löschen?\n\nDiese Aktion kann nicht rückgängig gemacht werden!`)) {
+      return;
+    }
+
+    try {
+      const response = await fetch(`/api/graph/graphs/${graphId}`, {
+        method: 'DELETE'
+      });
+
+      if (!response.ok) throw new Error('Delete failed');
+
+      this._showMessage('Graph gelöscht');
+
+      // Reset view
+      this.nodes = [];
+      this.edges = [];
+      this.currentCenter = null;
+
+      const graphContainer = this.container?.querySelector('.kg-graph');
+      if (graphContainer) graphContainer.remove();
+
+      // Graph-Liste neu laden
+      await this._loadGraphList();
+
+    } catch (e) {
+      console.error('[KnowledgeGraph] Delete failed:', e);
+      this._showMessage('Löschen fehlgeschlagen');
+    }
   }
 
   /**
