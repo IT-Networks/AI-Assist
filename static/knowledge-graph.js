@@ -567,10 +567,11 @@ class KnowledgeGraphViewer {
       return;
     }
 
+    const graphId = this._editingGraphId;
     this._hideModal();
 
     try {
-      const response = await fetch(`/api/graph/graphs/${this._editingGraphId}/rename`, {
+      const response = await fetch(`/api/graph/graphs/${graphId}/rename`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ name: newName })
