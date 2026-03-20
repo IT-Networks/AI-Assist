@@ -161,6 +161,11 @@ class UpdateService:
         if config.github_token:
             headers["Authorization"] = f"token {config.github_token}"
 
+        # Force-Headers hinzufügen wenn gesetzt
+        if hasattr(self, '_force_headers') and self._force_headers:
+            headers.update(self._force_headers)
+            logger.debug("[update] Force-refresh Headers aktiviert")
+
         return httpx.AsyncClient(
             timeout=httpx.Timeout(config.timeout_seconds),
             verify=config.verify_ssl,
@@ -176,13 +181,25 @@ class UpdateService:
         separator = "&" if "?" in url else "?"
         return f"{url}{separator}_nocache={int(time.time() * 1000)}"
 
-    async def check_for_updates(self) -> Dict:
+    async def check_for_updates(self, force_refresh: bool = False) -> Dict:
         """
         Prüft auf verfügbare Updates.
+
+        Args:
+            force_refresh: Wenn True, wird GitHub-Cache mit speziellen Headers umgangen
 
         Returns:
             Dict mit: available, current_version, latest_version, release_notes, download_url
         """
+        # Extra Headers für Force-Refresh um GitHub-Cache zu umgehen
+        if force_refresh:
+            self._force_headers = {
+                "Cache-Control": "no-cache, no-store, must-revalidate",
+                "Pragma": "no-cache",
+                "If-None-Match": "",  # ETag ignorieren
+            }
+        else:
+            self._force_headers = {}
         config = settings.update
 
         current = get_current_version()

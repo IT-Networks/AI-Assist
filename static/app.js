@@ -14694,7 +14694,7 @@ async function refreshUpdateStatus() {
   }
 }
 
-async function checkForUpdates() {
+async function checkForUpdates(forceHard = false) {
   const modal = document.getElementById('update-modal');
   modal.style.display = 'block';
   focusTrap.activate(modal);
@@ -14710,8 +14710,9 @@ async function checkForUpdates() {
   updateState.checking = true;
 
   try {
-    // Cache-Busting mit Timestamp für frische Daten
-    const response = await fetch(`/api/update/check?_t=${Date.now()}`);
+    // Cache-Busting mit Timestamp, force=true für harte Prüfung ohne GitHub-Cache
+    const url = `/api/update/check?_t=${Date.now()}${forceHard ? '&force=true' : ''}`;
+    const response = await fetch(url);
     const result = await response.json();
 
     document.getElementById('update-checking').style.display = 'none';

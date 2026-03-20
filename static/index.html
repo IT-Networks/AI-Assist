@@ -1209,7 +1209,7 @@
 <!-- Update Modal -->
 <div id="update-modal" class="modal" style="display:none" role="dialog" aria-modal="true" aria-labelledby="update-modal-title">
   <div class="modal-overlay" onclick="closeUpdateModal()"></div>
-  <div class="modal-content">
+  <div class="modal-content modal-medium">
     <div class="modal-header">
       <h2 id="update-modal-title">&#128259; App-Update</h2>
       <button class="modal-close" onclick="closeUpdateModal()">&times;</button>
@@ -1256,6 +1256,9 @@
     </div>
     <div class="modal-footer">
       <div id="update-actions-check">
+        <button class="btn btn-ghost btn-sm" onclick="checkForUpdates(true)" title="Prüft ohne Cache direkt bei GitHub">
+          &#128260; Harte Prüfung
+        </button>
         <button class="btn btn-secondary" onclick="closeUpdateModal()">Schließen</button>
         <button class="btn btn-primary" id="update-install-btn" onclick="installUpdate()" style="display:none">
           &#128259; Update installieren

@@ -49,16 +49,19 @@ class UpdateConfigRequest(BaseModel):
 
 
 @router.get("/check")
-async def check_for_updates():
+async def check_for_updates(force: bool = False):
     """
     Prüft auf verfügbare Updates.
+
+    Args:
+        force: Wenn True, wird GitHub-Cache umgangen (If-None-Match Header)
 
     Returns:
         Dict mit: available, current_version, latest_version, release_notes, download_url
     """
     from fastapi.responses import JSONResponse
     service = get_update_service()
-    result = await service.check_for_updates()
+    result = await service.check_for_updates(force_refresh=force)
     # Kein Caching - immer frische Daten
     return JSONResponse(
         content=result,
