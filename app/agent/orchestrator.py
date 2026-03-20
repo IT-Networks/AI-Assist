@@ -82,9 +82,13 @@ _RE_HINT_NAME = re.compile(r'"name"\s*:')
 # ══════════════════════════════════════════════════════════════════════════════
 # PR-Context Detection - Filtert Tools bei GitHub PR-Analysen
 # ══════════════════════════════════════════════════════════════════════════════
-# Pattern: github.com/owner/repo/pull/123 oder github.enterprise.com/.../pull/456
-_RE_GITHUB_PR_URL = re.compile(
-    r'github[.\w-]*\.com/[\w.-]+/[\w.-]+/pull/\d+',
+# Generisches Pattern für PR-URLs (funktioniert mit jedem Git-Server):
+# - github.com/owner/repo/pull/123
+# - github.intern/owner/repo/pull/456
+# - git.example.com/owner/repo/pull/789
+# - 192.168.1.100/owner/repo/pull/123
+_RE_PR_URL = re.compile(
+    r'(https?://[^\s/]+/[^\s/]+/[^\s/]+/pull/\d+)',
     re.IGNORECASE
 )
 
@@ -119,7 +123,13 @@ PR_CONTEXT_FORBIDDEN_TOOLS = {
 
 def _detect_pr_context(user_message: str) -> Optional[str]:
     """
-    Erkennt ob die User-Message eine GitHub PR-URL enthält.
+    Erkennt ob die User-Message eine PR-URL enthält.
+
+    Unterstützt:
+    - github.com/owner/repo/pull/123
+    - github.intern/owner/repo/pull/456
+    - IP-basierte URLs: 192.168.1.100/owner/repo/pull/789
+    - Jede URL mit /pull/N im Pfad
 
     Args:
         user_message: Die Nachricht des Users
@@ -127,9 +137,9 @@ def _detect_pr_context(user_message: str) -> Optional[str]:
     Returns:
         Die PR-URL wenn gefunden, sonst None
     """
-    match = _RE_GITHUB_PR_URL.search(user_message)
+    match = _RE_PR_URL.search(user_message)
     if match:
-        return match.group(0)
+        return match.group(1)
     return None
 
 
@@ -2052,40 +2062,11 @@ Sei präzise und gib detaillierte Analyse-Schritte."""
                 logger.debug("[agent] Nutzer-Kontext injiziert: {hint_parts}")
 
         # Konversations-Historie hinzufügen (für Multi-Turn)
-        # SANDWICH-Ansatz: Erste Nachrichten (Eingangsfrage) + Letzte Nachrichten (aktueller Kontext)
-        # Das verhindert, dass Follow-up Fragen den initialen Kontext verlieren
+        # context_items werden NICHT als separate System-Message eingefügt,
+        # da Tool-Results bereits korrekt als role="tool" Messages im Verlauf erscheinen.
+        # Das verhindert Dopplung und reduziert LLM-Loop-Verhalten.
         history_tokens = 0
-        history_len = len(state.messages_history)
-
-        if history_len <= state.max_history_messages:
-            # Alle Nachrichten passen - normal hinzufügen
-            history_to_add = state.messages_history
-        else:
-            # Sandwich: Erste N + Letzte M (wobei N + M <= max_history_messages)
-            keep_initial = min(state.keep_initial_messages, history_len)
-            remaining_slots = state.max_history_messages - keep_initial
-
-            initial_msgs = state.messages_history[:keep_initial]
-            recent_msgs = state.messages_history[-remaining_slots:] if remaining_slots > 0 else []
-
-            # Duplikate vermeiden wenn initial und recent überlappen
-            recent_start_idx = history_len - remaining_slots if remaining_slots > 0 else history_len
-            if recent_start_idx <= keep_initial:
-                # Überlappung - einfach alle von Anfang bis Ende nehmen
-                history_to_add = state.messages_history[:state.max_history_messages]
-            else:
-                # Sandwich zusammenbauen mit Marker für ausgelassene Nachrichten
-                skipped_count = recent_start_idx - keep_initial
-                history_to_add = initial_msgs.copy()
-                if skipped_count > 0:
-                    history_to_add.append({
-                        "role": "system",
-                        "content": f"[... {skipped_count} Nachrichten ausgelassen, Kontext zusammengefasst ...]"
-                    })
-                history_to_add.extend(recent_msgs)
-                logger.debug(f"[agent] Sandwich-History: {keep_initial} initial + {len(recent_msgs)} recent, {skipped_count} übersprungen")
-
-        for hist_msg in history_to_add:
+        for hist_msg in state.messages_history[-state.max_history_messages:]:
             messages.append(hist_msg)
             history_tokens += estimate_tokens(hist_msg.get("content", ""))
         budget.set("conversation", history_tokens)
