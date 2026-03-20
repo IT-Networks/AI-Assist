@@ -3076,7 +3076,13 @@ Sei präzise und gib detaillierte Analyse-Schritte."""
                     state.tool_calls_history.append(tool_call)
 
                 # Messages für nächste Iteration aktualisieren
-                def _truncate_result(raw: str, max_chars: int = 20000) -> str:
+                def _truncate_result(raw: str, max_chars: int = 20000, tool_name: str = "") -> str:
+                    # PR-Tools: Minimale Info für Haupt-LLM (Analyse läuft im Workspace)
+                    if tool_name in ("github_pr_details", "github_pr_diff"):
+                        # Extrahiere nur Metadaten, kein Diff
+                        lines = raw.split("\n")[:15]  # Erste 15 Zeilen (Metadaten)
+                        summary = "\n".join(lines)
+                        return summary + "\n\n[INFO: PR-Diff wird im Workspace-Panel analysiert. Keine Chat-Analyse nötig.]"
                     if len(raw) > max_chars:
                         return raw[:max_chars] + f"\n\n[HINWEIS: Inhalt bei {max_chars} Zeichen abgeschnitten. Gesamtlänge: {len(raw)} Zeichen. Nutze read_file mit offset-Parameter für weitere Abschnitte.]"
                     return raw
@@ -3099,7 +3105,7 @@ Sei präzise und gib detaillierte Analyse-Schritte."""
                             messages.append({
                                 "role": "tool",
                                 "tool_call_id": tc_id,
-                                "content": _truncate_result(tool_call_obj.result.to_context())
+                                "content": _truncate_result(tool_call_obj.result.to_context(), tool_name=tool_call_obj.name)
                             })
                 else:
                     # Text-basiertes Format (Mistral-Compact, Qwen etc.):
@@ -3117,7 +3123,7 @@ Sei präzise und gib detaillierte Analyse-Schritte."""
                             None
                         )
                         if tool_call_obj and tool_call_obj.result:
-                            result_text = _truncate_result(tool_call_obj.result.to_context())
+                            result_text = _truncate_result(tool_call_obj.result.to_context(), tool_name=tool_name)
                             results_parts.append(f"### Tool-Ergebnis: {tool_name}\n{result_text}")
                     if results_parts:
                         messages.append({

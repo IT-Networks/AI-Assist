@@ -146,7 +146,11 @@ NIEMALS lokale Tools für GitHub-PRs verwenden:
 - NICHT search_java_class (für lokale Java-Projekte)
 - NICHT trace_java_references (für lokale Java-Projekte)
 
-Der Diff aus github_pr_diff enthält alle relevanten Änderungen. Analysiere diesen direkt.
+WICHTIG: Nach Aufruf von github_pr_details oder github_pr_diff:
+- Die PR-Analyse erscheint automatisch im Workspace-Panel (rechts)
+- Gib im Chat NUR eine kurze Bestätigung: "PR #X wird im Workspace analysiert"
+- KEINE detaillierte Diff-Analyse im Chat - das macht der Workspace automatisch
+- Bei Fragen zu PR-Metadaten (Autor, Anzahl PRs, etc.) kannst du diese im Chat beantworten
 """
 
 _RETRY_DELAYS = [2, 4, 8]  # Exponential Backoff in Sekunden
