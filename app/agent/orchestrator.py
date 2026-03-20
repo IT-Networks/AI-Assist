@@ -3438,7 +3438,9 @@ Sei präzise und gib detaillierte Analyse-Schritte."""
                                 # über pending_pr_analysis im State gespeichert und am Ende
                                 # jeder Iteration abgefragt)
                                 diff_content = result_data.get("diff", "")
+                                logger.info(f"[agent] PR #{pr_number} diff_content length: {len(diff_content) if diff_content else 0}")
                                 if diff_content and len(diff_content) > 50:
+                                    logger.info(f"[agent] Starting background analysis task for PR #{pr_number}")
                                     state.pending_pr_analysis = asyncio.create_task(
                                         self._analyze_pr_for_workspace(
                                             pr_number=pr_number,
@@ -3738,6 +3740,8 @@ ALLE AUSGABEN AUF DEUTSCH!"""
                 "stream": False
             }
 
+            logger.info(f"[agent] PR analysis: Calling LLM {model} at {base_url}")
+
             async with httpx.AsyncClient(
                 timeout=30,
                 verify=settings.llm.verify_ssl
@@ -3747,10 +3751,12 @@ ALLE AUSGABEN AUF DEUTSCH!"""
                     headers=headers,
                     json=payload
                 )
+                logger.info(f"[agent] PR analysis: LLM response status {response.status_code}")
                 response.raise_for_status()
                 data = response.json()
 
                 content = data.get("choices", [{}])[0].get("message", {}).get("content", "")
+                logger.info(f"[agent] PR analysis: Got content length {len(content)}")
                 logger.debug(f"[agent] PR analysis raw response: {content[:500]}...")
 
                 # JSON aus Response extrahieren
@@ -3787,10 +3793,12 @@ ALLE AUSGABEN AUF DEUTSCH!"""
                     logger.warning(f"[agent] PR analysis: No JSON found in response: {content[:200]}")
 
         except Exception as e:
+            import traceback
             logger.warning(f"[agent] PR workspace analysis failed: {e}")
+            logger.warning(f"[agent] PR analysis traceback: {traceback.format_exc()}")
 
         # Fallback bei Fehler
-        logger.info("[agent] PR analysis using fallback (no findings)")
+        logger.warning("[agent] PR analysis using fallback (no findings)")
         return {
             "bySeverity": {"critical": 0, "high": 0, "medium": 0, "low": 0, "info": 0},
             "verdict": "comment",
