@@ -34,6 +34,7 @@ class MockLLMResponse:
     """Mock fuer LLM-Response."""
     content: str
     tool_calls: Optional[List[Dict[str, Any]]] = None
+    finish_reason: str = "stop"  # Required by TaskExecutor
 
 
 class MockLLMClient:
@@ -115,9 +116,9 @@ class MockToolRegistry:
             }
         ]
 
-    async def execute(self, tool_name: str, args: Dict[str, Any]) -> MagicMock:
+    async def execute(self, tool_name: str, **kwargs) -> MagicMock:
         """Mock Tool-Ausfuehrung."""
-        self.executed_tools.append({"tool": tool_name, "args": args})
+        self.executed_tools.append({"tool": tool_name, "args": kwargs})
 
         result = MagicMock()
         result.to_context.return_value = f"[Mock result for {tool_name}]"
@@ -587,9 +588,9 @@ class TestTaskExecutor:
 
         await executor.execute(plan, event_callback=event_callback)
 
-        # Sollte mindestens tasks_started und task_completed Events haben
+        # Sollte mindestens task_started und task_completed Events haben
         event_types = [e["type"] for e in events]
-        assert "tasks_started" in event_types
+        assert "task_started" in event_types  # Singular, nicht plural
         assert "task_completed" in event_types
 
     @pytest.mark.asyncio

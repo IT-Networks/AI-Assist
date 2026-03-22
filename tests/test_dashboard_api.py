@@ -32,10 +32,11 @@ def mock_analytics_logger():
             "edit_file": 30,
             "search_code": 20,
         },
+        # tool_success_rate muss dicts mit success/total/rate enthalten
         "tool_success_rate": {
-            "read_file": 0.98,
-            "edit_file": 0.95,
-            "search_code": 0.90,
+            "read_file": {"success": 49, "total": 50, "rate": 98.0},
+            "edit_file": {"success": 28, "total": 30, "rate": 95.0},
+            "search_code": {"success": 18, "total": 20, "rate": 90.0},
         },
         "error_types": {
             "FileNotFoundError": 5,
@@ -320,11 +321,14 @@ class TestDashboardToolUsage:
         """Tool-Usage ist auf 10 Eintraege begrenzt."""
         test_client, mock_logger = client
 
-        # Mock with many tools
+        # Mock with many tools - tool_success_rate muss dicts enthalten
         mock_logger.get_summary = AsyncMock(return_value={
             "total_chains": 100,
             "tools_used": {f"tool_{i}": i + 1 for i in range(20)},
-            "tool_success_rate": {f"tool_{i}": 0.9 for i in range(20)},
+            "tool_success_rate": {
+                f"tool_{i}": {"success": i, "total": i + 1, "rate": 90.0}
+                for i in range(20)
+            },
             "error_types": {},
         })
 

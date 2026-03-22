@@ -300,13 +300,17 @@ class TestAnalyticsLogger:
 
             assert len(logger._current_chain.tool_chain) == 3
 
+            # Referenz auf Chain speichern vor end_chain (wird danach None)
+            chain = logger._current_chain
+
             # Chain beenden
             await logger.end_chain(
                 status="resolved",
                 response="Hier ist die UserService Klasse..."
             )
 
-            assert logger._current_chain.final_status == "resolved"
+            # _current_chain ist nach end_chain None, aber chain hat die Referenz
+            assert chain.final_status == "resolved"
 
     @pytest.mark.asyncio
     async def test_anonymization_in_chain(self, temp_dir, mock_settings):
