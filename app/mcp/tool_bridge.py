@@ -65,14 +65,8 @@ class MCPToolBridge:
         self._tool_handlers["thinking_session_get"] = self._handle_get_session
         self._tool_handlers["thinking_session_add_step"] = self._handle_add_step
 
-        # Capabilities
-        self._tool_handlers["brainstorm"] = self._handle_capability
-        self._tool_handlers["design"] = self._handle_capability
-        self._tool_handlers["implement"] = self._handle_capability
-        self._tool_handlers["analyze"] = self._handle_capability
-
-        # Capability Handoff
-        self._tool_handlers["capability_handoff"] = self._handle_capability_handoff
+        # Capabilities (brainstorm, design, implement wurden zu Skills migriert)
+        self._tool_handlers["analyze"] = self._handle_capability  # Code-Analyse bleibt
 
     def get_tool_definitions(self) -> List[Dict]:
         """
@@ -120,36 +114,8 @@ class MCPToolBridge:
         capability_tools = self.capability_registry.get_all_tool_definitions()
         tools.extend(capability_tools)
 
-        # Handoff Tool
-        tools.append({
-            "type": "function",
-            "function": {
-                "name": "capability_handoff",
-                "description": (
-                    "Übergibt die Ergebnisse einer Capability an eine andere. "
-                    "Z.B. von Brainstorm zu Design, oder Design zu Implement."
-                ),
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "source_session_id": {
-                            "type": "string",
-                            "description": "ID der Quell-Session"
-                        },
-                        "target_capability": {
-                            "type": "string",
-                            "enum": ["brainstorm", "design", "implement", "analyze"],
-                            "description": "Ziel-Capability"
-                        },
-                        "additional_context": {
-                            "type": "string",
-                            "description": "Optional: Zusätzlicher Kontext für das Handoff"
-                        }
-                    },
-                    "required": ["source_session_id", "target_capability"]
-                }
-            }
-        })
+        # NOTE: capability_handoff wurde entfernt - brainstorm/design/implement sind jetzt Skills
+        # Handoff zwischen Skills erfolgt manuell durch User (/sc:brainstorm → /sc:design → /sc:implement)
 
         # MCP-Server Tools hinzufügen
         if settings.mcp.enabled:
@@ -169,8 +135,8 @@ class MCPToolBridge:
         Returns:
             Tool-Ergebnis als Dict
         """
-        # Capability Tool? (brainstorm, design, implement, analyze)
-        if tool_name in ["brainstorm", "design", "implement", "analyze"]:
+        # Capability Tool? (nur noch analyze - brainstorm/design/implement sind Skills)
+        if tool_name == "analyze":
             return await self._handle_capability(arguments, tool_name=tool_name)
 
         # Built-in Tool?

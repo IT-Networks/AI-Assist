@@ -62,7 +62,7 @@ SEQUENTIAL_ONLY_TOOLS = {
     "write_file", "edit_file", "create_file", "batch_write_files",
     "execute_command", "run_sql_query",
     "suggest_answers",  # Benötigt User-Interaktion
-    "sequential_thinking", "seq_think", "brainstorm", "design", "implement", "analyze",
+    "sequential_thinking", "seq_think", "analyze",  # brainstorm/design/implement → Skills
 }
 
 def _is_parallelizable_tool(tool_name: str) -> bool:
@@ -3053,11 +3053,11 @@ Sei präzise und gib detaillierte Analyse-Schritte."""
                     # ────────────────────────────────────────────────────────
 
                     # Tool ausführen - MCP-Tools speziell behandeln
-                    # Capabilities: brainstorm, design, implement, analyze, capability_handoff
+                    # Capabilities: analyze (Code-Analyse), sequential_thinking
+                    # NOTE: brainstorm, design, implement wurden zu Skills migriert (siehe ~/.claude/commands/sc/)
                     MCP_CAPABILITY_TOOLS = {
                         "sequential_thinking", "seq_think",
-                        "brainstorm", "design", "implement", "analyze",
-                        "capability_handoff"
+                        "analyze",  # Code-Analyse bleibt als MCP-Capability
                     }
                     if tool_call.name.startswith("mcp_") or tool_call.name in MCP_CAPABILITY_TOOLS:
                         # MCP-Tool über Bridge ausführen mit Live-Event-Streaming

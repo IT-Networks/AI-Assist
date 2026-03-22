@@ -33,7 +33,7 @@ class EnhancementType(str, Enum):
     RESEARCH = "research"            # Wiki/Docs/Code durchsuchen
     SEQUENTIAL = "sequential"        # Strukturierte Analyse (Debug, etc.)
     ANALYZE = "analyze"              # Bestehendes System verstehen
-    BRAINSTORM = "brainstorm"        # Vage Anforderungen klären
+    # NOTE: BRAINSTORM wurde zu Skill migriert (/sc:brainstorm)
 
 
 class ConfirmationStatus(str, Enum):
@@ -321,16 +321,7 @@ class EnhancementDetector:
         "current", "dependencies"
     ]
 
-    BRAINSTORM_TRIGGERS = [
-        # Deutsch
-        "neues feature", "neue funktion", "system für", "system fuer",
-        "wie könnte", "wie koennte", "idee", "konzept",
-        "möglichkeiten", "moeglichkeiten", "optionen", "vorschläge", "vorschlaege",
-        "was wäre wenn", "was waere wenn", "könntest du", "koenntest du",
-        # Englisch
-        "new feature", "system for", "how could", "idea", "concept",
-        "possibilities", "options", "suggestions", "what if"
-    ]
+    # NOTE: BRAINSTORM_TRIGGERS wurde entfernt - Brainstorm ist jetzt ein Skill (/sc:brainstorm)
 
     def detect(self, query: str) -> EnhancementType:
         """
@@ -362,10 +353,7 @@ class EnhancementDetector:
             logger.debug("[EnhancementDetector] Detected: ANALYZE")
             return EnhancementType.ANALYZE
 
-        # Brainstorm: Vage/explorative Anfragen
-        if any(trigger in query_lower for trigger in self.BRAINSTORM_TRIGGERS):
-            logger.debug("[EnhancementDetector] Detected: BRAINSTORM")
-            return EnhancementType.BRAINSTORM
+        # NOTE: Brainstorm-Erkennung entfernt - jetzt als Skill /sc:brainstorm
 
         # Keine Anreicherung nötig
         logger.debug("[EnhancementDetector] Detected: NONE")
@@ -425,7 +413,7 @@ class PromptEnhancer:
         self._research_capability = None
         self._sequential_thinking = None
         self._analyze_capability = None
-        self._brainstorm_capability = None
+        # NOTE: _brainstorm_capability entfernt - jetzt als Skill /sc:brainstorm
 
     def _get_research_capability(self):
         """Lazy-load ResearchCapability."""
@@ -461,15 +449,7 @@ class PromptEnhancer:
                 logger.debug(f"[PromptEnhancer] AnalyzeCapability not available: {e}")
         return self._analyze_capability
 
-    def _get_brainstorm_capability(self):
-        """Lazy-load BrainstormCapability."""
-        if self._brainstorm_capability is None:
-            try:
-                from app.mcp.capabilities.brainstorm import BrainstormCapability
-                self._brainstorm_capability = BrainstormCapability()
-            except ImportError as e:
-                logger.debug(f"[PromptEnhancer] BrainstormCapability not available: {e}")
-        return self._brainstorm_capability
+    # NOTE: _get_brainstorm_capability() entfernt - jetzt als Skill /sc:brainstorm
 
     async def enhance(
         self,
@@ -600,8 +580,7 @@ class PromptEnhancer:
         elif enhancement_type == EnhancementType.ANALYZE:
             context_items = await self._collect_analyze_context(query)
 
-        elif enhancement_type == EnhancementType.BRAINSTORM:
-            context_items = await self._collect_brainstorm_context(query)
+        # NOTE: BRAINSTORM wurde zu Skill migriert - keine Context-Collection mehr
 
         return context_items
 
@@ -749,56 +728,7 @@ class PromptEnhancer:
 
         return items
 
-    async def _collect_brainstorm_context(self, query: str) -> List[ContextItem]:
-        """Sammelt Kontext für vage Anforderungen via BrainstormCapability."""
-        items = []
-
-        brainstorm = self._get_brainstorm_capability()
-        if brainstorm is None:
-            logger.debug("[PromptEnhancer] BrainstormCapability not available")
-            return items
-
-        try:
-            # Execute quick brainstorm for requirements discovery
-            session = await brainstorm.execute(
-                query=query,
-                depth="shallow"
-            )
-
-            # Convert exploration step to ContextItems
-            for step in session.steps:
-                if step.phase.value == "explore":
-                    items.append(ContextItem(
-                        source="brainstorm_exploration",
-                        title="Requirements Exploration",
-                        content=step.content[:800],
-                        relevance=0.85
-                    ))
-
-                    # Add questions as separate items for user consideration
-                    for question in step.questions[:3]:
-                        items.append(ContextItem(
-                            source="clarification_question",
-                            title="Klärungsfrage",
-                            content=question,
-                            relevance=0.6
-                        ))
-
-            # Add artifacts (requirements, specifications)
-            for artifact in session.artifacts:
-                items.append(ContextItem(
-                    source=f"brainstorm_{artifact.artifact_type}",
-                    title=artifact.title,
-                    content=artifact.content[:500],
-                    relevance=0.9
-                ))
-
-            logger.info(f"[PromptEnhancer] Brainstorm collected {len(items)} items")
-
-        except Exception as e:
-            logger.warning(f"[PromptEnhancer] Brainstorming failed: {e}")
-
-        return items
+    # NOTE: _collect_brainstorm_context() entfernt - Brainstorm ist jetzt Skill /sc:brainstorm
 
     async def _create_summary(
         self,
@@ -914,7 +844,7 @@ def get_prompt_enhancer(
             _prompt_enhancer._research_capability = None
             _prompt_enhancer._sequential_thinking = None
             _prompt_enhancer._analyze_capability = None
-            _prompt_enhancer._brainstorm_capability = None
+            # NOTE: _brainstorm_capability entfernt - jetzt als Skill
         if mcp_callback:
             _prompt_enhancer.mcp_callback = mcp_callback
     return _prompt_enhancer

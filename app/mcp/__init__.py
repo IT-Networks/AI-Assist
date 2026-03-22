@@ -9,8 +9,11 @@ Features:
 - MCPManager: Verwaltung mehrerer MCP-Server
 - SequentialThinking: Lokale Implementation für strukturiertes Denken
 - ToolBridge: Integration von MCP-Tools in das Agent-System
-- Capabilities: Strukturierte Capabilities (Brainstorm, Design, Implement, Analyze, Research)
+- Capabilities: Strukturierte Capabilities (Analyze, Research)
 - CapabilityRegistry: Zentrale Verwaltung aller Capabilities
+
+NOTE: brainstorm, design, implement wurden zu Skills migriert.
+Siehe ~/.claude/commands/sc/brainstorm.md, design.md, implement.md
 """
 
 from app.mcp.client import MCPClient
@@ -28,9 +31,6 @@ from app.mcp.capabilities import (
     CapabilitySession,
     CapabilityPhase,
     CapabilityStatus,
-    BrainstormCapability,
-    DesignCapability,
-    ImplementCapability,
     AnalyzeCapability,
     ResearchCapability,
     get_research_capability
@@ -60,10 +60,7 @@ __all__ = [
     "CapabilitySession",
     "CapabilityPhase",
     "CapabilityStatus",
-    # Concrete Capabilities
-    "BrainstormCapability",
-    "DesignCapability",
-    "ImplementCapability",
+    # Concrete Capabilities (analyze, research - brainstorm/design/implement sind Skills)
     "AnalyzeCapability",
     "ResearchCapability",
     "get_research_capability",

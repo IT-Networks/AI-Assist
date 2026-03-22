@@ -269,17 +269,15 @@ def get_capability_registry(llm_callback: Optional[Callable] = None) -> Capabili
 
 
 def register_default_capabilities(registry: CapabilityRegistry) -> None:
-    """Register the default set of capabilities."""
-    from app.mcp.capabilities.brainstorm import BrainstormCapability
-    from app.mcp.capabilities.design import DesignCapability
-    from app.mcp.capabilities.implement import ImplementCapability
+    """Register the default set of capabilities.
+
+    NOTE: brainstorm, design, implement wurden zu Skills migriert.
+    Siehe ~/.claude/commands/sc/brainstorm.md, design.md, implement.md
+    """
     from app.mcp.capabilities.analyze import AnalyzeCapability
     from app.mcp.capabilities.research import ResearchCapability
 
-    registry.register_class(BrainstormCapability)
-    registry.register_class(DesignCapability)
-    registry.register_class(ImplementCapability)
     registry.register_class(AnalyzeCapability)
     registry.register_class(ResearchCapability)
 
-    logger.info("[Registry] Default capabilities registered")
+    logger.info("[Registry] Default capabilities registered (analyze, research)")

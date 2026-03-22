@@ -4750,16 +4750,9 @@ async function handleChatCommand(text) {
   }
 
   // ── MCP Capability Commands ───────────────────────────────────────────────
+  // NOTE: brainstorm, design, implement wurden zu Skills migriert → /sc:brainstorm, /sc:design, /sc:implement
   const capabilityMap = {
-    'brainstorm': { name: 'brainstorm', icon: '💡', label: 'Brainstorm' },
-    'bs': { name: 'brainstorm', icon: '💡', label: 'Brainstorm' },
-    'brain': { name: 'brainstorm', icon: '💡', label: 'Brainstorm' },
-    'design': { name: 'design', icon: '📐', label: 'Design' },
-    'des': { name: 'design', icon: '📐', label: 'Design' },
-    'arch': { name: 'design', icon: '📐', label: 'Design' },
-    'implement': { name: 'implement', icon: '💻', label: 'Implement' },
-    'impl': { name: 'implement', icon: '💻', label: 'Implement' },
-    'code': { name: 'implement', icon: '💻', label: 'Implement' },
+    // Analyze bleibt als MCP-Capability (Code-Analyse)
     'analyze': { name: 'analyze', icon: '🔍', label: 'Analyze' },
     'ana': { name: 'analyze', icon: '🔍', label: 'Analyze' },
     'review': { name: 'analyze', icon: '🔍', label: 'Analyze' },
@@ -4767,10 +4760,34 @@ async function handleChatCommand(text) {
     'seq': { name: 'sequential_thinking', icon: '🧠', label: 'Sequential Thinking' },
   };
 
+  // Skills redirect für alte Commands
+  const skillRedirectMap = {
+    'brainstorm': '/sc:brainstorm',
+    'bs': '/sc:brainstorm',
+    'brain': '/sc:brainstorm',
+    'design': '/sc:design',
+    'des': '/sc:design',
+    'arch': '/sc:design',
+    'implement': '/sc:implement',
+    'impl': '/sc:implement',
+    'code': '/sc:implement',
+  };
+
   // Parse: /brainstorm Was soll das Feature können?
   const parts = raw.split(' ');
   const cmdKey = parts[0];
   const capQuery = parts.slice(1).join(' ').trim();
+
+  // Redirect alte Commands zu Skills
+  if (skillRedirectMap[cmdKey]) {
+    const skillCmd = skillRedirectMap[cmdKey];
+    const skillMessage = capQuery ? `${skillCmd} ${capQuery}` : skillCmd;
+    log.info('[cmd] Redirect zu Skill:', { from: cmdKey, to: skillCmd });
+    appendMessage('system', `💡 \`/${cmdKey}\` wurde zu \`${skillCmd}\` migriert. Verwende \`${skillCmd}\` für diese Funktion.`);
+    const input = document.getElementById('message-input');
+    input.value = skillMessage;
+    return false;  // normal senden mit Skill-Command
+  }
 
   if (capabilityMap[cmdKey]) {
     const cap = capabilityMap[cmdKey];
