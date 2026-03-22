@@ -7315,7 +7315,7 @@ a:visited {
 }
 
 .severity-badge.critical::before {
-  content: 'Critical: ';
+  content: 'Kritisch: ';
 }
 
 .severity-badge.high {
@@ -7324,7 +7324,7 @@ a:visited {
 }
 
 .severity-badge.high::before {
-  content: 'High: ';
+  content: 'Hoch: ';
 }
 
 .severity-badge.medium {
@@ -7333,7 +7333,7 @@ a:visited {
 }
 
 .severity-badge.medium::before {
-  content: 'Medium: ';
+  content: 'Mittel: ';
 }
 
 .severity-badge.low {
@@ -7342,7 +7342,7 @@ a:visited {
 }
 
 .severity-badge.low::before {
-  content: 'Low: ';
+  content: 'Niedrig: ';
 }
 
 .severity-badge.info {

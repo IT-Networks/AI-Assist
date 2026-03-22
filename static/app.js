@@ -1860,7 +1860,7 @@ function _ensurePRPanelStructure() {
         </div>
       </div>
       <div class="pr-summary" id="pr-summary">
-        <div class="pr-summary-title">AI Review Summary</div>
+        <div class="pr-summary-title">KI-Review Zusammenfassung</div>
         <div class="pr-severity-badges">
           <span class="severity-badge critical" id="pr-critical">0</span>
           <span class="severity-badge high" id="pr-high">0</span>
@@ -1870,7 +1870,7 @@ function _ensurePRPanelStructure() {
         </div>
         <div class="pr-verdict" id="pr-verdict">
           <span class="verdict-icon">&#9989;</span>
-          <span class="verdict-text">APPROVE</span>
+          <span class="verdict-text">GENEHMIGEN</span>
         </div>
       </div>
       <div class="pr-files" id="pr-files"></div>
@@ -1879,9 +1879,9 @@ function _ensurePRPanelStructure() {
         <textarea id="pr-overall-comment-input" placeholder="Optionaler Kommentar zum gesamten PR..."></textarea>
       </div>
       <div class="pr-actions">
-        <button class="btn btn-success" onclick="submitPRReview('approve')">&#10003; Approve</button>
-        <button class="btn btn-warning" onclick="submitPRReview('request_changes')">&#8634; Request Changes</button>
-        <button class="btn btn-secondary" onclick="submitPRReview('comment')">&#128172; Comment Only</button>
+        <button class="btn btn-success" onclick="submitPRReview('approve')">&#10003; Genehmigen</button>
+        <button class="btn btn-warning" onclick="submitPRReview('request_changes')">&#8634; Änderungen anfordern</button>
+        <button class="btn btn-secondary" onclick="submitPRReview('comment')">&#128172; Nur Kommentar</button>
         <button class="btn btn-ghost" onclick="closePRReview()">&times; Schließen</button>
       </div>
     </div>
@@ -1990,7 +1990,7 @@ function renderPRReviewPanelForTab(tab) {
 
     if (verdictEl) {
       verdictEl.className = 'pr-verdict loading';
-      verdictEl.innerHTML = '<span class="verdict-icon">&#8987;</span><span class="verdict-text">ANALYSING...</span>';
+      verdictEl.innerHTML = '<span class="verdict-icon">&#8987;</span><span class="verdict-text">ANALYSE...</span>';
     }
   } else if (analysis) {
     const sev = analysis.bySeverity || {};
@@ -2021,10 +2021,10 @@ function renderPRReviewPanelForTab(tab) {
         verdictEl.innerHTML = '<span class="verdict-icon">&#128308;</span><span class="verdict-text">CLOSED</span>';
       } else {
         verdictEl.innerHTML = verdict === 'approve'
-          ? '<span class="verdict-icon">&#9989;</span><span class="verdict-text">APPROVE</span>'
+          ? '<span class="verdict-icon">&#9989;</span><span class="verdict-text">GENEHMIGEN</span>'
           : verdict === 'request_changes'
-            ? '<span class="verdict-icon">&#9888;</span><span class="verdict-text">REQUEST CHANGES</span>'
-            : '<span class="verdict-icon">&#128172;</span><span class="verdict-text">COMMENT</span>';
+            ? '<span class="verdict-icon">&#9888;</span><span class="verdict-text">ÄNDERUNGEN</span>'
+            : '<span class="verdict-icon">&#128172;</span><span class="verdict-text">KOMMENTAR</span>';
       }
     }
   }
