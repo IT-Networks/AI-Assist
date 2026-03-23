@@ -65,6 +65,10 @@ class HandbookIndexStatus(BaseModel):
     last_build: Optional[str] = None
     handbook_path: Optional[str] = None
     db_size_kb: float
+    # Build-Status für Fortsetzung
+    build_status: str = "none"  # none, complete, incomplete, cancelled, in_progress
+    total_files_expected: int = 0
+    files_processed: int = 0
 
 
 class HandbookBuildResult(BaseModel):

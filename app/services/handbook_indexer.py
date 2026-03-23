@@ -274,6 +274,13 @@ class HandbookIndexer:
         progress.message = f"{len(html_files)} HTML-Dateien gefunden. Analysiere Struktur..."
         yield progress
 
+        # Speichere Build-Status: in_progress + erwartete Dateien
+        with self._connect() as con:
+            con.execute("INSERT OR REPLACE INTO handbook_meta(key, value) VALUES ('build_status', 'in_progress')")
+            con.execute("INSERT OR REPLACE INTO handbook_meta(key, value) VALUES ('total_files_expected', ?)", (str(len(html_files)),))
+            con.execute("INSERT OR REPLACE INTO handbook_meta(key, value) VALUES ('files_processed', '0')")
+            con.commit()
+
         # 2. Service-Struktur analysieren
         services = self._analyze_service_structure(handbook, functions_subdir)
         progress.services_found = len(services)
@@ -339,6 +346,10 @@ class HandbookIndexer:
             i = 0
             while i < len(html_files):
                 if self._cancel_flag.is_set():
+                    # Status speichern: cancelled
+                    con.execute("INSERT OR REPLACE INTO handbook_meta(key, value) VALUES ('build_status', 'cancelled')")
+                    con.execute("INSERT OR REPLACE INTO handbook_meta(key, value) VALUES ('files_processed', ?)", (str(i),))
+                    con.commit()
                     progress.phase = "cancelled"
                     progress.message = "Abgebrochen durch Benutzer"
                     yield progress
@@ -385,6 +396,10 @@ class HandbookIndexer:
                     progress.estimated_remaining_seconds = avg_time * remaining
 
                 progress.message = f"Indexiere... {indexed} neu, {skipped} übersprungen ({parallel_workers} Threads)"
+
+                # Fortschritt in DB speichern (für Fortsetzung nach Abbruch)
+                con.execute("INSERT OR REPLACE INTO handbook_meta(key, value) VALUES ('files_processed', ?)", (str(min(i, len(html_files))),))
+                con.commit()
                 yield progress
 
         # 5. Services und Felder speichern
@@ -412,6 +427,10 @@ class HandbookIndexer:
                 "INSERT OR REPLACE INTO handbook_meta(key, value) VALUES ('total_files', ?)",
                 (str(len(html_files)),)
             )
+            # Build-Status: complete
+            con.execute("INSERT OR REPLACE INTO handbook_meta(key, value) VALUES ('build_status', 'complete')")
+            con.execute("INSERT OR REPLACE INTO handbook_meta(key, value) VALUES ('files_processed', ?)", (str(len(html_files)),))
+            con.commit()
 
         # Fertig
         progress.phase = "done"
@@ -942,7 +961,7 @@ class HandbookIndexer:
         return count > 0
 
     def get_stats(self) -> Dict:
-        """Gibt Index-Statistiken zurück."""
+        """Gibt Index-Statistiken zurück, inklusive Build-Status."""
         if not self.db_path.exists():
             return {
                 "indexed": False,
@@ -951,7 +970,10 @@ class HandbookIndexer:
                 "fields_count": 0,
                 "last_build": None,
                 "handbook_path": None,
-                "db_size_kb": 0
+                "db_size_kb": 0,
+                "build_status": "none",  # none, complete, incomplete, cancelled
+                "total_files_expected": 0,
+                "files_processed": 0
             }
 
         with self._connect() as con:
@@ -966,6 +988,17 @@ class HandbookIndexer:
                 "SELECT value FROM handbook_meta WHERE key='handbook_path'"
             ).fetchone()
 
+            # Build-Status Metadaten
+            build_status_row = con.execute(
+                "SELECT value FROM handbook_meta WHERE key='build_status'"
+            ).fetchone()
+            total_files_row = con.execute(
+                "SELECT value FROM handbook_meta WHERE key='total_files_expected'"
+            ).fetchone()
+            processed_files_row = con.execute(
+                "SELECT value FROM handbook_meta WHERE key='files_processed'"
+            ).fetchone()
+
         last_build = None
         if last_build_row:
             ts = int(last_build_row[0])
@@ -974,6 +1007,15 @@ class HandbookIndexer:
         handbook_path = handbook_path_row[0] if handbook_path_row else None
         db_size_kb = round(self.db_path.stat().st_size / 1024, 1)
 
+        # Build-Status auswerten
+        build_status = build_status_row[0] if build_status_row else "none"
+        total_files_expected = int(total_files_row[0]) if total_files_row else 0
+        files_processed = int(processed_files_row[0]) if processed_files_row else 0
+
+        # Automatische Erkennung: Wenn Dateien erwartet aber nicht alle verarbeitet
+        if build_status == "none" and total_files_expected > 0 and files_processed < total_files_expected:
+            build_status = "incomplete"
+
         return {
             "indexed": page_count > 0,
             "indexed_pages": page_count,
@@ -981,7 +1023,10 @@ class HandbookIndexer:
             "fields_count": field_count,
             "last_build": last_build,
             "handbook_path": handbook_path,
-            "db_size_kb": db_size_kb
+            "db_size_kb": db_size_kb,
+            "build_status": build_status,
+            "total_files_expected": total_files_expected,
+            "files_processed": files_processed
         }
 
     def clear(self) -> None:

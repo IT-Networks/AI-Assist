@@ -6697,11 +6697,45 @@ async function loadHandbookStatus() {
       return;
     }
     const d = await res.json();
-    if (d.indexed) {
-      el.innerHTML = `<span class="status-icon">&#128214;</span><span>${d.services_count} Services, ${d.indexed_pages} Seiten indexiert</span>`;
+
+    // Build-Status auswerten
+    const buildStatus = d.build_status || 'none';
+    const isComplete = buildStatus === 'complete';
+    const isIncomplete = buildStatus === 'incomplete' || buildStatus === 'cancelled';
+    const progress = d.total_files_expected > 0
+      ? Math.round((d.files_processed / d.total_files_expected) * 100)
+      : 0;
+
+    if (d.indexed && isComplete) {
+      // Vollständig indexiert
+      el.innerHTML = `
+        <span class="status-icon">&#128214;</span>
+        <span>${d.services_count} Services, ${d.indexed_pages} Seiten</span>
+        <button class="sb-btn" style="margin-left:8px" onclick="buildHandbookIndex(true)" title="Alle Dateien neu indexieren">Neu indexieren</button>
+      `;
       el.classList.add('success');
       await loadHandbookServices();
+    } else if (isIncomplete) {
+      // Unvollständig - Fortsetzen anbieten
+      el.innerHTML = `
+        <span class="status-icon">&#128214;</span>
+        <span style="color:var(--warning)">Unvollständig: ${d.files_processed}/${d.total_files_expected} (${progress}%)</span>
+        <button class="sb-btn" style="margin-left:8px" onclick="buildHandbookIndex(false)">Fortsetzen</button>
+        <button class="sb-btn btn-danger" style="margin-left:4px" onclick="clearHandbookIndex()" title="Index löschen und neu starten">Löschen</button>
+      `;
+      el.classList.add('warning');
+      if (d.services_count > 0) await loadHandbookServices();
+    } else if (d.indexed) {
+      // Teilweise indexiert (alter Status ohne build_status)
+      el.innerHTML = `
+        <span class="status-icon">&#128214;</span>
+        <span>${d.services_count} Services, ${d.indexed_pages} Seiten</span>
+        <button class="sb-btn" style="margin-left:8px" onclick="buildHandbookIndex(false)">Fortsetzen</button>
+        <button class="sb-btn" style="margin-left:4px" onclick="buildHandbookIndex(true)">Neu indexieren</button>
+      `;
+      await loadHandbookServices();
     } else {
+      // Kein Index
       el.innerHTML = `
         <span class="status-icon">&#128214;</span>
         <span>Index nicht aufgebaut</span>
@@ -6832,6 +6866,25 @@ async function cancelHandbookIndex() {
     await fetch('/api/handbook/index/cancel', { method: 'POST' });
   } catch (e) {
     // Ignore
+  }
+}
+
+async function clearHandbookIndex() {
+  if (!confirm('Index wirklich löschen? Die Indexierung muss danach komplett neu gestartet werden.')) {
+    return;
+  }
+  const el = document.getElementById('handbook-status');
+  try {
+    const res = await fetch('/api/handbook/index', { method: 'DELETE' });
+    if (res.ok) {
+      el.innerHTML = '<span class="status-icon">&#128214;</span><span>Index gelöscht</span>';
+      await loadHandbookStatus();
+    } else {
+      const d = await res.json().catch(() => ({}));
+      el.innerHTML = `<span class="status-icon">&#128214;</span><span style="color:var(--danger)">Fehler: ${d.detail || 'Löschen fehlgeschlagen'}</span>`;
+    }
+  } catch (e) {
+    el.innerHTML = `<span class="status-icon">&#128214;</span><span style="color:var(--danger)">Fehler: ${e.message}</span>`;
   }
 }
 
