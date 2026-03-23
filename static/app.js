@@ -4658,14 +4658,16 @@ function _buildHelpText() {
 \`/auto\` \`/a\`  → Autonom &#9888;
 \`/debug\` \`/d\`  → Debug & Fehleranalyse &#128269;
 
-**MCP Capabilities:**
-\`/brainstorm\` \`/bs\`  → Ideen & Requirements Discovery 💡
-\`/design\` \`/des\`  → Architektur & System-Design 📐
-\`/implement\` \`/impl\`  → Code-Generierung 💻
-\`/analyze\` \`/ana\`  → Code-Analyse & Review 🔍
+**Skills (SuperClaude-kompatibel):**
+\`/brainstorm\`  → Ideen & Requirements Discovery 💡
+\`/design\`  → Architektur & System-Design 📐
+\`/analyze\`  → Code-Analyse & Security Review 🔍
+\`/research\`  → Strukturierte Recherche 📚
 \`/seq\`  → Sequential Thinking (tiefgehende Analyse) 🧠
 
-_Beispiel: \`/brainstorm Neues Feature für User-Login\`_
+_Flags: \`--ultrathink\` \`--depth deep\` \`--focus security\` etc._
+_Beispiel: \`/research --depth deep JWT Authentication Spring Boot\`_
+_Auch mit sc:-Prefix: \`/sc:brainstorm\` \`/sc:design\` etc._
 
 **Web-Suche:**
 \`/suche an\`  → Web-Suche aktivieren
@@ -4749,42 +4751,63 @@ async function handleChatCommand(text) {
     return true;
   }
 
-  // ── MCP Capability Commands ───────────────────────────────────────────────
-  // Slash-Commands wie /brainstorm, /design, /analyze werden direkt ans Backend gesendet.
+  // ── Skill-Commands ───────────────────────────────────────────────────────
+  // Diese Commands werden direkt ans Backend gesendet.
   // Das Backend aktiviert automatisch die passenden Skills basierend auf trigger_commands.
   // Beide Formate funktionieren: /brainstorm und /sc:brainstorm
-  const capabilityMap = {
-    // /seq für explizites Sequential Thinking MCP (tiefgehende Analyse)
-    'seq': { name: 'sequential_thinking', icon: '🧠', label: 'Sequential Thinking' },
+  const skillCommands = {
+    'brainstorm': { icon: '💡', label: 'Brainstorming' },
+    'bs': { icon: '💡', label: 'Brainstorming', alias: 'brainstorm' },
+    'design': { icon: '📐', label: 'Design' },
+    'des': { icon: '📐', label: 'Design', alias: 'design' },
+    'analyze': { icon: '🔍', label: 'Analyze' },
+    'ana': { icon: '🔍', label: 'Analyze', alias: 'analyze' },
+    'research': { icon: '📚', label: 'Research' },
+    'res': { icon: '📚', label: 'Research', alias: 'research' },
+    'implement': { icon: '💻', label: 'Implement' },
+    'impl': { icon: '💻', label: 'Implement', alias: 'implement' },
+    // Sequential Thinking (MCP-Tool, nicht Skill)
+    'seq': { icon: '🧠', label: 'Sequential Thinking', mcp: 'sequential_thinking' },
   };
 
-  // Parse: /brainstorm Was soll das Feature können?
+  // Parse: /brainstorm --ultrathink Was soll das Feature können?
   const parts = raw.split(' ');
-  const cmdKey = parts[0];
+  let cmdKey = parts[0];
   const capQuery = parts.slice(1).join(' ').trim();
 
-  if (capabilityMap[cmdKey]) {
-    const cap = capabilityMap[cmdKey];
-    log.info('[cmd] MCP Capability:', { capability: cap.name, query: capQuery });
+  // sc:command Format erkennen
+  if (cmdKey.startsWith('sc:')) {
+    cmdKey = cmdKey.slice(3);
+  }
+
+  if (skillCommands[cmdKey]) {
+    const skill = skillCommands[cmdKey];
+    const actualCmd = skill.alias || cmdKey;
+    log.info('[cmd] Skill Command:', { command: actualCmd, query: capQuery });
 
     if (!capQuery) {
       appendMessage('system',
-        `${cap.icon} **${cap.label}** benötigt eine Anfrage.\n` +
-        `Beispiel: \`/${cmdKey} Beschreibe hier dein Vorhaben\``
+        `${skill.icon} **${skill.label}** benötigt eine Anfrage.\n` +
+        `Beispiel: \`/${cmdKey} Beschreibe hier dein Vorhaben\`\n` +
+        `Flags: \`--ultrathink\` \`--depth deep\` \`--focus security\``
       );
       return true;
     }
 
-    // Capability-spezifischen Prefix an die Nachricht anhängen
-    // Das signalisiert dem Agent, welches Tool forciert werden soll
-    const prefixedMessage = `[MCP:${cap.name}] ${capQuery}`;
+    // MCP-Tool (wie /seq) hat speziellen Prefix
+    if (skill.mcp) {
+      const prefixedMessage = `[MCP:${skill.mcp}] ${capQuery}`;
+      appendMessage('system', `${skill.icon} **${skill.label}** wird ausgeführt...`);
+      const input = document.getElementById('message-input');
+      input.value = prefixedMessage;
+      return false;
+    }
 
-    appendMessage('system', `${cap.icon} **${cap.label}** wird ausgeführt...`);
-
-    // Message mit Capability-Marker senden (wird nicht als handled markiert)
+    // Skill-Command: Direkt ans Backend mit /command Format
+    appendMessage('system', `${skill.icon} **${skill.label}** Skill aktiviert...`);
     const input = document.getElementById('message-input');
-    input.value = prefixedMessage;
-    return false;  // false = normal senden mit prefixed message
+    input.value = `/${actualCmd} ${capQuery}`;
+    return false;  // false = normal senden
   }
   // ─────────────────────────────────────────────────────────────────────────
 
