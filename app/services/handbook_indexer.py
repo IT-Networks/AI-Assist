@@ -281,12 +281,12 @@ class HandbookIndexer:
             con.execute("INSERT OR REPLACE INTO handbook_meta(key, value) VALUES ('files_processed', '0')")
             con.commit()
 
-        # 2. Service-Struktur analysieren
-        services = self._analyze_service_structure(handbook, functions_subdir)
+        # 2. Service-Struktur analysieren (nutzt bereits gescannte Dateien)
+        services = self._analyze_service_structure_fast(handbook, functions_subdir, html_files)
         progress.services_found = len(services)
 
-        # 3. Feld-Struktur analysieren
-        field_infos = self._analyze_field_structure(handbook, fields_subdir)
+        # 3. Feld-Struktur analysieren (nutzt bereits gescannte Dateien)
+        field_infos = self._analyze_field_structure_fast(handbook, fields_subdir, html_files)
         progress.fields_found = len(field_infos)
 
         progress.message = f"{len(services)} Services, {len(field_infos)} Felder gefunden"
@@ -730,6 +730,141 @@ class HandbookIndexer:
                     field_name=field_id.replace("-", " ").replace("_", " ").title(),
                     source_file=str(htm_file.relative_to(root))
                 )
+
+        return fields
+
+    def _analyze_service_structure_fast(
+        self,
+        root: Path,
+        functions_subdir: str,
+        html_files: List[Path]
+    ) -> Dict[str, ServiceInfo]:
+        """
+        Schnelle Service-Analyse: Nutzt bereits gescannte Dateien statt erneut glob.
+        Vermeidet doppelte Netzwerk-Zugriffe.
+        """
+        services = {}
+
+        known_tabs = getattr(self, '_known_tab_suffixes', {
+            'statistik', 'use_cases', 'aenderungen', 'dqm',
+            'fachlich', 'intern', 'parameter', 'uebersicht',
+            'eingabe', 'ausgabe', 'allgemein', 'technik',
+            'historie', 'beispiele', 'varianten', 'fehler'
+        })
+
+        structure_mode = getattr(self, '_structure_mode', 'auto')
+        funktionen_dir = root / functions_subdir
+
+        # Filtere relevante Dateien aus bereits gescannter Liste
+        # (statt erneut glob über Netzwerk)
+        if funktionen_dir.exists() and funktionen_dir != root:
+            funktionen_prefix = str(funktionen_dir.relative_to(root))
+            relevant_files = [
+                f for f in html_files
+                if str(f.relative_to(root)).startswith(funktionen_prefix)
+            ]
+        else:
+            # Flat mode: alle Dateien im Root
+            relevant_files = [f for f in html_files if f.parent == root]
+
+        # Bestimme Modus
+        use_flat_mode = structure_mode == "flat"
+        if structure_mode == "auto":
+            # Prüfe ob Unterordner in den relevanten Dateien
+            has_subdirs = any(
+                len(f.relative_to(root).parts) > 2
+                for f in relevant_files[:100]  # Sample für Performance
+            )
+            use_flat_mode = not has_subdirs
+
+        if not use_flat_mode:
+            # Modus 1: Ordner-basierte Struktur
+            service_files: Dict[str, List[Path]] = {}
+            for htm_file in relevant_files:
+                rel_parts = htm_file.relative_to(root).parts
+                if len(rel_parts) >= 2:
+                    service_id = rel_parts[1] if rel_parts[0] == functions_subdir else rel_parts[0]
+                    if service_id not in service_files:
+                        service_files[service_id] = []
+                    service_files[service_id].append(htm_file)
+
+            for service_id, files in service_files.items():
+                tabs = [{"name": f.stem, "file_path": str(f.relative_to(root))} for f in files]
+                services[service_id] = ServiceInfo(
+                    service_id=service_id,
+                    service_name=service_id.replace("-", " ").replace("_", " ").title(),
+                    tabs=tabs
+                )
+        else:
+            # Modus 2: Flache Struktur
+            file_groups: Dict[str, List[Dict]] = {}
+
+            for htm_file in relevant_files:
+                filename = htm_file.stem
+                service_id = None
+                tab_name = None
+
+                for tab in known_tabs:
+                    if filename.lower().endswith(f"_{tab}"):
+                        service_id = filename[:-(len(tab) + 1)]
+                        tab_name = tab
+                        break
+
+                if not service_id:
+                    if "_" in filename:
+                        parts = filename.rsplit("_", 1)
+                        service_id = parts[0]
+                        tab_name = parts[1]
+                    else:
+                        service_id = filename
+                        tab_name = "hauptseite"
+
+                if service_id not in file_groups:
+                    file_groups[service_id] = []
+                file_groups[service_id].append({
+                    "name": tab_name,
+                    "file_path": str(htm_file.relative_to(root))
+                })
+
+            for service_id, tabs in file_groups.items():
+                services[service_id] = ServiceInfo(
+                    service_id=service_id,
+                    service_name=service_id.replace("-", " ").replace("_", " ").title(),
+                    tabs=sorted(tabs, key=lambda t: t["name"])
+                )
+
+        return services
+
+    def _analyze_field_structure_fast(
+        self,
+        root: Path,
+        fields_subdir: str,
+        html_files: List[Path]
+    ) -> Dict[str, FieldInfo]:
+        """
+        Schnelle Feld-Analyse: Nutzt bereits gescannte Dateien.
+        """
+        fields = {}
+
+        felder_dir = root / fields_subdir
+        if not felder_dir.exists():
+            return fields
+
+        # Filtere nur Dateien aus dem Felder-Verzeichnis
+        felder_prefix = str(felder_dir.relative_to(root))
+        relevant_files = [
+            f for f in html_files
+            if str(f.relative_to(root)).startswith(felder_prefix)
+            and f.parent == felder_dir  # Nur direkte Kinder, keine Unterordner
+        ]
+
+        for htm_file in relevant_files:
+            field_id = htm_file.stem
+            fields[field_id] = FieldInfo(
+                field_id=field_id,
+                field_name=field_id.replace("-", " ").replace("_", " ").title(),
+                source_file=str(htm_file.relative_to(root))
+            )
 
         return fields
 
