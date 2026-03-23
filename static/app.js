@@ -4750,44 +4750,18 @@ async function handleChatCommand(text) {
   }
 
   // ── MCP Capability Commands ───────────────────────────────────────────────
-  // NOTE: brainstorm, design, implement wurden zu Skills migriert → /sc:brainstorm, /sc:design, /sc:implement
+  // Slash-Commands wie /brainstorm, /design, /analyze werden direkt ans Backend gesendet.
+  // Das Backend aktiviert automatisch die passenden Skills basierend auf trigger_commands.
+  // Beide Formate funktionieren: /brainstorm und /sc:brainstorm
   const capabilityMap = {
-    // Analyze bleibt als MCP-Capability (Code-Analyse)
-    'analyze': { name: 'analyze', icon: '🔍', label: 'Analyze' },
-    'ana': { name: 'analyze', icon: '🔍', label: 'Analyze' },
-    'review': { name: 'analyze', icon: '🔍', label: 'Analyze' },
     // /seq für explizites Sequential Thinking MCP (tiefgehende Analyse)
     'seq': { name: 'sequential_thinking', icon: '🧠', label: 'Sequential Thinking' },
-  };
-
-  // Skills redirect für alte Commands
-  const skillRedirectMap = {
-    'brainstorm': '/sc:brainstorm',
-    'bs': '/sc:brainstorm',
-    'brain': '/sc:brainstorm',
-    'design': '/sc:design',
-    'des': '/sc:design',
-    'arch': '/sc:design',
-    'implement': '/sc:implement',
-    'impl': '/sc:implement',
-    'code': '/sc:implement',
   };
 
   // Parse: /brainstorm Was soll das Feature können?
   const parts = raw.split(' ');
   const cmdKey = parts[0];
   const capQuery = parts.slice(1).join(' ').trim();
-
-  // Redirect alte Commands zu Skills
-  if (skillRedirectMap[cmdKey]) {
-    const skillCmd = skillRedirectMap[cmdKey];
-    const skillMessage = capQuery ? `${skillCmd} ${capQuery}` : skillCmd;
-    log.info('[cmd] Redirect zu Skill:', { from: cmdKey, to: skillCmd });
-    appendMessage('system', `💡 \`/${cmdKey}\` wurde zu \`${skillCmd}\` migriert. Verwende \`${skillCmd}\` für diese Funktion.`);
-    const input = document.getElementById('message-input');
-    input.value = skillMessage;
-    return false;  // normal senden mit Skill-Command
-  }
 
   if (capabilityMap[cmdKey]) {
     const cap = capabilityMap[cmdKey];
