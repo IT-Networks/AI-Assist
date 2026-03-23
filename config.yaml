@@ -149,8 +149,25 @@ handbook:
   - '**/archiv/**'
   - '**/backup/**'
   - '**/.git/**'
+  # Struktur-Modus: auto | directory | flat
+  # auto: Erkennt automatisch ob Unterordner existieren
+  # directory: Erwartet funktionen/SERVICE_NAME/tab.htm
+  # flat: Erwartet FUNKTIONSNAME_tabname.htm (alle Dateien flach)
+  structure_mode: auto
   functions_subdir: funktionen
   fields_subdir: felder
+  # Tab-Suffixe für flache Struktur (FUNKTION_suffix.htm)
+  known_tab_suffixes:
+  - statistik
+  - use_cases
+  - aenderungen
+  - dqm
+  - fachlich
+  - intern
+  - parameter
+  - uebersicht
+  - eingabe
+  - ausgabe
 
 # DB2-Datenbankverbindung
 database:

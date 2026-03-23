@@ -190,10 +190,22 @@ class HandbookIndexer:
         fields_subdir: str = "felder",
         exclude_patterns: Optional[List[str]] = None,
         force: bool = False,
-        batch_size: int = 500
+        batch_size: int = 500,
+        structure_mode: str = "auto",
+        known_tab_suffixes: Optional[List[str]] = None
     ) -> Generator[IndexProgress, None, Dict]:
         """
         Indexiert alle HTML-Dateien mit Progress-Streaming.
+
+        Args:
+            handbook_path: Pfad zum Handbuch-Verzeichnis
+            functions_subdir: Unterordner für Funktionen (bei directory-Modus)
+            fields_subdir: Unterordner für Felder
+            exclude_patterns: Glob-Patterns zum Ausschließen
+            force: Alle Dateien neu indexieren
+            batch_size: Batch-Größe für DB-Operationen
+            structure_mode: "auto", "directory" oder "flat"
+            known_tab_suffixes: Tab-Suffixe für flache Struktur
 
         Yields:
             IndexProgress Objekte mit aktuellem Status
@@ -201,6 +213,14 @@ class HandbookIndexer:
         Returns:
             Dict mit Statistiken am Ende
         """
+        # Speichere Struktur-Einstellungen für spätere Verwendung
+        self._structure_mode = structure_mode
+        self._known_tab_suffixes = set(known_tab_suffixes or [
+            'statistik', 'use_cases', 'aenderungen', 'dqm',
+            'fachlich', 'intern', 'parameter', 'uebersicht',
+            'eingabe', 'ausgabe', 'allgemein', 'technik',
+            'historie', 'beispiele', 'varianten', 'fehler'
+        ])
         self._cancel_flag.clear()
         start = time.time()
         handbook = Path(handbook_path)
@@ -537,13 +557,52 @@ class HandbookIndexer:
         root: Path,
         functions_subdir: str
     ) -> Dict[str, ServiceInfo]:
-        """Analysiert die Ordnerstruktur um Services und Tabs zu erkennen."""
+        """
+        Analysiert die Struktur um Services und Tabs zu erkennen.
+
+        Unterstützt drei Modi (via self._structure_mode):
+        - "auto": Erkennt automatisch ob Unterordner existieren
+        - "directory": Erwartet funktionen/SERVICE_NAME/tab.htm
+        - "flat": Erwartet FUNKTIONSNAME_tabname.htm (alle in einem Ordner)
+        """
         services = {}
 
+        # Tab-Suffixe aus Config oder Default
+        known_tabs = getattr(self, '_known_tab_suffixes', {
+            'statistik', 'use_cases', 'aenderungen', 'dqm',
+            'fachlich', 'intern', 'parameter', 'uebersicht',
+            'eingabe', 'ausgabe', 'allgemein', 'technik',
+            'historie', 'beispiele', 'varianten', 'fehler'
+        })
+
+        structure_mode = getattr(self, '_structure_mode', 'auto')
+
         funktionen_dir = root / functions_subdir
-        if funktionen_dir.exists():
+        if not funktionen_dir.exists():
+            # Fallback: root selbst als Funktions-Verzeichnis (flache Struktur)
+            funktionen_dir = root
+
+        # Bestimme Modus
+        use_flat_mode = False
+        if structure_mode == "flat":
+            use_flat_mode = True
+        elif structure_mode == "directory":
+            use_flat_mode = False
+        else:  # auto
+            # Prüfe ob Unterordner existieren
+            try:
+                has_subdirs = any(
+                    d.is_dir() for d in funktionen_dir.iterdir()
+                    if not d.name.startswith('.')
+                )
+                use_flat_mode = not has_subdirs or funktionen_dir == root
+            except (PermissionError, OSError):
+                use_flat_mode = True
+
+        if not use_flat_mode:
+            # Modus 1: Ordner-basierte Struktur
             for service_dir in funktionen_dir.iterdir():
-                if service_dir.is_dir():
+                if service_dir.is_dir() and not service_dir.name.startswith('.'):
                     service_id = service_dir.name
                     tabs = []
                     for htm_file in list(service_dir.glob("*.htm")) + list(service_dir.glob("*.html")):
@@ -559,6 +618,53 @@ class HandbookIndexer:
                         service_name=service_name,
                         tabs=tabs
                     )
+        else:
+            # Modus 2: Flache Struktur mit Namenskonvention
+            # Sammle alle HTM-Dateien und gruppiere nach Funktionsname
+            file_groups: Dict[str, List[Dict]] = {}
+
+            for htm_file in list(funktionen_dir.glob("*.htm")) + list(funktionen_dir.glob("*.html")):
+                filename = htm_file.stem  # z.B. "ALIAS_LESEN_statistik"
+
+                # Versuche Tab-Suffix zu erkennen
+                service_id = None
+                tab_name = None
+
+                # Suche nach bekanntem Tab-Suffix am Ende
+                for tab in known_tabs:
+                    if filename.lower().endswith(f"_{tab}"):
+                        # Gefunden: extrahiere Service-Name
+                        service_id = filename[:-(len(tab) + 1)]  # +1 für Unterstrich
+                        tab_name = tab
+                        break
+
+                if not service_id:
+                    # Fallback: Letzter Unterstrich trennt Service und Tab
+                    if "_" in filename:
+                        parts = filename.rsplit("_", 1)
+                        service_id = parts[0]
+                        tab_name = parts[1]
+                    else:
+                        # Kein Unterstrich: gesamter Name ist Service
+                        service_id = filename
+                        tab_name = "hauptseite"
+
+                if service_id not in file_groups:
+                    file_groups[service_id] = []
+
+                file_groups[service_id].append({
+                    "name": tab_name,
+                    "file_path": str(htm_file.relative_to(root))
+                })
+
+            # Erstelle ServiceInfo für jede Gruppe
+            for service_id, tabs in file_groups.items():
+                service_name = service_id.replace("-", " ").replace("_", " ").title()
+                services[service_id] = ServiceInfo(
+                    service_id=service_id,
+                    service_name=service_name,
+                    tabs=sorted(tabs, key=lambda t: t["name"])
+                )
 
         return services
 
@@ -601,12 +707,44 @@ class HandbookIndexer:
         rel_path: Path,
         functions_subdir: str
     ) -> Tuple[Optional[str], Optional[str]]:
-        """Ermittelt Service und Tab aus dem Dateipfad."""
+        """
+        Ermittelt Service und Tab aus dem Dateipfad.
+
+        Unterstützt:
+        1. Ordner-Struktur: funktionen/SERVICE/tab.htm
+        2. Flache Struktur: FUNKTIONSNAME_tabname.htm
+        """
         parts = rel_path.parts
 
-        if len(parts) >= 3 and parts[0] == functions_subdir:
+        # Modus 1: Ordner-basierte Struktur
+        if len(parts) >= 2 and parts[0] == functions_subdir:
             service_name = parts[1].replace("-", " ").replace("_", " ").title()
             tab_name = rel_path.stem
+            return service_name, tab_name
+
+        # Modus 2: Flache Struktur mit Namenskonvention
+        filename = rel_path.stem  # z.B. "ALIAS_LESEN_statistik"
+
+        # Bekannte Tab-Suffixe aus Config oder Default
+        known_tabs = getattr(self, '_known_tab_suffixes', {
+            'statistik', 'use_cases', 'aenderungen', 'dqm',
+            'fachlich', 'intern', 'parameter', 'uebersicht',
+            'eingabe', 'ausgabe', 'allgemein', 'technik',
+            'historie', 'beispiele', 'varianten', 'fehler'
+        })
+
+        # Suche nach bekanntem Tab-Suffix
+        for tab in known_tabs:
+            if filename.lower().endswith(f"_{tab}"):
+                service_id = filename[:-(len(tab) + 1)]
+                service_name = service_id.replace("-", " ").replace("_", " ").title()
+                return service_name, tab
+
+        # Fallback: Letzter Unterstrich trennt Service und Tab
+        if "_" in filename:
+            file_parts = filename.rsplit("_", 1)
+            service_name = file_parts[0].replace("-", " ").replace("_", " ").title()
+            tab_name = file_parts[1]
             return service_name, tab_name
 
         return None, None

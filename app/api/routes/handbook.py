@@ -120,6 +120,10 @@ async def build_index(
 
     indexer = get_handbook_indexer()
 
+    # Struktur-Einstellungen aus Config
+    structure_mode = getattr(settings.handbook, 'structure_mode', 'auto')
+    known_tab_suffixes = getattr(settings.handbook, 'known_tab_suffixes', None)
+
     if stream:
         # SSE Streaming Response
         async def progress_generator():
@@ -129,7 +133,9 @@ async def build_index(
                     functions_subdir=settings.handbook.functions_subdir,
                     fields_subdir=settings.handbook.fields_subdir,
                     exclude_patterns=settings.handbook.exclude_patterns,
-                    force=force
+                    force=force,
+                    structure_mode=structure_mode,
+                    known_tab_suffixes=known_tab_suffixes
                 ):
                     event_data = json.dumps(progress.to_dict(), ensure_ascii=False)
                     yield f"data: {event_data}\n\n"

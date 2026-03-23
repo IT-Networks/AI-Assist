@@ -262,8 +262,19 @@ class HandbookConfig(BaseModel):
     index_on_start: bool = False  # Automatisch beim Start indexieren
     exclude_patterns: List[str] = ["**/archiv/**", "**/backup/**", "**/.git/**"]
     # Struktur-Erkennung
-    functions_subdir: str = "funktionen"  # Subordner für Service-Funktionen
+    structure_mode: str = "auto"  # auto | directory | flat
+    # auto: Erkennt automatisch ob Unterordner existieren
+    # directory: Erwartet funktionen/SERVICE_NAME/tab.htm
+    # flat: Erwartet FUNKTIONSNAME_tabname.htm (alle Dateien in einem Ordner)
+    functions_subdir: str = "funktionen"  # Subordner für Service-Funktionen (bei directory-Modus)
     fields_subdir: str = "felder"  # Subordner für Feld-Definitionen
+    # Tab-Suffixe für flache Struktur (FUNKTION_suffix.htm)
+    known_tab_suffixes: List[str] = [
+        "statistik", "use_cases", "aenderungen", "dqm",
+        "fachlich", "intern", "parameter", "uebersicht",
+        "eingabe", "ausgabe", "allgemein", "technik",
+        "historie", "beispiele", "varianten", "fehler"
+    ]
 
 
 class SkillsConfig(BaseModel):
