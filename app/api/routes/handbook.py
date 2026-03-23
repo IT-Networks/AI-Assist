@@ -16,8 +16,13 @@ from fastapi import APIRouter, HTTPException, Query, BackgroundTasks
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
-from app.core.config import settings
 from app.services.handbook_indexer import get_handbook_indexer
+
+
+def get_settings():
+    """Holt immer die aktuellen Settings (nach UI-Änderungen)."""
+    from app.core.config import settings
+    return settings
 
 
 router = APIRouter(prefix="/api/handbook", tags=["handbook"])
@@ -83,7 +88,7 @@ class HandbookPageContent(BaseModel):
 @router.get("/status", response_model=HandbookIndexStatus)
 async def get_index_status():
     """Gibt den Status des Handbuch-Index zurück."""
-    if not settings.handbook.enabled:
+    if not get_settings().handbook.enabled:
         raise HTTPException(status_code=404, detail="Handbuch-Feature ist nicht aktiviert")
 
     indexer = get_handbook_indexer()
@@ -105,24 +110,30 @@ async def build_index(
     - force=true: Alle Dateien neu indexieren
     - stream=true: Progress als Server-Sent Events streamen
     """
-    if not settings.handbook.enabled:
+    # Einmalig aktuelle Config holen
+    hb_config = get_settings().handbook
+
+    if not hb_config.enabled:
         raise HTTPException(status_code=404, detail="Handbuch-Feature ist nicht aktiviert")
 
-    if not settings.handbook.path:
+    if not hb_config.path:
         raise HTTPException(status_code=400, detail="Kein Handbuch-Pfad konfiguriert")
 
-    handbook_path = Path(settings.handbook.path)
+    handbook_path = Path(hb_config.path)
     if not handbook_path.exists():
         raise HTTPException(
             status_code=400,
-            detail=f"Handbuch-Pfad existiert nicht: {settings.handbook.path}"
+            detail=f"Handbuch-Pfad existiert nicht: {hb_config.path}"
         )
 
     indexer = get_handbook_indexer()
 
     # Struktur-Einstellungen aus Config
-    structure_mode = getattr(settings.handbook, 'structure_mode', 'auto')
-    known_tab_suffixes = getattr(settings.handbook, 'known_tab_suffixes', None)
+    structure_mode = getattr(hb_config, 'structure_mode', 'auto')
+    known_tab_suffixes = getattr(hb_config, 'known_tab_suffixes', None)
+    functions_subdir = hb_config.functions_subdir
+    fields_subdir = hb_config.fields_subdir
+    exclude_patterns = hb_config.exclude_patterns
 
     if stream:
         # SSE Streaming Response
@@ -130,9 +141,9 @@ async def build_index(
             try:
                 for progress in indexer.build_with_progress(
                     handbook_path=str(handbook_path),
-                    functions_subdir=settings.handbook.functions_subdir,
-                    fields_subdir=settings.handbook.fields_subdir,
-                    exclude_patterns=settings.handbook.exclude_patterns,
+                    functions_subdir=functions_subdir,
+                    fields_subdir=fields_subdir,
+                    exclude_patterns=exclude_patterns,
                     force=force,
                     structure_mode=structure_mode,
                     known_tab_suffixes=known_tab_suffixes
@@ -163,9 +174,9 @@ async def build_index(
         # Synchroner Aufruf (Legacy)
         result = indexer.build(
             handbook_path=str(handbook_path),
-            functions_subdir=settings.handbook.functions_subdir,
-            fields_subdir=settings.handbook.fields_subdir,
-            exclude_patterns=settings.handbook.exclude_patterns,
+            functions_subdir=functions_subdir,
+            fields_subdir=fields_subdir,
+            exclude_patterns=exclude_patterns,
             force=force
         )
         return HandbookBuildResult(**result)
@@ -178,7 +189,7 @@ async def get_build_progress():
 
     Nützlich wenn SSE nicht verwendet wird.
     """
-    if not settings.handbook.enabled:
+    if not get_settings().handbook.enabled:
         raise HTTPException(status_code=404, detail="Handbuch-Feature ist nicht aktiviert")
 
     indexer = get_handbook_indexer()
@@ -197,7 +208,7 @@ async def cancel_build():
 
     Der Abbruch erfolgt nach dem aktuellen Batch.
     """
-    if not settings.handbook.enabled:
+    if not get_settings().handbook.enabled:
         raise HTTPException(status_code=404, detail="Handbuch-Feature ist nicht aktiviert")
 
     indexer = get_handbook_indexer()
@@ -209,7 +220,7 @@ async def cancel_build():
 @router.delete("/index")
 async def delete_index():
     """Löscht den Handbuch-Index."""
-    if not settings.handbook.enabled:
+    if not get_settings().handbook.enabled:
         raise HTTPException(status_code=404, detail="Handbuch-Feature ist nicht aktiviert")
 
     indexer = get_handbook_indexer()
@@ -233,7 +244,7 @@ async def search_handbook(
 
     Unterstützt Volltextsuche mit Porter-Stemming (z.B. "Bestellung" findet auch "Bestellungen").
     """
-    if not settings.handbook.enabled:
+    if not get_settings().handbook.enabled:
         raise HTTPException(status_code=404, detail="Handbuch-Feature ist nicht aktiviert")
 
     indexer = get_handbook_indexer()
@@ -264,7 +275,7 @@ async def list_services(
     offset: int = Query(0, ge=0, description="Offset für Pagination")
 ):
     """Listet alle im Handbuch dokumentierten Services auf (mit Pagination)."""
-    if not settings.handbook.enabled:
+    if not get_settings().handbook.enabled:
         raise HTTPException(status_code=404, detail="Handbuch-Feature ist nicht aktiviert")
 
     indexer = get_handbook_indexer()
@@ -279,7 +290,7 @@ async def list_services(
 @router.get("/services/{service_id}", response_model=HandbookServiceDetail)
 async def get_service(service_id: str):
     """Gibt detaillierte Informationen zu einem Service zurück."""
-    if not settings.handbook.enabled:
+    if not get_settings().handbook.enabled:
         raise HTTPException(status_code=404, detail="Handbuch-Feature ist nicht aktiviert")
 
     indexer = get_handbook_indexer()
@@ -300,7 +311,7 @@ async def get_page_content(
     path: str = Query(..., max_length=500, description="Relativer Pfad zur Handbuch-Seite")
 ):
     """Lädt den Textinhalt einer Handbuch-Seite."""
-    if not settings.handbook.enabled:
+    if not get_settings().handbook.enabled:
         raise HTTPException(status_code=404, detail="Handbuch-Feature ist nicht aktiviert")
 
     indexer = get_handbook_indexer()
@@ -319,7 +330,7 @@ async def get_page_content(
 @router.get("/fields/{field_id}")
 async def get_field(field_id: str):
     """Gibt Informationen zu einem Feld zurück."""
-    if not settings.handbook.enabled:
+    if not get_settings().handbook.enabled:
         raise HTTPException(status_code=404, detail="Handbuch-Feature ist nicht aktiviert")
 
     indexer = get_handbook_indexer()
