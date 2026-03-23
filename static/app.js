@@ -6737,6 +6737,7 @@ async function buildHandbookIndex(force = false) {
     handbookBuildController = new AbortController();
 
     const res = await fetch(`/api/handbook/index/build?force=${force}&stream=true`, {
+      method: 'POST',
       signal: handbookBuildController.signal
     });
 
