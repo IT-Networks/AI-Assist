@@ -1591,7 +1591,19 @@ Sei präzise und gib detaillierte Analyse-Schritte."""
             command_name = slash_match.group(1).lower()
             command_rest = slash_match.group(2).strip()
 
-            # Flags und Query trennen (--flag value Paare)
+            # Flags und Query trennen
+            # Boolean-Flags (kein Wert erwartet)
+            BOOLEAN_FLAGS = {
+                'ultrathink', 'parallel', 'safe', 'interactive', 'preview',
+                'validate', 'with-tests', 'force', 'verbose', 'quiet',
+                'dry-run', 'watch', 'fix', 'strict', 'coverage'
+            }
+            # Value-Flags (erwarten einen Wert)
+            VALUE_FLAGS = {
+                'depth', 'type', 'format', 'strategy', 'scope', 'focus',
+                'language', 'framework', 'constraints', 'model', 'target'
+            }
+
             flags = {}
             query_parts = []
             tokens = command_rest.split() if command_rest else []
@@ -1600,10 +1612,15 @@ Sei präzise und gib detaillierte Analyse-Schritte."""
                 token = tokens[i]
                 if token.startswith('--'):
                     flag_name = token[2:]
-                    # Prüfe ob nächstes Token ein Wert ist (kein Flag)
-                    if i + 1 < len(tokens) and not tokens[i + 1].startswith('--'):
+                    # Boolean-Flag oder unbekanntes Flag ohne Wert
+                    if flag_name in BOOLEAN_FLAGS:
+                        flags[flag_name] = True
+                        i += 1
+                    # Value-Flag mit erwartetem Wert
+                    elif flag_name in VALUE_FLAGS and i + 1 < len(tokens) and not tokens[i + 1].startswith('--'):
                         flags[flag_name] = tokens[i + 1]
                         i += 2
+                    # Unbekanntes Flag - als Boolean behandeln
                     else:
                         flags[flag_name] = True
                         i += 1
