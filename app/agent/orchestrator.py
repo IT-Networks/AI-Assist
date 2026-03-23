@@ -1581,6 +1581,27 @@ Sei präzise und gib detaillierte Analyse-Schritte."""
             user_message = mcp_match.group(2).strip()
             logger.debug("[agent] Forced MCP capability: {forced_capability}")
 
+        # ── Slash-Command Skill Activation ─────────────────────────────────────
+        # Format: /command <query> - Aktiviert Skills mit trigger_commands
+        slash_match = re.match(r'^/([a-zA-Z][a-zA-Z0-9_-]*)\s*(.*)', user_message, re.DOTALL)
+        if slash_match and not forced_capability:
+            command_name = slash_match.group(1).lower()
+            command_query = slash_match.group(2).strip() or user_message
+
+            # Skills für diesen Command finden
+            skill_mgr = get_skill_manager()
+            command_skills = skill_mgr.get_skills_for_command(command_name, include_inactive=True)
+
+            if command_skills:
+                # Skills aktivieren
+                for skill in command_skills:
+                    state.active_skill_ids.add(skill.id)
+                    logger.info(f"[agent] Skill '{skill.id}' aktiviert durch /{command_name}")
+
+                # Query ohne Slash-Command verwenden (aber Command als Kontext behalten)
+                user_message = f"[COMMAND: /{command_name}]\n\n{command_query}" if command_query else user_message
+                logger.debug(f"[agent] Slash-Command /{command_name} mit {len(command_skills)} Skills")
+
         # ── Continue-Handling (nach Bestätigung) ───────────────────────────────
         # ControlMarkers.CONTINUE wird nach Schreibbestätigung gesendet
         is_continue = user_message.strip() == ControlMarkers.CONTINUE
