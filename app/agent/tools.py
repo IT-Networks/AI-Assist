@@ -2129,24 +2129,36 @@ DESCRIBE_DATABASE_TABLE_TOOL = Tool(
 
 async def search_confluence(query: str, space: str = "", limit: int = 10) -> ToolResult:
     """Durchsucht Confluence per CQL nach Seiten."""
-    from app.services.confluence_client import ConfluenceClient
+    from app.services.confluence_client import get_confluence_client
+    from app.services.confluence_cache import get_confluence_cache
     from app.core.config import settings
 
     if not settings.confluence.base_url:
         return ToolResult(success=False, error="Confluence ist nicht konfiguriert (base_url fehlt)")
 
     try:
-        client = ConfluenceClient()
-        results = await client.search(
-            query=query,
-            space_key=space or settings.confluence.default_space or None,
-            limit=min(limit, 20),
-        )
+        cache = get_confluence_cache()
+        space_key = space or settings.confluence.default_space or ""
+
+        # Cache-Check
+        cached = cache.get_search(query, space_key, limit)
+        if cached is not None:
+            results = cached
+            cache_info = " (cached)"
+        else:
+            client = get_confluence_client()
+            results = await client.search(
+                query=query,
+                space_key=space_key or None,
+                limit=min(limit, 20),
+            )
+            cache.set_search(query, space_key, limit, results)
+            cache_info = ""
 
         if not results:
             return ToolResult(success=True, data=f"Keine Confluence-Ergebnisse für: {query}")
 
-        output = f"=== Confluence-Suche: {query} ===\n"
+        output = f"=== Confluence-Suche: {query}{cache_info} ===\n"
         output += f"{len(results)} Ergebnisse gefunden:\n\n"
         for r in results:
             output += f"📄 {r['title']}\n"
@@ -2164,17 +2176,28 @@ async def search_confluence(query: str, space: str = "", limit: int = 10) -> Too
 
 async def read_confluence_page(page_id: str) -> ToolResult:
     """Liest den Inhalt einer Confluence-Seite."""
-    from app.services.confluence_client import ConfluenceClient
+    from app.services.confluence_client import get_confluence_client
+    from app.services.confluence_cache import get_confluence_cache
     from app.core.config import settings
 
     if not settings.confluence.base_url:
         return ToolResult(success=False, error="Confluence ist nicht konfiguriert (base_url fehlt)")
 
     try:
-        client = ConfluenceClient()
-        page = await client.get_page_by_id(page_id)
+        cache = get_confluence_cache()
 
-        output = f"=== Confluence-Seite ===\n"
+        # Cache-Check
+        cached = cache.get_page(page_id)
+        if cached is not None:
+            page = cached
+            cache_info = " (cached)"
+        else:
+            client = get_confluence_client()
+            page = await client.get_page_by_id(page_id)
+            cache.set_page(page_id, page)
+            cache_info = ""
+
+        output = f"=== Confluence-Seite{cache_info} ===\n"
         output += f"Titel: {page['title']}\n"
         output += f"URL: {page['url']}\n"
         output += f"Space: {page['space']}\n"
@@ -2212,6 +2235,210 @@ READ_CONFLUENCE_PAGE_TOOL = Tool(
         ToolParameter("page_id", "string", "Confluence Seiten-ID"),
     ],
     handler=read_confluence_page
+)
+
+
+# ── Confluence PDF Tools ──
+
+async def list_confluence_pdfs(page_id: str) -> ToolResult:
+    """
+    Listet alle PDF-Attachments einer Confluence-Seite auf.
+
+    Gibt Metadaten wie Titel, Größe und Download-URL zurück.
+    Nützlich um zu prüfen welche PDFs an einer Seite hängen
+    bevor man sie mit read_confluence_pdf liest.
+    """
+    from app.services.confluence_client import get_confluence_client
+    from app.services.confluence_cache import get_confluence_cache
+    from app.core.config import settings
+
+    if not settings.confluence.base_url:
+        return ToolResult(success=False, error="Confluence ist nicht konfiguriert")
+
+    try:
+        cache = get_confluence_cache()
+
+        # Cache-Check
+        cached = cache.get_attachments(page_id, "application/pdf")
+        if cached is not None:
+            attachments = cached
+            cache_info = " (cached)"
+        else:
+            client = get_confluence_client()
+            attachments = await client.get_pdf_attachments(page_id)
+            cache.set_attachments(page_id, "application/pdf", attachments)
+            cache_info = ""
+
+        if not attachments:
+            return ToolResult(
+                success=True,
+                data=f"Keine PDF-Attachments auf Seite {page_id} gefunden."
+            )
+
+        output = f"=== PDF-Attachments auf Seite {page_id}{cache_info} ===\n\n"
+        for att in attachments:
+            size_kb = att['size_bytes'] / 1024
+            output += f"📎 {att['title']}\n"
+            output += f"   ID: {att['id']} | Größe: {size_kb:.1f} KB\n"
+            output += f"   Typ: {att['media_type']}\n\n"
+
+        return ToolResult(success=True, data=output)
+    except Exception as e:
+        return ToolResult(success=False, error=f"Confluence PDF-Fehler: {str(e)}")
+
+
+async def read_confluence_pdf(
+    page_id: str,
+    pdf_title: str,
+    max_pages: int = 10,
+    query: str = ""
+) -> ToolResult:
+    """
+    Liest ein PDF-Attachment von einer Confluence-Seite und extrahiert den Text.
+
+    Bei Angabe von 'query' wird eine Relevanz-Bewertung durchgeführt
+    und nur relevante Abschnitte zurückgegeben.
+    """
+    import tempfile
+    from pathlib import Path
+    from app.services.confluence_client import get_confluence_client
+    from app.services.pdf_reader import PDFReader
+    from app.core.config import settings
+
+    if not settings.confluence.base_url:
+        return ToolResult(success=False, error="Confluence ist nicht konfiguriert")
+
+    try:
+        client = get_confluence_client()
+        attachments = await client.get_pdf_attachments(page_id)
+
+        # PDF nach Titel finden
+        target_pdf = None
+        for att in attachments:
+            if pdf_title.lower() in att['title'].lower():
+                target_pdf = att
+                break
+
+        if not target_pdf:
+            available = ", ".join(a['title'] for a in attachments) if attachments else "keine"
+            return ToolResult(
+                success=False,
+                error=f"PDF '{pdf_title}' nicht gefunden. Verfügbar: {available}"
+            )
+
+        # PDF herunterladen
+        pdf_bytes = await client.download_attachment(target_pdf['download_url'])
+
+        # Temporär speichern und extrahieren
+        with tempfile.NamedTemporaryFile(suffix='.pdf', delete=False) as tmp:
+            tmp.write(pdf_bytes)
+            tmp_path = tmp.name
+
+        try:
+            reader = PDFReader()
+            text = reader.extract_text(tmp_path, max_pages=max_pages)
+            metadata = reader.get_metadata(tmp_path)
+        finally:
+            Path(tmp_path).unlink(missing_ok=True)
+
+        # Relevanz-Bewertung wenn Query angegeben
+        relevance_info = ""
+        if query:
+            relevance_score = _calculate_pdf_relevance(text, query)
+            relevance_info = f"\n📊 Relevanz für '{query}': {relevance_score:.0%}\n"
+
+            # Bei niedriger Relevanz warnen
+            if relevance_score < 0.2:
+                relevance_info += "⚠️ Geringe Relevanz - PDF enthält wenig zur Anfrage\n"
+
+        # Output formatieren
+        output = f"=== PDF: {target_pdf['title']} ===\n"
+        output += f"Seiten: {metadata.get('page_count', '?')} | "
+        output += f"Autor: {metadata.get('author', '-')}\n"
+        output += relevance_info
+        output += f"---\n\n{text}"
+
+        return ToolResult(success=True, data=output)
+
+    except Exception as e:
+        logger.error(f"PDF-Lesefeher: {e}")
+        return ToolResult(success=False, error=f"PDF-Fehler: {str(e)}")
+
+
+def _calculate_pdf_relevance(text: str, query: str) -> float:
+    """
+    Berechnet einen einfachen Relevanz-Score für PDF-Inhalt.
+
+    Args:
+        text: Extrahierter PDF-Text
+        query: Suchanfrage
+
+    Returns:
+        Score zwischen 0.0 und 1.0
+    """
+    import re
+
+    if not text or not query:
+        return 0.0
+
+    text_lower = text.lower()
+    query_lower = query.lower()
+
+    # Query-Terme extrahieren (min 3 Zeichen)
+    query_terms = set(re.findall(r'\b\w{3,}\b', query_lower))
+    if not query_terms:
+        return 0.0
+
+    # Zähle Treffer
+    matches = 0
+    total_occurrences = 0
+
+    for term in query_terms:
+        count = text_lower.count(term)
+        if count > 0:
+            matches += 1
+            total_occurrences += min(count, 10)  # Cap bei 10 pro Term
+
+    # Score berechnen
+    # 60% basierend auf Anteil gefundener Terme
+    term_coverage = matches / len(query_terms)
+
+    # 40% basierend auf Häufigkeit (normalisiert)
+    frequency_score = min(total_occurrences / (len(query_terms) * 5), 1.0)
+
+    return 0.6 * term_coverage + 0.4 * frequency_score
+
+
+LIST_CONFLUENCE_PDFS_TOOL = Tool(
+    name="list_confluence_pdfs",
+    description=(
+        "Listet alle PDF-Attachments einer Confluence-Seite auf. "
+        "Zeigt Titel, ID und Größe. "
+        "Nutze die Seiten-ID aus search_confluence."
+    ),
+    category=ToolCategory.KNOWLEDGE,
+    parameters=[
+        ToolParameter("page_id", "string", "Confluence Seiten-ID"),
+    ],
+    handler=list_confluence_pdfs
+)
+
+READ_CONFLUENCE_PDF_TOOL = Tool(
+    name="read_confluence_pdf",
+    description=(
+        "Liest ein PDF-Attachment von einer Confluence-Seite und extrahiert den Text. "
+        "Unterstützt Relevanz-Bewertung: Gib 'query' an um zu prüfen wie relevant "
+        "das PDF für eine bestimmte Frage ist. "
+        "Nutze list_confluence_pdfs um verfügbare PDFs zu sehen."
+    ),
+    category=ToolCategory.KNOWLEDGE,
+    parameters=[
+        ToolParameter("page_id", "string", "Confluence Seiten-ID"),
+        ToolParameter("pdf_title", "string", "Name/Titel des PDFs (Teil-Match möglich)"),
+        ToolParameter("max_pages", "integer", "Max. Seiten extrahieren (default: 10)", required=False, default=10),
+        ToolParameter("query", "string", "Optional: Query für Relevanz-Bewertung", required=False, default=""),
+    ],
+    handler=read_confluence_pdf
 )
 
 
@@ -2422,6 +2649,8 @@ def create_default_registry() -> ToolRegistry:
     # Confluence Tools
     registry.register(SEARCH_CONFLUENCE_TOOL)
     registry.register(READ_CONFLUENCE_PAGE_TOOL)
+    registry.register(LIST_CONFLUENCE_PDFS_TOOL)
+    registry.register(READ_CONFLUENCE_PDF_TOOL)
 
     # Jira Tools
     registry.register(SEARCH_JIRA_TOOL)
@@ -2509,6 +2738,10 @@ def create_default_registry() -> ToolRegistry:
     # Meta-Tools (kombinierte Operationen für effizientere Tool-Nutzung)
     from app.agent.meta_tools import register_meta_tools
     register_meta_tools(registry)
+
+    # Script Execution Tools (Python-Script-Generierung und -Ausführung)
+    from app.agent.script_tools import register_script_tools
+    register_script_tools(registry)
 
     return registry
 

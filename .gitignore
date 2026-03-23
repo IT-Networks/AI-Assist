@@ -21,6 +21,7 @@ env/
 uploads/
 backups/
 index/
+scripts/
 *.db
 *.sqlite3
 

@@ -4360,6 +4360,32 @@ ALLE AUSGABEN AUF DEUTSCH!"""
                     error=f"Alle Dateien fehlgeschlagen:\n" + "\n".join(errors)
                 )
 
+        elif operation == "execute_script":
+            # Python-Script ausführen
+            from app.agent.script_tools import execute_script_after_confirmation
+
+            script_id = confirmation_data.get("script_id")
+            args = confirmation_data.get("args")
+            input_data = confirmation_data.get("input_data")
+
+            result = await execute_script_after_confirmation(script_id, args, input_data)
+
+            # Emit workspace event für Script-Ergebnis
+            if result.success:
+                await self._emit_event(AgentEventType.WORKSPACE_CODE_CHANGE, {
+                    "id": str(uuid.uuid4())[:8],
+                    "toolCall": "execute_script",
+                    "filePath": confirmation_data.get("file_path", f"script_{script_id}.py"),
+                    "description": f"Script '{confirmation_data.get('script_name', script_id)}' ausgeführt",
+                    "status": "applied",
+                    "diff": "",
+                    "originalContent": confirmation_data.get("code", ""),
+                    "modifiedContent": result.data if result.success else "",
+                    "language": "python"
+                })
+
+            return result
+
         else:
             return ToolResult(success=False, error=f"Unbekannte Operation: {operation}")
 

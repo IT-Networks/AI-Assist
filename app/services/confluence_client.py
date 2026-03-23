@@ -431,6 +431,92 @@ class ConfluenceClient:
             if child.tail and child.tail.strip():
                 lines.append(child.tail.strip())
 
+    async def get_page_attachments(
+        self,
+        page_id: str,
+        media_type: Optional[str] = None
+    ) -> List[Dict]:
+        """
+        Holt alle Attachments einer Seite.
+
+        Args:
+            page_id: Confluence Seiten-ID
+            media_type: Optional Filter (z.B. "application/pdf")
+
+        Returns:
+            Liste von Attachment-Metadaten
+        """
+        self._check_configured()
+        await self._ensure_api_path()
+        client = _get_http_client()
+
+        try:
+            resp = await client.get(
+                self._api_url(f"/content/{page_id}/child/attachment"),
+                headers=self._headers(),
+                params={"expand": "version,metadata.mediaType", "limit": 100},
+            )
+            resp.raise_for_status()
+            data = resp.json()
+        except httpx.HTTPStatusError as e:
+            raise ConfluenceError(f"Attachments nicht abrufbar: {e.response.status_code}") from e
+        except httpx.RequestError as e:
+            raise ConfluenceError(f"Verbindungsfehler: {e}") from e
+
+        attachments = []
+        for item in data.get("results", []):
+            item_type = item.get("metadata", {}).get("mediaType", "")
+
+            # Filter nach Media-Type wenn angegeben
+            if media_type and media_type not in item_type:
+                continue
+
+            download_link = item.get("_links", {}).get("download", "")
+            if download_link and not download_link.startswith("http"):
+                # Relative URL → absolut machen
+                download_link = f"{self.base_url}{download_link}"
+
+            attachments.append({
+                "id": item.get("id", ""),
+                "title": item.get("title", ""),
+                "media_type": item_type,
+                "size_bytes": item.get("extensions", {}).get("fileSize", 0),
+                "download_url": download_link,
+                "version": item.get("version", {}).get("number", 1),
+            })
+
+        return attachments
+
+    async def get_pdf_attachments(self, page_id: str) -> List[Dict]:
+        """Holt nur PDF-Attachments einer Seite."""
+        return await self.get_page_attachments(page_id, media_type="application/pdf")
+
+    async def download_attachment(self, download_url: str) -> bytes:
+        """
+        Lädt ein Attachment herunter.
+
+        Args:
+            download_url: Volle Download-URL des Attachments
+
+        Returns:
+            Binärer Inhalt des Attachments
+        """
+        client = _get_http_client()
+
+        try:
+            resp = await client.get(
+                download_url,
+                headers=self._headers(),
+                timeout=60,  # PDFs können groß sein
+            )
+            resp.raise_for_status()
+            return resp.content
+        except httpx.HTTPStatusError as e:
+            raise ConfluenceError(f"Download fehlgeschlagen: {e.response.status_code}") from e
+        except httpx.RequestError as e:
+            raise ConfluenceError(f"Verbindungsfehler beim Download: {e}") from e
+
+
 # Singleton
 _confluence_client: Optional[ConfluenceClient] = None
 

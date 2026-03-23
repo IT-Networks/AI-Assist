@@ -35,22 +35,32 @@ STRATEGIE:
    - Nur Space-Match → NIEDRIG
 3. Lies NUR die Top-3 relevantesten Seiten vollständig
 4. Bei jedem read_confluence_page: Extrahiere KONKRETE Fakten
+5. PRÜFE mit list_confluence_pdfs ob relevante PDF-Attachments existieren
+6. Bei relevanten PDFs: read_confluence_pdf mit query für Relevanz-Score
+
+PDF-STRATEGIE:
+- PDFs oft bei technischen Docs, Spezifikationen, Architektur-Diagrammen
+- Nutze 'query' Parameter für automatische Relevanz-Bewertung
+- Bei Score < 20%: PDF überspringen, nicht relevant
 
 WICHTIGE REGELN:
 - Zitiere IMMER [Seiten-ID: Titel] bei Fakten
-- Lies NICHT mehr als 6 Seiten (Budget-Limit)
+- Lies NICHT mehr als 6 Seiten + 3 PDFs (Budget-Limit)
 - Bei <3 relevanten Treffern: Melde "wenig gefunden" statt weiterzusuchen
 - Bei 0 Treffern: Versuche EINMAL mit alternativen Begriffen
-- Erfinde KEINE Informationen - nur was in den Seiten steht
+- Erfinde KEINE Informationen - nur was in den Seiten/PDFs steht
 
 OUTPUT-FORMAT:
 Jedes Finding als: "[ID:12345 - Seitentitel] Konkrete Information..."
+Oder für PDFs: "[PDF: Dateiname.pdf] Konkrete Information..."
 """
 
-    max_iterations = 8  # Reduziert: 1-2 Suchen + max 6 Seiten
+    max_iterations = 10  # 1-2 Suchen + max 6 Seiten + optionale PDFs
     allowed_tools = [
         "search_confluence",
         "read_confluence_page",
+        "list_confluence_pdfs",
+        "read_confluence_pdf",
     ]
 
     # Content-Extraktion für große Confluence-Seiten aktivieren

@@ -629,6 +629,18 @@ function toggleCodeItemExpand(itemId) {
   renderWorkspaceTab('code');
 }
 
+/**
+ * Kopiert Text in die Zwischenablage
+ */
+function copyToClipboard(text) {
+  navigator.clipboard.writeText(text).then(() => {
+    showToast('Kopiert', 'success');
+  }).catch(err => {
+    log.error('Failed to copy:', err);
+    showToast('Kopieren fehlgeschlagen', 'error');
+  });
+}
+
 // Copy diff to clipboard
 function copyDiffToClipboard(itemId) {
   const item = workspaceState.tabs.code.items.find(i => i.id === itemId);
@@ -1001,17 +1013,67 @@ function renderResearchItems(items) {
 }
 
 function renderFileItem(item) {
+  const fileName = (item.filePath || '').split(/[/\\]/).pop();
+  const dirPath = (item.filePath || '').replace(/[/\\][^/\\]+$/, '');
+  const icon = getFileIcon(item.filePath);
+  const opIcon = item.operation === 'write' ? '💾' : (item.operation === 'edit' ? '✏️' : '📖');
+  const opLabel = item.operation === 'write' ? 'Geschrieben' : (item.operation === 'edit' ? 'Bearbeitet' : 'Gelesen');
+  const timeAgo = item.timestamp ? formatTimeAgo(item.timestamp) : '';
+
   return `
-    <div class="workspace-item" data-id="${item.id}">
+    <div class="workspace-item workspace-file-item" data-id="${item.id}">
       <div class="workspace-item-header">
         <div class="workspace-item-title">
-          <span class="file-icon">&#128193;</span>
-          <span>${escapeHtml(item.filePath)}</span>
+          <span class="file-icon">${icon}</span>
+          <span class="file-name" title="${escapeHtml(item.filePath)}">${escapeHtml(fileName)}</span>
         </div>
-        <span class="workspace-item-meta">${item.operation || 'read'}</span>
+        <span class="workspace-item-meta file-operation ${item.operation || 'read'}">${opIcon} ${opLabel}</span>
+      </div>
+      <div class="file-item-details">
+        <span class="file-path" onclick="copyToClipboard('${escapeHtml(item.filePath)}')" title="Klicken zum Kopieren">${escapeHtml(dirPath)}</span>
+        ${timeAgo ? `<span class="file-time">${timeAgo}</span>` : ''}
       </div>
     </div>
   `;
+}
+
+/**
+ * Gibt ein Icon basierend auf der Dateiendung zurück
+ */
+function getFileIcon(filePath) {
+  if (!filePath) return '📄';
+  const ext = filePath.split('.').pop()?.toLowerCase();
+  const icons = {
+    'py': '🐍', 'python': '🐍',
+    'js': '📜', 'jsx': '⚛️', 'ts': '📘', 'tsx': '⚛️',
+    'java': '☕', 'kt': '🟣', 'scala': '🔴',
+    'go': '🐹', 'rs': '🦀', 'rb': '💎',
+    'html': '🌐', 'css': '🎨', 'scss': '🎨', 'sass': '🎨',
+    'json': '📋', 'yaml': '📋', 'yml': '📋', 'xml': '📋',
+    'md': '📝', 'txt': '📄', 'log': '📜',
+    'sql': '🗃️', 'db': '🗃️',
+    'sh': '💻', 'bash': '💻', 'zsh': '💻', 'ps1': '💻',
+    'dockerfile': '🐳', 'docker': '🐳',
+    'png': '🖼️', 'jpg': '🖼️', 'jpeg': '🖼️', 'gif': '🖼️', 'svg': '🖼️',
+    'pdf': '📕', 'doc': '📘', 'docx': '📘', 'xls': '📊', 'xlsx': '📊',
+    'zip': '📦', 'tar': '📦', 'gz': '📦', 'rar': '📦',
+    'c': '🔧', 'cpp': '🔧', 'h': '🔧', 'hpp': '🔧',
+    'cs': '🟪', 'php': '🐘', 'swift': '🍎', 'vue': '💚'
+  };
+  return icons[ext] || '📄';
+}
+
+/**
+ * Formatiert einen Timestamp als relative Zeit
+ */
+function formatTimeAgo(timestamp) {
+  const now = Date.now();
+  const diff = now - timestamp;
+
+  if (diff < 60000) return 'gerade eben';
+  if (diff < 3600000) return `vor ${Math.floor(diff / 60000)} Min`;
+  if (diff < 86400000) return `vor ${Math.floor(diff / 3600000)} Std`;
+  return `vor ${Math.floor(diff / 86400000)} Tagen`;
 }
 
 function toggleResearchGroup(source) {
@@ -4517,11 +4579,11 @@ const _CMD_LIST = [
   { cmd: '/plan',       desc: 'Modus: Plan & Ausführen 📋',       alias: '/p' },
   { cmd: '/auto',       desc: 'Modus: Autonom ⚠️',               alias: '/a' },
   { cmd: '/debug',      desc: 'Modus: Debug & Fehleranalyse 🔍',  alias: '/d' },
-  // MCP Capabilities
-  { cmd: '/brainstorm', desc: 'MCP: Ideen & Requirements 💡',     alias: '/bs' },
-  { cmd: '/design',     desc: 'MCP: Architektur & Design 📐',     alias: '/des' },
-  { cmd: '/implement',  desc: 'MCP: Code-Generierung 💻',         alias: '/impl' },
-  { cmd: '/analyze',    desc: 'MCP: Code-Analyse 🔍',             alias: '/ana' },
+  // Skills (ehemals MCP)
+  { cmd: '/brainstorm', desc: 'Skill: Ideen & Requirements 💡',   alias: '/bs' },
+  { cmd: '/design',     desc: 'Skill: Architektur & Design 📐',   alias: '/des' },
+  { cmd: '/implement',  desc: 'Skill: Code-Generierung 💻',       alias: '/impl' },
+  { cmd: '/analyze',    desc: 'Skill: Code-Analyse 🔍',           alias: '/ana' },
   { cmd: '/seq',        desc: 'MCP: Sequential Thinking 🧠',      alias: null },
   // Sonstige
   { cmd: '/suche an',   desc: 'Web-Suche aktivieren 🔍',          alias: null },
@@ -5809,21 +5871,207 @@ function renderToolHistory() {
     return;
   }
 
-  container.innerHTML = state.toolHistory.slice(0, 20).map((tool, i) => `
-    <div class="tool-history-item">
+  container.innerHTML = state.toolHistory.slice(0, 30).map((tool, i) => `
+    <div class="tool-history-item ${tool.status}">
       <div class="tool-history-header" onclick="toggleToolHistoryItem(${i})">
-        <span class="tool-history-icon">&#128295;</span>
+        <span class="tool-history-icon">${getToolIcon(tool.name)}</span>
         <span class="tool-history-name">${escapeHtml(tool.name)}</span>
         <span class="tool-history-status tool-call-status ${tool.status}">${
-          tool.status === 'running' ? 'Läuft' : (tool.status === 'success' ? '✓' : '✗')
+          tool.status === 'running' ? '⏳' : (tool.status === 'success' ? '✓' : '✗')
         }</span>
       </div>
+      <div class="tool-history-summary">${formatToolSummary(tool)}</div>
       <div class="tool-history-body" id="tool-body-${i}">
-        <strong>Args:</strong> ${escapeHtml(JSON.stringify(tool.args))}
-        ${tool.result ? `<br><strong>Result:</strong> ${escapeHtml(typeof tool.result === 'string' ? tool.result.slice(0, 300) : JSON.stringify(tool.result).slice(0, 300))}` : ''}
+        ${formatToolArgs(tool.args, tool.name)}
+        ${formatToolResult(tool.result, i)}
       </div>
     </div>
   `).join('');
+}
+
+/**
+ * Gibt ein passendes Icon für das Tool zurück
+ */
+function getToolIcon(toolName) {
+  const icons = {
+    'read_file': '📖',
+    'write_file': '💾',
+    'edit_file': '✏️',
+    'batch_write_files': '📦',
+    'search_code': '🔍',
+    'search_files': '📂',
+    'grep': '🔎',
+    'glob': '📁',
+    'list_directory': '📂',
+    'execute_command': '⚡',
+    'bash': '💻',
+    'query_database': '🗃️',
+    'web_search': '🌐',
+    'fetch_url': '🔗',
+    'create_file': '📝',
+    'delete_file': '🗑️',
+    'move_file': '📋',
+    'copy_file': '📋'
+  };
+  return icons[toolName] || '🔧';
+}
+
+/**
+ * Formatiert eine kurze Zusammenfassung des Tool-Aufrufs
+ */
+function formatToolSummary(tool) {
+  const args = tool.args || {};
+  const name = tool.name;
+
+  // Datei-bezogene Tools
+  if (name === 'read_file' || name === 'write_file' || name === 'edit_file') {
+    const path = args.path || args.file_path || '';
+    const fileName = path.split(/[/\\]/).pop() || path;
+    return `<span class="tool-summary-path" title="${escapeHtml(path)}">${escapeHtml(fileName)}</span>`;
+  }
+
+  if (name === 'batch_write_files') {
+    const files = args.files || [];
+    return `<span class="tool-summary-count">${files.length} Dateien</span>`;
+  }
+
+  // Such-Tools
+  if (name === 'search_code' || name === 'grep') {
+    const query = args.query || args.pattern || '';
+    return `<span class="tool-summary-query">"${escapeHtml(query.slice(0, 40))}${query.length > 40 ? '...' : ''}"</span>`;
+  }
+
+  if (name === 'glob' || name === 'search_files') {
+    const pattern = args.pattern || args.glob || '';
+    return `<span class="tool-summary-pattern">${escapeHtml(pattern)}</span>`;
+  }
+
+  // Datenbank
+  if (name === 'query_database') {
+    const query = args.query || '';
+    const preview = query.replace(/\s+/g, ' ').slice(0, 50);
+    return `<span class="tool-summary-sql">${escapeHtml(preview)}${query.length > 50 ? '...' : ''}</span>`;
+  }
+
+  // Bash/Command
+  if (name === 'execute_command' || name === 'bash') {
+    const cmd = args.command || '';
+    return `<span class="tool-summary-cmd">${escapeHtml(cmd.slice(0, 50))}${cmd.length > 50 ? '...' : ''}</span>`;
+  }
+
+  // Web
+  if (name === 'web_search') {
+    return `<span class="tool-summary-query">"${escapeHtml(args.query || '')}"</span>`;
+  }
+
+  if (name === 'fetch_url') {
+    const url = args.url || '';
+    try {
+      const hostname = new URL(url).hostname;
+      return `<span class="tool-summary-url">${escapeHtml(hostname)}</span>`;
+    } catch {
+      return `<span class="tool-summary-url">${escapeHtml(url.slice(0, 40))}</span>`;
+    }
+  }
+
+  return '';
+}
+
+/**
+ * Formatiert die Tool-Argumente lesbar
+ */
+function formatToolArgs(args, toolName) {
+  if (!args || Object.keys(args).length === 0) {
+    return '<div class="tool-args-empty">Keine Argumente</div>';
+  }
+
+  // Spezielle Formatierung für bestimmte Tools
+  if (toolName === 'edit_file') {
+    return formatEditFileArgs(args);
+  }
+
+  if (toolName === 'query_database') {
+    return formatSqlArgs(args);
+  }
+
+  // Standard JSON Pretty-Print
+  return `<div class="tool-args">
+    <div class="tool-args-header">Argumente:</div>
+    <pre class="tool-args-json">${escapeHtml(JSON.stringify(args, null, 2))}</pre>
+  </div>`;
+}
+
+/**
+ * Formatiert edit_file Argumente speziell
+ */
+function formatEditFileArgs(args) {
+  const path = args.path || args.file_path || '';
+  const oldStr = args.old_string || '';
+  const newStr = args.new_string || '';
+
+  return `<div class="tool-args tool-args-edit">
+    <div class="tool-arg-row">
+      <span class="tool-arg-label">Datei:</span>
+      <span class="tool-arg-path" onclick="copyToClipboard('${escapeHtml(path)}')" title="Klicken zum Kopieren">${escapeHtml(path)}</span>
+    </div>
+    <div class="tool-arg-row">
+      <span class="tool-arg-label">Ersetze:</span>
+      <pre class="tool-arg-code tool-arg-old">${escapeHtml(oldStr.slice(0, 200))}${oldStr.length > 200 ? '\n... (' + (oldStr.length - 200) + ' weitere Zeichen)' : ''}</pre>
+    </div>
+    <div class="tool-arg-row">
+      <span class="tool-arg-label">Mit:</span>
+      <pre class="tool-arg-code tool-arg-new">${escapeHtml(newStr.slice(0, 200))}${newStr.length > 200 ? '\n... (' + (newStr.length - 200) + ' weitere Zeichen)' : ''}</pre>
+    </div>
+  </div>`;
+}
+
+/**
+ * Formatiert SQL Query Argumente
+ */
+function formatSqlArgs(args) {
+  const query = args.query || '';
+  return `<div class="tool-args tool-args-sql">
+    <div class="tool-arg-row">
+      <span class="tool-arg-label">Query:</span>
+    </div>
+    <pre class="tool-arg-sql">${escapeHtml(query)}</pre>
+  </div>`;
+}
+
+/**
+ * Formatiert das Tool-Result lesbar
+ */
+function formatToolResult(result, index) {
+  if (!result) return '';
+
+  const resultStr = typeof result === 'string' ? result : JSON.stringify(result, null, 2);
+  const maxLength = 500;
+  const truncated = resultStr.length > maxLength;
+  const displayStr = truncated ? resultStr.slice(0, maxLength) : resultStr;
+
+  return `<div class="tool-result">
+    <div class="tool-result-header">
+      <span>Ergebnis:</span>
+      ${truncated ? `<span class="tool-result-truncated">(${resultStr.length} Zeichen, gekürzt)</span>` : ''}
+    </div>
+    <pre class="tool-result-content" id="tool-result-${index}">${escapeHtml(displayStr)}${truncated ? '\n...' : ''}</pre>
+    ${truncated ? `<button class="btn btn-xs btn-ghost tool-result-expand" onclick="expandToolResult(${index})">Alles anzeigen</button>` : ''}
+  </div>`;
+}
+
+/**
+ * Expandiert ein gekürztes Result
+ */
+function expandToolResult(index) {
+  const container = document.getElementById(`tool-result-${index}`);
+  const btn = container?.nextElementSibling;
+  const tool = state.toolHistory[index];
+
+  if (container && tool?.result) {
+    const fullResult = typeof tool.result === 'string' ? tool.result : JSON.stringify(tool.result, null, 2);
+    container.textContent = fullResult;
+    if (btn) btn.style.display = 'none';
+  }
 }
 
 function toggleToolHistoryItem(index) {
@@ -14249,16 +14497,12 @@ document.addEventListener('keydown', (e) => {
 // ══════════════════════════════════════════════════════════════════════════════
 
 // MCP-Typen mit Icons und Farben
+// Hinweis: brainstorm, design, implement, analyze, research sind jetzt Skills (kein MCP mehr)
 const MCP_TYPES = {
   sequential_thinking: { icon: '🧠', label: 'Sequential Thinking', color: 'thinking' },
   thinking: { icon: '🧠', label: 'Sequential Thinking', color: 'thinking' },  // ThinkingEngine wrapper
-  brainstorm: { icon: '💡', label: 'Brainstorm', color: 'brainstorm' },
-  design: { icon: '📐', label: 'Design', color: 'design' },
-  implement: { icon: '⚙️', label: 'Implement', color: 'implement' },
-  analyze: { icon: '🔍', label: 'Analyze', color: 'analyze' },
-  research: { icon: '🌐', label: 'Research', color: 'research' },
   // Fallback für unbekannte MCP-Typen
-  default: { icon: '⚡', label: 'MCP Tool', color: 'thinking' }
+  default: { icon: '🧠', label: 'Sequential Thinking', color: 'thinking' }
 };
 
 // Max. Anzahl Sessions im Panel

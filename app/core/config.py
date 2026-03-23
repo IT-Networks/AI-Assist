@@ -606,6 +606,7 @@ class UpdateConfig(BaseModel):
         "skills/**",            # Custom Skills
         "claudedocs/**",        # Claude-Dokumentation
         "sandbox_uploads/**",   # Sandbox-Uploads
+        "scripts/**",           # Generierte Python-Scripte
         "htmlcov/**",           # Test-Coverage-Reports
         "**/*.db",              # Alle SQLite-Datenbanken
     ])
@@ -1036,6 +1037,48 @@ class DockerSandboxConfig(BaseModel):
     wsl_integration: WSLIntegrationConfig = Field(default_factory=WSLIntegrationConfig)
 
 
+class ScriptExecutionConfig(BaseModel):
+    """Konfiguration für Python-Script-Generierung und -Ausführung.
+
+    Ermöglicht dem AI-Agent, Python-Scripte zu erstellen und sicher auszuführen.
+    Scripte werden validiert und erfordern User-Bestätigung vor Ausführung.
+    """
+    enabled: bool = True
+    scripts_directory: str = "./scripts"      # Konfigurierbarer Pfad für Scripte
+    max_scripts: int = 100                    # Max. gespeicherte Scripte
+    max_script_size_kb: int = 100             # Max. Script-Größe in KB
+    max_total_size_mb: int = 50               # Max. Gesamtgröße aller Scripte
+    cleanup_days: int = 30                    # Auto-Cleanup nach X Tagen (0 = deaktiviert)
+    require_confirmation: bool = True         # Bestätigung vor Ausführung (empfohlen: True)
+
+    # Sicherheit - erlaubte Imports (Whitelist)
+    allowed_imports: List[str] = [
+        # Standard-Library (sicher)
+        "json", "csv", "pathlib", "re", "datetime", "collections",
+        "itertools", "functools", "math", "statistics", "typing",
+        "dataclasses", "enum", "copy", "io", "base64", "hashlib",
+        "uuid", "random", "string", "textwrap", "difflib", "decimal",
+        "fractions", "operator", "contextlib", "abc", "struct",
+        # Datenverarbeitung
+        "pandas", "numpy", "yaml", "xml", "html", "pprint",
+    ]
+
+    # Sicherheit - blockierte Patterns (Regex)
+    blocked_patterns: List[str] = [
+        r"subprocess", r"os\.system", r"os\.popen", r"os\.exec",
+        r"eval\s*\(", r"exec\s*\(", r"__import__", r"compile\s*\(",
+        r"open\s*\([^)]*['\"][wa]", r"shutil\.rmtree", r"shutil\.move",
+        r"socket\.", r"urllib\.request", r"http\.client",
+        r"importlib", r"builtins", r"globals\s*\(", r"locals\s*\(",
+        r"getattr\s*\(", r"setattr\s*\(", r"delattr\s*\(",
+    ]
+
+    # Ausführung
+    use_container: bool = True                # Docker/Podman-Sandbox nutzen
+    timeout_seconds: int = 30                 # Max. Ausführungszeit
+    max_output_size_kb: int = 256             # Max. stdout/stderr in KB
+
+
 class GitHubConfig(BaseModel):
     """GitHub Enterprise Server Konfiguration (intern gehostet)."""
     enabled: bool = False
@@ -1243,6 +1286,7 @@ class Settings(BaseModel):
     github: GitHubConfig = Field(default_factory=GitHubConfig)
     internal_fetch: InternalFetchConfig = Field(default_factory=InternalFetchConfig)
     docker_sandbox: DockerSandboxConfig = Field(default_factory=DockerSandboxConfig)
+    script_execution: ScriptExecutionConfig = Field(default_factory=ScriptExecutionConfig)
     mcp: MCPConfig = Field(default_factory=MCPConfig)
     api_tools: ApiToolsConfig = Field(default_factory=ApiToolsConfig)
     compile_tool: CompileToolConfig = Field(default_factory=CompileToolConfig)

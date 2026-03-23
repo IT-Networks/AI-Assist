@@ -1413,18 +1413,210 @@ body {
 
 .tool-history-body {
   display: none;
-  padding: 8px 10px;
+  padding: 10px 12px;
   border-top: 1px solid var(--border);
   font-size: 0.75rem;
   font-family: var(--font-mono);
   background: var(--bg);
   color: var(--text-secondary);
-  max-height: 150px;
+  max-height: 400px;
   overflow-y: auto;
 }
 
 .tool-history-body.open {
   display: block;
+}
+
+/* Tool History - Enhanced Styles */
+.tool-history-item.success {
+  border-left: 3px solid var(--success);
+}
+
+.tool-history-item.error {
+  border-left: 3px solid var(--danger);
+}
+
+.tool-history-item.running {
+  border-left: 3px solid var(--warning);
+}
+
+.tool-history-summary {
+  padding: 4px 10px 8px;
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  border-bottom: 1px dashed var(--border);
+}
+
+.tool-summary-path {
+  color: var(--primary);
+  cursor: pointer;
+  font-family: var(--font-mono);
+  background: var(--surface);
+  padding: 1px 4px;
+  border-radius: 3px;
+}
+
+.tool-summary-path:hover {
+  background: var(--surface-hover);
+}
+
+.tool-summary-query,
+.tool-summary-pattern,
+.tool-summary-sql,
+.tool-summary-cmd {
+  font-family: var(--font-mono);
+  color: var(--text-secondary);
+  background: var(--surface);
+  padding: 1px 4px;
+  border-radius: 3px;
+}
+
+.tool-summary-count {
+  background: var(--primary);
+  color: white;
+  padding: 1px 6px;
+  border-radius: 10px;
+  font-size: 0.7rem;
+}
+
+.tool-summary-url {
+  color: var(--info);
+  font-family: var(--font-mono);
+}
+
+/* Tool Args Formatting */
+.tool-args {
+  margin-bottom: 8px;
+}
+
+.tool-args-header {
+  font-weight: 600;
+  color: var(--text-secondary);
+  margin-bottom: 4px;
+}
+
+.tool-args-json {
+  background: var(--surface);
+  padding: 8px;
+  border-radius: 4px;
+  overflow-x: auto;
+  margin: 0;
+  white-space: pre-wrap;
+  word-break: break-all;
+  max-height: 200px;
+  overflow-y: auto;
+}
+
+.tool-args-empty {
+  color: var(--text-muted);
+  font-style: italic;
+}
+
+/* Edit File Args */
+.tool-args-edit .tool-arg-row {
+  margin-bottom: 8px;
+}
+
+.tool-arg-label {
+  display: block;
+  font-weight: 600;
+  color: var(--text-secondary);
+  margin-bottom: 2px;
+  font-size: 0.7rem;
+  text-transform: uppercase;
+}
+
+.tool-arg-path {
+  color: var(--primary);
+  cursor: pointer;
+  font-family: var(--font-mono);
+  padding: 2px 4px;
+  background: var(--surface);
+  border-radius: 3px;
+  display: inline-block;
+}
+
+.tool-arg-path:hover {
+  background: var(--surface-hover);
+  text-decoration: underline;
+}
+
+.tool-arg-code {
+  background: var(--surface);
+  padding: 6px 8px;
+  border-radius: 4px;
+  margin: 4px 0 0 0;
+  overflow-x: auto;
+  white-space: pre-wrap;
+  word-break: break-all;
+  max-height: 100px;
+  overflow-y: auto;
+  font-size: 0.7rem;
+}
+
+.tool-arg-old {
+  border-left: 3px solid var(--danger);
+  background: rgba(239, 68, 68, 0.1);
+}
+
+.tool-arg-new {
+  border-left: 3px solid var(--success);
+  background: rgba(34, 197, 94, 0.1);
+}
+
+.tool-arg-sql {
+  background: var(--surface);
+  padding: 8px;
+  border-radius: 4px;
+  margin: 4px 0 0 0;
+  overflow-x: auto;
+  white-space: pre-wrap;
+  color: var(--info);
+}
+
+/* Tool Result Formatting */
+.tool-result {
+  margin-top: 8px;
+  border-top: 1px solid var(--border);
+  padding-top: 8px;
+}
+
+.tool-result-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 4px;
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+.tool-result-truncated {
+  font-size: 0.65rem;
+  color: var(--text-muted);
+  font-weight: normal;
+}
+
+.tool-result-content {
+  background: var(--surface);
+  padding: 8px;
+  border-radius: 4px;
+  margin: 0;
+  overflow-x: auto;
+  white-space: pre-wrap;
+  word-break: break-all;
+  max-height: 300px;
+  overflow-y: auto;
+  font-size: 0.7rem;
+}
+
+.tool-result-expand {
+  margin-top: 4px;
+  font-size: 0.7rem;
+}
+
+.btn-xs {
+  padding: 2px 8px;
+  font-size: 0.7rem;
 }
 
 /* Empty State */
@@ -6231,6 +6423,67 @@ a:visited {
 .workspace-item-meta {
   font-size: 0.75rem;
   color: var(--text-muted);
+}
+
+/* File Item Styles */
+.workspace-file-item {
+  padding: 10px 12px;
+}
+
+.workspace-file-item .file-name {
+  font-weight: 500;
+  color: var(--text);
+}
+
+.file-item-details {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-top: 4px;
+  padding-top: 4px;
+  border-top: 1px dashed var(--border);
+}
+
+.file-path {
+  font-size: 0.7rem;
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  cursor: pointer;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 70%;
+}
+
+.file-path:hover {
+  color: var(--primary);
+  text-decoration: underline;
+}
+
+.file-time {
+  font-size: 0.65rem;
+  color: var(--text-muted);
+}
+
+.file-operation {
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-size: 0.7rem;
+}
+
+.file-operation.read {
+  background: var(--info-bg, rgba(59, 130, 246, 0.1));
+  color: var(--info);
+}
+
+.file-operation.write {
+  background: var(--success-bg, rgba(34, 197, 94, 0.1));
+  color: var(--success);
+}
+
+.file-operation.edit {
+  background: var(--warning-bg, rgba(234, 179, 8, 0.1));
+  color: var(--warning);
 }
 
 .workspace-item-actions {
