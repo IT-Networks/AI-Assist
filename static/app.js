@@ -6741,6 +6741,15 @@ async function buildHandbookIndex(force = false) {
       signal: handbookBuildController.signal
     });
 
+    // Fehler-Response abfangen
+    if (!res.ok) {
+      const errData = await res.json().catch(() => ({ detail: res.statusText }));
+      const errMsg = errData.detail || `HTTP ${res.status}`;
+      el.innerHTML = `<span class="status-icon">&#128214;</span><span style="color:var(--danger)">Fehler: ${errMsg}</span>`;
+      handbookBuildController = null;
+      return;
+    }
+
     const reader = res.body.getReader();
     const decoder = new TextDecoder();
     let buffer = '';
