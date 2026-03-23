@@ -275,6 +275,8 @@ class HandbookConfig(BaseModel):
         "eingabe", "ausgabe", "allgemein", "technik",
         "historie", "beispiele", "varianten", "fehler"
     ]
+    # Performance: Anzahl paralleler Threads für Netzwerk-I/O
+    parallel_workers: int = 8
 
 
 class SkillsConfig(BaseModel):

@@ -134,6 +134,7 @@ async def build_index(
     functions_subdir = hb_config.functions_subdir
     fields_subdir = hb_config.fields_subdir
     exclude_patterns = hb_config.exclude_patterns
+    parallel_workers = getattr(hb_config, 'parallel_workers', 8)
 
     if stream:
         # SSE Streaming Response
@@ -146,7 +147,8 @@ async def build_index(
                     exclude_patterns=exclude_patterns,
                     force=force,
                     structure_mode=structure_mode,
-                    known_tab_suffixes=known_tab_suffixes
+                    known_tab_suffixes=known_tab_suffixes,
+                    parallel_workers=parallel_workers
                 ):
                     event_data = json.dumps(progress.to_dict(), ensure_ascii=False)
                     yield f"data: {event_data}\n\n"

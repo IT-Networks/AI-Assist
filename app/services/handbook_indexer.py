@@ -192,7 +192,8 @@ class HandbookIndexer:
         force: bool = False,
         batch_size: int = 500,
         structure_mode: str = "auto",
-        known_tab_suffixes: Optional[List[str]] = None
+        known_tab_suffixes: Optional[List[str]] = None,
+        parallel_workers: int = 8
     ) -> Generator[IndexProgress, None, Dict]:
         """
         Indexiert alle HTML-Dateien mit Progress-Streaming.
@@ -206,6 +207,7 @@ class HandbookIndexer:
             batch_size: Batch-Größe für DB-Operationen
             structure_mode: "auto", "directory" oder "flat"
             known_tab_suffixes: Tab-Suffixe für flache Struktur
+            parallel_workers: Anzahl paralleler Threads für Netzwerk-I/O
 
         Yields:
             IndexProgress Objekte mit aktuellem Status
@@ -283,21 +285,30 @@ class HandbookIndexer:
         progress.message = f"{len(services)} Services, {len(field_infos)} Felder gefunden"
         yield progress
 
-        # 4. Indexierung in Batches
+        # 4. Indexierung mit paralleler Dateiverarbeitung
         progress.phase = "indexing"
         indexed = 0
         skipped = 0
         errors = 0
 
-        # Batch-Verarbeitung
-        batch = []
-        batch_mtimes = []
+        def parse_file_worker(html_file: Path) -> Optional[Tuple[Path, str, float, Tuple]]:
+            """Worker für paralleles Parsen (Thread-safe)."""
+            try:
+                rel_path = str(html_file.relative_to(handbook))
+                mtime = html_file.stat().st_mtime
+                data = self._parse_html_file(html_file, handbook, functions_subdir)
+                return (html_file, rel_path, mtime, data)
+            except Exception:
+                return None
 
-        def process_batch(con, batch_data, batch_mtimes_data):
-            """Verarbeitet einen Batch von Dateien."""
-            nonlocal indexed, skipped, errors
-
-            for (file_path, rel_path, data), mtime in zip(batch_data, batch_mtimes_data):
+        def save_batch_to_db(con, batch_results):
+            """Speichert geparste Dateien in DB (sequentiell)."""
+            nonlocal indexed, errors
+            for result in batch_results:
+                if result is None:
+                    errors += 1
+                    continue
+                html_file, rel_path, mtime, data = result
                 try:
                     con.execute("DELETE FROM handbook_fts WHERE file_path=?", (rel_path,))
                     con.execute(
@@ -311,72 +322,70 @@ class HandbookIndexer:
                         (f"mtime:{rel_path}", str(mtime))
                     )
                     indexed += 1
-                except Exception as e:
+                except Exception:
                     errors += 1
 
+        # Parallele Verarbeitung in Chunks
+        chunk_size = parallel_workers * 10  # z.B. 80 Dateien pro Chunk bei 8 Workern
+
         with self._connect() as con:
-            for i, html_file in enumerate(html_files):
+            # Lade bereits indexierte mtimes für Skip-Check
+            existing_mtimes = {}
+            if not force:
+                rows = con.execute("SELECT key, value FROM handbook_meta WHERE key LIKE 'mtime:%'").fetchall()
+                for row in rows:
+                    existing_mtimes[row[0][6:]] = float(row[1])  # Entferne "mtime:" Prefix
+
+            i = 0
+            while i < len(html_files):
                 if self._cancel_flag.is_set():
                     progress.phase = "cancelled"
                     progress.message = "Abgebrochen durch Benutzer"
                     yield progress
                     return {"cancelled": True, "indexed": indexed}
 
-                try:
+                # Chunk von Dateien holen
+                chunk = html_files[i:i + chunk_size]
+                files_to_process = []
+
+                # Skip-Check für diesen Chunk
+                for html_file in chunk:
                     rel_path = str(html_file.relative_to(handbook))
-                    mtime = html_file.stat().st_mtime
-
-                    # Prüfen ob unverändert
-                    if not force:
-                        row = con.execute(
-                            "SELECT value FROM handbook_meta WHERE key=?",
-                            (f"mtime:{rel_path}",)
-                        ).fetchone()
-                        if row and abs(float(row[0]) - mtime) < 0.001:
+                    try:
+                        mtime = html_file.stat().st_mtime
+                        if rel_path in existing_mtimes and abs(existing_mtimes[rel_path] - mtime) < 0.001:
                             skipped += 1
-                            progress.skipped = skipped
-                            progress.processed_files = i + 1
-                            if (i + 1) % 500 == 0:
-                                yield progress
-                            continue
+                        else:
+                            files_to_process.append(html_file)
+                    except Exception:
+                        errors += 1
 
-                    # Datei parsen
-                    data = self._parse_html_file(html_file, handbook, functions_subdir)
-                    batch.append((html_file, rel_path, data))
-                    batch_mtimes.append(mtime)
+                # Paralleles Parsen der nicht-übersprungenen Dateien
+                if files_to_process:
+                    with ThreadPoolExecutor(max_workers=parallel_workers) as executor:
+                        results = list(executor.map(parse_file_worker, files_to_process))
 
-                    # Batch verarbeiten wenn voll
-                    if len(batch) >= batch_size:
-                        process_batch(con, batch, batch_mtimes)
-                        con.commit()
-                        batch = []
-                        batch_mtimes = []
+                    # Sequentielles Speichern in DB
+                    save_batch_to_db(con, results)
+                    con.commit()
 
-                except Exception as e:
-                    errors += 1
+                i += chunk_size
 
                 # Progress Update
-                progress.processed_files = i + 1
+                progress.processed_files = min(i, len(html_files))
                 progress.errors = errors
                 progress.skipped = skipped
-                progress.current_file = str(html_file.name)[:50]
                 progress.elapsed_seconds = time.time() - start
 
                 # Geschätzte Restzeit
-                if indexed > 0:
-                    avg_time = progress.elapsed_seconds / (indexed + skipped + errors)
+                processed = indexed + skipped + errors
+                if processed > 0:
+                    avg_time = progress.elapsed_seconds / processed
                     remaining = len(html_files) - progress.processed_files
                     progress.estimated_remaining_seconds = avg_time * remaining
 
-                # Progress alle 50 Dateien (häufigeres Update bei langsamen Netzwerken)
-                if (i + 1) % 50 == 0:
-                    progress.message = f"Indexiere... {indexed} neu, {skipped} übersprungen"
-                    yield progress
-
-            # Letzten Batch verarbeiten
-            if batch:
-                process_batch(con, batch, batch_mtimes)
-                con.commit()
+                progress.message = f"Indexiere... {indexed} neu, {skipped} übersprungen ({parallel_workers} Threads)"
+                yield progress
 
         # 5. Services und Felder speichern
         progress.phase = "saving"
