@@ -1582,11 +1582,36 @@ Sei präzise und gib detaillierte Analyse-Schritte."""
             logger.debug("[agent] Forced MCP capability: {forced_capability}")
 
         # ── Slash-Command Skill Activation ─────────────────────────────────────
-        # Format: /command <query> - Aktiviert Skills mit trigger_commands
-        slash_match = re.match(r'^/([a-zA-Z][a-zA-Z0-9_-]*)\s*(.*)', user_message, re.DOTALL)
+        # Unterstützte Formate:
+        #   /command <query>           → z.B. /brainstorm Login-System
+        #   /sc:command <query>        → z.B. /sc:brainstorm Login-System (SuperClaude-Style)
+        #   /command --flag <query>    → z.B. /analyze --depth deep src/
+        slash_match = re.match(r'^/(?:sc:)?([a-zA-Z][a-zA-Z0-9_-]*)\s*(.*)', user_message, re.DOTALL)
         if slash_match and not forced_capability:
             command_name = slash_match.group(1).lower()
-            command_query = slash_match.group(2).strip() or user_message
+            command_rest = slash_match.group(2).strip()
+
+            # Flags und Query trennen (--flag value Paare)
+            flags = {}
+            query_parts = []
+            tokens = command_rest.split() if command_rest else []
+            i = 0
+            while i < len(tokens):
+                token = tokens[i]
+                if token.startswith('--'):
+                    flag_name = token[2:]
+                    # Prüfe ob nächstes Token ein Wert ist (kein Flag)
+                    if i + 1 < len(tokens) and not tokens[i + 1].startswith('--'):
+                        flags[flag_name] = tokens[i + 1]
+                        i += 2
+                    else:
+                        flags[flag_name] = True
+                        i += 1
+                else:
+                    query_parts.append(token)
+                    i += 1
+
+            command_query = ' '.join(query_parts)
 
             # Skills für diesen Command finden
             skill_mgr = get_skill_manager()
@@ -1598,9 +1623,15 @@ Sei präzise und gib detaillierte Analyse-Schritte."""
                     state.active_skill_ids.add(skill.id)
                     logger.info(f"[agent] Skill '{skill.id}' aktiviert durch /{command_name}")
 
-                # Query ohne Slash-Command verwenden (aber Command als Kontext behalten)
-                user_message = f"[COMMAND: /{command_name}]\n\n{command_query}" if command_query else user_message
-                logger.debug(f"[agent] Slash-Command /{command_name} mit {len(command_skills)} Skills")
+                # Flags als strukturierten Kontext aufbereiten
+                flags_context = ""
+                if flags:
+                    flags_list = [f"--{k}={v}" if v is not True else f"--{k}" for k, v in flags.items()]
+                    flags_context = f"\n[FLAGS: {' '.join(flags_list)}]"
+
+                # Query mit Command und Flags als Kontext
+                user_message = f"[COMMAND: /{command_name}]{flags_context}\n\n{command_query}" if command_query else user_message
+                logger.debug(f"[agent] Slash-Command /{command_name} mit {len(command_skills)} Skills, Flags: {flags}")
 
         # ── Continue-Handling (nach Bestätigung) ───────────────────────────────
         # ControlMarkers.CONTINUE wird nach Schreibbestätigung gesendet

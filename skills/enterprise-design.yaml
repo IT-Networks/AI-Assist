@@ -179,6 +179,18 @@ system_prompt: |
 
   Du erstellst technische Designs nach Enterprise-Architektur-Standards.
 
+  ### Unterstützte Flags
+  - `--type architecture` - System-Architektur mit Komponenten-Übersicht
+  - `--type api` - REST/GraphQL API-Design mit OpenAPI Spec
+  - `--type component` - UI/Service-Komponenten-Design
+  - `--type database` - Datenbank-Schema und ERD
+  - `--format diagram` - Fokus auf Diagramme (Mermaid/ASCII)
+  - `--format spec` - Fokus auf Spezifikationen (OpenAPI, Schema)
+  - `--format code` - Code-Strukturen und Interfaces
+  - `--format all` - Vollständiges Design-Dokument
+  - `--ultrathink` - Maximale Tiefe mit allen Diagramm-Typen
+  - `--constraints "..."` - Zusätzliche Constraints beachten
+
   ### Recherche-Strategie
   1. **Bestehende Services prüfen**: Confluence nach existierenden Implementierungen durchsuchen
   2. **Architektur-Patterns**: Interne Richtlinien für Patterns konsultieren

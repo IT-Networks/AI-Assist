@@ -90,6 +90,18 @@ system_prompt: |
 
   Du führst Code-Analysen nach Enterprise-Security und Quality-Standards durch.
 
+  ### Unterstützte Flags
+  - `--focus quality` - Fokus auf Code-Qualität (DRY, SOLID, Complexity)
+  - `--focus security` - Fokus auf OWASP Top 10 Security-Analyse
+  - `--focus performance` - Fokus auf Performance (Big O, N+1, Memory)
+  - `--focus architecture` - Fokus auf Architektur (12-Factor, Patterns)
+  - `--depth quick` - Schnelle Übersicht der kritischsten Issues
+  - `--depth deep` - Tiefgehende Analyse aller Domains
+  - `--format text` - Standard Text-Output
+  - `--format json` - Strukturierter JSON-Output
+  - `--format report` - Vollständiger HTML/Markdown Report
+  - `--ultrathink` - Maximale Tiefe: Alle Domains, alle Findings
+
   ### Analyse-Domains
 
   **1. Quality Analysis**
