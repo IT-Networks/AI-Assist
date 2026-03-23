@@ -57,6 +57,16 @@ class HandbookServiceDetail(BaseModel):
     call_variants: List[dict] = []
 
 
+class CheckpointInfo(BaseModel):
+    phase: str
+    batch_index: int
+    files_scanned: int
+    files_processed: int
+    created_at: str
+    updated_at: str
+    handbook_path: str
+
+
 class HandbookIndexStatus(BaseModel):
     indexed: bool
     indexed_pages: int
@@ -69,6 +79,9 @@ class HandbookIndexStatus(BaseModel):
     build_status: str = "none"  # none, complete, incomplete, cancelled, in_progress
     total_files_expected: int = 0
     files_processed: int = 0
+    # Checkpoint für Resume
+    has_checkpoint: bool = False
+    checkpoint_info: Optional[CheckpointInfo] = None
 
 
 class HandbookBuildResult(BaseModel):
@@ -103,6 +116,7 @@ async def get_index_status():
 @router.post("/index/build")
 async def build_index(
     force: bool = Query(False, description="Alle Dateien neu indexieren"),
+    resume: bool = Query(False, description="Unterbrochene Indexierung fortsetzen"),
     stream: bool = Query(True, description="Progress als SSE streamen")
 ):
     """
@@ -112,6 +126,7 @@ async def build_index(
 
     - force=false: Nur geänderte Dateien neu indexieren (schneller)
     - force=true: Alle Dateien neu indexieren
+    - resume=true: Setzt unterbrochene Indexierung fort (nutzt Checkpoint)
     - stream=true: Progress als Server-Sent Events streamen
     """
     # Einmalig aktuelle Config holen
@@ -144,16 +159,29 @@ async def build_index(
         # SSE Streaming Response
         async def progress_generator():
             try:
-                for progress in indexer.build_with_progress(
-                    handbook_path=str(handbook_path),
-                    functions_subdir=functions_subdir,
-                    fields_subdir=fields_subdir,
-                    exclude_patterns=exclude_patterns,
-                    force=force,
-                    structure_mode=structure_mode,
-                    known_tab_suffixes=known_tab_suffixes,
-                    parallel_workers=parallel_workers
-                ):
+                # Resume oder normaler Build
+                if resume and indexer.has_checkpoint():
+                    generator = indexer.resume_build(
+                        functions_subdir=functions_subdir,
+                        fields_subdir=fields_subdir,
+                        exclude_patterns=exclude_patterns,
+                        structure_mode=structure_mode,
+                        known_tab_suffixes=known_tab_suffixes,
+                        parallel_workers=parallel_workers
+                    )
+                else:
+                    generator = indexer.build_with_progress(
+                        handbook_path=str(handbook_path),
+                        functions_subdir=functions_subdir,
+                        fields_subdir=fields_subdir,
+                        exclude_patterns=exclude_patterns,
+                        force=force,
+                        structure_mode=structure_mode,
+                        known_tab_suffixes=known_tab_suffixes,
+                        parallel_workers=parallel_workers
+                    )
+
+                for progress in generator:
                     event_data = json.dumps(progress.to_dict(), ensure_ascii=False)
                     yield f"data: {event_data}\n\n"
 
@@ -232,6 +260,17 @@ async def delete_index():
     indexer = get_handbook_indexer()
     indexer.clear()
     return {"message": "Handbuch-Index gelöscht"}
+
+
+@router.delete("/index/checkpoint")
+async def delete_checkpoint():
+    """Löscht nur den Checkpoint (für Neustart ohne Index zu löschen)."""
+    if not get_settings().handbook.enabled:
+        raise HTTPException(status_code=404, detail="Handbuch-Feature ist nicht aktiviert")
+
+    indexer = get_handbook_indexer()
+    indexer._clear_checkpoint()
+    return {"message": "Checkpoint gelöscht"}
 
 
 # ══════════════════════════════════════════════════════════════════════════════

@@ -6702,6 +6702,8 @@ async function loadHandbookStatus() {
     const buildStatus = d.build_status || 'none';
     const isComplete = buildStatus === 'complete';
     const isIncomplete = buildStatus === 'incomplete' || buildStatus === 'cancelled';
+    const hasCheckpoint = d.has_checkpoint || false;
+    const checkpointInfo = d.checkpoint_info;
     const progress = d.total_files_expected > 0
       ? Math.round((d.files_processed / d.total_files_expected) * 100)
       : 0;
@@ -6715,8 +6717,22 @@ async function loadHandbookStatus() {
       `;
       el.classList.add('success');
       await loadHandbookServices();
+    } else if (hasCheckpoint && checkpointInfo) {
+      // Checkpoint vorhanden - Resume anbieten
+      const cpProgress = checkpointInfo.files_scanned > 0
+        ? Math.round((checkpointInfo.files_processed / checkpointInfo.files_scanned) * 100)
+        : 0;
+      el.innerHTML = `
+        <span class="status-icon">&#128214;</span>
+        <span style="color:var(--warning)">Unterbrochen bei ${checkpointInfo.phase}: ${checkpointInfo.files_processed}/${checkpointInfo.files_scanned} (${cpProgress}%)</span>
+        <button class="sb-btn" style="margin-left:8px" onclick="resumeHandbookIndex()" title="Indexierung fortsetzen">Fortsetzen</button>
+        <button class="sb-btn" style="margin-left:4px" onclick="buildHandbookIndex(true)" title="Neu starten">Neu starten</button>
+        <button class="sb-btn btn-danger" style="margin-left:4px" onclick="clearHandbookIndex()" title="Index löschen">Löschen</button>
+      `;
+      el.classList.add('warning');
+      if (d.services_count > 0) await loadHandbookServices();
     } else if (isIncomplete) {
-      // Unvollständig - Fortsetzen anbieten
+      // Unvollständig ohne Checkpoint - Neu starten empfohlen
       el.innerHTML = `
         <span class="status-icon">&#128214;</span>
         <span style="color:var(--warning)">Unvollständig: ${d.files_processed}/${d.total_files_expected} (${progress}%)</span>
@@ -6832,6 +6848,7 @@ function updateHandbookProgress(data) {
   const phaseNames = {
     'scanning': 'Suche Dateien...',
     'analyzing': 'Analysiere Struktur...',
+    'resuming': 'Setze fort...',
     'indexing': 'Indexiere...',
     'saving': 'Speichere...',
     'done': 'Fertig!',
@@ -6866,6 +6883,78 @@ async function cancelHandbookIndex() {
     await fetch('/api/handbook/index/cancel', { method: 'POST' });
   } catch (e) {
     // Ignore
+  }
+}
+
+async function resumeHandbookIndex() {
+  const el = document.getElementById('handbook-status');
+
+  el.innerHTML = `
+    <div class="handbook-progress">
+      <div class="progress-header">
+        <span class="status-icon">&#128214;</span>
+        <span id="handbook-progress-phase">Setze Indexierung fort...</span>
+        <button class="sb-btn btn-danger" onclick="cancelHandbookIndex()" style="margin-left:auto">Abbrechen</button>
+      </div>
+      <div class="progress-bar-container">
+        <div class="progress-bar" id="handbook-progress-bar" style="width:0%"></div>
+      </div>
+      <div class="progress-details" id="handbook-progress-details">
+        <span>Lade Checkpoint...</span>
+      </div>
+    </div>
+  `;
+
+  try {
+    handbookBuildController = new AbortController();
+
+    const res = await fetch('/api/handbook/index/build?resume=true&stream=true', {
+      method: 'POST',
+      signal: handbookBuildController.signal
+    });
+
+    if (!res.ok) {
+      const errData = await res.json().catch(() => ({ detail: res.statusText }));
+      const errMsg = errData.detail || `HTTP ${res.status}`;
+      el.innerHTML = `<span class="status-icon">&#128214;</span><span style="color:var(--danger)">Fehler: ${errMsg}</span>`;
+      handbookBuildController = null;
+      return;
+    }
+
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split('\n');
+      buffer = lines.pop() || '';
+
+      for (const line of lines) {
+        if (line.startsWith('data: ')) {
+          try {
+            const data = JSON.parse(line.slice(6));
+            updateHandbookProgress(data);
+          } catch (e) {
+            log.warn('Handbook progress parse error:', e);
+          }
+        }
+      }
+    }
+
+    handbookBuildController = null;
+    await loadHandbookStatus();
+
+  } catch (e) {
+    if (e.name === 'AbortError') {
+      el.innerHTML = '<span class="status-icon">&#128214;</span><span>Indexierung abgebrochen</span>';
+    } else {
+      el.innerHTML = `<span class="status-icon">&#128214;</span><span style="color:var(--danger)">Fehler: ${e.message}</span>`;
+    }
+    handbookBuildController = null;
   }
 }
 

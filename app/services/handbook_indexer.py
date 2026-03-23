@@ -22,16 +22,17 @@ Unterstützt die Struktur:
     └── ...
 """
 
+import hashlib
 import json
 import re
 import sqlite3
 import time
 import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, asdict
 from fnmatch import fnmatch
 from pathlib import Path
-from typing import AsyncGenerator, Callable, Dict, Generator, List, Optional, Tuple
+from typing import AsyncGenerator, Callable, Dict, Generator, List, Optional, Set, Tuple
 import os
 
 
@@ -88,6 +89,20 @@ class IndexProgress:
             "message": self.message,
             "percent": round(self.processed_files / max(self.total_files, 1) * 100, 1)
         }
+
+
+@dataclass
+class IndexCheckpoint:
+    """Checkpoint-Zustand für Resume nach Unterbrechung."""
+    handbook_path: str
+    config_hash: str
+    phase: str  # scanning | analyzing | indexing
+    batch_index: int = 0
+    scanned_files: List[str] = field(default_factory=list)
+    services_json: str = "{}"
+    fields_json: str = "{}"
+    created_at: str = ""
+    updated_at: str = ""
 
 
 class HandbookIndexer:
@@ -156,6 +171,26 @@ class HandbookIndexer:
                     value TEXT
                 );
 
+                -- Checkpoint für unterbrochene Indexierungen (Singleton)
+                CREATE TABLE IF NOT EXISTS handbook_checkpoint (
+                    id INTEGER PRIMARY KEY CHECK (id = 1),
+                    handbook_path TEXT NOT NULL,
+                    config_hash TEXT NOT NULL,
+                    phase TEXT NOT NULL,
+                    batch_index INTEGER DEFAULT 0,
+                    scanned_files_json TEXT,
+                    services_json TEXT,
+                    fields_json TEXT,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                );
+
+                -- Bereits verarbeitete Dateien (für Resume)
+                CREATE TABLE IF NOT EXISTS handbook_processed_files (
+                    file_path TEXT PRIMARY KEY,
+                    processed_at TEXT NOT NULL
+                );
+
                 -- Index für schnelle Datei-Lookup
                 CREATE INDEX IF NOT EXISTS idx_handbook_files
                 ON handbook_services(service_id);
@@ -178,6 +213,175 @@ class HandbookIndexer:
         if self._current_progress:
             return self._current_progress.to_dict()
         return None
+
+    # ══════════════════════════════════════════════════════════════════════════
+    # Checkpoint Management
+    # ══════════════════════════════════════════════════════════════════════════
+
+    @staticmethod
+    def _compute_config_hash(config: Dict) -> str:
+        """Berechnet Hash für Build-Konfig-Validierung."""
+        relevant = {
+            'handbook_path': config.get('handbook_path', ''),
+            'functions_subdir': config.get('functions_subdir', 'funktionen'),
+            'fields_subdir': config.get('fields_subdir', 'felder'),
+            'exclude_patterns': sorted(config.get('exclude_patterns', [])),
+            'structure_mode': config.get('structure_mode', 'auto'),
+        }
+        return hashlib.sha256(json.dumps(relevant, sort_keys=True).encode()).hexdigest()[:16]
+
+    def _save_checkpoint_full(
+        self,
+        handbook_path: str,
+        config: Dict,
+        phase: str,
+        batch_index: int,
+        scanned_files: List[str],
+        services: Dict[str, ServiceInfo],
+        fields: Dict[str, FieldInfo]
+    ) -> None:
+        """
+        Speichert vollständigen Checkpoint (nur nach Analyse-Phase).
+
+        Serialisiert alle Daten - sollte nur einmal pro Build aufgerufen werden,
+        nicht bei jedem Batch.
+        """
+        config_hash = self._compute_config_hash(config)
+        now = time.strftime("%Y-%m-%d %H:%M:%S")
+
+        # Services/Fields zu JSON serialisieren (nur hier, nicht bei jedem Batch!)
+        services_json = json.dumps({
+            sid: asdict(s) for sid, s in services.items()
+        }, ensure_ascii=False)
+        fields_json = json.dumps({
+            fid: asdict(f) for fid, f in fields.items()
+        }, ensure_ascii=False)
+        scanned_json = json.dumps(scanned_files, ensure_ascii=False)
+
+        with self._connect() as con:
+            con.execute("""
+                INSERT OR REPLACE INTO handbook_checkpoint
+                (id, handbook_path, config_hash, phase, batch_index,
+                 scanned_files_json, services_json, fields_json, created_at, updated_at)
+                VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, (handbook_path, config_hash, phase, batch_index,
+                  scanned_json, services_json, fields_json, now, now))
+            con.commit()
+
+    def _update_checkpoint_progress(self, con: sqlite3.Connection, batch_index: int) -> None:
+        """
+        Aktualisiert nur den Batch-Index im Checkpoint (leichtgewichtig).
+
+        Wird bei jedem Batch aufgerufen - keine JSON-Serialisierung!
+        """
+        now = time.strftime("%Y-%m-%d %H:%M:%S")
+        con.execute("""
+            UPDATE handbook_checkpoint
+            SET batch_index = ?, updated_at = ?
+            WHERE id = 1
+        """, (batch_index, now))
+
+    def _mark_files_processed_batch(self, con: sqlite3.Connection, file_paths: List[str]) -> None:
+        """
+        Markiert Dateien als verarbeitet (ohne eigenen Commit).
+
+        Nutzt bestehende Connection für Transaktions-Konsolidierung.
+        """
+        now = time.strftime("%Y-%m-%d %H:%M:%S")
+        con.executemany(
+            "INSERT OR REPLACE INTO handbook_processed_files (file_path, processed_at) VALUES (?, ?)",
+            [(fp, now) for fp in file_paths]
+        )
+
+    def _mark_files_processed(self, file_paths: List[str]) -> None:
+        """Markiert Dateien als verarbeitet (standalone mit eigenem Commit)."""
+        with self._connect() as con:
+            self._mark_files_processed_batch(con, file_paths)
+            con.commit()
+
+    def _get_processed_files(self) -> Set[str]:
+        """Lädt alle bereits verarbeiteten Dateipfade."""
+        with self._connect() as con:
+            rows = con.execute("SELECT file_path FROM handbook_processed_files").fetchall()
+        return {row[0] for row in rows}
+
+    def _load_checkpoint(self) -> Optional[IndexCheckpoint]:
+        """Lädt vorhandenen Checkpoint."""
+        with self._connect() as con:
+            row = con.execute("""
+                SELECT handbook_path, config_hash, phase, batch_index,
+                       scanned_files_json, services_json, fields_json,
+                       created_at, updated_at
+                FROM handbook_checkpoint WHERE id=1
+            """).fetchone()
+
+        if not row:
+            return None
+
+        scanned_files = json.loads(row[4]) if row[4] else []
+
+        return IndexCheckpoint(
+            handbook_path=row[0],
+            config_hash=row[1],
+            phase=row[2],
+            batch_index=row[3],
+            scanned_files=scanned_files,
+            services_json=row[5] or "{}",
+            fields_json=row[6] or "{}",
+            created_at=row[7],
+            updated_at=row[8]
+        )
+
+    def _is_checkpoint_compatible(self, handbook_path: str, config: Dict) -> bool:
+        """Prüft ob Checkpoint mit aktueller Config kompatibel ist."""
+        checkpoint = self._load_checkpoint()
+        if not checkpoint:
+            return False
+
+        current_hash = self._compute_config_hash(config)
+        return (checkpoint.handbook_path == handbook_path and
+                checkpoint.config_hash == current_hash)
+
+    def _clear_checkpoint(self) -> None:
+        """Löscht Checkpoint nach erfolgreichem Build."""
+        with self._connect() as con:
+            con.execute("DELETE FROM handbook_checkpoint WHERE id=1")
+            con.execute("DELETE FROM handbook_processed_files")
+            con.commit()
+
+    def _clear_index_data(self) -> None:
+        """Löscht alle Index-Daten (für force=true Neuindexierung)."""
+        with self._connect() as con:
+            con.executescript("""
+                DELETE FROM handbook_fts;
+                DELETE FROM handbook_services;
+                DELETE FROM handbook_fields;
+                DELETE FROM handbook_meta;
+            """)
+
+    def has_checkpoint(self) -> bool:
+        """Prüft ob ein Checkpoint existiert."""
+        checkpoint = self._load_checkpoint()
+        return checkpoint is not None
+
+    def get_checkpoint_info(self) -> Optional[Dict]:
+        """Gibt Checkpoint-Informationen für Status-Anzeige zurück."""
+        checkpoint = self._load_checkpoint()
+        if not checkpoint:
+            return None
+
+        processed_count = len(self._get_processed_files())
+        total_count = len(checkpoint.scanned_files)
+
+        return {
+            "phase": checkpoint.phase,
+            "batch_index": checkpoint.batch_index,
+            "files_scanned": total_count,
+            "files_processed": processed_count,
+            "created_at": checkpoint.created_at,
+            "updated_at": checkpoint.updated_at,
+            "handbook_path": checkpoint.handbook_path
+        }
 
     # ══════════════════════════════════════════════════════════════════════════
     # Build Index (mit Progress Generator)
@@ -226,6 +430,20 @@ class HandbookIndexer:
         self._cancel_flag.clear()
         start = time.time()
         handbook = Path(handbook_path)
+
+        # Build-Config für Checkpoint-Validierung
+        build_config = {
+            'handbook_path': handbook_path,
+            'functions_subdir': functions_subdir,
+            'fields_subdir': fields_subdir,
+            'exclude_patterns': exclude_patterns or [],
+            'structure_mode': structure_mode,
+        }
+
+        # Bei force=true: Kompletten Index und Checkpoint löschen
+        if force:
+            self._clear_checkpoint()
+            self._clear_index_data()
 
         progress = IndexProgress(phase="scanning", message="Suche HTML-Dateien...")
         self._current_progress = progress
@@ -291,6 +509,18 @@ class HandbookIndexer:
 
         progress.message = f"{len(services)} Services, {len(field_infos)} Felder gefunden"
         yield progress
+
+        # Checkpoint speichern: Scanning + Analyzing abgeschlossen (EINMALIG vollständig)
+        scanned_file_paths = [str(f.relative_to(handbook)) for f in html_files]
+        self._save_checkpoint_full(
+            handbook_path=handbook_path,
+            config=build_config,
+            phase="indexing",
+            batch_index=0,
+            scanned_files=scanned_file_paths,
+            services=services,
+            fields=field_infos
+        )
 
         # 4. Indexierung mit paralleler Dateiverarbeitung
         progress.phase = "indexing"
@@ -391,29 +621,41 @@ class HandbookIndexer:
                         results = list(executor.map(parse_file_worker, files_to_process))
                         # Sequentielles Speichern in DB
                         save_batch_to_db(con, results)
-                        con.commit()
+
+                    # Markiere verarbeitete Dateien im Chunk (in gleicher Transaktion)
+                    chunk_rel_paths = [str(f.relative_to(handbook)) for f in chunk if f is not None]
+                    self._mark_files_processed_batch(con, chunk_rel_paths)
 
                     i += chunk_size
+                    batch_idx = i // chunk_size
 
-                # Progress Update
-                progress.processed_files = min(i, len(html_files))
-                progress.errors = errors
-                progress.skipped = skipped
-                progress.elapsed_seconds = time.time() - start
+                    # Checkpoint-Progress nur alle 10 Batches aktualisieren (Performance!)
+                    # Bei 82k Dateien: ~41 Updates statt ~410
+                    if batch_idx % 10 == 0 or i >= len(html_files):
+                        self._update_checkpoint_progress(con, batch_idx)
 
-                # Geschätzte Restzeit
-                processed = indexed + skipped + errors
-                if processed > 0:
-                    avg_time = progress.elapsed_seconds / processed
-                    remaining = len(html_files) - progress.processed_files
-                    progress.estimated_remaining_seconds = avg_time * remaining
+                    # Fortschritt in DB speichern
+                    con.execute("INSERT OR REPLACE INTO handbook_meta(key, value) VALUES ('files_processed', ?)",
+                                (str(min(i, len(html_files))),))
 
-                progress.message = f"Indexiere... {indexed} neu, {skipped} übersprungen ({parallel_workers} Threads)"
+                    # EIN Commit pro Batch (statt 4)
+                    con.commit()
 
-                # Fortschritt in DB speichern (für Fortsetzung nach Abbruch)
-                con.execute("INSERT OR REPLACE INTO handbook_meta(key, value) VALUES ('files_processed', ?)", (str(min(i, len(html_files))),))
-                con.commit()
-                yield progress
+                    # Progress Update
+                    progress.processed_files = min(i, len(html_files))
+                    progress.errors = errors
+                    progress.skipped = skipped
+                    progress.elapsed_seconds = time.time() - start
+
+                    # Geschätzte Restzeit
+                    processed = indexed + skipped + errors
+                    if processed > 0:
+                        avg_time = progress.elapsed_seconds / processed
+                        remaining = len(html_files) - progress.processed_files
+                        progress.estimated_remaining_seconds = avg_time * remaining
+
+                    progress.message = f"Indexiere... {indexed} neu, {skipped} übersprungen ({parallel_workers} Threads)"
+                    yield progress
 
         # 5. Services und Felder speichern
         progress.phase = "saving"
@@ -445,6 +687,9 @@ class HandbookIndexer:
             con.execute("INSERT OR REPLACE INTO handbook_meta(key, value) VALUES ('files_processed', ?)", (str(len(html_files)),))
             con.commit()
 
+        # Checkpoint löschen nach erfolgreichem Build
+        self._clear_checkpoint()
+
         # Fertig
         progress.phase = "done"
         progress.elapsed_seconds = time.time() - start
@@ -460,6 +705,252 @@ class HandbookIndexer:
             "fields": len(field_infos),
             "total_files": len(html_files),
             "duration_s": round(time.time() - start, 2)
+        }
+
+    def resume_build(
+        self,
+        functions_subdir: str = "funktionen",
+        fields_subdir: str = "felder",
+        exclude_patterns: Optional[List[str]] = None,
+        batch_size: int = 500,
+        structure_mode: str = "auto",
+        known_tab_suffixes: Optional[List[str]] = None,
+        parallel_workers: int = 8
+    ) -> Generator[IndexProgress, None, Dict]:
+        """
+        Setzt eine unterbrochene Indexierung fort.
+
+        Nutzt den gespeicherten Checkpoint um:
+        - Bereits gescannte Dateien wiederzuverwenden
+        - Bereits analysierte Services/Fields zu laden
+        - Bei der zuletzt verarbeiteten Datei fortzusetzen
+
+        Yields:
+            IndexProgress Objekte mit aktuellem Status
+
+        Returns:
+            Dict mit Statistiken oder Fehler
+        """
+        checkpoint = self._load_checkpoint()
+        if not checkpoint:
+            progress = IndexProgress(phase="error", message="Kein Checkpoint vorhanden")
+            yield progress
+            return {"error": "Kein Checkpoint vorhanden"}
+
+        handbook_path = checkpoint.handbook_path
+        handbook = Path(handbook_path)
+
+        # Config für Validierung
+        build_config = {
+            'handbook_path': handbook_path,
+            'functions_subdir': functions_subdir,
+            'fields_subdir': fields_subdir,
+            'exclude_patterns': exclude_patterns or [],
+            'structure_mode': structure_mode,
+        }
+
+        # Prüfe Kompatibilität
+        if not self._is_checkpoint_compatible(handbook_path, build_config):
+            progress = IndexProgress(
+                phase="error",
+                message="Checkpoint nicht kompatibel (Config geändert). Bitte neu indexieren."
+            )
+            yield progress
+            return {"error": "Checkpoint nicht kompatibel"}
+
+        # Prüfe ob Pfad noch existiert
+        if not handbook.exists():
+            progress = IndexProgress(
+                phase="error",
+                message=f"Handbuch-Pfad existiert nicht mehr: {handbook_path}"
+            )
+            yield progress
+            return {"error": f"Pfad existiert nicht: {handbook_path}"}
+
+        self._structure_mode = structure_mode
+        self._known_tab_suffixes = set(known_tab_suffixes or [
+            'statistik', 'use_cases', 'aenderungen', 'dqm',
+            'fachlich', 'intern', 'parameter', 'uebersicht',
+            'eingabe', 'ausgabe', 'allgemein', 'technik',
+            'historie', 'beispiele', 'varianten', 'fehler'
+        ])
+        self._cancel_flag.clear()
+        start = time.time()
+
+        progress = IndexProgress(
+            phase="resuming",
+            message=f"Setze Indexierung fort von Checkpoint ({checkpoint.phase})..."
+        )
+        self._current_progress = progress
+        yield progress
+
+        # Lade gescannte Dateien aus Checkpoint
+        scanned_file_paths = checkpoint.scanned_files
+        html_files = [handbook / p for p in scanned_file_paths]
+        progress.total_files = len(html_files)
+
+        # Lade Services und Fields aus Checkpoint
+        services_data = json.loads(checkpoint.services_json)
+        services = {
+            sid: ServiceInfo(**data) for sid, data in services_data.items()
+        }
+        fields_data = json.loads(checkpoint.fields_json)
+        field_infos = {
+            fid: FieldInfo(**data) for fid, data in fields_data.items()
+        }
+
+        progress.services_found = len(services)
+        progress.fields_found = len(field_infos)
+
+        # Lade bereits verarbeitete Dateien
+        processed_files = self._get_processed_files()
+        progress.message = f"Fortsetzung: {len(processed_files)} bereits verarbeitet, {len(html_files) - len(processed_files)} verbleibend"
+        yield progress
+
+        # Filtere bereits verarbeitete Dateien heraus
+        remaining_files = [f for f in html_files if str(f.relative_to(handbook)) not in processed_files]
+
+        # Update Build-Status
+        with self._connect() as con:
+            con.execute("INSERT OR REPLACE INTO handbook_meta(key, value) VALUES ('build_status', 'in_progress')")
+            con.commit()
+
+        progress.phase = "indexing"
+        progress.message = f"Indexiere verbleibende {len(remaining_files)} Dateien..."
+        yield progress
+
+        indexed = 0
+        skipped = 0
+        errors = 0
+
+        def parse_file_worker(html_file: Path) -> Optional[Tuple[Path, str, float, Tuple]]:
+            try:
+                rel_path = str(html_file.relative_to(handbook))
+                mtime = html_file.stat().st_mtime
+                data = self._parse_html_file(html_file, handbook, functions_subdir)
+                return (html_file, rel_path, mtime, data)
+            except Exception:
+                return None
+
+        def save_batch_to_db(con, batch_results):
+            nonlocal indexed, errors
+            for result in batch_results:
+                if result is None:
+                    errors += 1
+                    continue
+                html_file, rel_path, mtime, data = result
+                try:
+                    con.execute("DELETE FROM handbook_fts WHERE file_path=?", (rel_path,))
+                    con.execute(
+                        """INSERT INTO handbook_fts
+                           (file_path, service_name, tab_name, title, headings, content, tables_text)
+                           VALUES (?, ?, ?, ?, ?, ?, ?)""",
+                        data
+                    )
+                    con.execute(
+                        "INSERT OR REPLACE INTO handbook_meta(key, value) VALUES (?, ?)",
+                        (f"mtime:{rel_path}", str(mtime))
+                    )
+                    indexed += 1
+                except Exception:
+                    errors += 1
+
+        chunk_size = parallel_workers * 25
+
+        with self._connect() as con:
+            existing_mtimes = {}
+            rows = con.execute("SELECT key, value FROM handbook_meta WHERE key LIKE 'mtime:%'").fetchall()
+            for row in rows:
+                existing_mtimes[row[0][6:]] = float(row[1])
+
+            with ThreadPoolExecutor(max_workers=parallel_workers) as executor:
+                i = 0
+                while i < len(remaining_files):
+                    if self._cancel_flag.is_set():
+                        con.execute("INSERT OR REPLACE INTO handbook_meta(key, value) VALUES ('build_status', 'cancelled')")
+                        con.commit()
+                        progress.phase = "cancelled"
+                        progress.message = "Abgebrochen durch Benutzer"
+                        yield progress
+                        return {"cancelled": True, "indexed": indexed}
+
+                    chunk = remaining_files[i:i + chunk_size]
+
+                    # Paralleles Parsen
+                    results = list(executor.map(parse_file_worker, chunk))
+                    save_batch_to_db(con, results)
+
+                    # Markiere als verarbeitet (in gleicher Transaktion)
+                    chunk_rel_paths = [str(f.relative_to(handbook)) for f in chunk]
+                    self._mark_files_processed_batch(con, chunk_rel_paths)
+
+                    i += chunk_size
+                    batch_idx = checkpoint.batch_index + (i // chunk_size)
+
+                    # Checkpoint-Progress nur alle 10 Batches aktualisieren (Performance!)
+                    if batch_idx % 10 == 0 or i >= len(remaining_files):
+                        self._update_checkpoint_progress(con, batch_idx)
+
+                    # Progress Update
+                    total_processed = len(processed_files) + i
+                    progress.processed_files = min(total_processed, len(html_files))
+                    progress.errors = errors
+                    progress.elapsed_seconds = time.time() - start
+
+                    if indexed + errors > 0:
+                        avg_time = progress.elapsed_seconds / (indexed + errors)
+                        remaining_count = len(remaining_files) - i
+                        progress.estimated_remaining_seconds = avg_time * remaining_count
+
+                    progress.message = f"Indexiere... {indexed} neu ({parallel_workers} Threads)"
+                    con.execute("INSERT OR REPLACE INTO handbook_meta(key, value) VALUES ('files_processed', ?)",
+                                (str(progress.processed_files),))
+
+                    # EIN Commit pro Batch
+                    con.commit()
+                    yield progress
+
+        # Services und Felder speichern
+        progress.phase = "saving"
+        progress.message = "Speichere Services und Felder..."
+        yield progress
+
+        for service in services.values():
+            self._save_service(service)
+        for field_info in field_infos.values():
+            self._save_field(field_info)
+
+        # Metadaten aktualisieren
+        with self._connect() as con:
+            con.execute("INSERT OR REPLACE INTO handbook_meta(key, value) VALUES ('last_build', ?)",
+                        (str(int(time.time())),))
+            con.execute("INSERT OR REPLACE INTO handbook_meta(key, value) VALUES ('handbook_path', ?)",
+                        (handbook_path,))
+            con.execute("INSERT OR REPLACE INTO handbook_meta(key, value) VALUES ('total_files', ?)",
+                        (str(len(html_files)),))
+            con.execute("INSERT OR REPLACE INTO handbook_meta(key, value) VALUES ('build_status', 'complete')")
+            con.execute("INSERT OR REPLACE INTO handbook_meta(key, value) VALUES ('files_processed', ?)",
+                        (str(len(html_files)),))
+            con.commit()
+
+        # Checkpoint löschen nach erfolgreichem Build
+        self._clear_checkpoint()
+
+        progress.phase = "done"
+        progress.elapsed_seconds = time.time() - start
+        progress.message = f"Fertig! {indexed} indexiert, {errors} Fehler (Fortsetzung)"
+        self._current_progress = None
+        yield progress
+
+        return {
+            "indexed": indexed,
+            "skipped": skipped,
+            "errors": errors,
+            "services": len(services),
+            "fields": len(field_infos),
+            "total_files": len(html_files),
+            "duration_s": round(time.time() - start, 2),
+            "resumed": True
         }
 
     def _parse_html_file(
@@ -1113,7 +1604,7 @@ class HandbookIndexer:
         return count > 0
 
     def get_stats(self) -> Dict:
-        """Gibt Index-Statistiken zurück, inklusive Build-Status."""
+        """Gibt Index-Statistiken zurück, inklusive Build-Status und Checkpoint-Info."""
         if not self.db_path.exists():
             return {
                 "indexed": False,
@@ -1125,7 +1616,9 @@ class HandbookIndexer:
                 "db_size_kb": 0,
                 "build_status": "none",  # none, complete, incomplete, cancelled
                 "total_files_expected": 0,
-                "files_processed": 0
+                "files_processed": 0,
+                "has_checkpoint": False,
+                "checkpoint_info": None
             }
 
         with self._connect() as con:
@@ -1168,6 +1661,9 @@ class HandbookIndexer:
         if build_status == "none" and total_files_expected > 0 and files_processed < total_files_expected:
             build_status = "incomplete"
 
+        # Checkpoint-Info hinzufügen
+        checkpoint_info = self.get_checkpoint_info()
+
         return {
             "indexed": page_count > 0,
             "indexed_pages": page_count,
@@ -1178,18 +1674,15 @@ class HandbookIndexer:
             "db_size_kb": db_size_kb,
             "build_status": build_status,
             "total_files_expected": total_files_expected,
-            "files_processed": files_processed
+            "files_processed": files_processed,
+            "has_checkpoint": checkpoint_info is not None,
+            "checkpoint_info": checkpoint_info
         }
 
     def clear(self) -> None:
-        """Löscht den gesamten Index."""
-        with self._connect() as con:
-            con.executescript("""
-                DELETE FROM handbook_fts;
-                DELETE FROM handbook_services;
-                DELETE FROM handbook_fields;
-                DELETE FROM handbook_meta;
-            """)
+        """Löscht den gesamten Index inklusive Checkpoints."""
+        self._clear_index_data()
+        self._clear_checkpoint()
 
 
 # ══════════════════════════════════════════════════════════════════════════════
