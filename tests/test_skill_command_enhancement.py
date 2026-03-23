@@ -1,5 +1,5 @@
 """
-Tests für MCP Enhancement Skills.
+Tests für Skill Command Enhancement.
 
 Testet die Erweiterungen für command-trigger Aktivierung,
 Research-Konfiguration und Output-Templates.
@@ -127,12 +127,12 @@ class TestEnhancedSkill:
         assert len(skill.output.templates) == 1
 
 
-class TestSkillManagerMCPIntegration:
-    """Tests für SkillManager MCP-Command Integration."""
+class TestSkillManagerCommandIntegration:
+    """Tests für SkillManager Command Integration."""
 
     @pytest.fixture
-    def manager_with_mcp_skills(self, tmp_path):
-        """Erstellt einen SkillManager mit MCP-Enhancement Skills."""
+    def manager_with_command_skills(self, tmp_path):
+        """Erstellt einen SkillManager mit Command-Enhancement Skills."""
         skills_dir = tmp_path / "skills"
         skills_dir.mkdir()
 
@@ -193,26 +193,26 @@ system_prompt: |
             db_path=str(db_path)
         )
 
-    def test_get_skills_for_command_brainstorm(self, manager_with_mcp_skills):
+    def test_get_skills_for_command_brainstorm(self, manager_with_command_skills):
         """Skills für brainstorm Command werden gefunden."""
-        skills = manager_with_mcp_skills.get_skills_for_command("brainstorm")
+        skills = manager_with_command_skills.get_skills_for_command("brainstorm")
         assert len(skills) == 1
         assert skills[0].id == "test-brainstorm"
 
-    def test_get_skills_for_command_design(self, manager_with_mcp_skills):
+    def test_get_skills_for_command_design(self, manager_with_command_skills):
         """Skills für design Command werden gefunden."""
-        skills = manager_with_mcp_skills.get_skills_for_command("design")
+        skills = manager_with_command_skills.get_skills_for_command("design")
         assert len(skills) == 1
         assert skills[0].id == "test-design"
 
-    def test_get_skills_for_unknown_command(self, manager_with_mcp_skills):
+    def test_get_skills_for_unknown_command(self, manager_with_command_skills):
         """Unbekannte Commands geben leere Liste zurück."""
-        skills = manager_with_mcp_skills.get_skills_for_command("unknown")
+        skills = manager_with_command_skills.get_skills_for_command("unknown")
         assert len(skills) == 0
 
-    def test_get_command_skills_config(self, manager_with_mcp_skills):
+    def test_get_command_skills_config(self, manager_with_command_skills):
         """get_command_skills_config liefert aggregierte Konfiguration."""
-        config = manager_with_mcp_skills.get_command_skills_config("brainstorm")
+        config = manager_with_command_skills.get_command_skills_config("brainstorm")
 
         assert "test-brainstorm" in config["skills"]
         assert "Test brainstorm prompt" in config["combined_system_prompt"]
@@ -220,9 +220,9 @@ system_prompt: |
         assert config["research"]["scope"] == "external-safe"
         assert config["output"] is not None
 
-    def test_list_command_triggers(self, manager_with_mcp_skills):
+    def test_list_command_triggers(self, manager_with_command_skills):
         """list_command_triggers gibt Übersicht zurück."""
-        triggers = manager_with_mcp_skills.list_command_triggers()
+        triggers = manager_with_command_skills.list_command_triggers()
 
         assert "brainstorm" in triggers
         assert "design" in triggers
@@ -283,3 +283,84 @@ class TestEnterpriseDesignSkill:
         diagram_types = [d.type for d in enterprise_design.output.diagrams]
         assert "sequence" in diagram_types
         assert "component" in diagram_types
+
+
+class TestEnterpriseAnalyzeSkill:
+    """Tests für den Enterprise Analyze Skill."""
+
+    @pytest.fixture
+    def enterprise_analyze(self):
+        """Lädt den Enterprise Analyze Skill."""
+        skill_path = Path(__file__).parent.parent / "skills" / "enterprise-analyze.yaml"
+        if skill_path.exists():
+            return Skill.from_yaml(skill_path)
+        pytest.skip("enterprise-analyze.yaml nicht gefunden")
+
+    def test_skill_loads(self, enterprise_analyze):
+        """Skill wird korrekt geladen."""
+        assert enterprise_analyze.id == "enterprise-analyze"
+        assert enterprise_analyze.activation.mode == ActivationMode.COMMAND_TRIGGER
+        assert "analyze" in enterprise_analyze.activation.trigger_commands
+
+    def test_research_config_internal_only(self, enterprise_analyze):
+        """Research-Konfiguration ist internal-only (kein Web)."""
+        assert enterprise_analyze.research is not None
+        assert enterprise_analyze.research.scope == ResearchScope.INTERNAL_ONLY
+        assert "web" not in enterprise_analyze.research.allowed_sources
+
+    def test_owasp_in_system_prompt(self, enterprise_analyze):
+        """System-Prompt enthält OWASP-Referenzen."""
+        assert enterprise_analyze.system_prompt is not None
+        assert "OWASP" in enterprise_analyze.system_prompt
+
+    def test_output_templates(self, enterprise_analyze):
+        """Output-Templates sind für Analyse definiert."""
+        assert enterprise_analyze.output is not None
+        template_names = [t.name for t in enterprise_analyze.output.templates]
+        assert "Security Findings" in template_names
+        assert "Quality Findings" in template_names
+        assert "Metrics" in template_names
+
+
+class TestEnterpriseResearchSkill:
+    """Tests für den Enterprise Research Skill."""
+
+    @pytest.fixture
+    def enterprise_research(self):
+        """Lädt den Enterprise Research Skill."""
+        skill_path = Path(__file__).parent.parent / "skills" / "enterprise-research.yaml"
+        if skill_path.exists():
+            return Skill.from_yaml(skill_path)
+        pytest.skip("enterprise-research.yaml nicht gefunden")
+
+    def test_skill_loads(self, enterprise_research):
+        """Skill wird korrekt geladen."""
+        assert enterprise_research.id == "enterprise-research"
+        assert enterprise_research.activation.mode == ActivationMode.COMMAND_TRIGGER
+        assert "research" in enterprise_research.activation.trigger_commands
+
+    def test_research_config_external_safe(self, enterprise_research):
+        """Research-Konfiguration ist external-safe mit Sanitization."""
+        assert enterprise_research.research is not None
+        assert enterprise_research.research.scope == ResearchScope.EXTERNAL_SAFE
+        assert enterprise_research.research.sanitize_queries is True
+        assert "web" in enterprise_research.research.allowed_sources
+
+    def test_source_prioritization_in_prompt(self, enterprise_research):
+        """System-Prompt enthält Quellen-Priorisierung."""
+        assert enterprise_research.system_prompt is not None
+        assert "Confluence" in enterprise_research.system_prompt
+        assert "Handbook" in enterprise_research.system_prompt
+
+    def test_query_sanitization_in_prompt(self, enterprise_research):
+        """System-Prompt enthält Query-Sanitization-Regeln."""
+        assert enterprise_research.system_prompt is not None
+        assert "Sanitization" in enterprise_research.system_prompt or "NIEMALS" in enterprise_research.system_prompt
+
+    def test_output_templates(self, enterprise_research):
+        """Output-Templates sind für Research definiert."""
+        assert enterprise_research.output is not None
+        template_names = [t.name for t in enterprise_research.output.templates]
+        assert "Internal Findings" in template_names
+        assert "External Findings" in template_names
+        assert "Sources" in template_names

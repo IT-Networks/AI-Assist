@@ -9,11 +9,16 @@ Features:
 - MCPManager: Verwaltung mehrerer MCP-Server
 - SequentialThinking: Lokale Implementation für strukturiertes Denken
 - ToolBridge: Integration von MCP-Tools in das Agent-System
-- Capabilities: Strukturierte Capabilities (Analyze, Research)
-- CapabilityRegistry: Zentrale Verwaltung aller Capabilities
 
-NOTE: brainstorm, design, implement wurden zu Skills migriert.
-Siehe ~/.claude/commands/sc/brainstorm.md, design.md, implement.md
+MIGRATION (2026-03-23):
+Alle Command-Capabilities (brainstorm, design, implement, analyze, research)
+wurden zu Skills migriert. Das System folgt nun dem SuperClaude-Ansatz:
+- Skills werden als YAML-Dateien geladen (skills/*.yaml)
+- Behavioral Instructions statt Python-Backend
+- Command-Trigger für automatische Aktivierung
+
+Für neue Skills siehe: skills/enterprise-*.yaml
+Für SuperClaude Referenz: ~/.claude/commands/sc/*.md
 """
 
 from app.mcp.client import MCPClient
@@ -21,20 +26,6 @@ from app.mcp.manager import MCPManager, get_mcp_manager
 from app.mcp.sequential_thinking import SequentialThinking, ThinkingStep
 from app.mcp.thinking_engine import ThinkingEngine, ThinkingMode, ThinkingResult, get_thinking_engine
 from app.mcp.tool_bridge import MCPToolBridge
-from app.mcp.registry import (
-    CapabilityRegistry,
-    get_capability_registry,
-    register_default_capabilities
-)
-from app.mcp.capabilities import (
-    BaseCapability,
-    CapabilitySession,
-    CapabilityPhase,
-    CapabilityStatus,
-    AnalyzeCapability,
-    ResearchCapability,
-    get_research_capability
-)
 
 __all__ = [
     # Client & Manager
@@ -51,17 +42,4 @@ __all__ = [
     "get_thinking_engine",
     # Tool Bridge
     "MCPToolBridge",
-    # Registry
-    "CapabilityRegistry",
-    "get_capability_registry",
-    "register_default_capabilities",
-    # Capabilities Base
-    "BaseCapability",
-    "CapabilitySession",
-    "CapabilityPhase",
-    "CapabilityStatus",
-    # Concrete Capabilities (analyze, research - brainstorm/design/implement sind Skills)
-    "AnalyzeCapability",
-    "ResearchCapability",
-    "get_research_capability",
 ]

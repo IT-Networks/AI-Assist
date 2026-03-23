@@ -1,12 +1,20 @@
 """
-Prompt Enhancer - MCP-basierte Kontext-Anreicherung vor Task-Decomposition.
+Prompt Enhancer - Kontext-Anreicherung vor Task-Decomposition.
 
 Pipeline:
 1. Enhancement-Detector prüft ob Kontext-Sammlung nötig
 2. Cache-Check für bereits angereicherte ähnliche Prompts
-3. MCP Context Collector sammelt relevanten Kontext
+3. Context Collector sammelt relevanten Kontext
 4. User-Bestätigung des gesammelten Kontexts
 5. Weiterleitung an TaskPlanner mit angereichertem Prompt
+
+MIGRATION (2026-03-23):
+Capabilities (Research, Analyze) wurden zu Skills migriert.
+Für Research/Analyze verwende die entsprechenden Skill-Commands:
+- /research oder /sc:research
+- /analyze oder /sc:analyze
+
+Der PromptEnhancer liefert nun Hinweise auf Skills statt eigener Kontext-Sammlung.
 """
 
 import hashlib
@@ -28,12 +36,11 @@ logger = logging.getLogger(__name__)
 # ══════════════════════════════════════════════════════════════════════════════
 
 class EnhancementType(str, Enum):
-    """Art der MCP-Anreicherung."""
+    """Art der Kontext-Anreicherung."""
     NONE = "none"                    # Keine Anreicherung nötig
-    RESEARCH = "research"            # Wiki/Docs/Code durchsuchen
+    RESEARCH = "research"            # Wiki/Docs/Code durchsuchen -> Skill-Hint
     SEQUENTIAL = "sequential"        # Strukturierte Analyse (Debug, etc.)
-    ANALYZE = "analyze"              # Bestehendes System verstehen
-    # NOTE: BRAINSTORM wurde zu Skill migriert (/sc:brainstorm)
+    ANALYZE = "analyze"              # Bestehendes System verstehen -> Skill-Hint
 
 
 class ConfirmationStatus(str, Enum):
@@ -194,7 +201,7 @@ class EnhancementCache:
     """
     Cache für angereicherte Prompts.
 
-    Vermeidet redundante MCP-Aufrufe für ähnliche Anfragen.
+    Vermeidet redundante Aufrufe für ähnliche Anfragen.
     """
 
     def __init__(self, ttl_seconds: int = 300, max_entries: int = 50):
@@ -286,7 +293,7 @@ class EnhancementCache:
 
 class EnhancementDetector:
     """
-    Erkennt ob und welche Art von MCP-Anreicherung sinnvoll ist.
+    Erkennt ob und welche Art von Kontext-Anreicherung sinnvoll ist.
     """
 
     # Keywords für verschiedene Enhancement-Typen
@@ -321,8 +328,6 @@ class EnhancementDetector:
         "current", "dependencies"
     ]
 
-    # NOTE: BRAINSTORM_TRIGGERS wurde entfernt - Brainstorm ist jetzt ein Skill (/sc:brainstorm)
-
     def detect(self, query: str) -> EnhancementType:
         """
         Erkennt den passenden Enhancement-Typ für eine Query.
@@ -335,7 +340,7 @@ class EnhancementDetector:
         """
         query_lower = query.lower()
 
-        # Prioritäts-Reihenfolge: Research > Sequential > Analyze > Brainstorm
+        # Prioritäts-Reihenfolge: Research > Sequential > Analyze
         # (spezifischer zu allgemeiner)
 
         # Research: Externe Quellen explizit referenziert
@@ -352,8 +357,6 @@ class EnhancementDetector:
         if any(trigger in query_lower for trigger in self.ANALYZE_TRIGGERS):
             logger.debug("[EnhancementDetector] Detected: ANALYZE")
             return EnhancementType.ANALYZE
-
-        # NOTE: Brainstorm-Erkennung entfernt - jetzt als Skill /sc:brainstorm
 
         # Keine Anreicherung nötig
         logger.debug("[EnhancementDetector] Detected: NONE")
@@ -386,10 +389,14 @@ class EnhancementDetector:
 
 class PromptEnhancer:
     """
-    Orchestriert die MCP-basierte Prompt-Anreicherung.
+    Orchestriert die Prompt-Anreicherung.
 
-    Sammelt Kontext über MCP-Capabilities und bereitet
+    Sammelt Kontext-Hinweise und bereitet
     den angereicherten Prompt für den TaskPlanner vor.
+
+    MIGRATION (2026-03-23):
+    Research/Analyze-Capabilities wurden zu Skills migriert.
+    Der Enhancer liefert nun Skill-Empfehlungen statt eigener Kontext-Sammlung.
     """
 
     def __init__(
@@ -409,23 +416,8 @@ class PromptEnhancer:
         self.mcp_callback = mcp_callback
         self.event_callback = event_callback
 
-        # Lazy-loaded MCP components
-        self._research_capability = None
+        # Lazy-loaded components
         self._sequential_thinking = None
-        self._analyze_capability = None
-        # NOTE: _brainstorm_capability entfernt - jetzt als Skill /sc:brainstorm
-
-    def _get_research_capability(self):
-        """Lazy-load ResearchCapability."""
-        if self._research_capability is None:
-            try:
-                from app.mcp.capabilities.research import get_research_capability
-                self._research_capability = get_research_capability(
-                    event_emitter=self.event_callback
-                )
-            except ImportError as e:
-                logger.debug(f"[PromptEnhancer] ResearchCapability not available: {e}")
-        return self._research_capability
 
     def _get_sequential_thinking(self):
         """Lazy-load SequentialThinking."""
@@ -439,18 +431,6 @@ class PromptEnhancer:
                 logger.debug(f"[PromptEnhancer] SequentialThinking not available: {e}")
         return self._sequential_thinking
 
-    def _get_analyze_capability(self):
-        """Lazy-load AnalyzeCapability."""
-        if self._analyze_capability is None:
-            try:
-                from app.mcp.capabilities.analyze import AnalyzeCapability
-                self._analyze_capability = AnalyzeCapability()
-            except ImportError as e:
-                logger.debug(f"[PromptEnhancer] AnalyzeCapability not available: {e}")
-        return self._analyze_capability
-
-    # NOTE: _get_brainstorm_capability() entfernt - jetzt als Skill /sc:brainstorm
-
     async def enhance(
         self,
         query: str,
@@ -458,7 +438,7 @@ class PromptEnhancer:
         skip_cache: bool = False
     ) -> EnrichedPrompt:
         """
-        Reichert einen Prompt mit MCP-Kontext an.
+        Reichert einen Prompt mit Kontext an.
 
         Args:
             query: Die User-Anfrage
@@ -572,68 +552,38 @@ class PromptEnhancer:
         context_items = []
 
         if enhancement_type == EnhancementType.RESEARCH:
-            context_items = await self._collect_research_context(query)
+            context_items = await self._collect_research_hints(query)
 
         elif enhancement_type == EnhancementType.SEQUENTIAL:
             context_items = await self._collect_sequential_context(query)
 
         elif enhancement_type == EnhancementType.ANALYZE:
-            context_items = await self._collect_analyze_context(query)
-
-        # NOTE: BRAINSTORM wurde zu Skill migriert - keine Context-Collection mehr
+            context_items = await self._collect_analyze_hints(query)
 
         return context_items
 
-    async def _collect_research_context(self, query: str) -> List[ContextItem]:
-        """Sammelt Kontext aus Wiki/Docs/Code via ResearchCapability."""
+    async def _collect_research_hints(self, query: str) -> List[ContextItem]:
+        """
+        Liefert Skill-Hinweise für Research statt eigener Kontext-Sammlung.
+
+        MIGRATION: ResearchCapability wurde zu Skills migriert.
+        """
         items = []
 
-        research = self._get_research_capability()
-        if research is None:
-            logger.debug("[PromptEnhancer] ResearchCapability not available")
-            return items
+        # Hinweis auf verfügbare Research-Skills
+        items.append(ContextItem(
+            source="skill_hint",
+            title="Research-Skill empfohlen",
+            content=(
+                "Für umfassende Recherche verwende /research oder /sc:research. "
+                "Der Enterprise Research Skill durchsucht: "
+                "Confluence, Handbook, Code-Index und Web (mit Query-Sanitization). "
+                "Ergebnis: Strukturierter Report mit Quellen-Angaben."
+            ),
+            relevance=0.9
+        ))
 
-        try:
-            # Execute research with quick depth for context collection
-            session = await research.execute(
-                query=query,
-                depth="quick",
-                max_results_per_source=3
-            )
-
-            # Convert artifacts and results to ContextItems
-            for artifact in session.artifacts:
-                if artifact.artifact_type == "research_results":
-                    # Parse structured results
-                    try:
-                        import ast
-                        results = ast.literal_eval(artifact.content)
-                        for r in results[:5]:  # Limit to top 5
-                            items.append(ContextItem(
-                                source=r.get("source", "research"),
-                                title=r.get("title", "Suchergebnis"),
-                                content=r.get("content", "")[:500],
-                                relevance=r.get("relevance", 0.5),
-                                url=r.get("url"),
-                                file_path=r.get("file_path")
-                            ))
-                    except (ValueError, SyntaxError):
-                        pass
-
-                elif artifact.artifact_type == "research_report":
-                    # Add report as summary item
-                    items.append(ContextItem(
-                        source="research_report",
-                        title="Research Summary",
-                        content=artifact.content[:1000],
-                        relevance=0.9
-                    ))
-
-            logger.info(f"[PromptEnhancer] Research collected {len(items)} items")
-
-        except Exception as e:
-            logger.warning(f"[PromptEnhancer] Research failed: {e}")
-
+        logger.debug("[PromptEnhancer] Research hints provided (skill-based)")
         return items
 
     async def _collect_sequential_context(self, query: str) -> List[ContextItem]:
@@ -685,50 +635,29 @@ class PromptEnhancer:
 
         return items
 
-    async def _collect_analyze_context(self, query: str) -> List[ContextItem]:
-        """Sammelt Kontext über bestehendes System via AnalyzeCapability."""
+    async def _collect_analyze_hints(self, query: str) -> List[ContextItem]:
+        """
+        Liefert Skill-Hinweise für Analyze statt eigener Kontext-Sammlung.
+
+        MIGRATION: AnalyzeCapability wurde zu Skills migriert.
+        """
         items = []
 
-        analyze = self._get_analyze_capability()
-        if analyze is None:
-            logger.debug("[PromptEnhancer] AnalyzeCapability not available")
-            return items
+        # Hinweis auf verfügbare Analyze-Skills
+        items.append(ContextItem(
+            source="skill_hint",
+            title="Analyze-Skill empfohlen",
+            content=(
+                "Für Code-Analyse verwende /analyze oder /sc:analyze. "
+                "Der Enterprise Analyze Skill prüft: "
+                "OWASP Top 10, Performance (Big O), Architektur (12-Factor). "
+                "Ergebnis: Severity-Rating mit actionable Recommendations."
+            ),
+            relevance=0.9
+        ))
 
-        try:
-            # Execute quick analysis for context
-            session = await analyze.execute(
-                query=query,
-                focus="all",
-                depth="quick"
-            )
-
-            # Convert steps to ContextItems (analysis findings)
-            for step in session.steps:
-                if step.phase.value in ("explore", "analyze"):
-                    items.append(ContextItem(
-                        source="code_analysis",
-                        title=step.title,
-                        content=step.content[:500],
-                        relevance=0.8
-                    ))
-
-                    # Add insights as separate items
-                    for insight in step.insights[:2]:
-                        items.append(ContextItem(
-                            source="analysis_insight",
-                            title="Erkenntnis",
-                            content=insight,
-                            relevance=0.7
-                        ))
-
-            logger.info(f"[PromptEnhancer] Analyze collected {len(items)} items")
-
-        except Exception as e:
-            logger.warning(f"[PromptEnhancer] Code analysis failed: {e}")
-
+        logger.debug("[PromptEnhancer] Analyze hints provided (skill-based)")
         return items
-
-    # NOTE: _collect_brainstorm_context() entfernt - Brainstorm ist jetzt Skill /sc:brainstorm
 
     async def _create_summary(
         self,
@@ -840,11 +769,8 @@ def get_prompt_enhancer(
         # Always update callbacks if provided (fixes stale singleton issue)
         if event_callback:
             _prompt_enhancer.event_callback = event_callback
-            # Reset lazy-loaded capabilities to use new callback
-            _prompt_enhancer._research_capability = None
+            # Reset lazy-loaded components to use new callback
             _prompt_enhancer._sequential_thinking = None
-            _prompt_enhancer._analyze_capability = None
-            # NOTE: _brainstorm_capability entfernt - jetzt als Skill
         if mcp_callback:
             _prompt_enhancer.mcp_callback = mcp_callback
     return _prompt_enhancer

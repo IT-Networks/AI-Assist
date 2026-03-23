@@ -463,9 +463,9 @@ async def get_skills_for_command(
     session_id: Optional[str] = Query(None, description="Session-ID für Aktivierungsstatus")
 ):
     """
-    Gibt alle Skills zurück, die für ein MCP-Command konfiguriert sind.
+    Gibt alle Skills zurück, die für ein Command konfiguriert sind.
 
-    MCP-Commands wie /brainstorm oder /design können Skills mit
+    Commands wie /brainstorm oder /design können Skills mit
     `activation.trigger_commands` automatisch aktivieren.
     """
     if not settings.skills.enabled:

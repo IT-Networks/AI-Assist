@@ -1,0 +1,162 @@
+# Enterprise Research Context Skill
+# Erweitert /research mit Enterprise-spezifischen Quellen,
+# Datenschutz-Sanitization und strukturierten Report-Templates.
+
+id: enterprise-research
+name: Enterprise Research Context
+description: |
+  Erweitert Research-Sessions mit Enterprise-Standards:
+  - Multi-Source-Recherche (Confluence, Handbook, Code-Index)
+  - Query-Sanitization (keine internen Namen in Web-Suchen)
+  - Strukturierte Reports mit Quellen-Angabe
+  - Interne Quellen priorisiert vor Web
+version: "1.0"
+type: hybrid
+
+activation:
+  mode: command-trigger
+  trigger_commands:
+    - research
+  trigger_words:
+    - research
+    - recherche
+    - suche
+    - finde
+    - lookup
+
+research:
+  scope: external-safe
+  allowed_sources:
+    - skills
+    - handbook
+    - confluence
+    - web
+  sanitize_queries: true
+  max_web_results: 5
+  max_internal_results: 15
+
+output:
+  templates:
+    - name: "Executive Summary"
+      required: true
+      format: "3-5 Key Findings mit Confidence-Level (High/Medium/Low)"
+
+    - name: "Internal Findings"
+      required: true
+      format: |
+        ### Interne Quellen
+        | Quelle | Titel | Relevanz | Key Information |
+        |--------|-------|----------|-----------------|
+        | {source} | {title} | {relevance}% | {summary} |
+
+    - name: "External Findings"
+      required: false
+      format: |
+        ### Externe Quellen
+        | Quelle | Titel | URL | Key Information |
+        |--------|-------|-----|-----------------|
+        | {source} | {title} | {url} | {summary} |
+
+    - name: "Code References"
+      required: false
+      format: |
+        ### Code-Referenzen
+        | Service | Klasse/Methode | Beschreibung |
+        |---------|----------------|--------------|
+        | {service} | {class}::{method} | {description} |
+
+    - name: "Recommendations"
+      required: true
+      format: |
+        ### Empfehlungen
+        1. {recommendation_1}
+        2. {recommendation_2}
+        3. {recommendation_3}
+
+    - name: "Sources"
+      required: true
+      format: |
+        ### Verwendete Quellen
+        - **Confluence**: {count} Seiten
+        - **Handbook**: {count} Einträge
+        - **Code-Index**: {count} Referenzen
+        - **Web**: {count} Ergebnisse
+
+  include_sources: true
+  enterprise_formatting: true
+
+system_prompt: |
+  ## Research-Anweisungen (Enterprise Standard)
+
+  Du führst strukturierte Recherchen mit Fokus auf interne Quellen durch.
+
+  ### Quellen-Priorisierung
+
+  **Reihenfolge (wichtig!):**
+  1. **Confluence/Wiki** - Firmeninterne Dokumentation
+  2. **Handbook** - Service-Dokumentation
+  3. **Code-Index** - Bestehende Implementierungen
+  4. **Skills** - Wissensbasen
+  5. **Web** - NUR als Fallback für technische Best Practices
+
+  ### Query-Sanitization (WICHTIG!)
+
+  **NIEMALS in Web-Queries verwenden:**
+  - Service-Namen (z.B. `OrderService` → `Service`)
+  - Projekt-Codes (z.B. `PROJ-123` → entfernt)
+  - IP-Adressen und interne URLs
+  - Personen-Namen
+  - Interne Systembezeichnungen
+
+  **Beispiel:**
+  - Original: "Wie funktioniert der OrderService mit DB2?"
+  - Web-Query: "Wie funktioniert ein Service mit DB2?"
+
+  ### Report-Struktur
+
+  1. **Executive Summary**
+     - 3-5 Haupt-Erkenntnisse
+     - Confidence-Level angeben
+
+  2. **Interne Findings**
+     - Confluence-Seiten mit Links
+     - Handbook-Einträge
+     - Code-Referenzen
+
+  3. **Externe Findings** (wenn genehmigt)
+     - Best Practices
+     - Technische Dokumentation
+     - Framework-Guides
+
+  4. **Empfehlungen**
+     - Konkrete nächste Schritte
+     - Verweis auf relevante interne Ressourcen
+
+  5. **Quellen-Übersicht**
+     - Alle verwendeten Quellen auflisten
+
+  ### Enterprise-Kontext
+  - Architektur: Microservices mit Java/Spring Boot
+  - Datenbank: DB2 als primäre Datenbank
+  - Runtime: WebSphere Liberty
+  - Dokumentation: Confluence Wiki
+
+  ### Qualitätskriterien
+  - Jede Aussage mit Quelle belegen
+  - Confidence-Level für Findings angeben
+  - Widersprüche zwischen Quellen aufzeigen
+  - Veraltete Information kennzeichnen
+
+knowledge_sources: []
+
+tools: []
+
+metadata:
+  author: Enterprise Architecture Team
+  created: "2026-03-23"
+  tags:
+    - research
+    - enterprise
+    - documentation
+    - multi-source
+    - skill-enhancement

@@ -594,7 +594,7 @@ class SkillManager:
         return None
 
     # ══════════════════════════════════════════════════════════════════════════
-    # MCP Command Integration (NEU)
+    # Command Integration
     # ══════════════════════════════════════════════════════════════════════════
 
     def get_skills_for_command(
@@ -604,10 +604,10 @@ class SkillManager:
         include_inactive: bool = False
     ) -> List[Skill]:
         """
-        Gibt Skills zurück, die für ein MCP-Command konfiguriert sind.
+        Gibt Skills zurück, die für ein Command konfiguriert sind.
 
         Args:
-            command: MCP-Command-Name (z.B. "brainstorm", "design")
+            command: Command-Name (z.B. "brainstorm", "design")
             session_id: Optional - wenn angegeben, nur aktivierte Skills
             include_inactive: Wenn True, auch nicht-aktivierte Skills zurückgeben
 

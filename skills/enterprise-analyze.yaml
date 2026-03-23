@@ -1,0 +1,160 @@
+# Enterprise Analyze Context Skill
+# Erweitert /analyze mit Enterprise-spezifischen Analyse-Standards,
+# Sicherheits-Checks und strukturierten Report-Templates.
+
+id: enterprise-analyze
+name: Enterprise Code Analysis Context
+description: |
+  Erweitert Code-Analyse-Sessions mit Enterprise-Standards:
+  - OWASP Top 10 Security Checks
+  - Performance-Metriken (Big O, DB Queries)
+  - Architektur-Bewertung (12-Factor, Microservices)
+  - Strukturierte Findings mit Severity-Ratings
+version: "1.0"
+type: hybrid
+
+activation:
+  mode: command-trigger
+  trigger_commands:
+    - analyze
+  trigger_words:
+    - analyze
+    - analyse
+    - code-review
+    - security-audit
+    - performance-check
+
+research:
+  scope: internal-only
+  allowed_sources:
+    - skills
+    - handbook
+    - confluence
+  sanitize_queries: true
+  max_internal_results: 10
+
+output:
+  templates:
+    - name: "Executive Summary"
+      required: true
+      format: "3-5 Key Findings mit Severity (Critical/High/Medium/Low)"
+
+    - name: "Quality Findings"
+      required: true
+      format: |
+        ### Quality Analysis
+        | Severity | Finding | Location | Recommendation |
+        |----------|---------|----------|----------------|
+        | {severity} | {finding} | {file:line} | {recommendation} |
+
+    - name: "Security Findings"
+      required: true
+      format: |
+        ### Security Analysis (OWASP)
+        | Severity | Vulnerability | OWASP Category | Remediation |
+        |----------|---------------|----------------|-------------|
+        | {severity} | {vuln} | {owasp_id} | {fix} |
+
+    - name: "Performance Findings"
+      required: false
+      format: |
+        ### Performance Analysis
+        | Issue | Complexity | Impact | Optimization |
+        |-------|------------|--------|--------------|
+        | {issue} | O({complexity}) | {impact} | {optimization} |
+
+    - name: "Architecture Findings"
+      required: false
+      format: |
+        ### Architecture Analysis
+        | Pattern | Current State | Recommendation | Effort |
+        |---------|---------------|----------------|--------|
+        | {pattern} | {state} | {recommendation} | {effort} |
+
+    - name: "Metrics"
+      required: true
+      format: |
+        ### Code Metrics
+        | Metric | Value | Rating | Target |
+        |--------|-------|--------|--------|
+        | Code Quality | {score}/100 | {rating} | >80 |
+        | Security Score | {score}/100 | {rating} | >85 |
+        | Test Coverage | {coverage}% | {rating} | >70% |
+        | Complexity (avg) | {complexity} | {rating} | <10 |
+
+  include_sources: true
+  enterprise_formatting: true
+
+system_prompt: |
+  ## Code-Analyse-Anweisungen (Enterprise Standard)
+
+  Du führst Code-Analysen nach Enterprise-Security und Quality-Standards durch.
+
+  ### Analyse-Domains
+
+  **1. Quality Analysis**
+  - Code Style & Naming Conventions
+  - Cyclomatic/Cognitive Complexity
+  - DRY/SOLID Principles
+  - Documentation Coverage
+  - Test Coverage
+
+  **2. Security Analysis (OWASP Top 10)**
+  - A01: Broken Access Control
+  - A02: Cryptographic Failures
+  - A03: Injection (SQL, XSS, Command)
+  - A04: Insecure Design
+  - A05: Security Misconfiguration
+  - A06: Vulnerable Components
+  - A07: Authentication Failures
+  - A08: Software/Data Integrity
+  - A09: Logging Failures
+  - A10: SSRF
+
+  **3. Performance Analysis**
+  - Algorithm Complexity (Big O)
+  - Database Query Patterns (N+1)
+  - Memory Usage & Leaks
+  - I/O Operations
+  - Caching Opportunities
+  - Async/Parallel Processing
+
+  **4. Architecture Analysis**
+  - 12-Factor App Compliance
+  - Separation of Concerns
+  - Dependency Management
+  - Scalability Patterns
+  - Technical Debt Assessment
+
+  ### Severity-Klassifikation
+  - **Critical**: Sofort beheben, Sicherheitsrisiko oder Produktionsausfall möglich
+  - **High**: Innerhalb 1 Woche beheben, signifikante Qualitätsprobleme
+  - **Medium**: Geplante Behebung, technische Schulden
+  - **Low**: Nice-to-have Verbesserungen
+
+  ### Output-Anforderungen
+  - Alle Findings mit konkreter Location (file:line)
+  - Actionable Recommendations
+  - Effort-Schätzung (S/M/L)
+  - Metrics-Tabelle am Ende
+
+  ### Enterprise-Kontext
+  - Architektur: Microservices mit Java/Spring Boot
+  - Security: OWASP Standards, keine Secrets in Code
+  - Logging: Structured JSON, keine PII
+  - Tests: Minimum 70% Coverage
+
+knowledge_sources: []
+
+tools: []
+
+metadata:
+  author: Enterprise Architecture Team
+  created: "2026-03-23"
+  tags:
+    - analyze
+    - enterprise
+    - security
+    - quality
+    - performance
+    - skill-enhancement

@@ -29,7 +29,7 @@ class ActivationMode(str, Enum):
     ALWAYS = "always"              # Immer aktiv
     ON_DEMAND = "on-demand"        # Manuell aktiviert
     AUTO = "auto"                  # Automatisch bei Trigger-Wörtern
-    COMMAND_TRIGGER = "command-trigger"  # Bei MCP-Commands (brainstorm, design, etc.)
+    COMMAND_TRIGGER = "command-trigger"  # Bei Commands (brainstorm, design, etc.)
 
 
 class KnowledgeSourceType(str, Enum):
@@ -61,7 +61,7 @@ class SkillActivation(BaseModel):
     trigger_words: List[str] = Field(default_factory=list)
     trigger_commands: List[str] = Field(
         default_factory=list,
-        description="MCP-Commands die diesen Skill aktivieren (z.B. 'brainstorm', 'design')"
+        description="Commands die diesen Skill aktivieren (z.B. 'brainstorm', 'design')"
     )
     confidence_threshold: float = 0.8  # Für auto-Aktivierung
 

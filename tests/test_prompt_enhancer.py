@@ -1,10 +1,14 @@
 """
-Tests fuer PromptEnhancer - MCP-basierte Kontext-Anreicherung.
+Tests fuer PromptEnhancer - Kontext-Anreicherung.
 
 Testet:
 - EnhancementDetector: Erkennung des Enhancement-Typs
 - EnhancementCache: Caching und TTL
 - PromptEnhancer: Kontext-Sammlung und User-Bestaetigung
+
+MIGRATION (2026-03-23):
+Capabilities wurden zu Skills migriert. Der Enhancer liefert nun
+Skill-Hinweise statt eigener Kontext-Sammlung.
 """
 
 import asyncio
@@ -271,8 +275,6 @@ class TestEnhancementDetector:
         assert detector.detect("Erweitere den bestehenden Service") == EnhancementType.ANALYZE
         assert detector.detect("Was passiert wenn ich das aendere?") == EnhancementType.ANALYZE
 
-    # NOTE: test_detect_brainstorm_keywords entfernt - Brainstorm ist jetzt Skill /sc:brainstorm
-
     def test_detect_none_for_simple_queries(self):
         """Einfache Queries sollten NONE sein."""
         detector = EnhancementDetector()
@@ -355,7 +357,7 @@ class TestPromptEnhancer:
         # Mit skip_cache sollte Cache ignoriert werden
         result = await enhancer.enhance("Wiki test", skip_cache=True)
 
-        # Kein Cache-Hit (da kein MCP konfiguriert, auch kein neuer Kontext)
+        # Kein Cache-Hit
         assert result.cache_hit is False
 
     @pytest.mark.asyncio
@@ -387,28 +389,6 @@ class TestPromptEnhancer:
         assert len(events) >= 2
         assert events[0][0] == "enhancement_start"
         assert events[-1][0] == "enhancement_complete"
-
-    @pytest.mark.asyncio
-    async def test_enhance_fallback_on_error(self):
-        """Bei Fehlern in einzelnen Quellen sollte Fallback greifen."""
-        enhancer = PromptEnhancer()
-
-        # Research-Capability mocken um Fehler zu werfen
-        enhancer._research_capability = MagicMock()
-        enhancer._research_capability.search = AsyncMock(
-            side_effect=Exception("Network error")
-        )
-
-        result = await enhancer.enhance(
-            "Wie im Wiki beschrieben",
-            force_type=EnhancementType.RESEARCH
-        )
-
-        # Sollte trotzdem einen EnrichedPrompt liefern (keine Items = auto-confirmed)
-        assert result is not None
-        assert result.confirmation_status == ConfirmationStatus.CONFIRMED
-        # Kein Kontext gesammelt
-        assert len(result.context_items) == 0
 
     def test_confirm_accepted(self):
         """Bestaetigung sollte Status aendern."""
@@ -462,20 +442,8 @@ class TestSingletonAccess:
         assert enhancer1 is enhancer2
 
 
-class TestMCPCapabilityWiring:
-    """Tests fuer MCP Capability Integration."""
-
-    def test_lazy_load_research_capability(self):
-        """ResearchCapability sollte lazy geladen werden."""
-        enhancer = PromptEnhancer()
-
-        # Vor dem Laden sollte None sein
-        assert enhancer._research_capability is None
-
-        # Nach dem Laden sollte eine Instanz existieren (falls verfuegbar)
-        research = enhancer._get_research_capability()
-        # Kann None sein wenn Import fehlschlaegt, aber sollte nicht crashen
-        # Der Test verifiziert, dass die Methode funktioniert
+class TestSkillHints:
+    """Tests fuer Skill-basierte Hints (nach Migration von Capabilities)."""
 
     def test_lazy_load_sequential_thinking(self):
         """SequentialThinking sollte lazy geladen werden."""
@@ -485,39 +453,27 @@ class TestMCPCapabilityWiring:
         sequential = enhancer._get_sequential_thinking()
         # Kann None sein wenn Import fehlschlaegt
 
-    def test_lazy_load_analyze_capability(self):
-        """AnalyzeCapability sollte lazy geladen werden."""
-        enhancer = PromptEnhancer()
-
-        assert enhancer._analyze_capability is None
-        analyze = enhancer._get_analyze_capability()
-        # Kann None sein wenn Import fehlschlaegt
-
-    # NOTE: test_lazy_load_brainstorm_capability entfernt - Brainstorm ist jetzt Skill /sc:brainstorm
-
     @pytest.mark.asyncio
-    async def test_collect_research_with_mock_capability(self):
-        """Research-Sammlung sollte mit Mock-Capability funktionieren."""
+    async def test_collect_research_returns_skill_hint(self):
+        """Research-Sammlung sollte Skill-Hint liefern."""
         enhancer = PromptEnhancer()
 
-        # Mock ResearchCapability
-        mock_session = MagicMock()
-        mock_session.artifacts = [
-            MagicMock(
-                artifact_type="research_report",
-                content="Test research report content"
-            )
-        ]
-
-        mock_capability = MagicMock()
-        mock_capability.execute = AsyncMock(return_value=mock_session)
-        enhancer._research_capability = mock_capability
-
-        items = await enhancer._collect_research_context("test query")
+        items = await enhancer._collect_research_hints("test query")
 
         assert len(items) == 1
-        assert items[0].source == "research_report"
-        assert "Test research report" in items[0].content
+        assert items[0].source == "skill_hint"
+        assert "/research" in items[0].content or "/sc:research" in items[0].content
+
+    @pytest.mark.asyncio
+    async def test_collect_analyze_returns_skill_hint(self):
+        """Analyze-Sammlung sollte Skill-Hint liefern."""
+        enhancer = PromptEnhancer()
+
+        items = await enhancer._collect_analyze_hints("refactor this class")
+
+        assert len(items) == 1
+        assert items[0].source == "skill_hint"
+        assert "/analyze" in items[0].content or "/sc:analyze" in items[0].content
 
     @pytest.mark.asyncio
     async def test_collect_sequential_with_hint_detection(self):
@@ -544,67 +500,31 @@ class TestMCPCapabilityWiring:
         assert "sequential_hint" in [item.source for item in items]
 
     @pytest.mark.asyncio
-    async def test_collect_analyze_with_mock_capability(self):
-        """Analyze-Sammlung sollte mit Mock-Capability funktionieren."""
+    async def test_enhancement_with_research_type_uses_hints(self):
+        """RESEARCH-Enhancement sollte Skill-Hints verwenden."""
         enhancer = PromptEnhancer()
 
-        # Mock AnalyzeCapability Session
-        mock_step = MagicMock()
-        mock_step.phase = MagicMock(value="analyze")
-        mock_step.title = "Code Quality Analysis"
-        mock_step.content = "Found issues in the code"
-        mock_step.insights = ["Issue 1", "Issue 2"]
+        result = await enhancer.enhance(
+            "Wie im Wiki beschrieben implementieren",
+            force_type=EnhancementType.RESEARCH
+        )
 
-        mock_session = MagicMock()
-        mock_session.steps = [mock_step]
-
-        mock_capability = MagicMock()
-        mock_capability.execute = AsyncMock(return_value=mock_session)
-        enhancer._analyze_capability = mock_capability
-
-        items = await enhancer._collect_analyze_context("refactor this class")
-
-        assert len(items) >= 1
-        assert items[0].source == "code_analysis"
-
-    # NOTE: test_collect_brainstorm_with_mock_capability entfernt - Brainstorm ist jetzt Skill /sc:brainstorm
+        assert result.enhancement_type == EnhancementType.RESEARCH
+        # Sollte Skill-Hints enthalten
+        assert len(result.context_items) >= 1
+        assert any(item.source == "skill_hint" for item in result.context_items)
 
     @pytest.mark.asyncio
-    async def test_graceful_failure_when_capability_unavailable(self):
-        """Enhancement sollte graceful failen wenn Capability nicht verfuegbar."""
+    async def test_enhancement_with_analyze_type_uses_hints(self):
+        """ANALYZE-Enhancement sollte Skill-Hints verwenden."""
         enhancer = PromptEnhancer()
 
-        # Explizit None setzen um lazy-loading zu verhindern
-        enhancer._research_capability = None
-        enhancer._sequential_thinking = None
-        enhancer._analyze_capability = None
-        # NOTE: _brainstorm_capability entfernt - jetzt als Skill /sc:brainstorm
+        result = await enhancer.enhance(
+            "Refactor diese Klasse",
+            force_type=EnhancementType.ANALYZE
+        )
 
-        # Getter patchen um None zurueckzugeben (simuliert fehlende Imports)
-        with patch.object(enhancer, '_get_research_capability', return_value=None), \
-             patch.object(enhancer, '_get_sequential_thinking', return_value=None), \
-             patch.object(enhancer, '_get_analyze_capability', return_value=None):
-
-            items = await enhancer._collect_research_context("test")
-            assert items == []
-
-            items = await enhancer._collect_sequential_context("test")
-            assert items == []
-
-            items = await enhancer._collect_analyze_context("test")
-            assert items == []
-            # NOTE: Brainstorm-Test entfernt - jetzt als Skill
-
-    @pytest.mark.asyncio
-    async def test_real_capability_integration_if_available(self):
-        """Wenn echte Capabilities verfuegbar sind, sollten sie funktionieren."""
-        enhancer = PromptEnhancer()
-
-        # Versuche Research-Capability zu laden
-        research = enhancer._get_research_capability()
-
-        if research is not None:
-            # Wenn verfuegbar, sollte Kontext gesammelt werden
-            items = await enhancer._collect_research_context("python programming")
-            # Kann leer sein bei Netzwerkproblemen, aber sollte nicht crashen
-            assert isinstance(items, list)
+        assert result.enhancement_type == EnhancementType.ANALYZE
+        # Sollte Skill-Hints enthalten
+        assert len(result.context_items) >= 1
+        assert any(item.source == "skill_hint" for item in result.context_items)

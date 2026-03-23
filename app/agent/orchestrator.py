@@ -210,7 +210,6 @@ from app.agent.sub_agent_coordinator import (
 )
 from app.core.config import settings
 from app.mcp.tool_bridge import get_tool_bridge, MCPToolBridge
-from app.mcp.capabilities.research import get_research_capability, ResearchCapability
 from app.mcp.event_bridge import MCPEventBridge, get_event_bridge, create_event_callback
 from app.core.token_budget import TokenBudget, create_budget_from_config
 from app.core.conversation_summarizer import get_summarizer
@@ -784,8 +783,6 @@ class AgentOrchestrator:
         self.auto_learner = get_auto_learner()
         # MCP Tool Bridge (für Sequential Thinking und externe MCP-Server)
         self._mcp_bridge: Optional[MCPToolBridge] = None
-        # Research Capability für parallele Quellensuche
-        self._research_capability: Optional[ResearchCapability] = None
         # Event Bridge für Live-Streaming von MCP-Events
         self._event_bridge: MCPEventBridge = get_event_bridge()
         # Tool Result Cache (reduziert redundante Tool-Aufrufe)
@@ -1220,14 +1217,13 @@ Sei präzise und gib detaillierte Analyse-Schritte."""
             except asyncio.TimeoutError:
                 break
 
-    def _get_research_capability(self) -> Optional["ResearchCapability"]:
-        """Initialisiert und gibt die ResearchCapability zurück."""
-        if self._research_capability is None:
-            try:
-                self._research_capability = get_research_capability()
-            except Exception as e:
-                logger.debug(f"[agent] ResearchCapability not available: {e}")
-        return self._research_capability
+    def _get_research_capability(self):
+        """
+        DEPRECATED: ResearchCapability wurde zu Skills migriert.
+        Verwende /research oder /sc:research für Recherchen.
+        """
+        logger.debug("[agent] ResearchCapability deprecated - use /research skill")
+        return None
 
     def _should_auto_research(self, query: str) -> bool:
         """
@@ -1282,12 +1278,14 @@ Sei präzise und gib detaillierte Analyse-Schritte."""
         budget,
     ) -> AsyncGenerator[AgentEvent, None]:
         """
-        Führt die Research-Phase mit parallelen Quellen aus.
+        DEPRECATED: Research-Phase wurde zu Skills migriert.
 
-        Nutzt ResearchCapability um parallel in verschiedenen
-        Quellen zu suchen (Memory, Code, Web, Docs).
+        Diese Methode ist noch vorhanden für Abwärtskompatibilität,
+        führt aber keine Aktionen mehr aus. Verwende stattdessen:
+        - /research oder /sc:research für Recherchen
+        - Enterprise Research Skill für firmenspezifische Quellen
 
-        Yieldet RESEARCH_START / RESEARCH_PROGRESS / RESEARCH_DONE Events.
+        Die Methode gibt sofort zurück ohne Events zu yielden.
         """
         from app.utils.token_counter import estimate_tokens
 
