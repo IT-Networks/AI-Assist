@@ -294,6 +294,9 @@ class HandbookIndexer:
 
         # 4. Indexierung mit paralleler Dateiverarbeitung
         progress.phase = "indexing"
+        progress.message = "Starte Indexierung..."
+        yield progress  # Sofort Phase-Wechsel anzeigen
+
         indexed = 0
         skipped = 0
         errors = 0
