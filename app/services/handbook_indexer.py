@@ -368,8 +368,8 @@ class HandbookIndexer:
                     remaining = len(html_files) - progress.processed_files
                     progress.estimated_remaining_seconds = avg_time * remaining
 
-                # Progress alle 100 Dateien oder alle 2 Sekunden
-                if (i + 1) % 100 == 0:
+                # Progress alle 50 Dateien (häufigeres Update bei langsamen Netzwerken)
+                if (i + 1) % 50 == 0:
                     progress.message = f"Indexiere... {indexed} neu, {skipped} übersprungen"
                     yield progress
 
