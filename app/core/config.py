@@ -276,7 +276,8 @@ class HandbookConfig(BaseModel):
         "historie", "beispiele", "varianten", "fehler"
     ]
     # Performance: Anzahl paralleler Threads für Netzwerk-I/O
-    parallel_workers: int = 8
+    # Höhere Werte bei schnellem Netzwerk (16-32), niedriger bei langsamem (4-8)
+    parallel_workers: int = 16
 
 
 class SkillsConfig(BaseModel):

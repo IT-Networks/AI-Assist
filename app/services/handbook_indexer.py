@@ -332,8 +332,17 @@ class HandbookIndexer:
                 except Exception:
                     errors += 1
 
-        # Parallele Verarbeitung in Chunks
-        chunk_size = parallel_workers * 10  # z.B. 80 Dateien pro Chunk bei 8 Workern
+        # Optimierte parallele Verarbeitung
+        chunk_size = parallel_workers * 25  # Größere Chunks: 200 Dateien bei 8 Workern
+
+        def get_file_mtime(html_file: Path) -> Optional[Tuple[Path, str, float]]:
+            """Worker für parallelen mtime-Check (schneller als sequentiell über Netzwerk)."""
+            try:
+                rel_path = str(html_file.relative_to(handbook))
+                mtime = html_file.stat().st_mtime
+                return (html_file, rel_path, mtime)
+            except Exception:
+                return None
 
         with self._connect() as con:
             # Lade bereits indexierte mtimes für Skip-Check
@@ -343,44 +352,45 @@ class HandbookIndexer:
                 for row in rows:
                     existing_mtimes[row[0][6:]] = float(row[1])  # Entferne "mtime:" Prefix
 
-            i = 0
-            while i < len(html_files):
-                if self._cancel_flag.is_set():
-                    # Status speichern: cancelled
-                    con.execute("INSERT OR REPLACE INTO handbook_meta(key, value) VALUES ('build_status', 'cancelled')")
-                    con.execute("INSERT OR REPLACE INTO handbook_meta(key, value) VALUES ('files_processed', ?)", (str(i),))
-                    con.commit()
-                    progress.phase = "cancelled"
-                    progress.message = "Abgebrochen durch Benutzer"
-                    yield progress
-                    return {"cancelled": True, "indexed": indexed}
+            # Ein Executor für die gesamte Indexierung (nicht pro Chunk neu erstellen)
+            with ThreadPoolExecutor(max_workers=parallel_workers) as executor:
+                i = 0
+                while i < len(html_files):
+                    if self._cancel_flag.is_set():
+                        # Status speichern: cancelled
+                        con.execute("INSERT OR REPLACE INTO handbook_meta(key, value) VALUES ('build_status', 'cancelled')")
+                        con.execute("INSERT OR REPLACE INTO handbook_meta(key, value) VALUES ('files_processed', ?)", (str(i),))
+                        con.commit()
+                        progress.phase = "cancelled"
+                        progress.message = "Abgebrochen durch Benutzer"
+                        yield progress
+                        return {"cancelled": True, "indexed": indexed}
 
-                # Chunk von Dateien holen
-                chunk = html_files[i:i + chunk_size]
-                files_to_process = []
+                    # Chunk von Dateien holen
+                    chunk = html_files[i:i + chunk_size]
 
-                # Skip-Check für diesen Chunk
-                for html_file in chunk:
-                    rel_path = str(html_file.relative_to(handbook))
-                    try:
-                        mtime = html_file.stat().st_mtime
+                    # PARALLELER mtime-Check (statt sequentiell)
+                    mtime_results = list(executor.map(get_file_mtime, chunk))
+
+                    files_to_process = []
+                    for result in mtime_results:
+                        if result is None:
+                            errors += 1
+                            continue
+                        html_file, rel_path, mtime = result
                         if rel_path in existing_mtimes and abs(existing_mtimes[rel_path] - mtime) < 0.001:
                             skipped += 1
                         else:
                             files_to_process.append(html_file)
-                    except Exception:
-                        errors += 1
 
-                # Paralleles Parsen der nicht-übersprungenen Dateien
-                if files_to_process:
-                    with ThreadPoolExecutor(max_workers=parallel_workers) as executor:
+                    # Paralleles Parsen der nicht-übersprungenen Dateien
+                    if files_to_process:
                         results = list(executor.map(parse_file_worker, files_to_process))
+                        # Sequentielles Speichern in DB
+                        save_batch_to_db(con, results)
+                        con.commit()
 
-                    # Sequentielles Speichern in DB
-                    save_batch_to_db(con, results)
-                    con.commit()
-
-                i += chunk_size
+                    i += chunk_size
 
                 # Progress Update
                 progress.processed_files = min(i, len(html_files))
@@ -468,11 +478,15 @@ class HandbookIndexer:
         root: Path,
         functions_subdir: str
     ) -> Tuple[str, str, str, str, str, str, str]:
-        """Parsed mit BeautifulSoup."""
+        """Parsed mit BeautifulSoup (lxml bevorzugt für Performance)."""
         from bs4 import BeautifulSoup
 
         content = file_path.read_text(encoding="utf-8", errors="replace")
-        soup = BeautifulSoup(content, "html.parser")
+        # lxml ist ~5x schneller als html.parser
+        try:
+            soup = BeautifulSoup(content, "lxml")
+        except Exception:
+            soup = BeautifulSoup(content, "html.parser")
 
         title = soup.title.string if soup.title else file_path.stem
         title = (title.strip() if title else file_path.stem)[:500]
