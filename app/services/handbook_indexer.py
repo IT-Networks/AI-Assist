@@ -1613,16 +1613,24 @@ class HandbookIndexer:
 
                 if service_name not in services:
                     # Service-ID aus handbook_services holen (mit LIKE für Fuzzy-Match)
+                    # Services haben Unterstriche zwischen Wörtern, z.B. "DATEN_LESEN"
+                    service_id_pattern = service_name.upper().replace(" ", "_")
                     service_row = con.execute(
                         """SELECT service_id, service_name, description
                            FROM handbook_services
-                           WHERE service_name = ? OR service_name LIKE ? OR service_id LIKE ?
+                           WHERE service_name = ?
+                              OR UPPER(service_name) = ?
+                              OR service_id = ?
+                              OR UPPER(service_id) = ?
+                              OR service_name LIKE ?
+                              OR service_id LIKE ?
                            LIMIT 1""",
-                        (service_name, f"%{service_name}%", f"%{service_name.lower().replace(' ', '-')}%")
+                        (service_name, service_name.upper(), service_id_pattern, service_id_pattern,
+                         f"%{service_name}%", f"%{service_id_pattern}%")
                     ).fetchone()
 
                     services[service_name] = {
-                        "service_id": service_row["service_id"] if service_row else service_name.lower().replace(" ", "-"),
+                        "service_id": service_row["service_id"] if service_row else service_name.lower().replace(" ", "_"),
                         "service_name": service_row["service_name"] if service_row else service_name,
                         "description": service_row["description"] if service_row else "",
                         "match_count": 0,
