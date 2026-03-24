@@ -234,12 +234,12 @@ async def batch_read_files(
     try:
         results = await asyncio.wait_for(
             asyncio.gather(*tasks, return_exceptions=True),
-            timeout=30.0  # 30 Sekunden Timeout
+            timeout=60.0  # 60 Sekunden Timeout (erhöht für größere Dateimengen)
         )
     except asyncio.TimeoutError:
         return ToolResult(
             success=False,
-            error="Timeout beim Lesen der Dateien (30s)"
+            error="Timeout beim Lesen der Dateien (60s). Versuche weniger Dateien pro Batch."
         )
 
     # Ergebnisse kombinieren

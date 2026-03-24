@@ -38,6 +38,8 @@ PARALLELIZABLE_TOOL_PREFIXES = (
     "github_",      # github_search_code, github_get_file, github_pr_diff, etc.
     "describe_",    # describe_database_table, etc.
     "grep_",        # grep_content
+    "batch_read_",  # batch_read_files (read-only meta tool)
+    "combined_",    # combined_search (read-only meta tool)
 )
 
 # Tools that must NOT be parallelized (writing, confirmations, MCP)
