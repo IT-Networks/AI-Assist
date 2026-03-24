@@ -8,6 +8,8 @@ Der Orchestrator:
 4. Führt Tool-Calls aus
 5. Bei Schreib-Ops: Wartet auf User-Bestätigung
 6. Wiederholt bis fertig oder max_iterations erreicht
+
+Refactored: Types, utilities and helpers are imported from app.agent.orchestration
 """
 
 import asyncio
@@ -16,7 +18,6 @@ import logging
 import re
 import uuid
 from dataclasses import dataclass, field
-from enum import Enum
 from typing import Any, AsyncGenerator, Dict, List, Optional, Set, TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -27,168 +28,70 @@ import httpx
 from app.agent.constants import ControlMarkers
 from app.agent.entity_tracker import EntityTracker
 
+# ══════════════════════════════════════════════════════════════════════════════
+# Import modular components from orchestration package
+# ══════════════════════════════════════════════════════════════════════════════
+from app.agent.orchestration.types import (
+    AgentMode,
+    AgentEventType,
+    AgentEvent,
+    AgentState,
+    ToolCall,
+    TokenUsage,
+    MCP_EVENT_TYPE_MAPPING,
+)
+from app.agent.orchestration.utils import (
+    get_model_context_limit as _get_model_context_limit,
+    trim_messages_to_limit as _trim_messages_to_limit,
+    detect_pr_context as _detect_pr_context,
+    filter_tools_for_pr_context as _filter_tools_for_pr_context,
+    analyze_pr_for_workspace as _analyze_pr_for_workspace,
+)
+from app.agent.orchestration.llm_caller import (
+    call_llm_with_tools as _call_llm_with_tools,
+    llm_callback_for_mcp as _llm_callback_for_mcp_impl,
+)
+from app.agent.orchestration.workspace_events import (
+    build_code_change_event as _build_code_change_event,
+    build_sql_result_event as _build_sql_result_event,
+    format_sql_result_for_agent as _format_sql_result_for_agent,
+)
+from app.agent.orchestration.tool_executor import (
+    is_parallelizable_tool as _is_parallelizable_tool,
+    execute_tools_parallel as _execute_tools_parallel,
+    PARALLELIZABLE_TOOL_PREFIXES,
+    SEQUENTIAL_ONLY_TOOLS,
+    truncate_result as _truncate_result,
+)
+from app.agent.orchestration.response_handler import (
+    strip_tool_markers as _strip_tool_markers,
+    extract_plan_block,
+    build_usage_data as _build_usage_data,
+    track_token_usage as _track_token_usage,
+    stream_final_response_with_usage as _stream_final_response_with_usage,
+)
+from app.agent.orchestration.tool_parser import (
+    parse_text_tool_calls as _parse_text_tool_calls,
+    REGEX_PATTERNS as _TOOL_REGEX,
+)
+from app.agent.orchestration.command_parser import (
+    parse_mcp_force_capability,
+    parse_slash_command,
+    check_continue_markers,
+)
+from app.agent.orchestration.context_builder import (
+    extract_conversation_context as _extract_conversation_context,
+    build_agent_instructions as _build_agent_instructions,
+)
+
 logger = logging.getLogger(__name__)
 
 # ══════════════════════════════════════════════════════════════════════════════
-# Pre-compiled Regex Patterns (Performance: avoid re-compilation on each call)
+# Regex patterns are now imported from orchestration.tool_parser as _TOOL_REGEX
+# Additional patterns still needed locally (not in tool_parser module)
 # ══════════════════════════════════════════════════════════════════════════════
-_RE_MISTRAL_COMPACT = re.compile(r'\[TOOL_CALLS\](\w+)(\{.*?\}|\[.*?\])', re.DOTALL)
-_RE_MISTRAL_STANDARD = re.compile(r'\[TOOL_CALLS\]\s*(\[.*?\])', re.DOTALL)
-_RE_XML_TOOL_CALL = re.compile(r'<tool_call>(.*?)</tool_call>', re.DOTALL)
-_RE_XML_FUNCTIONCALL = re.compile(r'<functioncall>(.*?)</functioncall>', re.DOTALL)
-_RE_XML_FUNCTION_CALLS = re.compile(r'<function_calls>(.*?)</function_calls>', re.DOTALL)
-_RE_XML_INVOKE = re.compile(r'<invoke>(.*?)</invoke>', re.DOTALL)
-_RE_JSON_BLOCK = re.compile(r'```(?:json)?\s*\n(.*?)\n```', re.DOTALL)
-_RE_INLINE_NAME = re.compile(r'\{[^{}]*"name"\s*:\s*"([^"]+)"[^{}]*\}')
 _RE_MCP_FORCE = re.compile(r'^\[MCP:(\w+)\]\s*(.+)$', re.DOTALL)
 _RE_PLAN_BLOCK = re.compile(r'\[PLAN\](.*?)\[/PLAN\]', re.DOTALL)
-
-# ══════════════════════════════════════════════════════════════════════════════
-# Parallelisierbare Tools (Read-Only, keine Seiteneffekte)
-# ══════════════════════════════════════════════════════════════════════════════
-PARALLELIZABLE_TOOL_PREFIXES = (
-    "search_",      # search_code, search_confluence, search_jira, etc.
-    "read_",        # read_file, read_confluence_page, etc.
-    "get_",         # get_active_repositories, etc.
-    "list_",        # list_files, list_database_tables, etc.
-    "glob_",        # glob_files
-    "github_",      # github_search_code, github_get_file, github_pr_diff, etc.
-    "describe_",    # describe_database_table, etc.
-    "grep_",        # grep_content
-)
-
-# Tools die NICHT parallelisiert werden dürfen (Schreibend, Confirmations, MCP)
-SEQUENTIAL_ONLY_TOOLS = {
-    "write_file", "edit_file", "create_file", "batch_write_files",
-    "execute_command", "run_sql_query",
-    "suggest_answers",  # Benötigt User-Interaktion
-    "sequential_thinking", "seq_think", "analyze",  # brainstorm/design/implement → Skills
-}
-
-def _is_parallelizable_tool(tool_name: str) -> bool:
-    """Prüft ob ein Tool parallel ausgeführt werden kann."""
-    if tool_name in SEQUENTIAL_ONLY_TOOLS:
-        return False
-    if tool_name.startswith("mcp_"):
-        return False  # MCP-Tools immer sequentiell
-    return tool_name.startswith(PARALLELIZABLE_TOOL_PREFIXES)
-
-# Debug hint patterns
-_RE_HINT_TOOL = re.compile(r'\[TOOL', re.IGNORECASE)
-_RE_HINT_XML_TOOL = re.compile(r'<tool', re.IGNORECASE)
-_RE_HINT_XML_FUNC = re.compile(r'<function', re.IGNORECASE)
-_RE_HINT_NAME = re.compile(r'"name"\s*:')
-
-# ══════════════════════════════════════════════════════════════════════════════
-# PR-Context Detection - Filtert Tools bei GitHub PR-Analysen
-# ══════════════════════════════════════════════════════════════════════════════
-# Generisches Pattern für PR-URLs (funktioniert mit jedem Git-Server):
-# - github.com/owner/repo/pull/123
-# - github.intern/owner/repo/pull/456
-# - git.example.com/owner/repo/pull/789
-# - 192.168.1.100/owner/repo/pull/123
-_RE_PR_URL = re.compile(
-    r'(https?://[^\s/]+/[^\s/]+/[^\s/]+/pull/\d+)',
-    re.IGNORECASE
-)
-
-# Tools die bei PR-Analysen erlaubt sind (GitHub-Tools + Basis-Infos)
-PR_CONTEXT_ALLOWED_TOOLS = {
-    # GitHub-Tools für PR-Analyse
-    "github_pr_details",
-    "github_pr_diff",
-    "github_get_file",
-    "github_search_code",
-    "github_commit_diff",
-    "github_recent_commits",
-    "github_list_branches",
-    # Allgemeine Hilfstools
-    "sequential_thinking",
-    "seq_think",
-}
-
-# Tools die bei PR-Context explizit VERBOTEN sind (lokale Dateien)
-PR_CONTEXT_FORBIDDEN_TOOLS = {
-    "search_code",          # Durchsucht lokales Dateisystem
-    "read_file",            # Liest lokale Dateien
-    "batch_read_files",     # Liest mehrere lokale Dateien
-    "grep_content",         # Grep in lokalen Dateien
-    "glob_files",           # Glob in lokalem Dateisystem
-    "find_files",           # Findet lokale Dateien
-    "search_java_class",    # Java-Suche lokal
-    "trace_java_references",# Java-Referenzen lokal
-    "search_python_class",  # Python-Suche lokal
-}
-
-
-def _detect_pr_context(user_message: str) -> Optional[str]:
-    """
-    Erkennt ob die User-Message eine PR-URL enthält.
-
-    Unterstützt:
-    - github.com/owner/repo/pull/123
-    - github.intern/owner/repo/pull/456
-    - IP-basierte URLs: 192.168.1.100/owner/repo/pull/789
-    - Jede URL mit /pull/N im Pfad
-
-    Args:
-        user_message: Die Nachricht des Users
-
-    Returns:
-        Die PR-URL wenn gefunden, sonst None
-    """
-    match = _RE_PR_URL.search(user_message)
-    if match:
-        return match.group(1)
-    return None
-
-
-def _filter_tools_for_pr_context(
-    tool_schemas: List[Dict[str, Any]],
-    pr_url: str
-) -> List[Dict[str, Any]]:
-    """
-    Filtert Tool-Schemas für PR-Context.
-
-    Entfernt lokale Datei-Tools und behält nur GitHub-Tools.
-
-    Args:
-        tool_schemas: Alle verfügbaren Tool-Schemas
-        pr_url: Die erkannte PR-URL
-
-    Returns:
-        Gefilterte Tool-Schemas (nur PR-relevante Tools)
-    """
-    filtered = []
-    removed = []
-
-    for schema in tool_schemas:
-        tool_name = schema.get("function", {}).get("name", "")
-
-        # Explizit verbotene Tools entfernen
-        if tool_name in PR_CONTEXT_FORBIDDEN_TOOLS:
-            removed.append(tool_name)
-            continue
-
-        # GitHub-Tools und erlaubte Tools behalten
-        if (tool_name.startswith("github_") or
-            tool_name in PR_CONTEXT_ALLOWED_TOOLS or
-            tool_name.startswith("mcp_")):  # MCP-Tools für Reasoning behalten
-            filtered.append(schema)
-        else:
-            # Andere Tools entfernen (z.B. search_confluence, search_jira)
-            # Diese sind für PR-Analyse nicht relevant
-            removed.append(tool_name)
-
-    if removed:
-        logger.info(
-            f"[PR-Context] Erkannt: {pr_url[:60]}... | "
-            f"Entfernte {len(removed)} lokale Tools, {len(filtered)} Tools verfügbar"
-        )
-        logger.debug(f"[PR-Context] Entfernte Tools: {removed[:10]}...")
-
-    return filtered
-_RE_HINT_TOOL_KEY = re.compile(r'"tool"\s*:')
 
 from app.agent.tools import ToolRegistry, ToolResult, get_tool_registry
 from app.agent.tool_cache import ToolResultCache, get_tool_cache
@@ -233,529 +136,15 @@ from app.services.analytics_logger import get_analytics_logger, AnalyticsLogger
 from app.utils.token_counter import estimate_tokens, estimate_messages_tokens, truncate_text_to_tokens
 
 
-def _get_model_context_limit(model_id: str) -> int:
-    """
-    Ermittelt das Kontext-Limit für ein Model.
-
-    Unterstützt:
-    - Exakte Matches: "mistral-678b" -> llm_context_limits["mistral-678b"]
-    - Pfad-basierte IDs: "mistral/mistral_large" -> sucht nach "mistral" in keys
-    - Fallback auf default_context_limit
-    """
-    limits = settings.llm.llm_context_limits or {}
-    default = settings.llm.default_context_limit or 32000
-
-    if not model_id:
-        return default
-
-    # 1. Exakter Match
-    if model_id in limits:
-        return limits[model_id]
-
-    # 2. Normalisierter Match (lowercase)
-    model_lower = model_id.lower()
-    for key, value in limits.items():
-        if key.lower() == model_lower:
-            return value
-
-    # 3. Partial Match - Model-ID enthält einen bekannten Key oder umgekehrt
-    # z.B. "mistral/mistral_large" enthält "mistral"
-    for key, value in limits.items():
-        key_lower = key.lower()
-        # Extrahiere Basis-Namen (ohne Pfad und Größenangaben)
-        model_base = model_lower.replace("/", "-").replace("_", "-")
-        key_base = key_lower.replace("/", "-").replace("_", "-")
-
-        # Prüfe ob key im model vorkommt oder umgekehrt
-        if key_base in model_base or model_base in key_base:
-            logger.debug(f"[context] Partial match: {model_id} -> {key} ({value} tokens)")
-            return value
-
-        # Prüfe einzelne Teile (z.B. "mistral" in "mistral/mistral_large")
-        model_parts = set(model_base.split("-"))
-        key_parts = set(key_base.split("-"))
-        if model_parts & key_parts:  # Intersection
-            logger.debug(f"[context] Partial match via parts: {model_id} -> {key} ({value} tokens)")
-            return value
-
-    logger.debug(f"[context] No match for {model_id}, using default: {default}")
-    return default
-
-
-def _trim_messages_to_limit(messages: List[Dict], max_tokens: int) -> List[Dict]:
-    """
-    Trimmt Message-Inhalte um Kontext-Limit einzuhalten.
-
-    Priorität:
-    1. System-Prompt bleibt unverändert
-    2. Letzte User-Nachricht bleibt unverändert
-    3. Tool-Ergebnisse werden gekürzt (älteste zuerst, größte zuerst)
-    4. Ältere Nachrichten werden gekürzt
-    """
-    # Sicherheitsprüfung
-    if not messages:
-        return messages or []
-
-    current_tokens = estimate_messages_tokens(messages)
-    if current_tokens <= max_tokens:
-        return messages
-
-    logger.warning(f"[agent] Kontext zu groß ({current_tokens} > {max_tokens} tokens), trimme...")
-
-    # Kopie erstellen
-    trimmed = [dict(m) for m in messages]
-    tokens_to_remove = current_tokens - max_tokens + 1000  # Puffer
-
-    # Finde große Tool-Ergebnisse und kürze sie
-    tool_results = []
-    for i, msg in enumerate(trimmed):
-        if msg.get("role") == "tool":
-            content = msg.get("content", "")
-            content_tokens = estimate_tokens(content)
-            if content_tokens > 500:  # Nur große Ergebnisse betrachten
-                tool_results.append((i, content_tokens, content))
-
-    # Sortiere nach Größe (größte zuerst) und trimme
-    tool_results.sort(key=lambda x: x[1], reverse=True)
-
-    for idx, orig_tokens, content in tool_results:
-        if tokens_to_remove <= 0:
-            break
-
-        # Berechne wie viel vom Inhalt übrig bleiben soll
-        target_tokens = max(200, orig_tokens - tokens_to_remove)
-        truncated = truncate_text_to_tokens(content, target_tokens)
-        trimmed[idx]["content"] = truncated
-
-        removed = orig_tokens - estimate_tokens(truncated)
-        tokens_to_remove -= removed
-        logger.debug(f"[agent] Tool-Ergebnis {idx} gekürzt: -{removed} tokens")
-
-    # Wenn immer noch zu groß: Ältere Assistant-Nachrichten kürzen
-    if tokens_to_remove > 0:
-        for i, msg in enumerate(trimmed):
-            if msg.get("role") == "assistant" and i < len(trimmed) - 2:
-                content = msg.get("content", "")
-                if content and len(content) > 500:
-                    truncated = content[:300] + "\n[... gekürzt ...]"
-                    removed = estimate_tokens(content) - estimate_tokens(truncated)
-                    trimmed[i]["content"] = truncated
-                    tokens_to_remove -= removed
-                    if tokens_to_remove <= 0:
-                        break
-
-    final_tokens = estimate_messages_tokens(trimmed)
-    logger.info(f"[agent] Kontext getrimmt: {current_tokens} -> {final_tokens} tokens")
-    return trimmed
-
-
-class AgentMode(str, Enum):
-    """Betriebsmodus des Agents."""
-    READ_ONLY = "read_only"           # Nur Lese-Operationen
-    WRITE_WITH_CONFIRM = "write_with_confirm"  # Schreiben mit Bestätigung
-    AUTONOMOUS = "autonomous"          # Schreiben ohne Bestätigung (gefährlich)
-    PLAN_THEN_EXECUTE = "plan_then_execute"    # Erst planen, dann mit Bestätigung ausführen
-    DEBUG = "debug"                    # Fehler-Analyse: Rückfragen + Tools zum Nachstellen
-
-
-class AgentEventType(str, Enum):
-    """Typen von Agent-Events."""
-    TOKEN = "token"                    # Streaming-Token
-    TOOL_START = "tool_start"          # Tool wird ausgeführt
-    TOOL_RESULT = "tool_result"        # Tool-Ergebnis
-    CONFIRM_REQUIRED = "confirm_required"  # User-Bestätigung benötigt
-    CONFIRMED = "confirmed"            # User hat bestätigt
-    CANCELLED = "cancelled"            # User hat abgelehnt
-    ERROR = "error"                    # Fehler
-    USAGE = "usage"                    # Token-Nutzung
-    COMPACTION = "compaction"          # Context wurde komprimiert
-    CONTEXT_STATUS = "context_status"  # Kontext-Auslastung für UI
-    DONE = "done"                      # Fertig
-    # Sub-Agent Events
-    SUBAGENT_START = "subagent_start"      # Sub-Agent-Phase beginnt (Routing läuft)
-    SUBAGENT_ROUTING = "subagent_routing"  # Routing fertig – ausgewählte Agenten bekannt
-    SUBAGENT_DONE = "subagent_done"        # Ein Sub-Agent hat Ergebnis geliefert
-    SUBAGENT_ERROR = "subagent_error"      # Sub-Agent fehlgeschlagen
-    # Planning Events
-    PLAN_READY = "plan_ready"              # Plan erstellt – wartet auf User-Genehmigung
-    PLAN_APPROVED = "plan_approved"        # Plan genehmigt, Ausführung startet
-    PLAN_REJECTED = "plan_rejected"        # Plan abgelehnt
-    # Debug-Modus Events
-    QUESTION = "question"                  # Agent stellt Rückfrage mit Vorschlägen
-    # MCP Progress Events
-    MCP_START = "mcp_start"                # MCP-Tool startet (z.B. Sequential Thinking)
-    MCP_STEP = "mcp_step"                  # Einzelner Denkschritt mit Details
-    MCP_PROGRESS = "mcp_progress"          # Fortschritts-Update (Prozent)
-    MCP_COMPLETE = "mcp_complete"          # MCP-Tool fertig mit Zusammenfassung
-    MCP_ERROR = "mcp_error"                # Fehler während MCP-Verarbeitung
-    # v2: Extended MCP Events
-    MCP_BRANCH_START = "mcp_branch_start"  # Branch in Sequential Thinking gestartet
-    MCP_BRANCH_END = "mcp_branch_end"      # Branch merged oder abandoned
-    MCP_ASSUMPTION = "mcp_assumption_created"  # Neue Assumption erstellt
-    MCP_TOOL_REC = "mcp_tool_recommendation"   # Tool-Empfehlung
-    # Reasoning Events (GPT-OSS, o1, o3)
-    REASONING_STATUS = "reasoning_status"  # Reasoning-Modus aktiv/inaktiv
-    # Task-Decomposition Events
-    TASK_PLAN_CREATED = "task_plan_created"          # TaskPlan erstellt
-    TASK_STARTED = "task_started"                    # Task-Ausfuehrung gestartet
-    TASK_PROGRESS = "task_progress"                  # Task-Fortschritt
-    TASK_COMPLETED = "task_completed"                # Task erfolgreich
-    TASK_FAILED = "task_failed"                      # Task fehlgeschlagen
-    TASK_CLARIFICATION = "task_clarification_needed" # Klaerungsfragen noetig
-    TASK_EXECUTION_DONE = "task_execution_complete"  # Alle Tasks fertig
-    # Prompt Enhancement Events
-    ENHANCEMENT_START = "enhancement_start"          # MCP-Kontext-Sammlung startet
-    ENHANCEMENT_PROGRESS = "enhancement_progress"    # Fortschritt bei Kontext-Sammlung
-    ENHANCEMENT_COMPLETE = "enhancement_complete"    # Kontext gesammelt, Bestätigung anfordern
-    ENHANCEMENT_CONFIRMED = "enhancement_confirmed"  # User hat Kontext bestätigt
-    ENHANCEMENT_REJECTED = "enhancement_rejected"    # User hat Kontext abgelehnt
-    # Web Fallback Events
-    WEB_FALLBACK_REQUIRED = "web_fallback_required"  # Web-Suche braucht Bestätigung (interne Quellen leer)
-    WEB_FALLBACK_CONFIRMED = "web_fallback_confirmed"  # User hat Web-Suche bestätigt
-    WEB_FALLBACK_REJECTED = "web_fallback_rejected"    # User hat Web-Suche abgelehnt
-    # Workspace Events
-    WORKSPACE_CODE_CHANGE = "workspace_code_change"  # Code-Änderung für Workspace Panel
-    WORKSPACE_SQL_RESULT = "workspace_sql_result"    # SQL-Abfrage-Ergebnis für Workspace Panel
-    WORKSPACE_FILE = "workspace_file"                # Gelesene Datei für Workspace Panel
-    WORKSPACE_RESEARCH = "workspace_research"        # Research-Ergebnis für Workspace Panel
-    WORKSPACE_PR = "workspace_pr"                    # PR-Daten für Workspace Panel
-    WORKSPACE_PR_ANALYSIS = "workspace_pr_analysis"  # PR-Analyse-Ergebnisse für Badges
-    PR_OPENED_HINT = "pr_opened_hint"                # Kurzer Chat-Hinweis: "PR im Workspace"
-    # Progress & Stuck Detection Events
-    STUCK_DETECTED = "stuck_detected"                # Agent dreht sich im Kreis
-    PROGRESS_UPDATE = "progress_update"              # Neues Wissen gewonnen
-
-
-@dataclass
-class TokenUsage:
-    """Token-Nutzung einer LLM-Anfrage."""
-    prompt_tokens: int = 0
-    completion_tokens: int = 0
-    total_tokens: int = 0
-    finish_reason: str = ""  # stop, length, tool_calls, etc.
-    model: str = ""
-    truncated: bool = False  # True wenn wegen max_tokens abgebrochen
-
-
-@dataclass
-class AgentEvent:
-    """Ein Event das vom Agent emittiert wird."""
-    type: AgentEventType
-    data: Any = None
-
-    def to_dict(self) -> Dict:
-        return {
-            "type": self.type.value,
-            "data": self.data
-        }
-
-
-@dataclass
-class ToolCall:
-    """Ein Tool-Call vom LLM."""
-    id: str
-    name: str
-    arguments: Dict[str, Any]
-    result: Optional[ToolResult] = None
-    confirmed: Optional[bool] = None
-
-
-@dataclass
-class AgentState:
-    """Zustand einer Agent-Session."""
-    session_id: str
-    project_id: Optional[str] = None  # Projekt-ID für Context-System
-    project_path: Optional[str] = None  # Projekt-Pfad für Context-Dateien
-    mode: AgentMode = AgentMode.READ_ONLY
-    active_skill_ids: Set[str] = field(default_factory=set)
-    pending_confirmation: Optional[ToolCall] = None
-    tool_calls_history: List[ToolCall] = field(default_factory=list)
-    context_items: List[str] = field(default_factory=list)
-    # Konversations-Historie für Multi-Turn Chats
-    messages_history: List[Dict[str, str]] = field(default_factory=list)
-    max_history_messages: int = 50  # Erhöht - Summarizer kümmert sich um Kompression
-    # Token-Tracking für aktuelle Anfrage
-    current_usage: Optional[TokenUsage] = None
-    total_prompt_tokens: int = 0
-    total_completion_tokens: int = 0
-    # Token Budget Management
-    token_budget: Optional[TokenBudget] = None
-    # Compaction Stats
-    compaction_count: int = 0
-    last_compaction_savings: int = 0
-    compaction_attempted_while_full: bool = False  # Verhindert Spam wenn Komprimierung nicht hilft
-    # Loop-Prävention: Zählt wie oft eine Datei pro Request bearbeitet wurde
-    read_files_this_request: Dict[str, int] = field(default_factory=dict)
-    edit_files_this_request: Dict[str, int] = field(default_factory=dict)
-    write_files_this_request: Dict[str, int] = field(default_factory=dict)
-    # Abbruch-Flag für laufende Anfragen
-    cancelled: bool = False
-    # Entity Tracker: Verfolgt gefundene Entitäten und ihre Quellen (Java ↔ Handbuch ↔ PDF)
-    entity_tracker: EntityTracker = field(default_factory=EntityTracker)
-    # Pending Enhancement: Wartet auf User-Bestätigung
-    pending_enhancement: Optional["EnrichedPrompt"] = None
-    # Confirmed Enhancement Context: Gesammelter Kontext nach Bestätigung
-    confirmed_enhancement_context: Optional[str] = None
-    # Original query für Enhancement (für Task-Decomposition nach Bestätigung)
-    enhancement_original_query: Optional[str] = None
-    # Chat-Titel (wird aus erster User-Nachricht abgeleitet oder manuell gesetzt)
-    title: str = ""
-    # Planungsphase (PLAN_THEN_EXECUTE-Modus)
-    pending_plan: Optional[str] = None    # Erstellter Plan, wartet auf Genehmigung
-    plan_approved: bool = False           # True wenn User den Plan genehmigt hat
-    # Tool-Budget-Tracking (fuer Effizienz-Optimierung)
-    tool_budget: Optional["ToolBudget"] = None
-    # Web-Fallback-Bestätigung (für Research mit leerem internen Ergebnis)
-    web_fallback_approved: bool = False   # True wenn User Web-Suche genehmigt hat
-    # Pending PR-Analyse (läuft im Hintergrund)
-    pending_pr_analysis: Optional[asyncio.Task] = None
-    pending_pr_number: Optional[int] = None
-    pending_pr_state: Optional[str] = None
-
-
 # ══════════════════════════════════════════════════════════════════════════════
-# Tool-Call Content-Bereinigung
+# Functions imported from app.agent.orchestration:
+# Types: AgentMode, AgentEventType, AgentEvent, AgentState, ToolCall, TokenUsage
+# Utils: _get_model_context_limit, _trim_messages_to_limit, _detect_pr_context
+# Tool Executor: _is_parallelizable_tool, _truncate_result
+# Response Handler: _strip_tool_markers, extract_plan_block
+# Tool Parser: _parse_text_tool_calls
+# Command Parser: parse_mcp_force_capability, parse_slash_command, check_continue_markers
 # ══════════════════════════════════════════════════════════════════════════════
-
-def _strip_tool_markers(content: str) -> str:
-    """
-    Entfernt Tool-Call-Marker aus dem Content nach dem Parsing.
-
-    Verhindert dass [TOOL_CALLS]..., <tool_call>...</tool_call> etc.
-    im finalen Output an den User erscheinen.
-
-    Args:
-        content: Roher Content mit möglichen Tool-Markern
-
-    Returns:
-        Bereinigter Content ohne Tool-Marker
-    """
-    if not content:
-        return content
-
-    clean = content
-
-    # [TOOL_CALLS] mit JSON-Array: [TOOL_CALLS] [{"name": ...}]
-    clean = re.sub(r'\[TOOL_CALLS\]\s*\[.*?\]', '', clean, flags=re.DOTALL)
-
-    # [TOOL_CALLS] mit direktem JSON: [TOOL_CALLS]funcname{...}
-    clean = re.sub(r'\[TOOL_CALLS\]\w*\{[^}]*\}', '', clean, flags=re.DOTALL)
-
-    # Generisches [TOOL_CALLS] Cleanup (falls Reste)
-    clean = re.sub(r'\[TOOL_CALLS\][^\[]*', '', clean, flags=re.DOTALL)
-
-    # XML-Style Tool-Calls
-    clean = re.sub(r'<tool_call>.*?</tool_call>', '', clean, flags=re.DOTALL)
-    clean = re.sub(r'<functioncall>.*?</functioncall>', '', clean, flags=re.DOTALL)
-    clean = re.sub(r'<function_calls>.*?</function_calls>', '', clean, flags=re.DOTALL)
-    clean = re.sub(r'<invoke>.*?</invoke>', '', clean, flags=re.DOTALL)
-
-    # JSON-Blöcke mit Tool-Struktur (nur wenn sie wie Tool-Calls aussehen)
-    # Vorsichtig: Nicht alle JSON-Blöcke entfernen!
-    clean = re.sub(
-        r'```(?:json)?\s*\n\s*\{\s*"(?:name|tool|function)"\s*:.*?\}\s*\n```',
-        '',
-        clean,
-        flags=re.DOTALL
-    )
-
-    # Mehrfache Leerzeilen reduzieren
-    clean = re.sub(r'\n{3,}', '\n\n', clean)
-
-    return clean.strip()
-
-
-# ══════════════════════════════════════════════════════════════════════════════
-# Text-basierter Tool-Call-Parser (Fallback für Modelle ohne natives Tool-Calling)
-# ══════════════════════════════════════════════════════════════════════════════
-
-def _parse_text_tool_calls(content: str, available_tools: List[Dict]) -> List[Dict]:
-    """
-    Parst Tool-Calls aus dem Text-Content von Modellen, die kein natives
-    Tool-Calling unterstützen (z.B. Mistral, Qwen, OpenHermes).
-
-    Unterstützte Formate:
-    1. Mistral: [TOOL_CALLS] [{"name": "func", "arguments": {...}}]
-    2. XML:     <tool_call>{"name": "func", "arguments": {...}}</tool_call>
-    3. OpenHermes: <functioncall>{"name": "func", "arguments": {...}}</functioncall>
-    4. JSON-Block: ```json\n{"tool": "func", ...}\n```
-    """
-    if not content:
-        return []
-
-    # PERFORMANCE: Schneller Check ob überhaupt Tool-Call-Marker vorhanden sind
-    # Vermeidet teure Regex-Operationen wenn Content keine Tools enthält
-    _HAS_TOOL_MARKERS = (
-        "[TOOL_CALLS]" in content or
-        "<tool_call>" in content or
-        "<functioncall>" in content or
-        "<function_calls>" in content or
-        "<invoke>" in content or
-        ('"name"' in content and ("arguments" in content or "parameters" in content)) or
-        ("```" in content and '"tool"' in content)
-    )
-    if not _HAS_TOOL_MARKERS:
-        return []
-
-    tool_names = {t["function"]["name"] for t in available_tools} if available_tools else set()
-    parsed_calls = []
-
-    # Format 1a: Mistral 678B Compact Format
-    # [TOOL_CALLS]funcname{"arg": "val"}  (kein Leerzeichen, kein JSON-Array)
-    mistral_compact_matches = _RE_MISTRAL_COMPACT.findall(content)
-    if mistral_compact_matches:
-        for name, args_str in mistral_compact_matches:
-            if not tool_names or name in tool_names:
-                try:
-                    args = json.loads(args_str)
-                    parsed_calls.append({
-                        "id": f"call_{uuid.uuid4().hex[:8]}",
-                        "type": "function",
-                        "function": {
-                            "name": name,
-                            "arguments": json.dumps(args) if isinstance(args, dict) else args_str
-                        }
-                    })
-                except json.JSONDecodeError:
-                    parsed_calls.append({
-                        "id": f"call_{uuid.uuid4().hex[:8]}",
-                        "type": "function",
-                        "function": {"name": name, "arguments": args_str}
-                    })
-        if parsed_calls:
-            logger.debug("Mistral 678B Compact Format erkannt: %d calls", len(parsed_calls))
-            return parsed_calls
-
-    # Format 1b: Mistral Standard Format
-    # [TOOL_CALLS] [{"name": "...", "arguments": {...}}]
-    mistral_match = _RE_MISTRAL_STANDARD.search(content)
-    if mistral_match:
-        try:
-            calls = json.loads(mistral_match.group(1))
-            if isinstance(calls, list):
-                for call in calls:
-                    name = call.get("name") or call.get("function")
-                    args = call.get("arguments") or call.get("parameters") or {}
-                    if name and (not tool_names or name in tool_names):
-                        parsed_calls.append({
-                            "id": f"call_{uuid.uuid4().hex[:8]}",
-                            "type": "function",
-                            "function": {
-                                "name": name,
-                                "arguments": json.dumps(args) if isinstance(args, dict) else args
-                            }
-                        })
-            if parsed_calls:
-                logger.debug("[agent] Mistral Standard Format erkannt: {len(parsed_calls)} calls")
-                return parsed_calls
-        except (json.JSONDecodeError, KeyError):
-            pass
-
-    # Format 2: XML <tool_call> oder <functioncall>
-    xml_patterns = [
-        _RE_XML_TOOL_CALL,
-        _RE_XML_FUNCTIONCALL,
-        _RE_XML_FUNCTION_CALLS,
-        _RE_XML_INVOKE,
-    ]
-    for pattern in xml_patterns:
-        matches = pattern.findall(content)
-        for match in matches:
-            try:
-                call = json.loads(match.strip())
-                name = call.get("name") or call.get("function") or call.get("tool_name")
-                args = call.get("arguments") or call.get("parameters") or call.get("kwargs") or {}
-                if name and (not tool_names or name in tool_names):
-                    parsed_calls.append({
-                        "id": f"call_{uuid.uuid4().hex[:8]}",
-                        "type": "function",
-                        "function": {
-                            "name": name,
-                            "arguments": json.dumps(args) if isinstance(args, dict) else args
-                        }
-                    })
-            except (json.JSONDecodeError, KeyError):
-                continue
-    if parsed_calls:
-        logger.debug("[agent] XML Tool-Call Format erkannt: {len(parsed_calls)} calls")
-        return parsed_calls
-
-    # Format 3: JSON-Codeblock mit Tool-Call Struktur
-    json_blocks = _RE_JSON_BLOCK.findall(content)
-    for block in json_blocks:
-        try:
-            data = json.loads(block.strip())
-            # Prüfe ob es ein Tool-Call ist
-            name = None
-            args = {}
-            if isinstance(data, dict):
-                if "name" in data and ("arguments" in data or "parameters" in data):
-                    name = data["name"]
-                    args = data.get("arguments") or data.get("parameters") or {}
-                elif "tool" in data:
-                    name = data["tool"]
-                    args = data.get("input") or data.get("arguments") or {}
-            if name and (not tool_names or name in tool_names):
-                parsed_calls.append({
-                    "id": f"call_{uuid.uuid4().hex[:8]}",
-                    "type": "function",
-                    "function": {
-                        "name": name,
-                        "arguments": json.dumps(args) if isinstance(args, dict) else args
-                    }
-                })
-        except (json.JSONDecodeError, KeyError):
-            continue
-    if parsed_calls:
-        logger.debug("[agent] JSON-Block Tool-Call Format erkannt: {len(parsed_calls)} calls")
-        return parsed_calls
-
-    # Format 4: Inline JSON mit bekanntem Tool-Namen
-    # Suche nach {"name": "known_tool", ...} direkt im Text
-    if tool_names:
-        inline_matches = _RE_INLINE_NAME.findall(content)
-        for match_name in inline_matches:
-            if match_name in tool_names:
-                # Versuche den vollständigen JSON-Block zu extrahieren
-                pattern = r'\{[^{}]*"name"\s*:\s*"' + re.escape(match_name) + r'"[^{}]*\}'
-                full_matches = re.findall(pattern, content, re.DOTALL)
-                for fm in full_matches:
-                    try:
-                        call = json.loads(fm)
-                        args = call.get("arguments") or call.get("parameters") or {}
-                        parsed_calls.append({
-                            "id": f"call_{uuid.uuid4().hex[:8]}",
-                            "type": "function",
-                            "function": {
-                                "name": match_name,
-                                "arguments": json.dumps(args) if isinstance(args, dict) else args
-                            }
-                        })
-                    except (json.JSONDecodeError, KeyError):
-                        continue
-        if parsed_calls:
-            logger.debug("[agent] Inline JSON Tool-Call Format erkannt: {len(parsed_calls)} calls")
-            return parsed_calls
-
-    # Debug: Wenn kein Tool-Call erkannt wurde, hilfreiche Info loggen
-    if content and len(content) > 20:
-        # Prüfe auf mögliche Tool-Call-Patterns die nicht gematcht wurden
-        potential_patterns = [
-            (_RE_HINT_TOOL, '[TOOL...'),
-            (_RE_HINT_XML_TOOL, '<tool...'),
-            (_RE_HINT_XML_FUNC, '<function...'),
-            (_RE_HINT_NAME, '"name":'),
-            (_RE_HINT_TOOL_KEY, '"tool":'),
-        ]
-        found_hints = []
-        for pattern, hint in potential_patterns:
-            if pattern.search(content):
-                found_hints.append(hint)
-        if found_hints:
-            logger.debug("[agent] Text-Parser: Keine Tool-Calls erkannt, aber Hinweise gefunden: {found_hints}")
-            logger.debug("[agent] Content-Anfang (100 chars): {content[:100]!r}")
-
-    return []
 
 
 class AgentOrchestrator:
@@ -794,57 +183,9 @@ class AgentOrchestrator:
         self._analytics: AnalyticsLogger = get_analytics_logger()
 
     async def _llm_callback_for_mcp(self, prompt: str, context: Optional[str] = None) -> str:
-        """
-        LLM-Callback für MCP Sequential Thinking.
-
-        Ermöglicht echtes LLM-Denken statt Template-Fallback.
-        WICHTIG: Verwendet längeren Timeout (60s) da Analyse-Schritte
-        mehr Zeit benötigen als einfache Klassifikation.
-        """
-        system_prompt = """Du bist ein strukturierter analytischer Denker.
-Antworte IMMER im exakten Format das im Prompt angegeben ist.
-Sei präzise und gib detaillierte Analyse-Schritte."""
-
-        messages = [
-            {"role": "system", "content": system_prompt}
-        ]
-        if context:
-            messages.append({"role": "system", "content": context})
-        messages.append({"role": "user", "content": prompt})
-
-        try:
-            # WICHTIG: Nicht chat_quick() verwenden (15s Timeout, 256 Tokens)!
-            # Sequential Thinking braucht mehr Zeit und Tokens.
-            response = await central_llm_client.chat_with_tools(
-                messages=messages,
-                temperature=0.2,  # Niedrig für konsistentes Format
-                max_tokens=2048,  # Genug Tokens für detaillierte Schritte
-                timeout=TIMEOUT_TOOL,  # 60s statt 15s
-            )
-            result = response.content or ""
-            logger.debug(f"[MCP] LLM callback response length: {len(result)}")
-
-            # Token-Tracking für MCP-Calls
-            if hasattr(response, 'usage') and response.usage:
-                try:
-                    tracker = get_token_tracker()
-                    # Session-ID aus _current_mcp_session oder Fallback
-                    session_id = getattr(self, '_current_mcp_session', 'mcp-default')
-                    model = getattr(response, 'model', None) or settings.llm.default_model
-                    tracker.log_usage(
-                        session_id=session_id,
-                        model=model,
-                        input_tokens=response.usage.prompt_tokens or 0,
-                        output_tokens=response.usage.completion_tokens or 0,
-                        request_type="mcp",
-                    )
-                except Exception as track_err:
-                    logger.debug(f"[MCP] Token tracking failed: {track_err}")
-
-            return result
-        except Exception as e:
-            logger.warning(f"[MCP] LLM callback failed: {e}")
-            return ""
+        """LLM-Callback für MCP Sequential Thinking. Delegiert zu llm_caller."""
+        session_id = getattr(self, '_current_mcp_session', 'mcp-default')
+        return await _llm_callback_for_mcp_impl(prompt, context, session_id)
 
     def _get_state(self, session_id: str) -> AgentState:
         """Holt oder erstellt den State für eine Session. Stellt bei Bedarf vom Disk wieder her."""
@@ -903,63 +244,6 @@ Sei präzise und gib detaillierte Analyse-Schritte."""
         if project_id:
             self.transcript_logger.project_id = project_id
 
-    async def _execute_tools_parallel_batch(
-        self,
-        tool_calls: List[ToolCall],
-        state: "AgentState"
-    ) -> List[ToolResult]:
-        """
-        Führt mehrere Read-Only-Tools parallel aus.
-
-        Args:
-            tool_calls: Liste von ToolCall-Objekten (alle müssen parallelisierbar sein)
-            state: Aktueller Agent-State für Caching/Budget
-
-        Returns:
-            Liste von ToolResult in gleicher Reihenfolge wie tool_calls
-        """
-        import time as _time
-
-        async def execute_single(tc: ToolCall) -> ToolResult:
-            """Einzelnes Tool mit Caching ausführen."""
-            # Cache prüfen
-            cached = self._tool_cache.get(tc.name, tc.arguments)
-            if cached is not None:
-                logger.debug(f"[parallel] Cache HIT: {tc.name}")
-                if state.tool_budget:
-                    state.tool_budget.record_tool_call(tc.name, duration_ms=0, cached=True)
-                return cached
-
-            # Tool ausführen
-            _start = _time.time()
-            try:
-                result = await self.tools.execute(tc.name, **tc.arguments)
-            except Exception as e:
-                logger.warning(f"[parallel] Tool {tc.name} failed: {e}")
-                result = ToolResult(success=False, error=str(e))
-
-            _duration_ms = int((_time.time() - _start) * 1000)
-
-            # Cachen und Budget tracken
-            if result.success:
-                self._tool_cache.set(tc.name, tc.arguments, result)
-            if state.tool_budget:
-                state.tool_budget.record_tool_call(tc.name, duration_ms=_duration_ms, cached=False)
-
-            logger.debug(f"[parallel] {tc.name} completed in {_duration_ms}ms")
-            return result
-
-        # Alle Tools parallel ausführen
-        logger.info(f"[parallel] Executing {len(tool_calls)} tools in parallel: {[tc.name for tc in tool_calls]}")
-        _batch_start = _time.time()
-
-        results = await asyncio.gather(*[execute_single(tc) for tc in tool_calls])
-
-        _batch_duration = int((_time.time() - _batch_start) * 1000)
-        logger.info(f"[parallel] Batch completed in {_batch_duration}ms (vs sequential estimate: {sum(r.data.get('duration_ms', 500) if isinstance(r.data, dict) else 500 for r in results)}ms)")
-
-        return list(results)
-
     async def _emit_mcp_event(self, event_type: str, data: Dict[str, Any]) -> None:
         """
         Callback für MCP/Thinking Events.
@@ -976,88 +260,23 @@ Sei präzise und gib detaillierte Analyse-Schritte."""
         description: str = "",
         is_new: bool = False
     ) -> None:
-        """
-        Emittiert ein Workspace Code Change Event für das UI.
-
-        Args:
-            file_path: Pfad zur Datei
-            original_content: Ursprünglicher Dateiinhalt
-            modified_content: Neuer Dateiinhalt
-            tool_call: Name des Tools (write_file, edit_file, batch_write_files)
-            description: Beschreibung der Änderung
-            is_new: True wenn neue Datei erstellt wurde
-        """
-        import difflib
-        import uuid
-        from pathlib import Path
-        import time
-
-        # Generate unified diff
-        if is_new:
-            diff = f"--- /dev/null\n+++ b/{file_path}\n@@ -0,0 +1,{len(modified_content.splitlines())} @@\n"
-            for line in modified_content.splitlines():
-                diff += f"+{line}\n"
-        else:
-            diff_lines = difflib.unified_diff(
-                original_content.splitlines(keepends=True),
-                modified_content.splitlines(keepends=True),
-                fromfile=f"a/{file_path}",
-                tofile=f"b/{file_path}",
-                lineterm=""
-            )
-            diff = "".join(diff_lines)
-
-        # Detect language from file extension
-        path_obj = Path(file_path)
-        ext_to_lang = {
-            ".py": "python", ".java": "java", ".js": "javascript",
-            ".ts": "typescript", ".tsx": "tsx", ".jsx": "jsx",
-            ".sql": "sql", ".html": "html", ".css": "css",
-            ".json": "json", ".xml": "xml", ".yaml": "yaml",
-            ".yml": "yaml", ".md": "markdown", ".sh": "bash",
-            ".go": "go", ".rs": "rust", ".cpp": "cpp", ".c": "c",
-            ".h": "c", ".hpp": "cpp", ".cs": "csharp", ".rb": "ruby",
-            ".php": "php", ".swift": "swift", ".kt": "kotlin"
-        }
-        language = ext_to_lang.get(path_obj.suffix.lower(), "text")
-
-        # Build event payload matching the CodeChange interface from design doc
-        event_data = {
-            "id": str(uuid.uuid4()),
-            "timestamp": int(time.time() * 1000),
-            "filePath": str(file_path),
-            "fileName": path_obj.name,
-            "language": language,
-            "originalContent": original_content,
-            "modifiedContent": modified_content,
-            "diff": diff,
-            "toolCall": tool_call,
-            "description": description,
-            "status": "applied",  # Already applied when user confirmed
-            "appliedAt": int(time.time() * 1000),
-            "isNew": is_new
-        }
-
+        """Emit workspace code change event for UI."""
+        event_data = _build_code_change_event(
+            file_path=file_path,
+            original_content=original_content,
+            modified_content=modified_content,
+            tool_call=tool_call,
+            description=description,
+            is_new=is_new
+        )
         await self._event_bridge.emit(
             AgentEventType.WORKSPACE_CODE_CHANGE.value,
             event_data
         )
 
     async def _execute_and_emit_sql_result(self, query: str, max_rows: int = 100) -> ToolResult:
-        """
-        Führt eine SQL-Abfrage aus und emittiert ein Workspace SQL Result Event.
-
-        Args:
-            query: SQL-Abfrage
-            max_rows: Maximale Anzahl Zeilen
-
-        Returns:
-            ToolResult mit formatierter Ausgabe
-        """
-        from app.core.config import settings
-        import uuid
+        """Execute SQL query and emit workspace SQL result event."""
         import time
-
         start_time = time.time()
 
         try:
@@ -1067,140 +286,73 @@ Sei präzise und gib detaillierte Analyse-Schritte."""
             if not client:
                 return ToolResult(success=False, error="DB-Client nicht verfügbar")
 
-            # Temporär max_rows überschreiben
+            # Temporarily override max_rows
             original_max = client.max_rows
             client.max_rows = min(max_rows, settings.database.max_rows)
-
             result = await client.execute(query)
-
             client.max_rows = original_max
 
             execution_time_ms = int((time.time() - start_time) * 1000)
 
             if not result.success:
-                # Emit error event
-                await self._event_bridge.emit(
-                    AgentEventType.WORKSPACE_SQL_RESULT.value,
-                    {
-                        "id": str(uuid.uuid4()),
-                        "timestamp": int(time.time() * 1000),
-                        "query": query,
-                        "database": settings.database.database or "DB2",
-                        "schema": client.schema if client else None,
-                        "columns": [],
-                        "rows": [],
-                        "rowCount": 0,
-                        "executionTimeMs": execution_time_ms,
-                        "toolCall": "query_database",
-                        "truncated": False,
-                        "error": result.error
-                    }
+                event_data = _build_sql_result_event(
+                    query=query,
+                    database=settings.database.database or "DB2",
+                    schema=client.schema if client else None,
+                    columns=[],
+                    rows=[],
+                    row_count=0,
+                    execution_time_ms=execution_time_ms,
+                    error=result.error
                 )
+                await self._event_bridge.emit(AgentEventType.WORKSPACE_SQL_RESULT.value, event_data)
                 return ToolResult(success=False, error=result.error)
 
-            # Build column definitions
-            columns = []
-            if result.columns:
-                for col_name in result.columns:
-                    columns.append({
-                        "name": col_name,
-                        "type": "VARCHAR",  # DB2 doesn't provide type info in basic result
-                        "nullable": True,
-                        "visible": True
-                    })
-
             # Emit success event
-            await self._event_bridge.emit(
-                AgentEventType.WORKSPACE_SQL_RESULT.value,
-                {
-                    "id": str(uuid.uuid4()),
-                    "timestamp": int(time.time() * 1000),
-                    "query": query,
-                    "database": settings.database.database or "DB2",
-                    "schema": client.schema if client else None,
-                    "columns": columns,
-                    "rows": result.rows or [],
-                    "rowCount": result.row_count,
-                    "executionTimeMs": execution_time_ms,
-                    "toolCall": "query_database",
-                    "truncated": result.truncated,
-                    "error": None
-                }
+            event_data = _build_sql_result_event(
+                query=query,
+                database=settings.database.database or "DB2",
+                schema=client.schema if client else None,
+                columns=result.columns or [],
+                rows=result.rows or [],
+                row_count=result.row_count,
+                execution_time_ms=execution_time_ms,
+                truncated=result.truncated
             )
+            await self._event_bridge.emit(AgentEventType.WORKSPACE_SQL_RESULT.value, event_data)
 
-            # Formatierte Ausgabe für Agent
-            output = f"=== Query-Ergebnis ===\n"
-            output += f"Zeilen: {result.row_count}"
-            if result.truncated:
-                output += f" (begrenzt auf {client.max_rows})"
-            output += "\n\n"
-
-            if result.columns and result.rows:
-                output += " | ".join(result.columns) + "\n"
-                output += "-" * (len(" | ".join(result.columns))) + "\n"
-                for row in result.rows:
-                    output += " | ".join(str(v) if v is not None else "NULL" for v in row) + "\n"
-
+            # Format output for agent
+            output = _format_sql_result_for_agent(
+                columns=result.columns or [],
+                rows=result.rows or [],
+                row_count=result.row_count,
+                truncated=result.truncated,
+                max_rows=client.max_rows
+            )
             return ToolResult(success=True, data=output)
 
         except Exception as e:
             execution_time_ms = int((time.time() - start_time) * 1000)
-            # Emit error event
-            await self._event_bridge.emit(
-                AgentEventType.WORKSPACE_SQL_RESULT.value,
-                {
-                    "id": str(uuid.uuid4()),
-                    "timestamp": int(time.time() * 1000),
-                    "query": query,
-                    "database": "DB2",
-                    "schema": None,
-                    "columns": [],
-                    "rows": [],
-                    "rowCount": 0,
-                    "executionTimeMs": execution_time_ms,
-                    "toolCall": "query_database",
-                    "truncated": False,
-                    "error": str(e)
-                }
+            event_data = _build_sql_result_event(
+                query=query,
+                database="DB2",
+                schema=None,
+                columns=[],
+                rows=[],
+                row_count=0,
+                execution_time_ms=execution_time_ms,
+                error=str(e)
             )
+            await self._event_bridge.emit(AgentEventType.WORKSPACE_SQL_RESULT.value, event_data)
             return ToolResult(success=False, error=str(e))
-
-    def _get_mcp_event_type_mapping(self) -> Dict[str, AgentEventType]:
-        """Mapping von MCP Event-Typen zu AgentEventType."""
-        return {
-            "MCP_START": AgentEventType.MCP_START,
-            "MCP_STEP": AgentEventType.MCP_STEP,
-            "MCP_PROGRESS": AgentEventType.MCP_PROGRESS,
-            "MCP_COMPLETE": AgentEventType.MCP_COMPLETE,
-            "MCP_ERROR": AgentEventType.MCP_ERROR,
-            # Lowercase variants (from SequentialThinking)
-            "mcp_start": AgentEventType.MCP_START,
-            "mcp_step": AgentEventType.MCP_STEP,
-            "mcp_progress": AgentEventType.MCP_PROGRESS,
-            "mcp_complete": AgentEventType.MCP_COMPLETE,
-            "mcp_error": AgentEventType.MCP_ERROR,
-            # v2: Extended events
-            "mcp_branch_start": AgentEventType.MCP_BRANCH_START,
-            "mcp_branch_end": AgentEventType.MCP_BRANCH_END,
-            "mcp_assumption_created": AgentEventType.MCP_ASSUMPTION,
-            "mcp_tool_recommendation": AgentEventType.MCP_TOOL_REC,
-            # Workspace events
-            "workspace_code_change": AgentEventType.WORKSPACE_CODE_CHANGE,
-            "workspace_sql_result": AgentEventType.WORKSPACE_SQL_RESULT,
-            "workspace_file": AgentEventType.WORKSPACE_FILE,
-            "workspace_research": AgentEventType.WORKSPACE_RESEARCH,
-            "workspace_pr": AgentEventType.WORKSPACE_PR,
-            "workspace_pr_analysis": AgentEventType.WORKSPACE_PR_ANALYSIS,
-        }
 
     async def _drain_mcp_events(self) -> AsyncGenerator[AgentEvent, None]:
         """
         Liefert alle wartenden MCP Events aus der Event Bridge.
         Mappt Event-Typen zu AgentEventType.
         """
-        type_mapping = self._get_mcp_event_type_mapping()
         async for event in self._event_bridge.drain():
-            event_type_enum = type_mapping.get(event.event_type, AgentEventType.MCP_STEP)
+            event_type_enum = MCP_EVENT_TYPE_MAPPING.get(event.event_type, AgentEventType.MCP_STEP)
             yield AgentEvent(event_type_enum, event.data)
 
     async def _drain_mcp_events_from_queue(self, queue: asyncio.Queue, timeout: float = 0.01) -> AsyncGenerator[AgentEvent, None]:
@@ -1208,212 +360,15 @@ Sei präzise und gib detaillierte Analyse-Schritte."""
         Liefert alle wartenden MCP Events aus einer bestehenden Queue.
         Verwendet für persistente Subscriptions während Tool-Ausführung.
         """
-        type_mapping = self._get_mcp_event_type_mapping()
         while True:
             try:
                 event = await asyncio.wait_for(queue.get(), timeout=timeout)
-                event_type_enum = type_mapping.get(event.event_type, AgentEventType.MCP_STEP)
+                event_type_enum = MCP_EVENT_TYPE_MAPPING.get(event.event_type, AgentEventType.MCP_STEP)
                 yield AgentEvent(event_type_enum, event.data)
             except asyncio.TimeoutError:
                 break
 
-    def _get_research_capability(self):
-        """
-        DEPRECATED: ResearchCapability wurde zu Skills migriert.
-        Verwende /research oder /sc:research für Recherchen.
-        """
-        logger.debug("[agent] ResearchCapability deprecated - use /research skill")
-        return None
-
-    def _should_auto_research(self, query: str) -> bool:
-        """
-        Prüft ob automatische Research-Phase aktiviert werden soll.
-
-        Basiert auf:
-        - Config-Setting research_enabled
-        - auto_research_on_question
-        - Keyword-Matching aus auto_research_keywords
-        - Ausschluss von Begrüßungen und Small-Talk
-        """
-        if not settings.mcp.research_enabled:
-            return False
-        if not settings.mcp.auto_research_on_question:
-            return False
-
-        query_lower = query.lower().strip()
-
-        # Zu kurze Queries ignorieren (wahrscheinlich Begrüßung)
-        if len(query_lower) < 15:
-            return False
-
-        # Begrüßungen und Small-Talk ausschließen
-        greetings = [
-            "hi", "hallo", "hey", "moin", "servus", "grüß", "guten tag",
-            "guten morgen", "guten abend", "wie geht", "wie gehts",
-            "was geht", "alles klar", "na du", "hello", "good morning",
-            "how are you", "what's up", "danke", "bitte", "tschüss", "bye"
-        ]
-        for greeting in greetings:
-            if greeting in query_lower:
-                return False
-
-        # Prüfe ob Query ein Keyword enthält
-        for keyword in settings.mcp.auto_research_keywords:
-            if keyword.lower() in query_lower:
-                return True
-
-        # Prüfe ob Query eine Frage ist (? oder Fragewörter)
-        question_indicators = ["?", "wie ", "was ", "warum ", "wann ", "wo ", "wer ",
-                               "how ", "what ", "why ", "when ", "where ", "who "]
-        for indicator in question_indicators:
-            if indicator in query_lower:
-                return True
-
-        return False
-
-    async def _run_research_phase(
-        self,
-        query: str,
-        messages: List[Dict],
-        budget,
-    ) -> AsyncGenerator[AgentEvent, None]:
-        """
-        DEPRECATED: Research-Phase wurde zu Skills migriert.
-
-        Diese Methode ist noch vorhanden für Abwärtskompatibilität,
-        führt aber keine Aktionen mehr aus. Verwende stattdessen:
-        - /research oder /sc:research für Recherchen
-        - Enterprise Research Skill für firmenspezifische Quellen
-
-        Die Methode gibt sofort zurück ohne Events zu yielden.
-        """
-        from app.utils.token_counter import estimate_tokens
-
-        research = self._get_research_capability()
-        if research is None:
-            return
-
-        try:
-            # RESEARCH_START Event
-            yield AgentEvent(AgentEventType.MCP_START, {
-                "mode": "research",
-                "query": query[:100],
-                "message": "Research-Phase gestartet..."
-            })
-
-            # Research ausführen mit Timeout
-            timeout = settings.mcp.research_timeout_seconds
-            session = await asyncio.wait_for(
-                research.execute(
-                    query=query,
-                    context=None,
-                    max_results=settings.mcp.max_research_results
-                ),
-                timeout=timeout
-            )
-
-            # Progress-Event mit Ergebnissen
-            if session.is_complete:
-                result_count = len(session.artifacts) if session.artifacts else 0
-                yield AgentEvent(AgentEventType.MCP_PROGRESS, {
-                    "mode": "research",
-                    "progress": 100,
-                    "message": f"{result_count} Ergebnisse gefunden"
-                })
-
-                # Research-Ergebnis als Kontext injizieren
-                if session.final_conclusion:
-                    research_context = f"""## Research-Ergebnisse (automatisch)
-
-{session.final_conclusion}
-"""
-                    research_tokens = estimate_tokens(research_context)
-                    if budget.can_add("context", research_tokens):
-                        messages.append({"role": "system", "content": research_context})
-                        budget.add("context", research_tokens)
-                        logger.debug(f"[agent] Research context injected: {research_tokens} tokens")
-
-            # RESEARCH_DONE Event
-            yield AgentEvent(AgentEventType.MCP_COMPLETE, {
-                "mode": "research",
-                "success": session.is_complete,
-                "message": "Research-Phase abgeschlossen"
-            })
-
-            # Workspace Research Events für UI Panel
-            if session.is_complete:
-                # Emit einzelne Items für jedes Artifact
-                if session.artifacts:
-                    for artifact in session.artifacts:
-                        yield AgentEvent(AgentEventType.WORKSPACE_RESEARCH, {
-                            "source": artifact.source_name if hasattr(artifact, 'source_name') else "research",
-                            "title": artifact.title if hasattr(artifact, 'title') else query[:50],
-                            "snippet": artifact.content[:500] if hasattr(artifact, 'content') else "",
-                            "url": artifact.url if hasattr(artifact, 'url') else None,
-                            "relevance": artifact.relevance if hasattr(artifact, 'relevance') else 0.5
-                        })
-                # Falls keine Artifacts aber Conclusion: Zusammenfassung als Item
-                elif session.final_conclusion:
-                    yield AgentEvent(AgentEventType.WORKSPACE_RESEARCH, {
-                        "source": "summary",
-                        "title": f"Research: {query[:40]}",
-                        "snippet": session.final_conclusion[:500],
-                        "url": None,
-                        "relevance": 1.0
-                    })
-
-        except asyncio.TimeoutError:
-            logger.warning(f"[agent] Research phase timed out after {timeout}s")
-            yield AgentEvent(AgentEventType.MCP_ERROR, {
-                "mode": "research",
-                "error": f"Timeout nach {timeout}s"
-            })
-        except Exception as e:
-            logger.warning(f"[agent] Research phase failed: {e}")
-            yield AgentEvent(AgentEventType.MCP_ERROR, {
-                "mode": "research",
-                "error": str(e)
-            })
-
-    def _extract_conversation_context(self, messages: List[Dict], max_messages: int = 4) -> Optional[str]:
-        """
-        Extrahiert einen kurzen Kontext aus den letzten Konversations-Nachrichten.
-
-        Gibt den Sub-Agenten Kontext über die vorherige Konversation,
-        sodass Follow-up-Fragen wie "aus meiner Eingangsfrage" verstanden werden.
-
-        Args:
-            messages: Die vollständige Message-Liste
-            max_messages: Max Anzahl User/Assistant-Nachrichten zum Extrahieren
-
-        Returns:
-            Kontext-String oder None wenn keine relevanten Nachrichten
-        """
-        # Nur User/Assistant-Nachrichten extrahieren (keine System-Prompts)
-        relevant = [
-            m for m in messages
-            if m.get("role") in ("user", "assistant") and m.get("content")
-        ]
-
-        if len(relevant) <= 1:
-            return None  # Keine vorherige Konversation
-
-        # Letzte N Nachrichten nehmen (ohne die aktuelle User-Nachricht, die ist die Query)
-        recent = relevant[-(max_messages + 1):-1] if len(relevant) > max_messages else relevant[:-1]
-
-        if not recent:
-            return None
-
-        # Als kompakten Kontext-String formatieren
-        context_parts = []
-        for msg in recent:
-            role = "User" if msg["role"] == "user" else "Assistant"
-            content = str(msg.get("content", ""))[:300]  # Kürzen
-            if len(str(msg.get("content", ""))) > 300:
-                content += "..."
-            context_parts.append(f"{role}: {content}")
-
-        return "\n\n".join(context_parts)
+    # Note: _extract_conversation_context is now imported from context_builder module
 
     async def _run_sub_agents_phase(
         self,
@@ -1475,7 +430,7 @@ Sei präzise und gib detaillierte Analyse-Schritte."""
 
         # Konversations-Kontext für Sub-Agenten extrahieren
         # Letzte 3-4 User/Assistant-Nachrichten als Kurzkontext
-        conversation_context = self._extract_conversation_context(messages)
+        conversation_context = _extract_conversation_context(messages)
 
         # Phase 3: Ausgewählte Agenten parallel ausführen
         try:
@@ -1559,7 +514,12 @@ Sei präzise und gib detaillierte Analyse-Schritte."""
         """
         from app.services.llm_client import llm_client
         from app.services.skill_manager import get_skill_manager
-        import re
+        from app.agent.orchestration.command_parser import (
+            activate_skills_for_command,
+        )
+        from app.agent.orchestration.phase_runner import (
+            run_forced_capability as _run_forced_capability,
+        )
 
         state = self._get_state(session_id)
         # Session-ID für MCP Token-Tracking setzen
@@ -1574,125 +534,35 @@ Sei präzise und gib detaillierte Analyse-Schritte."""
 
         # ── MCP Force-Capability Detection ────────────────────────────────────
         # Format: [MCP:capability_name] actual query
-        forced_capability = None
-        mcp_match = _RE_MCP_FORCE.match(user_message)
-        if mcp_match:
-            forced_capability = mcp_match.group(1)
-            user_message = mcp_match.group(2).strip()
-            logger.debug("[agent] Forced MCP capability: {forced_capability}")
+        forced_capability, user_message = parse_mcp_force_capability(user_message)
 
         # ── Slash-Command Skill Activation ─────────────────────────────────────
-        # Unterstützte Formate:
-        #   /command <query>           → z.B. /brainstorm Login-System
-        #   /sc:command <query>        → z.B. /sc:brainstorm Login-System (SuperClaude-Style)
-        #   /command --flag <query>    → z.B. /analyze --depth deep src/
-        slash_match = re.match(r'^/(?:sc:)?([a-zA-Z][a-zA-Z0-9_-]*)\s*(.*)', user_message, re.DOTALL)
-        if slash_match and not forced_capability:
-            command_name = slash_match.group(1).lower()
-            command_rest = slash_match.group(2).strip()
-
-            # Flags und Query trennen
-            # Boolean-Flags (kein Wert erwartet)
-            BOOLEAN_FLAGS = {
-                'ultrathink', 'parallel', 'safe', 'interactive', 'preview',
-                'validate', 'with-tests', 'force', 'verbose', 'quiet',
-                'dry-run', 'watch', 'fix', 'strict', 'coverage'
-            }
-            # Value-Flags (erwarten einen Wert)
-            VALUE_FLAGS = {
-                'depth', 'type', 'format', 'strategy', 'scope', 'focus',
-                'language', 'framework', 'constraints', 'model', 'target'
-            }
-
-            flags = {}
-            query_parts = []
-            tokens = command_rest.split() if command_rest else []
-            i = 0
-            while i < len(tokens):
-                token = tokens[i]
-                if token.startswith('--'):
-                    flag_name = token[2:]
-                    # Boolean-Flag oder unbekanntes Flag ohne Wert
-                    if flag_name in BOOLEAN_FLAGS:
-                        flags[flag_name] = True
-                        i += 1
-                    # Value-Flag mit erwartetem Wert
-                    elif flag_name in VALUE_FLAGS and i + 1 < len(tokens) and not tokens[i + 1].startswith('--'):
-                        flags[flag_name] = tokens[i + 1]
-                        i += 2
-                    # Unbekanntes Flag - als Boolean behandeln
-                    else:
-                        flags[flag_name] = True
-                        i += 1
-                else:
-                    query_parts.append(token)
-                    i += 1
-
-            command_query = ' '.join(query_parts)
-
-            # Skills für diesen Command finden
-            skill_mgr = get_skill_manager()
-            command_skills = skill_mgr.get_skills_for_command(command_name, include_inactive=True)
-
-            if command_skills:
-                # Skills aktivieren
-                for skill in command_skills:
-                    state.active_skill_ids.add(skill.id)
-                    logger.info(f"[agent] Skill '{skill.id}' aktiviert durch /{command_name}")
-
-                # Flags als strukturierten Kontext aufbereiten
-                flags_context = ""
-                if flags:
-                    flags_list = [f"--{k}={v}" if v is not True else f"--{k}" for k, v in flags.items()]
-                    flags_context = f"\n[FLAGS: {' '.join(flags_list)}]"
-
-                # Query mit Command und Flags als Kontext
-                user_message = f"[COMMAND: /{command_name}]{flags_context}\n\n{command_query}" if command_query else user_message
-                logger.debug(f"[agent] Slash-Command /{command_name} mit {len(command_skills)} Skills, Flags: {flags}")
+        # Uses command_parser module for parsing
+        parsed_command = None
+        if not forced_capability:
+            parsed_command = parse_slash_command(user_message)
+            if parsed_command:
+                skill_mgr = get_skill_manager()
+                command_skills = activate_skills_for_command(parsed_command, state, skill_mgr)
+                if command_skills:
+                    user_message = parsed_command.get_transformed_message()
+                    logger.debug(f"[agent] Slash-Command /{parsed_command.command_name} with {len(command_skills)} skills, flags: {parsed_command.flags}")
 
         # ── Continue-Handling (nach Bestätigung) ───────────────────────────────
-        # ControlMarkers.CONTINUE wird nach Schreibbestätigung gesendet
-        is_continue = user_message.strip() == ControlMarkers.CONTINUE
-        if is_continue:
-            logger.debug("[agent] Continue nach Bestätigung erkannt")
-            # Ersetze durch System-Hinweis statt User-Message
-            user_message = (
-                "Die letzte Datei-Operation wurde bestätigt und ausgeführt. "
-                "Setze die Arbeit fort und führe die verbleibenden Schritte aus."
-            )
+        # Uses command_parser module for continue marker detection
+        continue_result = check_continue_markers(user_message, state)
+        is_continue = continue_result.is_continue
+        is_continue_enhanced = continue_result.is_continue_enhanced
+        is_retry_with_web = continue_result.is_retry_with_web
+        is_continue_no_web = continue_result.is_continue_no_web
 
-        # ControlMarkers.CONTINUE_ENHANCED wird nach Enhancement-Bestätigung gesendet
-        is_continue_enhanced = user_message.strip() == ControlMarkers.CONTINUE_ENHANCED
-        if is_continue_enhanced:
-            logger.debug("[agent] Continue after enhancement confirmation")
-            # Hole originale Query zurück
-            if state.enhancement_original_query:
-                user_message = state.enhancement_original_query
-                logger.info(f"[agent] Restored original query: {user_message[:50]}...")
-            else:
-                user_message = "Fahre mit der Anfrage fort."
+        if continue_result.transformed_message:
+            user_message = continue_result.transformed_message
 
-        # ControlMarkers.RETRY_WITH_WEB wird nach Web-Fallback-Bestätigung gesendet
-        is_retry_with_web = user_message.strip() == ControlMarkers.RETRY_WITH_WEB
         if is_retry_with_web:
-            logger.debug("[agent] Retry with web search approved")
             state.web_fallback_approved = True
-            # Hole originale Query zurück für Research-Retry
-            if state.enhancement_original_query:
-                user_message = state.enhancement_original_query
-                logger.info(f"[agent] Retrying with web: {user_message[:50]}...")
-            else:
-                user_message = "Führe die Recherche mit Web-Suche durch."
-
-        # ControlMarkers.CONTINUE_WITHOUT_WEB wird nach Web-Fallback-Ablehnung gesendet
-        is_continue_no_web = user_message.strip() == ControlMarkers.CONTINUE_WITHOUT_WEB
         if is_continue_no_web:
-            logger.debug("[agent] Continue without web search")
             state.web_fallback_approved = False
-            if state.enhancement_original_query:
-                user_message = state.enhancement_original_query
-            else:
-                user_message = "Fahre ohne Web-Ergebnisse fort."
         # ─────────────────────────────────────────────────────────────────────
 
         # ── MCP Prompt Enhancement Phase ────────────────────────────────────
@@ -2089,8 +959,8 @@ Sei präzise und gib detaillierte Analyse-Schritte."""
                 "Die PR-Analyse erscheint automatisch im Workspace-Panel."
             )
 
-        # Agent-Instruktionen
-        agent_instructions = self._build_agent_instructions(state.mode, state.plan_approved)
+        # Agent-Instruktionen (from context_builder module)
+        agent_instructions = _build_agent_instructions(state.mode, state.plan_approved)
         system_prompt += f"\n\n{agent_instructions}"
 
         # Planungsphase: Plan als Kontext injizieren wenn genehmigt
@@ -2292,25 +1162,10 @@ Sei präzise und gib detaillierte Analyse-Schritte."""
             # Budget unter 80% → bereit für nächste Komprimierung wenn nötig
             state.compaction_attempted_while_full = False
 
-        # === RESEARCH PHASE (Parallele Quellensuche) ===
-        # Aktiviert bei Fragen oder Keywords - sucht parallel in Memory, Code, Web, Docs
-        # SKIP wenn Enhancement bereits Research durchgeführt hat (vermeidet Doppelarbeit)
-        if (
-            not forced_capability
-            and not enriched_context  # Enhancement hat bereits Research gemacht
-            and self._should_auto_research(user_message)
-        ):
-            try:
-                logger.debug("[agent] Activating research phase...")
-                async for event in self._run_research_phase(
-                    user_message, messages, budget
-                ):
-                    yield event
-            except Exception as e:
-                logger.warning(f"[agent] Research phase failed: {e}")
-                # Nicht kritisch - weiter mit normalem Flow
-        elif enriched_context:
-            logger.debug("[agent] Skipping research phase - enhancement already ran")
+        # === RESEARCH PHASE - DEPRECATED ===
+        # Research functionality has been migrated to skills (/research, /sc:research).
+        # The old _run_research_phase method is no longer called.
+        # If enriched_context exists, it means MCP Enhancement already collected context.
 
         # === SUB-AGENT PHASE ===
         # Spezialisierte Sub-Agenten erkunden Datenquellen parallel,
@@ -2327,88 +1182,25 @@ Sei präzise und gib detaillierte Analyse-Schritte."""
 
         # === FORCED CAPABILITY EXECUTION ===
         # Wenn User /brainstorm, /design etc. nutzt, direkt ausführen
+        # Uses phase_runner.run_forced_capability for cleaner separation
         if forced_capability:
-            logger.debug("[agent] Executing forced capability: {forced_capability}")
-
+            # Initialize MCP bridge if needed
             if self._mcp_bridge is None:
                 self._mcp_bridge = get_tool_bridge(
-                        llm_callback=self._llm_callback_for_mcp,
-                        event_callback=self._emit_mcp_event
-                    )
+                    llm_callback=self._llm_callback_for_mcp,
+                    event_callback=self._emit_mcp_event
+                )
 
-            # TOOL_START Event
-            yield AgentEvent(AgentEventType.TOOL_START, {
-                "id": f"forced_{forced_capability}",
-                "name": forced_capability,
-                "arguments": {"query": user_message},
-                "model": "MCP"
-            })
+            # Execute via phase_runner module
+            async for event in _run_forced_capability(
+                capability=forced_capability,
+                user_message=user_message,
+                mcp_bridge=self._mcp_bridge,
+                event_bridge=self._event_bridge,
+            ):
+                yield event
 
-            try:
-                # Persistente Subscription BEVOR Tool startet
-                mcp_queue = self._event_bridge.subscribe()
-
-                try:
-                    # Capability in separatem Task ausführen für Live-Event-Streaming
-                    tool_task = asyncio.create_task(
-                        self._mcp_bridge.call_tool(
-                            forced_capability,
-                            {"query": user_message, "context": None}
-                        )
-                    )
-
-                    # Events live streamen während Tool läuft
-                    while not tool_task.done():
-                        async for mcp_event in self._drain_mcp_events_from_queue(mcp_queue):
-                            yield mcp_event
-                        await asyncio.sleep(0.05)
-
-                    # Tool-Result abholen
-                    mcp_result = await tool_task
-
-                    # Finale Events (falls noch welche da sind)
-                    async for mcp_event in self._drain_mcp_events_from_queue(mcp_queue, timeout=0.1):
-                        yield mcp_event
-                finally:
-                    # Subscription aufräumen
-                    self._event_bridge.unsubscribe(mcp_queue)
-
-                # Ergebnis formatieren
-                if mcp_result.get("success"):
-                    output = mcp_result.get("formatted_output") or mcp_result.get("result") or str(mcp_result)
-
-                    # TOOL_RESULT Event
-                    yield AgentEvent(AgentEventType.TOOL_RESULT, {
-                        "id": f"forced_{forced_capability}",
-                        "name": forced_capability,
-                        "success": True,
-                        "data": output[:500] if len(output) > 500 else output
-                    })
-
-                    # Streaming-Antwort mit formatiertem Output
-                    for chunk in output.split('\n'):
-                        yield AgentEvent(AgentEventType.TOKEN, chunk + '\n')
-
-                    # Handoff-Vorschlag wenn vorhanden
-                    next_cap = mcp_result.get("next_capability")
-                    if next_cap:
-                        yield AgentEvent(AgentEventType.TOKEN, f"\n\n---\n➡️ **Nächster Schritt:** `/{next_cap}` für die Weiterführung\n")
-
-                else:
-                    error_msg = mcp_result.get("error", "Unbekannter Fehler")
-                    yield AgentEvent(AgentEventType.TOOL_RESULT, {
-                        "id": f"forced_{forced_capability}",
-                        "name": forced_capability,
-                        "success": False,
-                        "data": error_msg
-                    })
-                    yield AgentEvent(AgentEventType.ERROR, {"error": f"Capability {forced_capability} fehlgeschlagen: {error_msg}"})
-
-            except Exception as e:
-                yield AgentEvent(AgentEventType.ERROR, {"error": f"Capability-Ausführung fehlgeschlagen: {str(e)}"})
-
-            yield AgentEvent(AgentEventType.DONE, {})
-            return  # Beende hier - kein normaler Agent-Loop
+            return  # End here - no normal agent loop
 
         # Agent-Loop
         has_used_tools = False
@@ -2558,7 +1350,7 @@ Sei präzise und gib detaillierte Analyse-Schritte."""
                         "phase": "processing"
                     })
 
-                response = await self._call_llm_with_tools(
+                response = await _call_llm_with_tools(
                     messages, tool_schemas, model, is_tool_phase=True
                 )
                 tool_calls = response.get("tool_calls", [])
@@ -2612,7 +1404,7 @@ Sei präzise und gib detaillierte Analyse-Schritte."""
                         # Wenn existing_content leer ist, muss ein neuer LLM-Call gemacht werden.
                         extra_plan_usage: Optional[TokenUsage] = None
                         if not plan_response:
-                            plan_resp = await self._call_llm_with_tools(
+                            plan_resp = await _call_llm_with_tools(
                                 messages, [], None, is_tool_phase=False
                             )
                             plan_response = plan_resp.get("content", "")
@@ -2635,32 +1427,22 @@ Sei präzise und gib detaillierte Analyse-Schritte."""
                         state.total_prompt_tokens += request_prompt_tokens
                         state.total_completion_tokens += request_completion_tokens
 
-                        usage_data = {
-                            "prompt_tokens": request_prompt_tokens,
-                            "completion_tokens": request_completion_tokens,
-                            "total_tokens": request_prompt_tokens + request_completion_tokens,
-                            "finish_reason": last_finish_reason,
-                            "model": last_model,
-                            "truncated": last_finish_reason == "length",
-                            "max_tokens": settings.llm.max_tokens,
-                            "session_total_prompt": state.total_prompt_tokens,
-                            "session_total_completion": state.total_completion_tokens,
-                            "budget": budget.get_status() if budget else None,
-                            "compaction_count": state.compaction_count,
-                        }
-
-                        # Token-Tracking für Statistiken
-                        try:
-                            tracker = get_token_tracker()
-                            tracker.log_usage(
-                                session_id=session_id,
-                                model=last_model or settings.llm.default_model,
-                                input_tokens=request_prompt_tokens,
-                                output_tokens=request_completion_tokens,
-                                request_type="plan",
-                            )
-                        except Exception as e:
-                            logger.debug(f"[agent] Token-Tracking failed: {e}")
+                        # Build usage data and track tokens using helpers
+                        usage_data = _build_usage_data(
+                            prompt_tokens=request_prompt_tokens,
+                            completion_tokens=request_completion_tokens,
+                            finish_reason=last_finish_reason,
+                            model=last_model,
+                            state=state,
+                            budget=budget,
+                        )
+                        _track_token_usage(
+                            session_id=session_id,
+                            model=last_model,
+                            input_tokens=request_prompt_tokens,
+                            output_tokens=request_completion_tokens,
+                            request_type="plan",
+                        )
 
                         plan_match = _RE_PLAN_BLOCK.search(plan_response)
                         if plan_match:
@@ -2716,13 +1498,13 @@ Sei präzise und gib detaillierte Analyse-Schritte."""
                     if needs_new_request:
                         # Neue Anfrage mit Analyse-Modell
                         if should_stream:
-                            stream_result = await self._stream_final_response_with_usage(messages)
+                            stream_result = await _stream_final_response_with_usage(messages)
                             async for token in stream_result["tokens"]:
                                 assistant_response += token
                                 yield AgentEvent(AgentEventType.TOKEN, token)
                             final_usage = stream_result["usage"].get("usage")
                         else:
-                            analysis_response = await self._call_llm_with_tools(
+                            analysis_response = await _call_llm_with_tools(
                                 messages, [], None, is_tool_phase=False
                             )
                             assistant_response = analysis_response.get("content", "")
@@ -2745,7 +1527,7 @@ Sei präzise und gib detaillierte Analyse-Schritte."""
                                 "level": settings.llm.analysis_reasoning,
                                 "phase": "analysis"
                             })
-                        stream_result = await self._stream_final_response_with_usage(messages, model)
+                        stream_result = await _stream_final_response_with_usage(messages, model)
                         async for token in stream_result["tokens"]:
                             assistant_response += token
                             yield AgentEvent(AgentEventType.TOKEN, token)
@@ -2794,35 +1576,22 @@ Sei präzise und gib detaillierte Analyse-Schritte."""
                         except Exception:
                             pass
 
-                    # Token-Nutzung als Event senden
-                    usage_data = {
-                        "prompt_tokens": request_prompt_tokens,
-                        "completion_tokens": request_completion_tokens,
-                        "total_tokens": request_prompt_tokens + request_completion_tokens,
-                        "finish_reason": last_finish_reason,
-                        "model": last_model,
-                        "truncated": last_finish_reason == "length",
-                        "max_tokens": settings.llm.max_tokens,
-                        # Session-Gesamtwerte
-                        "session_total_prompt": state.total_prompt_tokens,
-                        "session_total_completion": state.total_completion_tokens,
-                        # Budget-Status für Context-Management
-                        "budget": budget.get_status() if budget else None,
-                        "compaction_count": state.compaction_count
-                    }
-
-                    # Token-Tracking für Statistiken
-                    try:
-                        tracker = get_token_tracker()
-                        tracker.log_usage(
-                            session_id=session_id,
-                            model=last_model or settings.llm.default_model,
-                            input_tokens=request_prompt_tokens,
-                            output_tokens=request_completion_tokens,
-                            request_type="chat",
-                        )
-                    except Exception as e:
-                        logger.debug(f"[agent] Token-Tracking failed: {e}")
+                    # Build usage data and track tokens using helpers
+                    usage_data = _build_usage_data(
+                        prompt_tokens=request_prompt_tokens,
+                        completion_tokens=request_completion_tokens,
+                        finish_reason=last_finish_reason,
+                        model=last_model,
+                        state=state,
+                        budget=budget,
+                    )
+                    _track_token_usage(
+                        session_id=session_id,
+                        model=last_model,
+                        input_tokens=request_prompt_tokens,
+                        output_tokens=request_completion_tokens,
+                        request_type="chat",
+                    )
 
                     yield AgentEvent(AgentEventType.USAGE, usage_data)
 
@@ -2934,7 +1703,9 @@ Sei präzise und gib detaillierte Analyse-Schritte."""
                         })
 
                     # Parallele Ausführung
-                    parallel_results = await self._execute_tools_parallel_batch(parsed_tool_calls, state)
+                    parallel_results = await _execute_tools_parallel(
+                        parsed_tool_calls, state, self.tools, self._tool_cache
+                    )
 
                     # Ergebnisse verarbeiten
                     for i, (tc, result) in enumerate(zip(parsed_tool_calls, parallel_results)):
@@ -3489,9 +2260,10 @@ Sei präzise und gib detaillierte Analyse-Schritte."""
                                     "authorName": author_name or author or "unknown",  # NEU
                                     "baseBranch": base_branch or "main",
                                     "headBranch": head_branch or "feature",
-                                    "additions": result_data.get("additions", 0),
-                                    "deletions": result_data.get("deletions", 0),
-                                    "filesChanged": result_data.get("changed_files", 0),
+                                    # GitHub API kann null bei Berechnung zurückgeben
+                                    "additions": result_data.get("additions") or 0,
+                                    "deletions": result_data.get("deletions") or 0,
+                                    "filesChanged": result_data.get("changed_files") or 0,
                                     "commits": commits_count,  # NEU
                                     "state": "merged" if is_merged else pr_state,
                                     "mergedAt": merged_at,  # NEU
@@ -3513,7 +2285,7 @@ Sei präzise und gib detaillierte Analyse-Schritte."""
                                 diff_content = result_data.get("diff", "")
                                 if diff_content and len(diff_content) > 50:
                                     state.pending_pr_analysis = asyncio.create_task(
-                                        self._analyze_pr_for_workspace(
+                                        _analyze_pr_for_workspace(
                                             pr_number=pr_number,
                                             title=result_data.get("title", ""),
                                             diff=diff_content[:15000],
@@ -3538,17 +2310,7 @@ Sei präzise und gib detaillierte Analyse-Schritte."""
                     state.tool_calls_history.append(tool_call)
 
                 # Messages für nächste Iteration aktualisieren
-                def _truncate_result(raw: str, max_chars: int = 20000, tool_name: str = "") -> str:
-                    # PR-Tools: Minimale Info für Haupt-LLM (Analyse läuft im Workspace)
-                    if tool_name in ("github_pr_details", "github_pr_diff"):
-                        # Extrahiere nur Metadaten, kein Diff
-                        lines = raw.split("\n")[:15]  # Erste 15 Zeilen (Metadaten)
-                        summary = "\n".join(lines)
-                        return summary + "\n\n[INFO: PR-Diff wird im Workspace-Panel analysiert. Keine Chat-Analyse nötig.]"
-                    if len(raw) > max_chars:
-                        return raw[:max_chars] + f"\n\n[HINWEIS: Inhalt bei {max_chars} Zeichen abgeschnitten. Gesamtlänge: {len(raw)} Zeichen. Nutze read_file mit offset-Parameter für weitere Abschnitte.]"
-                    return raw
-
+                # Note: _truncate_result is imported from tool_executor module
                 if native_tools:
                     # OpenAI-kompatibles Format: role="assistant" mit tool_calls + role="tool" Ergebnisse
                     # content muss None (nicht "") sein wenn tool_calls vorhanden - Mistral/OpenAI-Anforderung
@@ -3637,35 +2399,25 @@ Sei präzise und gib detaillierte Analyse-Schritte."""
             except Exception:
                 pass
 
-        # Token-Nutzung auch bei max iterations senden (wichtig für korrekte Anzeige)
-        usage_data = {
-            "prompt_tokens": state.total_prompt_tokens,
-            "completion_tokens": state.total_completion_tokens,
-            "total_tokens": state.total_prompt_tokens + state.total_completion_tokens,
-            "finish_reason": "max_iterations",
-            "model": model or settings.llm.default_model,
-            "truncated": True,
-            "max_tokens": settings.llm.max_tokens,
-            # Session-Gesamtwerte
-            "session_total_prompt": state.total_prompt_tokens,
-            "session_total_completion": state.total_completion_tokens,
-            # Budget-Status
-            "budget": budget.get_status() if budget else None,
-            "compaction_count": state.compaction_count
-        }
-
-        # Token-Tracking für Statistiken
-        try:
-            tracker = get_token_tracker()
-            tracker.log_usage(
-                session_id=session_id,
-                model=model or settings.llm.default_model,
-                input_tokens=state.total_prompt_tokens,
-                output_tokens=state.total_completion_tokens,
-                request_type="max_iterations",
-            )
-        except Exception:
-            pass
+        # Build usage data and track tokens using helpers
+        # Note: At max iterations, we report session totals as the request values
+        usage_data = _build_usage_data(
+            prompt_tokens=state.total_prompt_tokens,
+            completion_tokens=state.total_completion_tokens,
+            finish_reason="max_iterations",
+            model=model or settings.llm.default_model,
+            state=state,
+            budget=budget,
+        )
+        # Override truncated to True for max_iterations
+        usage_data["truncated"] = True
+        _track_token_usage(
+            session_id=session_id,
+            model=model or settings.llm.default_model,
+            input_tokens=state.total_prompt_tokens,
+            output_tokens=state.total_completion_tokens,
+            request_type="max_iterations",
+        )
 
         yield AgentEvent(AgentEventType.USAGE, usage_data)
 
@@ -3731,448 +2483,6 @@ Sei präzise und gib detaillierte Analyse-Schritte."""
             "tool_calls_count": len(state.tool_calls_history),
             "max_iterations_reached": True
         })
-
-    async def _analyze_pr_for_workspace(
-        self,
-        pr_number: int,
-        title: str,
-        diff: str,
-        state: str
-    ) -> Dict[str, Any]:
-        """
-        Analysiert einen PR für das Workspace-Panel.
-
-        Macht einen separaten LLM-Call mit strukturiertem Output-Format
-        für die Anzeige im PR-Panel (Severity-Badges, Findings, Verdict).
-
-        Returns:
-            Dict mit bySeverity, verdict, findings, canApprove
-        """
-
-        prompt = f"""Analysiere diesen Pull Request und gib eine strukturierte Bewertung.
-WICHTIG: Alle Texte (title, description, summary) MÜSSEN auf DEUTSCH sein!
-
-PR #{pr_number}: {title}
-Status: {state}
-
-DIFF:
-```
-{diff[:12000]}
-```
-
-Antworte NUR mit einem JSON-Objekt in diesem Format (keine Erklärungen):
-{{
-  "bySeverity": {{
-    "critical": <Anzahl kritischer Issues>,
-    "high": <Anzahl hoher Issues>,
-    "medium": <Anzahl mittlerer Issues>,
-    "low": <Anzahl niedriger Issues>,
-    "info": <Anzahl Info-Hinweise>
-  }},
-  "verdict": "<approve|request_changes|comment>",
-  "findings": [
-    {{
-      "severity": "<critical|high|medium|low|info>",
-      "title": "<Kurzer deutscher Titel>",
-      "file": "<Dateipfad>",
-      "line": <Zeilennummer oder null>,
-      "description": "<Kurze deutsche Beschreibung>",
-      "codeSnippet": "<Betroffene Code-Zeilen wenn relevant, sonst null>"
-    }}
-  ],
-  "summary": "<1-2 Sätze deutsche Zusammenfassung>"
-}}
-
-Bewertungskriterien:
-- critical: Sicherheitslücken, Datenverlust-Risiko
-- high: Bugs, Breaking Changes, Performance-Probleme
-- medium: Code-Qualität, fehlende Tests, schlechte Patterns
-- low: Style-Issues, Minor Improvements
-- info: Dokumentation, Kommentare
-
-Maximal 10 Findings. Bei closed/merged PRs: verdict="comment".
-ALLE AUSGABEN AUF DEUTSCH!"""
-
-        try:
-            # Schnelles Modell für Analyse
-            model = settings.llm.tool_model or settings.llm.default_model
-            base_url = settings.llm.base_url.rstrip("/")
-
-            headers = {"Content-Type": "application/json"}
-            if settings.llm.api_key and settings.llm.api_key != "none":
-                headers["Authorization"] = f"Bearer {settings.llm.api_key}"
-
-            payload = {
-                "model": model,
-                "messages": [{"role": "user", "content": prompt}],
-                "temperature": 0.2,
-                "max_tokens": 2500,  # Erhöht für codeSnippet
-                "stream": False
-            }
-
-            async with httpx.AsyncClient(
-                timeout=30,
-                verify=settings.llm.verify_ssl
-            ) as client:
-                response = await client.post(
-                    f"{base_url}/chat/completions",
-                    headers=headers,
-                    json=payload
-                )
-                response.raise_for_status()
-                data = response.json()
-
-                content = data.get("choices", [{}])[0].get("message", {}).get("content", "")
-
-                # JSON aus Response extrahieren
-                import re
-                json_match = re.search(r'\{[\s\S]*\}', content)
-                if json_match:
-                    result = json.loads(json_match.group())
-
-                    # Validierung und Defaults
-                    by_severity = result.get("bySeverity", {})
-                    for sev in ["critical", "high", "medium", "low", "info"]:
-                        by_severity[sev] = int(by_severity.get(sev, 0))
-
-                    verdict = result.get("verdict", "comment")
-                    if verdict not in ("approve", "request_changes", "comment"):
-                        verdict = "comment"
-
-                    # Bei closed/merged immer comment
-                    if state in ("closed", "merged"):
-                        verdict = "comment"
-
-                    return {
-                        "bySeverity": by_severity,
-                        "verdict": verdict,
-                        "findings": result.get("findings", [])[:10],
-                        "summary": result.get("summary", ""),
-                        "canApprove": state == "open"
-                    }
-
-                else:
-                    logger.warning(f"[agent] PR analysis: No JSON found in response: {content[:200]}")
-
-        except Exception as e:
-            logger.warning(f"[agent] PR workspace analysis failed: {e}")
-
-        # Fallback bei Fehler
-        return {
-            "bySeverity": {"critical": 0, "high": 0, "medium": 0, "low": 0, "info": 0},
-            "verdict": "comment",
-            "findings": [],
-            "summary": "Analyse fehlgeschlagen",
-            "canApprove": state == "open"
-        }
-
-    async def _stream_final_response(
-        self,
-        messages: List[Dict],
-        model: Optional[str] = None
-    ) -> AsyncGenerator[str, None]:
-        """
-        Streamt die finale Antwort Token für Token.
-        Verwendet das analysis_model wenn konfiguriert.
-        """
-        result = await self._stream_final_response_with_usage(messages, model)
-        async for token in result["tokens"]:
-            yield token
-
-    async def _stream_final_response_with_usage(
-        self,
-        messages: List[Dict],
-        model: Optional[str] = None
-    ) -> Dict:
-        """
-        Streamt die finale Antwort und tracked Token-Nutzung.
-        Mit Retry-Logik für Verbindungsabbrüche.
-
-        Returns:
-            Dict mit "tokens" (AsyncGenerator) und "usage" (TokenUsage nach Abschluss)
-        """
-        # Modell-Auswahl: User-Auswahl > Phase-spezifisch > Default
-        if model:
-            # User hat explizit ein Modell ausgewählt - das hat Vorrang
-            selected_model = model
-            logger.debug("[stream] Using user-selected model: {selected_model}")
-        elif settings.llm.analysis_model:
-            selected_model = settings.llm.analysis_model
-            logger.debug("[stream] Using analysis_model: {selected_model}")
-        else:
-            selected_model = settings.llm.default_model
-            logger.debug("[stream] Using default_model: {selected_model}")
-
-        base_url = settings.llm.base_url.rstrip("/")
-
-        headers = {"Content-Type": "application/json"}
-        if settings.llm.api_key and settings.llm.api_key != "none":
-            headers["Authorization"] = f"Bearer {settings.llm.api_key}"
-
-        # Reasoning für Analyse-Phase (Streaming = finale Antwort)
-        reasoning = settings.llm.analysis_reasoning
-        stream_messages = messages
-        if reasoning and reasoning in ("low", "medium", "high"):
-            stream_messages = central_llm_client._inject_reasoning(messages, reasoning)
-            logger.debug(f"[stream] Reasoning aktiviert: {reasoning}")
-
-        payload = {
-            "model": selected_model,
-            "messages": stream_messages,
-            "temperature": settings.llm.temperature,
-            "max_tokens": settings.llm.max_tokens,
-            "stream": True,
-            "stream_options": {"include_usage": True}
-        }
-
-        # Container für Usage (wird während Streaming gefüllt)
-        usage_container = {"usage": None, "finish_reason": ""}
-
-        # Prompt-Tokens schätzen (ca. 4 Zeichen pro Token)
-        prompt_text = "".join(m.get("content", "") or "" for m in messages)
-        estimated_prompt_tokens = len(prompt_text) // 4
-
-        async def token_generator():
-            completion_tokens = 0
-            completion_chars = 0
-            last_exc = None
-            for attempt, delay in enumerate([0] + _RETRY_DELAYS):
-                if delay:
-                    logger.debug("[agent] Stream Retry {attempt} nach {delay}s")
-                    await asyncio.sleep(delay)
-                try:
-                    client = _get_http_client()
-                    async with client.stream(
-                        "POST",
-                        f"{base_url}/chat/completions",
-                        headers=headers,
-                        json=payload
-                    ) as response:
-                        response.raise_for_status()
-                        async for line in response.aiter_lines():
-                            if not line.startswith("data:"):
-                                continue
-                            raw = line[5:].strip()
-                            if raw == "[DONE]":
-                                break
-                            try:
-                                import json as json_module
-                                chunk = json_module.loads(raw)
-
-                                # Check for usage in final chunk (OpenAI stream_options)
-                                if "usage" in chunk and chunk["usage"]:
-                                    usage_data = chunk["usage"]
-                                    usage_container["usage"] = TokenUsage(
-                                        prompt_tokens=usage_data.get("prompt_tokens", 0),
-                                        completion_tokens=usage_data.get("completion_tokens", 0),
-                                        total_tokens=usage_data.get("total_tokens", 0),
-                                        finish_reason=usage_container["finish_reason"],
-                                        model=selected_model,
-                                        truncated=(usage_container["finish_reason"] == "length")
-                                    )
-
-                                choices = chunk.get("choices", [])
-                                if choices:
-                                    choice = choices[0]
-                                    delta = choice.get("delta", {})
-                                    token = delta.get("content", "")
-
-                                    # finish_reason extrahieren
-                                    if choice.get("finish_reason"):
-                                        usage_container["finish_reason"] = choice["finish_reason"]
-
-                                    if token:
-                                        completion_chars += len(token)
-                                        completion_tokens = completion_chars // 4  # ~4 chars per token
-                                        yield token
-
-                            except (ValueError, KeyError, IndexError):
-                                continue
-                    return  # Erfolgreich abgeschlossen
-                except Exception as e:
-                    last_exc = e
-                    if _is_retryable(e) and attempt < len(_RETRY_DELAYS):
-                        logger.debug("[agent] Stream unterbrochen: {e}, Retry {attempt + 1}")
-                        continue
-                    logger.debug("[agent] Stream Fehler (kein Retry): {e}")
-                    break
-
-            # Fallback: Wenn kein Usage vom Server, schätzen wir basierend auf Zeichenzahl
-            if not usage_container["usage"]:
-                usage_container["usage"] = TokenUsage(
-                    prompt_tokens=estimated_prompt_tokens,  # Geschätzt aus Prompt-Länge
-                    completion_tokens=completion_tokens,
-                    total_tokens=estimated_prompt_tokens + completion_tokens,
-                    finish_reason=usage_container["finish_reason"],
-                    model=selected_model,
-                    truncated=(usage_container["finish_reason"] == "length")
-                )
-
-        return {
-            "tokens": token_generator(),
-            "usage": usage_container  # Wird nach Streaming gefüllt
-        }
-
-    async def _call_llm_with_tools(
-        self,
-        messages: List[Dict],
-        tools: List[Dict],
-        model: Optional[str] = None,
-        is_tool_phase: bool = True
-    ) -> Dict:
-        """
-        Ruft das LLM mit Tool-Definitionen auf.
-        Mit Retry-Logik für Verbindungsabbrüche und 5xx Fehler.
-
-        Args:
-            messages: Chat-Nachrichten
-            tools: Tool-Definitionen (leer für finale Antwort)
-            model: Explizites Modell (überschreibt automatische Auswahl)
-            is_tool_phase: True = Tool-Phase (schnelles Modell), False = Analyse-Phase (großes Modell)
-        """
-
-        # Modell-Auswahl: Pro-Tool > Phase-spezifisch > Explizit (Header-Dropdown) > Default
-        selected_model = None
-
-        # 1. Pro-Tool Modell prüfen
-        if is_tool_phase and settings.llm.tool_models:
-            for msg in reversed(messages):
-                if msg.get("role") == "tool":
-                    tool_call_id = msg.get("tool_call_id", "")
-                    for prev_msg in messages:
-                        for tc in prev_msg.get("tool_calls", []):
-                            if tc.get("id") == tool_call_id:
-                                tool_name = tc["function"]["name"]
-                                if tool_name in settings.llm.tool_models:
-                                    selected_model = settings.llm.tool_models[tool_name]
-                                    break
-                        if selected_model:
-                            break
-                    if selected_model:
-                        break
-
-        if not selected_model:
-            # Priorität: User-Auswahl > Phase-spezifisch > Default
-            if model:
-                # User hat explizit ein Modell ausgewählt - das hat Vorrang
-                selected_model = model
-                logger.debug("[model] Using user-selected model: {selected_model}")
-            elif is_tool_phase and tools and settings.llm.tool_model:
-                selected_model = settings.llm.tool_model
-                logger.debug("[model] Using tool_model: {selected_model}")
-            elif not is_tool_phase and settings.llm.analysis_model:
-                selected_model = settings.llm.analysis_model
-                logger.debug("[model] Using analysis_model: {selected_model}")
-            else:
-                selected_model = settings.llm.default_model
-                logger.debug("[model] Using default_model: {selected_model}")
-
-        base_url = settings.llm.base_url.rstrip("/")
-
-        headers = {"Content-Type": "application/json"}
-        if settings.llm.api_key and settings.llm.api_key != "none":
-            headers["Authorization"] = f"Bearer {settings.llm.api_key}"
-
-        # Phase-spezifische Temperature: Tool-Phase deterministisch, Analyse-Phase konfigurierbar
-        is_tool_phase = bool(tools)
-        if is_tool_phase:
-            effective_temperature = settings.llm.tool_temperature
-        else:
-            cfg_analysis_temp = settings.llm.analysis_temperature
-            effective_temperature = cfg_analysis_temp if cfg_analysis_temp >= 0 else settings.llm.temperature
-
-        # Modell-spezifisches Kontext-Limit anwenden
-        model_limit = _get_model_context_limit(selected_model)
-        # Sicherheitsprüfung: mindestens 1000 Token Limit
-        if not model_limit or model_limit < 1000:
-            model_limit = settings.llm.default_context_limit or 32000
-            logger.warning(f"[agent] Invalid context limit for {selected_model}, using {model_limit}")
-
-        # Bei langen Chats: Summarizer aufrufen (fasst ältere Messages zusammen)
-        if messages:  # Sicherheitsprüfung
-            try:
-                current_tokens = estimate_messages_tokens(messages)
-                if current_tokens > model_limit * 0.8:  # Ab 80% des Limits
-                    summarizer = get_summarizer()
-                    summarized = await summarizer.summarize_if_needed(
-                        messages,
-                        target_tokens=int(model_limit * 0.7)  # Ziel: 70% des Limits
-                    )
-                    # Nur verwenden wenn Summarizer etwas zurückgibt
-                    if summarized:
-                        messages = summarized
-                        logger.info(f"[agent] Summarizer aktiv: {current_tokens} -> {estimate_messages_tokens(messages)} tokens")
-            except Exception as e:
-                logger.warning(f"[agent] Summarizer/Token estimation failed: {e}")
-
-        # Falls immer noch zu groß: Trim anwenden
-        trimmed_messages = _trim_messages_to_limit(messages, model_limit)
-
-        # Kontextgröße schätzen für Logging
-        estimated_tokens = estimate_messages_tokens(trimmed_messages)
-        logger.debug(f"[agent] LLM Request: ~{estimated_tokens} tokens, model={selected_model}, limit={model_limit}")
-
-        # Timeout basierend auf Phase
-        timeout = TIMEOUT_TOOL if is_tool_phase else TIMEOUT_ANALYSIS
-
-        # Reasoning basierend auf Phase (GPT-OSS, o1, o3-mini Support)
-        reasoning = settings.llm.tool_reasoning if is_tool_phase else settings.llm.analysis_reasoning
-
-        # Tool-Prefill: Prüfe ob für dieses Modell aktiviert
-        # 1. Modell-spezifischer Override hat Priorität
-        # 2. Fallback auf globale Einstellung
-        use_prefill = False
-        if tools and is_tool_phase:
-            model_prefill = settings.llm.tool_prefill_models.get(selected_model)
-            if model_prefill is not None:
-                use_prefill = model_prefill
-            else:
-                use_prefill = settings.llm.use_tool_prefill
-
-        # Zentraler LLM-Call mit Retry-Logik
-        try:
-            response: LLMResponse = await central_llm_client.chat_with_tools(
-                messages=trimmed_messages,
-                tools=tools if tools else None,
-                model=selected_model,
-                temperature=effective_temperature,
-                max_tokens=settings.llm.max_tokens,
-                timeout=timeout,
-                reasoning=reasoning or None,
-                use_tool_prefill=use_prefill,
-            )
-        except Exception as e:
-            # Kontext-Info für bessere Fehlermeldungen hinzufügen
-            raise RuntimeError(
-                f"LLM-Fehler (Kontext: ~{estimated_tokens} Token, Modell: {selected_model}): {e}"
-            ) from e
-
-        # Debug für Modelle mit Text-basierten Tool-Calls
-        if response.finish_reason == "tool_calls" and not response.tool_calls:
-            logger.warning(
-                "[agent] finish_reason='tool_calls' aber keine tool_calls im message-Objekt! "
-                "Modell: %s, Content (erste 500 Zeichen): %s",
-                selected_model, (response.content or '')[:500]
-            )
-
-        # TokenUsage aus LLMResponse erstellen
-        usage = TokenUsage(
-            prompt_tokens=response.prompt_tokens,
-            completion_tokens=response.completion_tokens,
-            total_tokens=response.prompt_tokens + response.completion_tokens,
-            finish_reason=response.finish_reason,
-            model=selected_model,
-            truncated=(response.finish_reason == "length")
-        )
-
-        return {
-            "content": response.content or "",
-            "tool_calls": response.tool_calls,
-            "native_tools": bool(response.tool_calls),
-            "usage": usage,
-            "finish_reason": response.finish_reason,
-            "reasoning": reasoning or None,  # Reasoning-Level falls aktiv
-        }
 
     async def _enrich_from_entity_tracker(
         self,
@@ -4389,297 +2699,7 @@ ALLE AUSGABEN AUF DEUTSCH!"""
         else:
             return ToolResult(success=False, error=f"Unbekannte Operation: {operation}")
 
-    def _build_agent_instructions(self, mode: AgentMode, plan_approved: bool = False) -> str:
-        """Baut die Agent-Instruktionen für den System-Prompt."""
-        db_available = settings.database.enabled
-        handbook_available = settings.handbook.enabled
-
-        base = """
-## Agent-Anweisungen
-
-Du bist ein intelligenter Assistent mit Zugriff auf Tools.
-
-### Verfügbare Tools:
-
-**Code-Suche:**
-- search_code: Durchsuche Java/Python/SQL Code nach relevanten Dateien
-- read_file: Lese den Inhalt einer Datei
-- list_files: Liste Dateien in einem Verzeichnis auf
-- trace_java_references: Verfolge Java-Klassenhierarchien (Interfaces, Parent-Klassen)
-"""
-
-        if handbook_available:
-            base += """
-**Handbuch:**
-- search_handbook: Durchsuche das Handbuch nach Service-Dokumentation
-- get_service_info: Hole Service-Details aus dem Handbuch
-"""
-
-        base += """
-**Wissen & Dokumente:**
-- search_skills: Durchsuche die Wissensbasen der aktiven Skills
-- search_pdf: Durchsuche hochgeladene PDF-Dokumente
-"""
-
-        if settings.internal_fetch.enabled:
-            base += """
-**HTTP/URL-Abruf (Internal Fetch):**
-- internal_fetch: Ruft eine URL ab und gibt den Inhalt zurück (HTML, JSON, Text)
-- internal_search: Ruft eine URL ab und durchsucht den Inhalt nach einem Pattern
-- http_request: Führt HTTP-Requests aus (wie curl) - GET, POST, PUT, DELETE, PATCH mit Body und Headers
-
-Nutze diese Tools um:
-- Interne/Intranet-Seiten abzurufen
-- REST-APIs aufzurufen (GET, POST, etc.)
-- Webseiten zu durchsuchen
-- Daten von URLs zu holen
-"""
-
-        if settings.github.enabled:
-            base += """
-**GitHub (Code-Suche & Repository):**
-- github_search_code: Durchsucht Code in ALLEN Repos nach Beispielen, Patterns, Funktionen
-- github_list_repos: Listet Repositories einer Organisation
-- github_list_prs: Pull Requests eines Repos auflisten
-- github_pr_diff: Code-Änderungen eines PRs anzeigen
-- github_get_file: Dateiinhalt von GitHub holen (aus Branch/Commit)
-- github_recent_commits: Letzte Commits eines Branches
-
-Nutze github_search_code wenn der User nach:
-- Code-Beispielen sucht ("wie wird X implementiert", "Beispiele für Y")
-- Patterns oder Best Practices sucht
-- Wissen will wo eine Funktion/Klasse verwendet wird
-- Nach ähnlichen Implementierungen sucht
-"""
-
-        # Git-Tools sind immer verfügbar (Git ist vorausgesetzt)
-        base += """
-**Git (Lokales Repository):**
-- git_status: Zeigt geänderte/ungetrackte Dateien, aktueller Branch
-- git_diff: Zeigt Code-Änderungen (Working Dir, Staged, zwischen Commits)
-- git_log: Commit-Historie anzeigen (mit Filter nach Autor, Datei, Zeit)
-- git_branch_list: Alle Branches auflisten
-- git_blame: Wer hat welche Zeile geändert?
-- git_show_commit: Vollständige Commit-Details mit Diff
-
-WICHTIG: git_* Tools sind für LOKALE Repos. Für REMOTE GitHub: github_* Tools verwenden.
-Nutze git_status/git_diff wenn der User wissen will was sich geändert hat.
-Nutze git_blame um herauszufinden wer Code geschrieben hat.
-"""
-
-        if settings.docker_sandbox.enabled:
-            base += """
-**Docker Sandbox (Sichere Code-Ausführung):**
-- docker_execute_python: Führt Python-Code in isoliertem Container aus (stateless)
-- docker_session_create: Erstellt persistente Session (Variablen bleiben erhalten)
-- docker_session_execute: Führt Code in Session aus (mit persistenten Variablen)
-- docker_session_list: Listet aktive Sessions
-- docker_session_close: Schließt eine Session
-- docker_upload_file: Lädt Datei in Session hoch (Base64)
-- docker_list_packages: Zeigt verfügbare Python-Pakete
-
-WANN NUTZEN:
-- Benutzer bittet um Code-Ausführung: "encodiere in Base64", "berechne SHA256 Hash"
-- Datenverarbeitung: JSON parsen, CSV verarbeiten, Regex testen
-- Mathematische Berechnungen
-- Testen von Code-Snippets
-- Daten transformieren oder konvertieren
-
-BEISPIELE:
-- "Encodiere 'Hello' in Base64" → docker_execute_python(code="import base64; print(base64.b64encode(b'Hello').decode())")
-- "Berechne SHA256 von 'password'" → docker_execute_python(code="import hashlib; print(hashlib.sha256(b'password').hexdigest())")
-
-FÜR MEHRERE OPERATIONEN: Erstelle eine Session mit docker_session_create, dann docker_session_execute für jeden Schritt.
-Variablen bleiben zwischen Aufrufen erhalten!
-"""
-
-        if db_available:
-            base += f"""
-**Datenbank (DB2):**
-Die DB2-Datenbank ist aktiviert und verbunden ({settings.database.host}:{settings.database.port}/{settings.database.database}).
-- query_database: Führe eine SELECT-Abfrage aus (nur SELECT erlaubt, readonly)
-- list_database_tables: Liste alle Tabellen im Schema auf
-- describe_database_table: Zeige Spalten, Typen und Constraints einer Tabelle
-
-WICHTIG: Nutze query_database um Daten abzufragen. Beispiel: query_database(query="SELECT * FROM tabelle FETCH FIRST 10 ROWS ONLY")
-"""
-
-        base += """
-### Tool-Aufrufe
-
-**WICHTIG - Tool-Aufruf-Format:**
-Wenn du ein Tool aufrufen willst, formatiere es EXAKT so:
-
-```
-[TOOL_CALLS][{"name": "tool_name", "arguments": {"param1": "value1", "param2": "value2"}}]
-```
-
-Beispiele:
-- `[TOOL_CALLS][{"name": "search_code", "arguments": {"query": "PaymentService", "language": "java"}}]`
-- `[TOOL_CALLS][{"name": "read_file", "arguments": {"path": "src/Main.java"}}]`
-- `[TOOL_CALLS][{"name": "http_request", "arguments": {"url": "https://api.example.com", "method": "POST", "body": "{\"key\": \"value\"}"}}]`
-
-Rufe immer nur EIN Tool pro Nachricht auf. Warte auf das Ergebnis bevor du das nächste Tool aufrufst.
-
-### Vorgehensweise bei jeder Anfrage:
-
-1. **Verstehen**: Was genau wird gefragt? Welche Information fehlt mir?
-2. **Planen**: Welche Tools brauche ich in welcher Reihenfolge?
-3. **Ausführen**: Tools einzeln aufrufen und Ergebnis abwarten, bevor das nächste Tool gerufen wird.
-4. **Antworten**: Erst wenn alle nötigen Infos vorliegen, die Antwort formulieren.
-
-Verwende die passenden Tools um Informationen zu sammeln, bevor du antwortest.
-- Bei Code-Fragen: Suche zuerst nach relevantem Code. Bei komplexen Klassen nutze trace_java_references.
-- Bei Handbuch-Fragen: Suche zuerst im Handbuch.
-- Bei PDF-Dokumenten: Durchsuche sie mit search_pdf.
-- Bei Datenbank-Fragen: Nutze list_database_tables und describe_database_table um die Struktur zu verstehen.
-- Lese jede Datei nur EINMAL - der Inhalt bleibt im Kontext verfügbar.
-
-### Beispiel-Abläufe:
-
-**Beispiel 1** — Benutzer: "Was macht die Klasse PaymentService?"
-→ Plane: Ich brauche den Java-Code → search_code, dann ggf. read_file.
-→ Tool: search_code(query="PaymentService", language="java", top_k=3)
-→ Ergebnis zeigt Pfad: src/payment/PaymentService.java
-→ Tool: read_file(path="src/payment/PaymentService.java")
-→ Antwort: "PaymentService ist zuständig für..."
-
-**Beispiel 2** — Benutzer: "Erstelle einen JUnit-Test für OrderValidator"
-→ Plane: Erst Quellcode lesen, dann Test generieren.
-→ Tool: search_code(query="OrderValidator", language="java")
-→ Tool: read_file(path="src/order/OrderValidator.java")
-→ Antwort mit vollständigem JUnit-5-Test in ```java Block.
-"""
-
-        if mode == AgentMode.READ_ONLY:
-            return base + """
-MODUS: Nur Lesen
-Du kannst keine Dateien schreiben oder bearbeiten.
-Gib Code-Vorschläge als Markdown-Codeblöcke aus.
-Datenbank-Abfragen (SELECT) sind erlaubt.
-"""
-
-        elif mode == AgentMode.WRITE_WITH_CONFIRM:
-            return base + """
-MODUS: Schreiben mit Bestätigung
-Zusätzliche Tools:
-- write_file: Erstelle oder überschreibe eine DATEI (benötigt Bestätigung) - NUR für Dateien mit Endung!
-- edit_file: Bearbeite eine Datei (benötigt Bestätigung)
-- create_directory: Erstelle einen ORDNER (benötigt Bestätigung) - NUR für Verzeichnisse!
-- batch_write_files: WICHTIG! Schreibt MEHRERE Dateien mit EINER Bestätigung. Nutze wenn du 2+ Dateien erstellen musst!
-
-**MEHRERE DATEIEN ERSTELLEN:**
-Wenn du mehrere Dateien erstellen musst (z.B. bei einem Design-Konzept), nutze IMMER batch_write_files!
-Format: batch_write_files(files='[{"path": "src/A.java", "content": "..."}, {"path": "src/B.java", "content": "..."}]')
-→ User bestätigt EINMAL für alle Dateien
-
-**ORDNER vs DATEI:**
-- Pfad OHNE Dateiendung (z.B. `src/components`) → verwende create_directory
-- Pfad MIT Dateiendung (z.B. `src/app.py`) → verwende write_file oder batch_write_files
-
-Der User muss Datei-Operationen bestätigen bevor sie ausgeführt werden.
-Datenbank-Abfragen (SELECT) sind ohne Bestätigung erlaubt.
-"""
-
-        elif mode == AgentMode.PLAN_THEN_EXECUTE and not plan_approved:
-            return base + """
-MODUS: Planungsphase
-Du befindest dich in der Planungsphase. Datei-Änderungen sind noch NICHT erlaubt.
-
-**Deine Aufgabe:**
-1. Nutze Read-Tools (search_code, read_file, etc.) um den relevanten Code zu analysieren.
-2. Erstelle einen strukturierten Implementierungsplan.
-3. Schreibe deinen fertigen Plan EXAKT in folgendem Format:
-
-[PLAN]
-**Aufgabe:** <Kurzbeschreibung der Aufgabe>
-
-**Analysierte Dateien:**
-- `<Dateipfad>`: <Was wurde darin gefunden>
-
-**Implementierungsschritte:**
-1. **`<Dateipfad>`** – <Was wird geändert und warum>
-2. ...
-
-**Erwartete Auswirkungen:**
-- <Auswirkung 1>
-[/PLAN]
-
-Schreibe NUR den [PLAN]-Block als deine finale Antwort. Führe keine Datei-Änderungen durch.
-"""
-
-        elif mode == AgentMode.PLAN_THEN_EXECUTE and plan_approved:
-            return base + """
-MODUS: Ausführungsphase (Plan genehmigt)
-Der User hat deinen Plan genehmigt.
-Zusätzliche Tools:
-- write_file: Erstelle eine einzelne DATEI (benötigt Bestätigung)
-- edit_file: Bearbeite eine Datei (benötigt Bestätigung)
-- create_directory: Erstelle einen ORDNER
-- batch_write_files: BEVORZUGT! Schreibt MEHRERE Dateien mit EINER Bestätigung!
-
-**WICHTIG - NUTZE BATCH_WRITE_FILES FÜR MEHRERE DATEIEN:**
-Wenn dein Plan mehrere Dateien erstellt/ändert, nutze batch_write_files um sie ALLE auf einmal zu schreiben!
-→ Statt 5x write_file (5 Bestätigungen) → 1x batch_write_files (1 Bestätigung)
-Format: batch_write_files(files='[{"path": "...", "content": "..."}, ...]')
-
-**VOLLSTÄNDIGE PLAN-AUSFÜHRUNG:**
-Du MUSST ALLE Dateien des Plans erstellen - nicht nach der ersten aufhören!
-- Sammle ALLE zu erstellenden Dateien
-- Nutze batch_write_files um sie in EINEM Aufruf zu schreiben
-- User bestätigt einmal, alle Dateien werden erstellt
-
-**ORDNER vs DATEI:**
-- Pfad OHNE Dateiendung (z.B. `src/components`) → verwende create_directory
-- Pfad MIT Dateiendung (z.B. `src/app.py`) → verwende batch_write_files (oder write_file für einzelne)
-"""
-
-        elif mode == AgentMode.DEBUG:
-            return base + """
-MODUS: Debug & Fehleranalyse
-Du hilfst beim systematischen Verstehen und Lösen von Fehlern. Keine Datei-Änderungen erlaubt.
-
-**Dein Vorgehen:**
-1. **Verstehen**: Stelle gezielte Rückfragen bevor du analysierst. Nutze das Tool `suggest_answers` um dem User Antwort-Optionen anzubieten.
-2. **Nachstellen**: Nutze Log-Tools, Code-Suche und Datenbank-Abfragen um den Fehler zu reproduzieren.
-3. **Analysieren**: Suche nach Root-Cause im Code, Konfiguration und Logs.
-4. **Lösungsvorschlag**: Erkläre die Ursache und schlage Korrekturen als Codeblöcke vor (keine Datei-Schreiboperationen).
-
-**Rückfragen mit suggest_answers:**
-Wenn du mehr Kontext brauchst, rufe `suggest_answers` auf BEVOR du mit der Analyse beginnst:
-- Formuliere eine klare Frage
-- Gib 3-5 konkrete Antwort-Optionen vor
-- Der User kann eine Option wählen oder frei antworten
-
-**Typische Rückfragen:**
-- Wann tritt der Fehler auf? (immer / sporadisch / nach bestimmten Aktionen)
-- In welcher Umgebung? (dev / test / prod)
-- Gibt es eine Fehlermeldung/Exception? (ja, welche / nein, nur falsches Verhalten)
-- Ist das Verhalten neu? (seit letztem Deployment / schon immer / nach Konfigurationsänderung)
-
-Verfügbare Diagnose-Tools: search_code, read_file, search_handbook, Log-Tools, Datenbank-Abfragen (SELECT).
-"""
-
-        else:  # AUTONOMOUS
-            return base + """
-MODUS: Autonom
-Zusätzliche Tools:
-- write_file: Erstelle eine einzelne DATEI
-- edit_file: Bearbeite eine Datei
-- create_directory: Erstelle einen ORDNER
-- batch_write_files: Schreibt mehrere Dateien in einem Aufruf (effizienter!)
-
-**MEHRERE DATEIEN:**
-Bei mehreren Dateien nutze batch_write_files für bessere Performance.
-Format: batch_write_files(files='[{"path": "...", "content": "..."}, ...]')
-
-**ORDNER vs DATEI:**
-- Pfad OHNE Dateiendung (z.B. `src/components`) → verwende create_directory
-- Pfad MIT Dateiendung (z.B. `src/app.py`) → verwende write_file oder batch_write_files
-
-Du kannst Dateien ohne Bestätigung schreiben/bearbeiten.
-Sei vorsichtig und mache nur notwendige Änderungen.
-"""
+    # Note: _build_agent_instructions is now imported from context_builder module
 
     def confirm_operation(self, session_id: str, confirmed: bool) -> bool:
         """

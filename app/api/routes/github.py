@@ -347,9 +347,11 @@ async def get_pr_details(owner: str, repo: str, pr_number: int) -> Dict[str, Any
         "authorName": author_name,
         "baseBranch": pr.get("base", {}).get("ref", "main"),
         "headBranch": pr.get("head", {}).get("ref", "feature"),
-        "additions": pr.get("additions", 0),
-        "deletions": pr.get("deletions", 0),
-        "filesChanged": pr.get("changed_files", 0),
+        # GitHub API gibt null zurück wenn Statistiken noch berechnet werden
+        # or 0 fängt None ab (dict.get default greift nur bei fehlendem Key)
+        "additions": pr.get("additions") or 0,
+        "deletions": pr.get("deletions") or 0,
+        "filesChanged": pr.get("changed_files") or 0,
         "createdAt": pr.get("created_at"),
         "updatedAt": pr.get("updated_at"),
         "mergedAt": pr.get("merged_at"),

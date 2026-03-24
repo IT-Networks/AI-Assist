@@ -440,9 +440,10 @@ def register_github_tools(registry: ToolRegistry) -> int:
                 "mergeable_state": pr.get("mergeable_state"),
                 "head_branch": pr.get("head", {}).get("ref"),
                 "base_branch": pr.get("base", {}).get("ref"),
-                "additions": pr.get("additions"),
-                "deletions": pr.get("deletions"),
-                "changed_files": pr.get("changed_files"),
+                # GitHub API gibt null zurück wenn Statistiken noch berechnet werden
+                "additions": pr.get("additions") or 0,
+                "deletions": pr.get("deletions") or 0,
+                "changed_files": pr.get("changed_files") or 0,
                 "commits": pr.get("commits", 0),  # NEU: Anzahl Commits
                 "reviews": reviews,
                 "comment_count": pr.get("comments", 0) + pr.get("review_comments", 0),
@@ -522,10 +523,11 @@ def register_github_tools(registry: ToolRegistry) -> int:
                 "merged_by": merged_by_data.get("login", "") if merged_by_data else "",
                 "head_branch": pr.get("head", {}).get("ref", ""),
                 "base_branch": pr.get("base", {}).get("ref", ""),
-                "additions": pr.get("additions", 0),
-                "deletions": pr.get("deletions", 0),
-                "changed_files": pr.get("changed_files", 0),
-                "commits": pr.get("commits", 0),
+                # GitHub API gibt null zurück wenn Statistiken noch berechnet werden
+                "additions": pr.get("additions") or 0,
+                "deletions": pr.get("deletions") or 0,
+                "changed_files": pr.get("changed_files") or 0,
+                "commits": pr.get("commits") or 0,
             }
 
         # Geänderte Dateien holen (mit Patch/Diff)
