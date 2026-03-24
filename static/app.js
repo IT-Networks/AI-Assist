@@ -7513,6 +7513,7 @@ async function loadAndRenderHandbookView() {
   const currentView = handbookModalState.navigationStack[handbookModalState.navigationStack.length - 1];
   const modal = document.getElementById('handbook-modal');
   const content = modal.querySelector('.handbook-modal-content');
+  const canGoBack = handbookModalState.navigationStack.length > 1;
 
   content.innerHTML = '<div class="modal-loading"><span class="spinner"></span> Lade...</div>';
 
@@ -7525,21 +7526,58 @@ async function loadAndRenderHandbookView() {
         data = handbookModalState.serviceCache[currentView.id];
       } else {
         const res = await fetch(`/api/handbook/services/${encodeURIComponent(currentView.id)}`);
-        if (!res.ok) throw new Error('Service nicht gefunden');
+        if (!res.ok) {
+          // Service nicht gefunden - zeige hilfreiche Optionen
+          const functionsSubdir = handbookModalState.functionsSubdir || 'funktionen';
+          const externalPath = `${functionsSubdir}/${currentView.id}/`;
+          content.innerHTML = `
+            <div class="modal-error" style="text-align: center; padding: 40px;">
+              <p style="margin-bottom: 20px;">Service <strong>"${escapeHtml(currentView.id)}"</strong> nicht im Index gefunden.</p>
+              <div style="display: flex; gap: 12px; justify-content: center; flex-wrap: wrap;">
+                <button class="btn btn-primary" onclick="openExternalHandbookPath('${escapeHtml(externalPath)}')">
+                  Im externen Handbuch öffnen
+                </button>
+                ${canGoBack ? `<button class="btn btn-secondary" onclick="handbookModalBack()">Zurück</button>` : ''}
+                <button class="btn btn-secondary" onclick="closeHandbookModal()">Schließen</button>
+              </div>
+            </div>
+          `;
+          return;
+        }
         data = await res.json();
         handbookModalState.serviceCache[currentView.id] = data;
       }
       renderServiceView(data);
     } else if (currentView.type === 'field') {
       const res = await fetch(`/api/handbook/fields/${encodeURIComponent(currentView.id)}`);
-      if (!res.ok) throw new Error('Feld nicht gefunden');
+      if (!res.ok) {
+        content.innerHTML = `
+          <div class="modal-error" style="text-align: center; padding: 40px;">
+            <p style="margin-bottom: 20px;">Feld <strong>"${escapeHtml(currentView.id)}"</strong> nicht im Index gefunden.</p>
+            <div style="display: flex; gap: 12px; justify-content: center;">
+              ${canGoBack ? `<button class="btn btn-secondary" onclick="handbookModalBack()">Zurück</button>` : ''}
+              <button class="btn btn-secondary" onclick="closeHandbookModal()">Schließen</button>
+            </div>
+          </div>
+        `;
+        return;
+      }
       data = await res.json();
       renderFieldView(data);
     }
 
     handbookModalState.currentData = data;
   } catch (e) {
-    content.innerHTML = `<div class="modal-error">Fehler: ${e.message}</div>`;
+    console.error('Handbook load error:', e);
+    content.innerHTML = `
+      <div class="modal-error" style="text-align: center; padding: 40px;">
+        <p style="margin-bottom: 20px;">Fehler: ${escapeHtml(e.message)}</p>
+        <div style="display: flex; gap: 12px; justify-content: center;">
+          ${canGoBack ? `<button class="btn btn-secondary" onclick="handbookModalBack()">Zurück</button>` : ''}
+          <button class="btn btn-secondary" onclick="closeHandbookModal()">Schließen</button>
+        </div>
+      </div>
+    `;
   }
 }
 
@@ -7742,6 +7780,18 @@ function interceptHandbookLinks(container) {
  * Falls back to external handbook if not found.
  */
 async function tryNavigateOrExternal(type, id, fallbackPath) {
+  if (!id || id.length < 2) {
+    openExternalHandbookPath(fallbackPath);
+    return;
+  }
+
+  // Show loading indicator
+  const modal = document.getElementById('handbook-modal');
+  const content = modal?.querySelector('.handbook-modal-content');
+  if (content) {
+    content.innerHTML = '<div class="modal-loading"><span class="spinner"></span> Suche...</div>';
+  }
+
   try {
     // First try direct lookup
     const endpoint = type === 'service'
@@ -7755,35 +7805,63 @@ async function tryNavigateOrExternal(type, id, fallbackPath) {
       return;
     }
 
-    // If direct lookup fails, try searching
-    if (id && id.length >= 3) {
-      const searchRes = await fetch(`/api/handbook/search/grouped?q=${encodeURIComponent(id)}&top_k=5`);
+    // If direct lookup fails, try searching (min 3 chars for search)
+    if (id.length >= 3) {
+      const searchRes = await fetch(`/api/handbook/search/grouped?q=${encodeURIComponent(id)}&top_k=10`);
       if (searchRes.ok) {
         const results = await searchRes.json();
-        // Find exact or close match
-        const exactMatch = results.find(r =>
-          r.service_id.toUpperCase() === id.toUpperCase() ||
-          r.service_name.toUpperCase() === id.toUpperCase()
-        );
 
-        if (exactMatch) {
-          handbookNavigateTo('service', exactMatch.service_id);
-          return;
-        }
+        if (results && results.length > 0) {
+          // Find exact or close match
+          const idUpper = id.toUpperCase().replace(/[-_\s]/g, '');
+          const exactMatch = results.find(r => {
+            const sIdUpper = (r.service_id || '').toUpperCase().replace(/[-_\s]/g, '');
+            const sNameUpper = (r.service_name || '').toUpperCase().replace(/[-_\s]/g, '');
+            return sIdUpper === idUpper || sNameUpper === idUpper ||
+                   sIdUpper.includes(idUpper) || sNameUpper.includes(idUpper);
+          });
 
-        // If we have results, navigate to first one
-        if (results.length > 0) {
+          if (exactMatch) {
+            handbookNavigateTo('service', exactMatch.service_id);
+            return;
+          }
+
+          // Navigate to first result
           handbookNavigateTo('service', results[0].service_id);
           return;
         }
       }
     }
 
-    // Not found - open external
-    openExternalHandbookPath(fallbackPath);
+    // Not found - show message and offer external link
+    if (content) {
+      content.innerHTML = `
+        <div class="modal-error">
+          <p>Service "${escapeHtml(id)}" nicht im Index gefunden.</p>
+          <button class="btn btn-primary" onclick="openExternalHandbookPath('${escapeHtml(fallbackPath)}'); return false;">
+            Im externen Handbuch öffnen
+          </button>
+          <button class="btn btn-secondary" onclick="handbookModalBack(); return false;">
+            Zurück
+          </button>
+        </div>
+      `;
+    }
   } catch (e) {
     console.error('Navigation error:', e);
-    openExternalHandbookPath(fallbackPath);
+    if (content) {
+      content.innerHTML = `
+        <div class="modal-error">
+          <p>Fehler beim Laden: ${escapeHtml(e.message)}</p>
+          <button class="btn btn-primary" onclick="openExternalHandbookPath('${escapeHtml(fallbackPath)}'); return false;">
+            Im externen Handbuch öffnen
+          </button>
+          <button class="btn btn-secondary" onclick="handbookModalBack(); return false;">
+            Zurück
+          </button>
+        </div>
+      `;
+    }
   }
 }
 
