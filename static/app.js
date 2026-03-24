@@ -7646,6 +7646,129 @@ function initHandbookContentInteractions(container) {
       wrapper.appendChild(table);
     }
   });
+
+  // Intercept all handbook-internal links
+  interceptHandbookLinks(container);
+}
+
+/**
+ * Intercept clicks on handbook-internal links (parameter, functions, etc.)
+ * - Normal click: Navigate within modal
+ * - Ctrl+click: Open external handbook in new tab
+ */
+function interceptHandbookLinks(container) {
+  container.addEventListener('click', (event) => {
+    const link = event.target.closest('a');
+    if (!link) return;
+
+    const href = link.getAttribute('href');
+    if (!href || href === '#' || link.classList.contains('handbook-link')) {
+      // Already handled by handbook-link class or anchor
+      return;
+    }
+
+    // Parse the href to determine link type
+    const linkInfo = parseHandbookHref(href);
+    if (!linkInfo) {
+      // External or unknown link - let browser handle normally
+      return;
+    }
+
+    // Prevent default navigation
+    event.preventDefault();
+    event.stopPropagation();
+
+    if (event.ctrlKey || event.metaKey) {
+      // Ctrl+click: Open external handbook
+      openExternalHandbookPath(linkInfo.path);
+    } else {
+      // Normal click: Navigate in modal
+      if (linkInfo.type === 'parameter') {
+        handbookNavigateTo('field', linkInfo.name);
+      } else if (linkInfo.type === 'function' || linkInfo.type === 'service') {
+        handbookNavigateTo('service', linkInfo.name);
+      } else if (linkInfo.type === 'dqm') {
+        // DQM links - try to navigate to parameter
+        handbookNavigateTo('field', linkInfo.name);
+      }
+    }
+  });
+}
+
+/**
+ * Parse handbook href to extract type and name
+ * Examples:
+ *   ../parameter/parameter_A.htm#BIC -> { type: 'parameter', name: 'BIC', path: 'parameter/parameter_A.htm#BIC' }
+ *   ../funktionen/DATEN_LESEN/... -> { type: 'function', name: 'DATEN_LESEN', path: '...' }
+ *   ../dqm/dqm_ART_KZ.htm -> { type: 'dqm', name: 'ART_KZ', path: '...' }
+ */
+function parseHandbookHref(href) {
+  if (!href || href.startsWith('http') || href.startsWith('//') || href.startsWith('javascript:')) {
+    return null;
+  }
+
+  // Normalize path
+  const normalizedHref = href.replace(/\\/g, '/');
+
+  // Parameter link: ../parameter/parameter_X.htm#PARAM_NAME
+  const paramMatch = normalizedHref.match(/parameter\/parameter_\w+\.htm#(\w+)/i);
+  if (paramMatch) {
+    return { type: 'parameter', name: paramMatch[1], path: normalizedHref };
+  }
+
+  // Parameter link without anchor: ../parameter/parameter_X.htm
+  const paramMatch2 = normalizedHref.match(/parameter\/parameter_(\w+)\.htm$/i);
+  if (paramMatch2) {
+    return { type: 'parameter', name: paramMatch2[1], path: normalizedHref };
+  }
+
+  // Function/Service link: ../funktionen/SERVICE_NAME/
+  const funcMatch = normalizedHref.match(/funktionen\/([^/]+)/i);
+  if (funcMatch) {
+    return { type: 'function', name: funcMatch[1], path: normalizedHref };
+  }
+
+  // DQM link: ../dqm/dqm_PARAM.htm or dqm_PARAM.htm
+  const dqmMatch = normalizedHref.match(/dqm_(\w+)\.htm/i);
+  if (dqmMatch) {
+    return { type: 'dqm', name: dqmMatch[1], path: normalizedHref };
+  }
+
+  // Relative link within same directory (e.g., service links)
+  const relativeMatch = normalizedHref.match(/^([A-Z_][A-Z0-9_]+)\.htm/i);
+  if (relativeMatch) {
+    return { type: 'service', name: relativeMatch[1], path: normalizedHref };
+  }
+
+  // Anchor-only link
+  if (normalizedHref.startsWith('#')) {
+    const anchor = normalizedHref.substring(1);
+    return { type: 'parameter', name: anchor, path: normalizedHref };
+  }
+
+  return null;
+}
+
+/**
+ * Open external handbook with a relative path
+ */
+function openExternalHandbookPath(relativePath) {
+  const handbookPath = handbookModalState.handbookPath;
+
+  if (!handbookPath) {
+    showToast('Handbuch-Pfad nicht konfiguriert', 'warning');
+    return;
+  }
+
+  // Normalize and construct full path
+  let normalizedBase = handbookPath.replace(/\\/g, '/');
+  if (!normalizedBase.endsWith('/')) normalizedBase += '/';
+
+  // Remove leading ../ from relative path and construct URL
+  let cleanPath = relativePath.replace(/^(\.\.\/)+/, '');
+
+  const fullUrl = `file:///${normalizedBase}${cleanPath}`;
+  window.open(fullUrl, '_blank');
 }
 
 function renderServiceOverview(service, searchTerm) {
