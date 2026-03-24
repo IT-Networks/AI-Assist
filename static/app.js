@@ -3544,6 +3544,13 @@ document.addEventListener('DOMContentLoaded', async () => {
   setupKeyboardShortcuts();
   setupWorkspaceResize();
 
+  // Modus aus Radio-Button initialisieren (falls HTML einen anderen Default hat)
+  const checkedRadio = document.querySelector('input[name="agent-mode"]:checked');
+  if (checkedRadio) {
+    state.mode = checkedRadio.value;
+  }
+  updateModeIndicator();  // Modus-Anzeige sofort aktualisieren
+
   // KRITISCH: Nur Models und Chats blockieren - Rest im Hintergrund
   // Dies reduziert Initial Load von ~2s auf ~500ms
   await Promise.all([
@@ -3742,11 +3749,17 @@ async function loadPersistedChats() {
 
 async function createNewChat() {
   try {
+    // Neue Chats starten immer mit 'read_only' (sicherster Default)
+    state.mode = 'read_only';
+    syncModeRadioButtons('read_only');
+    updateModeIndicator();
+
     const sessionId = await createAgentSession();
     const chat = chatManager.createChat(sessionId);
+    chat.mode = 'read_only';  // Mode direkt im Chat-Objekt speichern
     // switchToChat übernimmt Pane-Swap, State-Restore und UI-Updates
     await switchToChat(chat.id);
-    log.info('New chat created:', chat.id, 'session:', sessionId);
+    log.info('New chat created:', chat.id, 'session:', sessionId, 'mode: read_only');
   } catch (e) {
     log.error('Failed to create new chat:', e);
     showErrorToast('Neuer Chat konnte nicht erstellt werden');
