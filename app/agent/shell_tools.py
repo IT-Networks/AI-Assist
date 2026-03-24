@@ -208,6 +208,13 @@ _SERVER_PATTERNS = [
     re.compile(r"^node\b", re.IGNORECASE),
 ]
 
+# SCRIPT - Script-Ausführung (Python/Node scripts mit Bestätigung)
+_SCRIPT_PATTERNS = [
+    re.compile(r"^python3?\s+[\w./\\-]+\.py\b", re.IGNORECASE),  # python script.py
+    re.compile(r"^python3?\s+-c\s+", re.IGNORECASE),  # python -c "code"
+    re.compile(r"^node\s+[\w./\\-]+\.js\b", re.IGNORECASE),  # node script.js
+]
+
 
 def classify_command(command: str) -> CommandClassification:
     """
@@ -298,6 +305,17 @@ def classify_command(command: str) -> CommandClassification:
                 category="server",
                 can_container_test=True,
                 requires_confirmation=True
+            )
+
+    # SCRIPT prüfen - Python/Node Script-Ausführung (pre-compiled patterns)
+    for pattern in _SCRIPT_PATTERNS:
+        if pattern.search(command):
+            return CommandClassification(
+                command=command,
+                level=SafetyLevel.LOCAL_WRITE,
+                category="script",
+                can_container_test=True,  # Kann im Container getestet werden
+                requires_confirmation=True  # Aber lokale Ausführung braucht Bestätigung
             )
 
     # Unbekannter Befehl - vorsichtshalber LOCAL_WRITE
