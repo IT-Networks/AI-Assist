@@ -1744,16 +1744,30 @@ class HandbookIndexer:
             tabs_with_content = []
             seen_tabs = set()
 
-            # Handbook-Pfad aus DB lesen (wurde beim Indexieren gespeichert)
+            # Handbook-Pfad ermitteln: Settings haben Priorität, dann Index-DB
             handbook_path = None
-            path_row = con.execute(
-                "SELECT value FROM handbook_meta WHERE key = 'handbook_path'"
-            ).fetchone()
-            if path_row and path_row["value"]:
-                handbook_path = Path(path_row["value"])
-            # Fallback auf Settings
-            if not handbook_path and settings.handbook.path:
+            path_source = None
+
+            # 1. Aus Settings (aktuelle Konfiguration)
+            if settings.handbook.enabled and settings.handbook.path:
                 handbook_path = Path(settings.handbook.path)
+                path_source = "settings"
+
+            # 2. Fallback: Aus Index-DB (wurde beim Indexieren gespeichert)
+            if not handbook_path:
+                path_row = con.execute(
+                    "SELECT value FROM handbook_meta WHERE key = 'handbook_path'"
+                ).fetchone()
+                if path_row and path_row["value"]:
+                    handbook_path = Path(path_row["value"])
+                    path_source = "index_db"
+
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.info(f"[get_service_info] handbook_path={handbook_path} (source={path_source})")
+
+            import logging
+            logger = logging.getLogger(__name__)
 
             for fts_row in fts_rows:
                 tab_name = fts_row["tab_name"] or fts_row["title"] or "Inhalt"
@@ -1763,15 +1777,25 @@ class HandbookIndexer:
 
                 # Versuche Original-HTML zu laden
                 html_content = None
-                if handbook_path and fts_row["file_path"]:
-                    file_path = handbook_path / fts_row["file_path"]
+                rel_file_path = fts_row["file_path"]
+
+                if handbook_path and rel_file_path:
+                    # Pfad zusammenbauen (relative Pfade aus DB + handbook root)
+                    file_path = handbook_path / rel_file_path
+                    logger.debug(f"[get_service_info] Trying to load: {file_path}")
+
                     if file_path.exists():
                         try:
                             raw_html = file_path.read_text(encoding="utf-8", errors="replace")
                             # Body-Inhalt extrahieren
                             html_content = self._extract_body_html(raw_html)
-                        except Exception:
-                            pass
+                            logger.debug(f"[get_service_info] Loaded HTML from: {file_path}")
+                        except Exception as e:
+                            logger.warning(f"[get_service_info] Failed to read {file_path}: {e}")
+                    else:
+                        logger.debug(f"[get_service_info] File not found: {file_path}")
+                else:
+                    logger.debug(f"[get_service_info] No handbook_path ({handbook_path}) or file_path ({rel_file_path})")
 
                 # Fallback auf Plain-Text wenn HTML nicht verfügbar
                 if not html_content:
