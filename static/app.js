@@ -7313,7 +7313,7 @@ async function searchHandbookGrouped(query) {
             <span class="grouped-result-name">${escapeHtml(r.service_name)}</span>
           </div>
           <button class="grouped-result-modal-btn" onclick="openHandbookModal('${escapeHtml(r.service_id)}', '${escapeHtml(query)}')" title="Details anzeigen">
-            &#128203;
+            &#128065;
           </button>
         </div>
         <div class="grouped-result-meta">

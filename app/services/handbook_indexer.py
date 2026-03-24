@@ -1571,19 +1571,59 @@ class HandbookIndexer:
             # Gruppierung nach Service (innerhalb der Connection)
             services: Dict[str, Dict] = {}
 
+            # Bekannte Tab-Suffixe für Normalisierung
+            known_tabs = {
+                'statistik', 'use_cases', 'use cases', 'aenderungen', 'änderungen', 'dqm',
+                'fachlich', 'intern', 'parameter', 'uebersicht', 'übersicht',
+                'eingabe', 'ausgabe', 'allgemein', 'technik',
+                'historie', 'beispiele', 'varianten', 'fehler'
+            }
+
+            def normalize_service_name(name: str) -> str:
+                """Normalisiert Service-Namen: entfernt .htm, Tab-Suffixe, etc."""
+                if not name:
+                    return "Unbekannt"
+
+                # .htm/.html entfernen
+                normalized = re.sub(r'\.html?$', '', name, flags=re.IGNORECASE)
+
+                # Tab-Suffixe entfernen (mit Leerzeichen oder Unterstrich)
+                for tab in known_tabs:
+                    # Am Ende mit Leerzeichen oder Unterstrich
+                    patterns = [
+                        rf'\s+{re.escape(tab)}$',
+                        rf'_{re.escape(tab)}$',
+                        rf'-{re.escape(tab)}$',
+                    ]
+                    for pattern in patterns:
+                        normalized = re.sub(pattern, '', normalized, flags=re.IGNORECASE)
+
+                # Bereinigen und Title-Case
+                normalized = normalized.strip()
+                if normalized:
+                    # Unterstriche/Bindestriche durch Leerzeichen ersetzen und Title-Case
+                    normalized = re.sub(r'[-_]+', ' ', normalized)
+                    normalized = ' '.join(word.capitalize() for word in normalized.split())
+
+                return normalized or "Unbekannt"
+
             for row in rows:
-                service_name = row["service_name"] or "Unbekannt"
+                raw_service_name = row["service_name"] or "Unbekannt"
+                service_name = normalize_service_name(raw_service_name)
 
                 if service_name not in services:
-                    # Service-ID aus handbook_services holen
+                    # Service-ID aus handbook_services holen (mit LIKE für Fuzzy-Match)
                     service_row = con.execute(
-                        "SELECT service_id, description FROM handbook_services WHERE service_name = ?",
-                        (service_name,)
+                        """SELECT service_id, service_name, description
+                           FROM handbook_services
+                           WHERE service_name = ? OR service_name LIKE ? OR service_id LIKE ?
+                           LIMIT 1""",
+                        (service_name, f"%{service_name}%", f"%{service_name.lower().replace(' ', '-')}%")
                     ).fetchone()
 
                     services[service_name] = {
                         "service_id": service_row["service_id"] if service_row else service_name.lower().replace(" ", "-"),
-                        "service_name": service_name,
+                        "service_name": service_row["service_name"] if service_row else service_name,
                         "description": service_row["description"] if service_row else "",
                         "match_count": 0,
                         "matched_tabs": set(),
@@ -1593,12 +1633,21 @@ class HandbookIndexer:
                 svc = services[service_name]
                 svc["match_count"] += 1
 
-                if row["tab_name"]:
-                    svc["matched_tabs"].add(row["tab_name"])
+                # Tab aus raw_service_name extrahieren falls nicht vorhanden
+                tab_name = row["tab_name"]
+                if not tab_name:
+                    # Versuche Tab aus dem raw service name zu extrahieren
+                    for tab in known_tabs:
+                        if tab.lower() in raw_service_name.lower():
+                            tab_name = tab.replace("_", " ").title()
+                            break
+
+                if tab_name:
+                    svc["matched_tabs"].add(tab_name)
 
                 if len(svc["top_snippets"]) < max_snippets:
                     svc["top_snippets"].append({
-                        "tab_name": row["tab_name"] or "",
+                        "tab_name": tab_name or "",
                         "text": row["snippet"] or ""
                     })
 
