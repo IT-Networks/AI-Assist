@@ -7725,8 +7725,20 @@ function interceptHandbookLinks(container) {
     // Normal click handling based on link type
     switch (linkInfo.type) {
       case 'tab':
-        // Same-service tab link - switch tab in modal
+        // Same-service tab link - switch tab in modal and optionally scroll to anchor
         switchHandbookTab(linkInfo.tabName);
+        // If there's an anchor, scroll to it after tab switch (with delay for render)
+        if (linkInfo.anchor) {
+          setTimeout(() => {
+            const anchorEl = container.querySelector(`[name="${linkInfo.anchor}"], #${linkInfo.anchor}, a[name="${linkInfo.anchor}"]`);
+            if (anchorEl) {
+              anchorEl.scrollIntoView({ behavior: 'smooth', block: 'start' });
+              // Highlight the anchor briefly
+              anchorEl.style.outline = '2px solid var(--accent)';
+              setTimeout(() => { anchorEl.style.outline = ''; }, 2000);
+            }
+          }, 100);
+        }
         break;
 
       case 'anchor':
@@ -7884,13 +7896,14 @@ function parseHandbookHref(href) {
   // Get current service name from modal state for tab detection
   const currentService = handbookModalState.currentData?.service_name || handbookModalState.currentData?.service_id || '';
 
-  // Tab link within same service: SERVICE_fachlich.htm, SERVICE_parameter.htm, etc.
-  // Pattern: CurrentServiceName_tabname.htm (case insensitive match on service name)
+  // Tab link within same service: SERVICE_fachlich.htm, SERVICE_parameter.htm#FIELD, etc.
+  // Pattern: CurrentServiceName_tabname.htm with optional anchor
   if (currentService) {
-    const tabPattern = new RegExp(`^${escapeRegex(currentService)}_(\\w+)\\.htm$`, 'i');
+    const tabPattern = new RegExp(`^${escapeRegex(currentService)}_(\\w+)\\.htm(#[\\w-]+)?$`, 'i');
     const tabMatch = normalizedHref.match(tabPattern);
     if (tabMatch) {
       const tabName = tabMatch[1].toLowerCase();
+      const anchor = tabMatch[2] ? tabMatch[2].substring(1) : null; // Remove # prefix
       // Map common tab names
       const tabMapping = {
         'fachlich': 'Fachlich',
@@ -7901,7 +7914,7 @@ function parseHandbookHref(href) {
         'aenderungen': 'Änderungen',
         'statistik': 'Statistik'
       };
-      return { type: 'tab', tabName: tabMapping[tabName] || tabName, path: normalizedHref };
+      return { type: 'tab', tabName: tabMapping[tabName] || tabName, anchor: anchor, path: normalizedHref };
     }
   }
 
