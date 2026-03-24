@@ -1743,7 +1743,17 @@ class HandbookIndexer:
             # Tabs mit HTML-Content aus Original-Dateien laden
             tabs_with_content = []
             seen_tabs = set()
-            handbook_path = Path(settings.handbook.path) if settings.handbook.path else None
+
+            # Handbook-Pfad aus DB lesen (wurde beim Indexieren gespeichert)
+            handbook_path = None
+            path_row = con.execute(
+                "SELECT value FROM handbook_meta WHERE key = 'handbook_path'"
+            ).fetchone()
+            if path_row and path_row["value"]:
+                handbook_path = Path(path_row["value"])
+            # Fallback auf Settings
+            if not handbook_path and settings.handbook.path:
+                handbook_path = Path(settings.handbook.path)
 
             for fts_row in fts_rows:
                 tab_name = fts_row["tab_name"] or fts_row["title"] or "Inhalt"
