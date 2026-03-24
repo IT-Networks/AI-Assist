@@ -7475,7 +7475,13 @@ function renderServiceView(service) {
     // Tab-Content aus tabs Array
     const tab = tabs.find(t => (t.name || t.title) === handbookModalState.activeTab);
     if (tab && tab.content) {
-      html = `<div class="handbook-tab-content">${highlightText(tab.content, searchTerm)}</div>`;
+      // HTML-Content mit Auto-Links für Funktionen
+      let processedContent = tab.content;
+      processedContent = addFunctionLinks(processedContent, service.known_functions || []);
+      if (searchTerm) {
+        processedContent = highlightInHtml(processedContent, searchTerm);
+      }
+      html = `<div class="handbook-tab-content">${processedContent}</div>`;
     } else {
       html = `<div class="handbook-tab-content"><p>Kein Inhalt verfügbar.</p></div>`;
     }
@@ -7639,6 +7645,48 @@ function highlightText(text, searchTerm) {
   if (!searchTerm || !text) return text;
   const regex = new RegExp(`(${escapeRegex(searchTerm)})`, 'gi');
   return text.replace(regex, '<mark class="search-highlight">$1</mark>');
+}
+
+function highlightInHtml(html, searchTerm) {
+  // Highlighting in HTML-Content ohne Tags zu zerstören
+  if (!searchTerm || !html) return html;
+
+  // Nur Text-Nodes highlighten, keine Tags
+  const regex = new RegExp(`(${escapeRegex(searchTerm)})`, 'gi');
+
+  // Einfacher Ansatz: Text außerhalb von Tags ersetzen
+  return html.replace(/>([^<]+)</g, (match, textContent) => {
+    const highlighted = textContent.replace(regex, '<mark class="search-highlight">$1</mark>');
+    return `>${highlighted}<`;
+  });
+}
+
+function addFunctionLinks(html, knownFunctions) {
+  // Funktionsnamen in HTML-Content zu Links umwandeln
+  if (!knownFunctions || knownFunctions.length === 0 || !html) return html;
+
+  // Sortieren nach Länge (längste zuerst) um Teilmatches zu vermeiden
+  const sortedFunctions = [...knownFunctions].sort((a, b) => b.length - a.length);
+
+  // Funktionsnamen außerhalb von Tags ersetzen
+  let result = html;
+
+  for (const funcName of sortedFunctions) {
+    if (funcName.length < 3) continue; // Zu kurze Namen ignorieren
+
+    // Pattern: Funktionsname als Wort (nicht in Tags, nicht bereits ein Link)
+    const pattern = new RegExp(
+      `(?<![\\w-])(?<!href=["'][^"']*)(${escapeRegex(funcName)})(?![\\w-])(?![^<]*>)`,
+      'g'
+    );
+
+    result = result.replace(pattern, (match, name) => {
+      // Prüfen ob wir nicht in einem Tag sind
+      return `<a class="handbook-link auto-link" onclick="handbookNavigateTo('service', '${escapeHtml(name)}')">${name}</a>`;
+    });
+  }
+
+  return result;
 }
 
 function escapeRegex(str) {

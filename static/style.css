@@ -3732,6 +3732,20 @@ body {
   color: var(--accent-hover);
 }
 
+.handbook-link.auto-link {
+  text-decoration-style: dashed;
+  font-weight: 500;
+}
+
+.handbook-link.auto-link:hover {
+  text-decoration-style: solid;
+  background: var(--accent);
+  color: white;
+  padding: 0 4px;
+  border-radius: 3px;
+  text-decoration: none;
+}
+
 .more-link {
   color: var(--text-muted);
   cursor: pointer;

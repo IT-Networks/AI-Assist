@@ -1681,6 +1681,8 @@ class HandbookIndexer:
 
     def get_service_info(self, service_id: str) -> Optional[Dict]:
         """Gibt strukturierte Service-Informationen zurück."""
+        from app.core.config import settings
+
         with self._connect() as con:
             # Fuzzy-Match für service_id (verschiedene Formate möglich)
             service_id_upper = service_id.upper().replace("-", "_").replace(" ", "_")
@@ -1702,21 +1704,25 @@ class HandbookIndexer:
             actual_service_id = row["service_id"]
             service_name = row["service_name"]
 
-            # Tabs mit Content aus handbook_fts laden
-            tabs_meta = json.loads(row["tabs_json"] or "[]")
-
-            # Tab-Inhalte aus FTS-Index holen
+            # Tab-Dateien aus FTS-Index holen (mit file_path für HTML-Laden)
             fts_rows = con.execute(
-                """SELECT tab_name, title, content
+                """SELECT file_path, tab_name, title, content
                    FROM handbook_fts
                    WHERE service_name = ? OR service_name LIKE ?
                    ORDER BY tab_name""",
                 (service_name, f"%{service_name}%")
             ).fetchall()
 
-            # Tabs mit Content anreichern
+            # Alle bekannten Service-IDs für Auto-Linking holen
+            all_services = con.execute(
+                "SELECT service_id FROM handbook_services"
+            ).fetchall()
+            known_functions = [r["service_id"] for r in all_services]
+
+            # Tabs mit HTML-Content aus Original-Dateien laden
             tabs_with_content = []
             seen_tabs = set()
+            handbook_path = Path(settings.handbook.path) if settings.handbook.path else None
 
             for fts_row in fts_rows:
                 tab_name = fts_row["tab_name"] or fts_row["title"] or "Inhalt"
@@ -1724,13 +1730,31 @@ class HandbookIndexer:
                     continue
                 seen_tabs.add(tab_name)
 
+                # Versuche Original-HTML zu laden
+                html_content = None
+                if handbook_path and fts_row["file_path"]:
+                    file_path = handbook_path / fts_row["file_path"]
+                    if file_path.exists():
+                        try:
+                            raw_html = file_path.read_text(encoding="utf-8", errors="replace")
+                            # Body-Inhalt extrahieren
+                            html_content = self._extract_body_html(raw_html)
+                        except Exception:
+                            pass
+
+                # Fallback auf Plain-Text wenn HTML nicht verfügbar
+                if not html_content:
+                    html_content = f"<p>{fts_row['content'] or ''}</p>"
+
                 tabs_with_content.append({
                     "name": tab_name,
                     "title": tab_name.replace("_", " ").title(),
-                    "content": fts_row["content"] or ""
+                    "content": html_content,
+                    "file_path": fts_row["file_path"]
                 })
 
             # Falls keine FTS-Tabs, Metadaten-Tabs verwenden
+            tabs_meta = json.loads(row["tabs_json"] or "[]")
             if not tabs_with_content and tabs_meta:
                 tabs_with_content = tabs_meta
 
@@ -1742,7 +1766,33 @@ class HandbookIndexer:
             "input_fields": json.loads(row["input_fields_json"] or "[]"),
             "output_fields": json.loads(row["output_fields_json"] or "[]"),
             "call_variants": json.loads(row["call_variants_json"] or "[]"),
+            "known_functions": known_functions,  # Für Auto-Linking im Frontend
         }
+
+    def _extract_body_html(self, html: str) -> str:
+        """Extrahiert den Body-Inhalt aus HTML und bereinigt ihn."""
+        import re
+
+        # Body-Inhalt extrahieren
+        body_match = re.search(r'<body[^>]*>(.*?)</body>', html, re.DOTALL | re.IGNORECASE)
+        if body_match:
+            content = body_match.group(1)
+        else:
+            content = html
+
+        # Script und Style Tags entfernen
+        content = re.sub(r'<script[^>]*>.*?</script>', '', content, flags=re.DOTALL | re.IGNORECASE)
+        content = re.sub(r'<style[^>]*>.*?</style>', '', content, flags=re.DOTALL | re.IGNORECASE)
+
+        # Navigation, Header, Footer entfernen
+        content = re.sub(r'<nav[^>]*>.*?</nav>', '', content, flags=re.DOTALL | re.IGNORECASE)
+        content = re.sub(r'<header[^>]*>.*?</header>', '', content, flags=re.DOTALL | re.IGNORECASE)
+        content = re.sub(r'<footer[^>]*>.*?</footer>', '', content, flags=re.DOTALL | re.IGNORECASE)
+
+        # Inline-Styles und Event-Handler entfernen (Sicherheit)
+        content = re.sub(r'\s+on\w+\s*=\s*["\'][^"\']*["\']', '', content, flags=re.IGNORECASE)
+
+        return content.strip()
 
     def list_services(self, limit: int = 100, offset: int = 0) -> List[Dict]:
         """Listet Services mit Pagination auf."""
