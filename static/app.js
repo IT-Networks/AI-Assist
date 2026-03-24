@@ -7685,9 +7685,12 @@ function initHandbookContentInteractions(container) {
     }
   });
 
-  // Intercept all handbook-internal links
+  // Intercept all handbook-internal links (only once per modal)
   interceptHandbookLinks(container);
 }
+
+// Track if we've added the handbook link interceptor
+let handbookLinkInterceptorAdded = false;
 
 /**
  * Intercept clicks on handbook-internal links (parameter, functions, etc.)
@@ -7695,7 +7698,15 @@ function initHandbookContentInteractions(container) {
  * - Ctrl+click: Open external handbook in new tab
  */
 function interceptHandbookLinks(container) {
-  container.addEventListener('click', (event) => {
+  // Only add the listener once to avoid multiple handlers
+  if (handbookLinkInterceptorAdded) return;
+  handbookLinkInterceptorAdded = true;
+
+  // Use the modal body instead of content (which changes)
+  const modalBody = document.querySelector('#handbook-modal .handbook-modal-body');
+  if (!modalBody) return;
+
+  modalBody.addEventListener('click', (event) => {
     const link = event.target.closest('a');
     if (!link) return;
 
@@ -7730,7 +7741,7 @@ function interceptHandbookLinks(container) {
         // If there's an anchor, scroll to it after tab switch (with delay for render)
         if (linkInfo.anchor) {
           setTimeout(() => {
-            const anchorEl = container.querySelector(`[name="${linkInfo.anchor}"], #${linkInfo.anchor}, a[name="${linkInfo.anchor}"]`);
+            const anchorEl = modalBody.querySelector(`[name="${linkInfo.anchor}"], #${linkInfo.anchor}, a[name="${linkInfo.anchor}"]`);
             if (anchorEl) {
               anchorEl.scrollIntoView({ behavior: 'smooth', block: 'start' });
               // Highlight the anchor briefly
@@ -7743,9 +7754,9 @@ function interceptHandbookLinks(container) {
 
       case 'anchor':
         // Anchor link - scroll to element if exists
-        const anchorEl = container.querySelector(`[name="${linkInfo.anchor}"], #${linkInfo.anchor}`);
-        if (anchorEl) {
-          anchorEl.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        const anchorEl2 = modalBody.querySelector(`[name="${linkInfo.anchor}"], #${linkInfo.anchor}`);
+        if (anchorEl2) {
+          anchorEl2.scrollIntoView({ behavior: 'smooth', block: 'start' });
         }
         break;
 
@@ -7760,18 +7771,18 @@ function interceptHandbookLinks(container) {
         break;
 
       case 'parameter':
-        // Try to find parameter in indexed services first
+        // Try to find parameter/field in index
         if (linkInfo.name) {
-          tryNavigateOrExternal('service', linkInfo.name, linkInfo.path);
+          tryNavigateOrExternal('field', linkInfo.name, linkInfo.path);
         } else {
           openExternalHandbookPath(linkInfo.path);
         }
         break;
 
       case 'dqm':
-        // Try to find in indexed services
+        // DQM links usually reference parameters/fields
         if (linkInfo.name) {
-          tryNavigateOrExternal('service', linkInfo.name, linkInfo.path);
+          tryNavigateOrExternal('field', linkInfo.name, linkInfo.path);
         } else {
           openExternalHandbookPath(linkInfo.path);
         }
@@ -7804,6 +7815,8 @@ async function tryNavigateOrExternal(type, id, fallbackPath) {
     content.innerHTML = '<div class="modal-loading"><span class="spinner"></span> Suche...</div>';
   }
 
+  const typeLabel = type === 'field' ? 'Feld/Parameter' : 'Service';
+
   try {
     // First try direct lookup
     const endpoint = type === 'service'
@@ -7817,8 +7830,8 @@ async function tryNavigateOrExternal(type, id, fallbackPath) {
       return;
     }
 
-    // If direct lookup fails, try searching (min 3 chars for search)
-    if (id.length >= 3) {
+    // If direct lookup fails and type is service, try searching
+    if (type === 'service' && id.length >= 3) {
       const searchRes = await fetch(`/api/handbook/search/grouped?q=${encodeURIComponent(id)}&top_k=10`);
       if (searchRes.ok) {
         const results = await searchRes.json();
@@ -7845,17 +7858,20 @@ async function tryNavigateOrExternal(type, id, fallbackPath) {
       }
     }
 
-    // Not found - show message and offer external link
+    // Not found - for fields/parameters, just open external (they aren't fully indexed)
+    // Show message and offer external link
     if (content) {
       content.innerHTML = `
-        <div class="modal-error">
-          <p>Service "${escapeHtml(id)}" nicht im Index gefunden.</p>
-          <button class="btn btn-primary" onclick="openExternalHandbookPath('${escapeHtml(fallbackPath)}'); return false;">
-            Im externen Handbuch öffnen
-          </button>
-          <button class="btn btn-secondary" onclick="handbookModalBack(); return false;">
-            Zurück
-          </button>
+        <div class="modal-error" style="text-align: center; padding: 40px;">
+          <p style="margin-bottom: 20px;">${typeLabel} <strong>"${escapeHtml(id)}"</strong> nicht im Index gefunden.</p>
+          <div style="display: flex; gap: 12px; justify-content: center; flex-wrap: wrap;">
+            <button class="btn btn-primary" onclick="openExternalHandbookPath('${escapeHtml(fallbackPath)}')">
+              Im externen Handbuch öffnen
+            </button>
+            <button class="btn btn-secondary" onclick="handbookModalBack()">
+              Zurück
+            </button>
+          </div>
         </div>
       `;
     }
@@ -7863,14 +7879,16 @@ async function tryNavigateOrExternal(type, id, fallbackPath) {
     console.error('Navigation error:', e);
     if (content) {
       content.innerHTML = `
-        <div class="modal-error">
-          <p>Fehler beim Laden: ${escapeHtml(e.message)}</p>
-          <button class="btn btn-primary" onclick="openExternalHandbookPath('${escapeHtml(fallbackPath)}'); return false;">
-            Im externen Handbuch öffnen
-          </button>
-          <button class="btn btn-secondary" onclick="handbookModalBack(); return false;">
-            Zurück
-          </button>
+        <div class="modal-error" style="text-align: center; padding: 40px;">
+          <p style="margin-bottom: 20px;">Fehler beim Laden: ${escapeHtml(e.message)}</p>
+          <div style="display: flex; gap: 12px; justify-content: center; flex-wrap: wrap;">
+            <button class="btn btn-primary" onclick="openExternalHandbookPath('${escapeHtml(fallbackPath)}')">
+              Im externen Handbuch öffnen
+            </button>
+            <button class="btn btn-secondary" onclick="handbookModalBack()">
+              Zurück
+            </button>
+          </div>
         </div>
       `;
     }
