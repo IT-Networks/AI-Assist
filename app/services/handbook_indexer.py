@@ -1705,13 +1705,34 @@ class HandbookIndexer:
             service_name = row["service_name"]
 
             # Tab-Dateien aus FTS-Index holen (mit file_path für HTML-Laden)
+            # Robustes Matching: service_name, service_id (mit verschiedenen Formaten)
+            service_name_upper = service_name.upper().replace(" ", "_").replace("-", "_")
+            service_name_lower = service_name.lower().replace(" ", "_").replace("-", "_")
+            service_id_normalized = actual_service_id.upper().replace(" ", "_").replace("-", "_")
+
             fts_rows = con.execute(
                 """SELECT file_path, tab_name, title, content
                    FROM handbook_fts
-                   WHERE service_name = ? OR service_name LIKE ?
+                   WHERE service_name = ?
+                      OR service_name LIKE ?
+                      OR UPPER(REPLACE(REPLACE(service_name, ' ', '_'), '-', '_')) = ?
+                      OR LOWER(REPLACE(REPLACE(service_name, ' ', '_'), '-', '_')) = ?
+                      OR UPPER(REPLACE(REPLACE(service_name, ' ', '_'), '-', '_')) = ?
                    ORDER BY tab_name""",
-                (service_name, f"%{service_name}%")
+                (service_name, f"%{service_name}%", service_name_upper, service_name_lower, service_id_normalized)
             ).fetchall()
+
+            # Fallback: Suche nach file_path Pattern wenn keine Treffer
+            if not fts_rows:
+                # Versuche über Pfad zu finden: funktionen/SERVICE_ID/
+                path_pattern = f"%{actual_service_id}%"
+                fts_rows = con.execute(
+                    """SELECT file_path, tab_name, title, content
+                       FROM handbook_fts
+                       WHERE file_path LIKE ?
+                       ORDER BY tab_name""",
+                    (path_pattern,)
+                ).fetchall()
 
             # Alle bekannten Service-IDs für Auto-Linking holen
             all_services = con.execute(
