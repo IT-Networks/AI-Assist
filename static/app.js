@@ -2418,7 +2418,11 @@ async function submitPRReview(verdict) {
 
     if (!res.ok) {
       const err = await res.json();
-      throw new Error(err.detail || 'Submit failed');
+      // err.detail kann string oder object sein (FastAPI HTTPException)
+      const errorDetail = typeof err.detail === 'string'
+        ? err.detail
+        : (err.detail?.message || err.detail?.error || err.message || JSON.stringify(err.detail) || 'Submit failed');
+      throw new Error(errorDetail);
     }
 
     const result = await res.json();
@@ -2490,20 +2494,97 @@ function openFindingModal(findingIndex) {
 }
 
 /**
+ * Extrahiert Code-Snippet aus einem Unified Diff für eine bestimmte Datei und Zeile
+ */
+function _extractCodeFromDiff(diff, filePath, targetLine, contextLines = 3) {
+  if (!diff || !filePath || !targetLine) return null;
+
+  // Datei im Diff finden
+  const filePattern = new RegExp(`diff --git a/.*${escapeRegex(filePath.split('/').pop())}.*?(?=diff --git|$)`, 's');
+  const fileMatch = diff.match(filePattern);
+  if (!fileMatch) return null;
+
+  const fileDiff = fileMatch[0];
+  const lines = fileDiff.split('\n');
+  const result = [];
+  let currentNewLine = 0;
+  let foundTarget = false;
+  let startCollectLine = 0;
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+
+    // Hunk Header parsen: @@ -oldStart,oldCount +newStart,newCount @@
+    const hunkMatch = line.match(/^@@ -\d+(?:,\d+)? \+(\d+)(?:,\d+)? @@/);
+    if (hunkMatch) {
+      currentNewLine = parseInt(hunkMatch[1], 10);
+      continue;
+    }
+
+    // Kontext oder hinzugefügte Zeile (Teil der neuen Datei)
+    if (line.startsWith(' ') || line.startsWith('+')) {
+      if (line.startsWith('+') && !line.startsWith('+++')) {
+        // Hinzugefügte Zeile
+      }
+      // Prüfen ob wir in der Nähe der Zielzeile sind
+      if (currentNewLine >= targetLine - contextLines && currentNewLine <= targetLine + contextLines) {
+        if (!foundTarget) {
+          startCollectLine = currentNewLine;
+          foundTarget = true;
+        }
+        const content = line.substring(1); // Prefix entfernen
+        result.push({ line: currentNewLine, content, isTarget: currentNewLine === targetLine });
+      }
+      currentNewLine++;
+    } else if (line.startsWith('-') && !line.startsWith('---')) {
+      // Gelöschte Zeile - nicht zur neuen Zeilennummer hinzufügen
+    }
+  }
+
+  if (result.length === 0) return null;
+
+  return {
+    code: result.map(r => r.content).join('\n'),
+    startLine: startCollectLine,
+    targetLine: targetLine,
+    lines: result
+  };
+}
+
+function escapeRegex(str) {
+  return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+/**
  * Erstellt das HTML für das Finding-Modal
  */
 function _createFindingModalHTML(finding, index, tab) {
   const { className, packagePath } = _extractClassName(finding.file || 'Unbekannt');
   const lineInfo = finding.line ? `Zeile ${finding.line}` : '';
 
-  // Code-Snippet aus Finding oder Platzhalter
-  const codeSnippet = finding.codeSnippet || finding.code || '// Code nicht im Diff verfügbar';
+  // Versuche Code-Snippet aus dem Diff zu extrahieren
+  let codeSnippet = finding.codeSnippet || finding.code;
+  let actualStartLine = null;
+
+  if (!codeSnippet && tab.diff && finding.file && finding.line) {
+    const extracted = _extractCodeFromDiff(tab.diff, finding.file, finding.line);
+    if (extracted) {
+      codeSnippet = extracted.code;
+      actualStartLine = extracted.startLine;
+    }
+  }
+
+  // Fallback wenn kein Code verfügbar
+  if (!codeSnippet) {
+    codeSnippet = '// Code nicht im Diff verfügbar';
+    actualStartLine = null; // Keine Zeilennummern anzeigen
+  }
 
   // Inline-Kommentare für dieses Finding
   const inlineComments = tab.inlineComments?.[index] || {};
 
   // Code mit Highlighting rendern
-  const highlightedCode = _highlightCodeLines(codeSnippet, finding.line, inlineComments);
+  const highlightedCode = _highlightCodeLines(codeSnippet, finding.line, inlineComments, actualStartLine);
 
   // Existierender Kommentar
   const existingComment = tab.findingComments?.[index] || '';
@@ -2553,18 +2634,34 @@ function _createFindingModalHTML(finding, index, tab) {
 
 /**
  * Rendert Code-Zeilen mit Highlighting und Inline-Kommentar-Buttons
+ * @param {string} code - Der anzuzeigende Code
+ * @param {number|null} highlightLine - Die zu highlightende Zeile
+ * @param {object} inlineComments - Inline-Kommentare nach Zeilennummer
+ * @param {number|null} actualStartLine - Die tatsächliche Startzeile (wenn bekannt)
  */
-function _highlightCodeLines(code, highlightLine, inlineComments = {}) {
+function _highlightCodeLines(code, highlightLine, inlineComments = {}, actualStartLine = null) {
   const lines = code.split('\n');
-  // Start-Zeile berechnen (3 Zeilen vor highlighted line wenn vorhanden)
-  const startLine = Math.max(1, (highlightLine || 1) - 3);
+
+  // Start-Zeile: verwende actualStartLine wenn vorhanden, sonst berechne aus highlightLine
+  // Wenn beides null ist (kein Code aus Diff), zeige keine Zeilennummern
+  const showLineNumbers = actualStartLine !== null || highlightLine !== null;
+  const startLine = actualStartLine !== null
+    ? actualStartLine
+    : Math.max(1, (highlightLine || 1) - 3);
 
   return lines.map((line, idx) => {
-    const lineNum = startLine + idx;
-    const isHighlighted = lineNum === highlightLine;
-    const comment = inlineComments[lineNum];
+    const lineNum = showLineNumbers ? startLine + idx : null;
+    const isHighlighted = lineNum !== null && lineNum === highlightLine;
+    const comment = lineNum !== null ? inlineComments[lineNum] : null;
     const lineClass = isHighlighted ? 'code-line highlighted' : 'code-line';
     const marker = isHighlighted ? '▶' : ' ';
+
+    // Wenn keine Zeilennummern, zeige einfachen Code ohne Interaktion
+    if (lineNum === null) {
+      return `<span class="${lineClass}">` +
+        `<span class="line-content">${escapeHtml(line)}</span>` +
+        `</span>`;
+    }
 
     let html = `<span class="${lineClass}" data-line="${lineNum}">` +
       `<span class="line-num">${lineNum.toString().padStart(4)}</span>` +
