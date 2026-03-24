@@ -88,6 +88,7 @@ class HandbookIndexStatus(BaseModel):
     fields_count: int
     last_build: Optional[str] = None
     handbook_path: Optional[str] = None
+    functions_subdir: str = "funktionen"  # Unterordner für Service-Funktionen
     db_size_kb: float
     # Build-Status für Fortsetzung
     build_status: str = "none"  # none, complete, incomplete, cancelled, in_progress
@@ -119,11 +120,14 @@ class HandbookPageContent(BaseModel):
 @router.get("/status", response_model=HandbookIndexStatus)
 async def get_index_status():
     """Gibt den Status des Handbuch-Index zurück."""
-    if not get_settings().handbook.enabled:
+    settings = get_settings()
+    if not settings.handbook.enabled:
         raise HTTPException(status_code=404, detail="Handbuch-Feature ist nicht aktiviert")
 
     indexer = get_handbook_indexer()
     stats = indexer.get_stats()
+    # functions_subdir aus Settings hinzufügen
+    stats["functions_subdir"] = settings.handbook.functions_subdir
     return HandbookIndexStatus(**stats)
 
 

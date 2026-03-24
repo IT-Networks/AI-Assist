@@ -6949,6 +6949,10 @@ async function loadHandbookStatus() {
     }
     const d = await res.json();
 
+    // Handbook config für externe Links speichern
+    handbookModalState.handbookPath = d.handbook_path || null;
+    handbookModalState.functionsSubdir = d.functions_subdir || 'funktionen';
+
     // Build-Status auswerten
     const buildStatus = d.build_status || 'none';
     const isComplete = buildStatus === 'complete';
@@ -7260,7 +7264,10 @@ const handbookModalState = {
   currentData: null,
   activeTab: 'overview',
   initialSearchTerm: null,
-  serviceCache: {}
+  serviceCache: {},
+  // Handbook config für externe Links
+  handbookPath: null,
+  functionsSubdir: 'funktionen'
 };
 
 function initHandbookSearch() {
@@ -7682,11 +7689,52 @@ function addFunctionLinks(html, knownFunctions) {
 
     result = result.replace(pattern, (match, name) => {
       // Prüfen ob wir nicht in einem Tag sind
-      return `<a class="handbook-link auto-link" onclick="handbookNavigateTo('service', '${escapeHtml(name)}')">${name}</a>`;
+      // href="#" verhindert Browser-Navigation, onclick mit event handling
+      return `<a href="#" class="handbook-link auto-link" onclick="handleFunctionLinkClick(event, '${escapeHtml(name)}')">${name}</a>`;
     });
   }
 
   return result;
+}
+
+/**
+ * Handler für Funktions-Link Klicks.
+ * - Normal-Klick: Navigation im Modal
+ * - Ctrl+Klick: Öffnet externes Handbuch in neuem Tab
+ */
+function handleFunctionLinkClick(event, functionName) {
+  event.preventDefault();
+  event.stopPropagation();
+
+  if (event.ctrlKey || event.metaKey) {
+    // Ctrl+Klick: Externes Handbuch in neuem Tab öffnen
+    openExternalHandbook(functionName);
+  } else {
+    // Normal-Klick: Im Modal navigieren
+    handbookNavigateTo('service', functionName);
+  }
+}
+
+/**
+ * Öffnet das externe Handbuch für eine Funktion in einem neuen Tab.
+ * URL-Format: file:///{handbook_path}/{functions_subdir}/{function_name}/
+ */
+function openExternalHandbook(functionName) {
+  const handbookPath = handbookModalState.handbookPath;
+  const functionsSubdir = handbookModalState.functionsSubdir || 'funktionen';
+
+  if (!handbookPath) {
+    showToast('Handbuch-Pfad nicht konfiguriert', 'warning');
+    return;
+  }
+
+  // Pfad bauen: handbook_path/functions_subdir/function_name/
+  // Für Windows: file:/// mit forward slashes
+  let normalizedPath = handbookPath.replace(/\\/g, '/');
+  if (!normalizedPath.endsWith('/')) normalizedPath += '/';
+
+  const url = `file:///${normalizedPath}${functionsSubdir}/${functionName}/`;
+  window.open(url, '_blank');
 }
 
 function escapeRegex(str) {

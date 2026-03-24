@@ -3854,6 +3854,74 @@ body {
   font-weight: 600;
 }
 
+.handbook-tab-content p {
+  margin: 8px 0;
+}
+
+.handbook-tab-content ul,
+.handbook-tab-content ol {
+  margin: 12px 0;
+  padding-left: 24px;
+}
+
+.handbook-tab-content li {
+  margin: 4px 0;
+}
+
+.handbook-tab-content pre,
+.handbook-tab-content code {
+  font-family: var(--font-mono);
+  background: var(--surface);
+  border-radius: 4px;
+}
+
+.handbook-tab-content pre {
+  padding: 12px;
+  overflow-x: auto;
+  margin: 12px 0;
+}
+
+.handbook-tab-content code {
+  padding: 2px 6px;
+}
+
+.handbook-tab-content hr {
+  border: none;
+  border-top: 1px solid var(--border);
+  margin: 16px 0;
+}
+
+.handbook-tab-content blockquote {
+  border-left: 3px solid var(--accent);
+  padding-left: 12px;
+  margin: 12px 0;
+  color: var(--text-secondary);
+}
+
+.handbook-tab-content a:not(.handbook-link) {
+  color: var(--accent);
+  text-decoration: none;
+}
+
+.handbook-tab-content a:not(.handbook-link):hover {
+  text-decoration: underline;
+}
+
+/* Auto-Link Styling - zeigt Ctrl+Click Hinweis */
+.handbook-link.auto-link {
+  cursor: pointer;
+  color: var(--accent);
+  text-decoration: underline;
+  text-decoration-style: dashed;
+}
+
+.handbook-link.auto-link:hover::after {
+  content: " (Ctrl+Click für externes Handbuch)";
+  font-size: 0.75em;
+  color: var(--text-muted);
+  font-style: italic;
+}
+
 /* ══════════════════════════════════════════════════════════════════════════════
    Token Usage Display
    ══════════════════════════════════════════════════════════════════════════════ */
