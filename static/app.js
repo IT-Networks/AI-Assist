@@ -7964,7 +7964,8 @@ function parseHandbookHref(href) {
 }
 
 /**
- * Open external handbook with a relative path
+ * Open external handbook with a relative path.
+ * Since browsers block file:// URLs from web pages, we show a copyable path.
  */
 function openExternalHandbookPath(relativePath) {
   const handbookPath = handbookModalState.handbookPath;
@@ -7974,15 +7975,79 @@ function openExternalHandbookPath(relativePath) {
     return;
   }
 
-  // Normalize and construct full path
-  let normalizedBase = handbookPath.replace(/\\/g, '/');
-  if (!normalizedBase.endsWith('/')) normalizedBase += '/';
+  // Normalize and construct full path (use backslashes for Windows Explorer)
+  let normalizedBase = handbookPath.replace(/\//g, '\\');
+  if (!normalizedBase.endsWith('\\')) normalizedBase += '\\';
 
-  // Remove leading ../ from relative path and construct URL
-  let cleanPath = relativePath.replace(/^(\.\.\/)+/, '');
+  // Remove leading ../ from relative path and convert to backslashes
+  let cleanPath = relativePath.replace(/^(\.\.\/)+/, '').replace(/\//g, '\\');
 
-  const fullUrl = `file:///${normalizedBase}${cleanPath}`;
-  window.open(fullUrl, '_blank');
+  const fullPath = normalizedBase + cleanPath;
+
+  // Show path dialog with copy button
+  showHandbookPathDialog(fullPath);
+}
+
+/**
+ * Show dialog with handbook path that can be copied
+ */
+function showHandbookPathDialog(fullPath) {
+  // Remove any existing dialog
+  const existing = document.getElementById('handbook-path-dialog');
+  if (existing) existing.remove();
+
+  const dialog = document.createElement('div');
+  dialog.id = 'handbook-path-dialog';
+  dialog.className = 'modal-overlay';
+  dialog.style.cssText = 'display: flex; z-index: 10001;';
+  dialog.innerHTML = `
+    <div class="modal-content" style="width: auto; max-width: 700px; padding: 24px;">
+      <h3 style="margin: 0 0 16px 0; color: var(--text-primary);">Externer Handbuch-Pfad</h3>
+      <p style="margin: 0 0 12px 0; color: var(--text-secondary); font-size: 0.9rem;">
+        Browser erlauben keine direkten Datei-Links. Kopiere den Pfad und öffne ihn im Explorer:
+      </p>
+      <div style="display: flex; gap: 8px; align-items: center;">
+        <input type="text" id="handbook-path-input" value="${escapeHtml(fullPath)}" readonly
+               style="flex: 1; padding: 10px 12px; font-family: var(--font-mono); font-size: 0.85rem;
+                      background: var(--surface); border: 1px solid var(--border); border-radius: 6px;
+                      color: var(--text-primary);" />
+        <button class="btn btn-primary" onclick="copyHandbookPath()" style="white-space: nowrap;">
+          Pfad kopieren
+        </button>
+      </div>
+      <div style="margin-top: 16px; display: flex; gap: 12px; justify-content: flex-end;">
+        <button class="btn btn-secondary" onclick="document.getElementById('handbook-path-dialog').remove()">
+          Schließen
+        </button>
+      </div>
+    </div>
+  `;
+
+  document.body.appendChild(dialog);
+
+  // Select input content
+  const input = document.getElementById('handbook-path-input');
+  input.select();
+}
+
+/**
+ * Copy handbook path to clipboard
+ */
+async function copyHandbookPath() {
+  const input = document.getElementById('handbook-path-input');
+  if (!input) return;
+
+  try {
+    await navigator.clipboard.writeText(input.value);
+    showToast('Pfad in Zwischenablage kopiert', 'success');
+    document.getElementById('handbook-path-dialog')?.remove();
+  } catch (e) {
+    // Fallback for older browsers
+    input.select();
+    document.execCommand('copy');
+    showToast('Pfad kopiert', 'success');
+    document.getElementById('handbook-path-dialog')?.remove();
+  }
 }
 
 function renderServiceOverview(service, searchTerm) {
