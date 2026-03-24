@@ -7710,7 +7710,23 @@ function interceptHandbookLinks(container) {
         break;
 
       case 'parameter':
+        // Try to find parameter in indexed services first
+        if (linkInfo.name) {
+          tryNavigateOrExternal('service', linkInfo.name, linkInfo.path);
+        } else {
+          openExternalHandbookPath(linkInfo.path);
+        }
+        break;
+
       case 'dqm':
+        // Try to find in indexed services
+        if (linkInfo.name) {
+          tryNavigateOrExternal('service', linkInfo.name, linkInfo.path);
+        } else {
+          openExternalHandbookPath(linkInfo.path);
+        }
+        break;
+
       case 'navigation':
       case 'external':
       default:
@@ -7722,24 +7738,51 @@ function interceptHandbookLinks(container) {
 }
 
 /**
- * Try to navigate in modal, fallback to external handbook on error
+ * Try to navigate in modal by searching for the service/field.
+ * Falls back to external handbook if not found.
  */
 async function tryNavigateOrExternal(type, id, fallbackPath) {
   try {
+    // First try direct lookup
     const endpoint = type === 'service'
       ? `/api/handbook/services/${encodeURIComponent(id)}`
       : `/api/handbook/fields/${encodeURIComponent(id)}`;
 
-    const res = await fetch(endpoint, { method: 'HEAD' });
+    const res = await fetch(endpoint);
 
     if (res.ok) {
       handbookNavigateTo(type, id);
-    } else {
-      // Not found in index - open external
-      openExternalHandbookPath(fallbackPath);
+      return;
     }
+
+    // If direct lookup fails, try searching
+    if (id && id.length >= 3) {
+      const searchRes = await fetch(`/api/handbook/search/grouped?q=${encodeURIComponent(id)}&top_k=5`);
+      if (searchRes.ok) {
+        const results = await searchRes.json();
+        // Find exact or close match
+        const exactMatch = results.find(r =>
+          r.service_id.toUpperCase() === id.toUpperCase() ||
+          r.service_name.toUpperCase() === id.toUpperCase()
+        );
+
+        if (exactMatch) {
+          handbookNavigateTo('service', exactMatch.service_id);
+          return;
+        }
+
+        // If we have results, navigate to first one
+        if (results.length > 0) {
+          handbookNavigateTo('service', results[0].service_id);
+          return;
+        }
+      }
+    }
+
+    // Not found - open external
+    openExternalHandbookPath(fallbackPath);
   } catch (e) {
-    // Error - fallback to external
+    console.error('Navigation error:', e);
     openExternalHandbookPath(fallbackPath);
   }
 }
@@ -8053,7 +8096,7 @@ function addFunctionLinks(html, knownFunctions) {
 
 /**
  * Handler für Funktions-Link Klicks.
- * - Normal-Klick: Navigation im Modal
+ * - Normal-Klick: Navigation im Modal (mit Suche falls nicht gefunden)
  * - Ctrl+Klick: Öffnet externes Handbuch in neuem Tab
  */
 function handleFunctionLinkClick(event, functionName) {
@@ -8064,8 +8107,10 @@ function handleFunctionLinkClick(event, functionName) {
     // Ctrl+Klick: Externes Handbuch in neuem Tab öffnen
     openExternalHandbook(functionName);
   } else {
-    // Normal-Klick: Im Modal navigieren
-    handbookNavigateTo('service', functionName);
+    // Normal-Klick: Im Modal navigieren (mit Suche-Fallback)
+    const functionsSubdir = handbookModalState.functionsSubdir || 'funktionen';
+    const fallbackPath = `${functionsSubdir}/${functionName}/`;
+    tryNavigateOrExternal('service', functionName, fallbackPath);
   }
 }
 
