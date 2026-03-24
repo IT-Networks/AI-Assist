@@ -3576,10 +3576,10 @@ body {
    ══════════════════════════════════════════════════════════════════════════════ */
 
 .handbook-modal-container {
-  width: min(900px, 90vw);
-  max-width: 900px;
-  height: min(700px, 85vh);
-  max-height: 85vh;
+  width: min(1100px, 95vw);
+  max-width: 1100px;
+  height: min(750px, 88vh);
+  max-height: 88vh;
   display: flex;
   flex-direction: column;
 }
@@ -3842,6 +3842,17 @@ body {
   margin: 16px 0;
 }
 
+/* Table wrapper for horizontal scroll on overflow */
+.handbook-tab-content .table-wrapper {
+  overflow-x: auto;
+  margin: 16px 0;
+}
+
+.handbook-tab-content .table-wrapper table {
+  margin: 0;
+  min-width: 600px;
+}
+
 .handbook-tab-content th,
 .handbook-tab-content td {
   padding: 8px 12px;
@@ -3920,6 +3931,502 @@ body {
   font-size: 0.75em;
   color: var(--text-muted);
   font-style: italic;
+}
+
+/* ══════════════════════════════════════════════════════════════════════════════
+   Handbook Parameter Tables (Original Handbook CSS)
+   ══════════════════════════════════════════════════════════════════════════════ */
+
+/* Parameter Header Table */
+.handbook-tab-content .parameter-ueberschrift-table {
+  width: 100%;
+  border-collapse: collapse;
+  margin-bottom: 0;
+  background: var(--surface);
+}
+
+.handbook-tab-content .parameter-ueberschrift-table th,
+.handbook-tab-content .parameter-ueberschrift-table td {
+  padding: 6px 10px;
+  border: 1px solid var(--border);
+  font-size: 0.85rem;
+  text-align: center;
+}
+
+.handbook-tab-content .parametername-ueberschrift,
+.handbook-tab-content .parameterverwendung-ueberschrift,
+.handbook-tab-content .parameterdatentyp-ueberschrift,
+.handbook-tab-content .parameterlaenge-ueberschrift,
+.handbook-tab-content .parameter-svz-ueberschrift,
+.handbook-tab-content .parameterbeschreibung-ueberschrift {
+  font-weight: 600;
+  background: var(--accent);
+  color: white;
+  white-space: nowrap;
+}
+
+.handbook-tab-content .parameterdatentyp-pms-ueberschrift,
+.handbook-tab-content .parameterdatentyp-modell-ueberschrift,
+.handbook-tab-content .parameterlaenge-c-ueberschrift,
+.handbook-tab-content .parameterlaenge-cobol-ueberschrift,
+.handbook-tab-content .parameterlaenge-java-ueberschrift,
+.handbook-tab-content .parameter-svz-id-ueberschrift,
+.handbook-tab-content .parameter-svz-kz-ueberschrift {
+  font-weight: 500;
+  background: color-mix(in srgb, var(--accent) 80%, black);
+  color: white;
+  font-size: 0.8rem;
+}
+
+/* Parameter List Table */
+.handbook-tab-content .parameterliste-table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 0;
+  font-size: 0.85rem;
+}
+
+.handbook-tab-content .parameterliste-zeile td {
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  vertical-align: top;
+}
+
+.handbook-tab-content .parameterliste-zeile:nth-child(even) {
+  background: var(--surface);
+}
+
+.handbook-tab-content .parameterliste-zeile:hover {
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+}
+
+.handbook-tab-content .parametername {
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.handbook-tab-content .parametername a {
+  color: var(--accent);
+  text-decoration: none;
+}
+
+.handbook-tab-content .parametername a:hover {
+  text-decoration: underline;
+}
+
+.handbook-tab-content .parameterverwendung {
+  text-align: center;
+  font-weight: 500;
+  color: var(--text-secondary);
+  white-space: nowrap;
+}
+
+.handbook-tab-content .parameterdatentyp-pms,
+.handbook-tab-content .parameterdatentyp-modell {
+  text-align: center;
+  font-family: var(--font-mono);
+  font-size: 0.8rem;
+}
+
+.handbook-tab-content .parameterlaenge-c,
+.handbook-tab-content .parameterlaenge-cobol,
+.handbook-tab-content .parameterlaenge-java {
+  text-align: center;
+  font-family: var(--font-mono);
+  font-size: 0.8rem;
+}
+
+.handbook-tab-content .parameter-svz-id,
+.handbook-tab-content .parameter-svz-kz {
+  text-align: center;
+  color: var(--text-muted);
+}
+
+.handbook-tab-content .parameterbeschreibung {
+  color: var(--text-secondary);
+  line-height: 1.5;
+}
+
+/* ══════════════════════════════════════════════════════════════════════════════
+   Handbook DQM / Meldungs-ID Tables (Original Handbook CSS)
+   ══════════════════════════════════════════════════════════════════════════════ */
+
+.handbook-tab-content .dqm {
+  margin: 16px 0;
+}
+
+.handbook-tab-content .dqm > div > b {
+  display: block;
+  font-size: 1rem;
+  color: var(--text-primary);
+  margin: 16px 0 8px 0;
+  padding-bottom: 4px;
+  border-bottom: 1px solid var(--border);
+}
+
+.handbook-tab-content .dqm-toggle-meldungs-ids {
+  display: inline-block;
+  width: 16px;
+  height: 16px;
+  margin-right: 6px;
+  cursor: pointer;
+  background: var(--accent);
+  border-radius: 3px;
+  text-align: center;
+  line-height: 16px;
+  vertical-align: middle;
+}
+
+.handbook-tab-content .dqm-toggle-meldungs-ids::before {
+  content: "+";
+  color: white;
+  font-size: 12px;
+}
+
+.handbook-tab-content .dqm-toggle-meldungs-ids.open::before {
+  content: "−";
+}
+
+.handbook-tab-content .dqm-meldungs-ids {
+  padding: 12px;
+  background: var(--surface);
+  border-radius: 6px;
+  margin-top: 8px;
+}
+
+/* Meldungsgruppen Table */
+.handbook-tab-content .meldungsgruppenliste-table {
+  width: auto;
+  border-collapse: collapse;
+  margin-bottom: 12px;
+}
+
+.handbook-tab-content .meldungsgruppenliste-ueberschrift td,
+.handbook-tab-content .meldungsgruppe-ueberschrift {
+  font-weight: 600;
+  background: var(--accent);
+  color: white;
+  padding: 6px 12px;
+}
+
+.handbook-tab-content .meldungsgruppe {
+  padding: 6px 12px;
+  font-family: var(--font-mono);
+  font-size: 0.85rem;
+  background: var(--bg);
+  border: 1px solid var(--border);
+}
+
+/* Returncode Table */
+.handbook-tab-content .returncodeliste-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.85rem;
+}
+
+.handbook-tab-content .returncodeliste-ueberschrift td {
+  font-weight: 600;
+  background: var(--accent);
+  color: white;
+  padding: 8px 10px;
+  white-space: nowrap;
+}
+
+.handbook-tab-content .meldungs-id-ueberschrift,
+.handbook-tab-content .herkunft-meldungs-id-ueberschrift,
+.handbook-tab-content .returncode-meldungs-id-ueberschrift,
+.handbook-tab-content .meldungsklasse-ueberschrift,
+.handbook-tab-content .meldungstext-ueberschrift {
+  font-weight: 600;
+}
+
+.handbook-tab-content .meldungs-id {
+  font-family: var(--font-mono);
+  font-size: 0.8rem;
+  white-space: nowrap;
+  padding: 6px 10px;
+  border: 1px solid var(--border);
+}
+
+.handbook-tab-content .herkunft-meldungs-id-technisch {
+  font-family: var(--font-mono);
+  font-size: 0.8rem;
+  color: var(--text-muted);
+  padding: 6px 10px;
+  border: 1px solid var(--border);
+}
+
+.handbook-tab-content .returncode-meldungs-id {
+  font-family: var(--font-mono);
+  font-size: 0.8rem;
+  text-align: center;
+  padding: 6px 10px;
+  border: 1px solid var(--border);
+  color: var(--warning);
+}
+
+.handbook-tab-content .meldungsklasse {
+  text-align: center;
+  padding: 6px 10px;
+  border: 1px solid var(--border);
+  font-weight: 600;
+}
+
+.handbook-tab-content .meldungstext {
+  padding: 6px 10px;
+  border: 1px solid var(--border);
+  color: var(--text-secondary);
+  line-height: 1.4;
+}
+
+.handbook-tab-content .returncodeliste-table tr:nth-child(even) td {
+  background: var(--surface);
+}
+
+.handbook-tab-content .returncodeliste-table tr:hover td {
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+}
+
+/* ══════════════════════════════════════════════════════════════════════════════
+   Handbook Navigation and Menu Styles
+   ══════════════════════════════════════════════════════════════════════════════ */
+
+/* Hide original handbook navigation elements in modal */
+.handbook-tab-content #kopf,
+.handbook-tab-content #kopf-object,
+.handbook-tab-content #auswahlleiste,
+.handbook-tab-content #auswahlleiste-object,
+.handbook-tab-content #menue-rahmen,
+.handbook-tab-content #menue,
+.handbook-tab-content #fussleiste,
+.handbook-tab-content #seite > #kopf-object,
+.handbook-tab-content .menue-ueberschrift,
+.handbook-tab-content .parameter {
+  display: none !important;
+}
+
+/* Tab content navigation within handbook */
+.handbook-tab-content .tab-inhalt {
+  display: none;
+}
+
+.handbook-tab-content .tab-inhalt.aktiv {
+  display: block;
+}
+
+/* Show only darstellung area */
+.handbook-tab-content #darstellung {
+  width: 100%;
+  padding: 0;
+  margin: 0;
+}
+
+.handbook-tab-content #dqm-inhalt {
+  padding: 0;
+}
+
+/* ══════════════════════════════════════════════════════════════════════════════
+   Handbook Fachlich Content Styles
+   ══════════════════════════════════════════════════════════════════════════════ */
+
+.handbook-tab-content .inhalt-ueberschrift {
+  font-weight: 600;
+  font-size: 1rem;
+  color: var(--text-primary);
+  margin: 20px 0 12px 0;
+  padding-bottom: 6px;
+  border-bottom: 2px solid var(--accent);
+}
+
+.handbook-tab-content .inhalt-info {
+  margin: 12px 0;
+}
+
+.handbook-tab-content .info-fachlich {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 4px 0;
+}
+
+.handbook-tab-content .info-fachlich td {
+  padding: 6px 10px;
+  border: none;
+}
+
+.handbook-tab-content .info-name {
+  width: 200px;
+  color: var(--text-secondary);
+  font-weight: 500;
+  vertical-align: top;
+  white-space: nowrap;
+}
+
+.handbook-tab-content .info-inhalt,
+.handbook-tab-content .info-inhalt-technisch {
+  color: var(--text-primary);
+}
+
+.handbook-tab-content .info-inhalt-technisch {
+  font-family: var(--font-mono);
+  font-size: 0.9rem;
+}
+
+.handbook-tab-content .textfeld {
+  margin: 16px 0;
+}
+
+.handbook-tab-content pre.Textfeld,
+.handbook-tab-content .Textfeld {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 12px;
+  font-family: var(--font-mono);
+  font-size: 0.85rem;
+  line-height: 1.5;
+  overflow-x: auto;
+  white-space: pre-wrap;
+  color: var(--text-secondary);
+}
+
+.handbook-tab-content .inhalt-fussnoten {
+  margin-top: 20px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+  font-size: 0.85rem;
+  color: var(--text-muted);
+}
+
+/* ══════════════════════════════════════════════════════════════════════════════
+   Handbook Fachobjekt (Object Structure) Styles
+   ══════════════════════════════════════════════════════════════════════════════ */
+
+.handbook-tab-content .fachobjekt {
+  margin: 16px 0;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.handbook-tab-content .fachobjekt-ueberschrift {
+  font-weight: 500;
+  color: var(--text-secondary);
+  padding: 8px 12px;
+  background: var(--bg);
+  border-bottom: 1px solid var(--border);
+}
+
+.handbook-tab-content .fachobjekt-name {
+  font-family: var(--font-mono);
+  font-size: 1rem;
+  font-weight: 600;
+  color: var(--accent);
+  padding: 10px 12px;
+  background: var(--bg);
+}
+
+.handbook-tab-content .fachobjekt-struktur {
+  padding: 0;
+}
+
+.handbook-tab-content .fachobjekt-menue-ueberschrift {
+  display: flex;
+  background: var(--accent);
+  color: white;
+  font-weight: 600;
+  font-size: 0.85rem;
+}
+
+.handbook-tab-content .fachobjekt-menue-ueberschrift .fachobjekt-objektname,
+.handbook-tab-content .fachobjekt-menue-ueberschrift .fachobjekt-default,
+.handbook-tab-content .fachobjekt-menue-ueberschrift .fachobjekt-kardinalitaet {
+  padding: 8px 12px;
+}
+
+.handbook-tab-content .fachobjekt-menue > div {
+  display: flex;
+  border-bottom: 1px solid var(--border);
+}
+
+.handbook-tab-content .fachobjekt-menue > div:nth-child(even) {
+  background: var(--bg);
+}
+
+.handbook-tab-content .fachobjekt-menue > div:hover {
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+}
+
+.handbook-tab-content .fachobjekt-objektname {
+  flex: 1;
+  padding: 6px 12px;
+  font-family: var(--font-mono);
+  font-size: 0.85rem;
+}
+
+.handbook-tab-content .fachobjekt-default {
+  width: 100px;
+  padding: 6px 12px;
+  text-align: center;
+  color: var(--text-muted);
+}
+
+.handbook-tab-content .fachobjekt-kardinalitaet {
+  width: 80px;
+  padding: 6px 12px;
+  text-align: center;
+  font-family: var(--font-mono);
+  color: var(--text-secondary);
+}
+
+/* Tree hierarchy indicators for nested objects */
+.handbook-tab-content .fachobjekt-objektname span[title] {
+  position: relative;
+}
+
+.handbook-tab-content .fachobjekt-objektname span[style*="font-family:Arial"] {
+  color: var(--text-muted);
+}
+
+/* ══════════════════════════════════════════════════════════════════════════════
+   Handbook Responsive Adjustments
+   ══════════════════════════════════════════════════════════════════════════════ */
+
+@media (max-width: 900px) {
+  .handbook-modal-container {
+    width: 98vw;
+    max-width: 98vw;
+    height: 92vh;
+    max-height: 92vh;
+  }
+
+  .handbook-tab-content .info-name {
+    width: 140px;
+  }
+
+  .handbook-tab-content .parameterliste-table,
+  .handbook-tab-content .returncodeliste-table {
+    font-size: 0.8rem;
+  }
+
+  .handbook-tab-content .parameterliste-zeile td,
+  .handbook-tab-content .returncodeliste-table td {
+    padding: 4px 6px;
+  }
+}
+
+/* Search highlight animation */
+@keyframes highlight-pulse {
+  0%, 100% { background-color: var(--warning); }
+  50% { background-color: color-mix(in srgb, var(--warning) 70%, white); }
+}
+
+.handbook-tab-content mark.search-highlight {
+  background-color: var(--warning);
+  color: black;
+  padding: 1px 2px;
+  border-radius: 2px;
+  animation: highlight-pulse 1.5s ease-in-out 2;
 }
 
 /* ══════════════════════════════════════════════════════════════════════════════

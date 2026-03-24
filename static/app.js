@@ -7605,6 +7605,47 @@ function renderServiceView(service) {
   }
 
   content.innerHTML = html;
+
+  // Initialize interactive elements in handbook content
+  initHandbookContentInteractions(content);
+}
+
+/**
+ * Initialize interactive elements like DQM toggle buttons and table wrappers
+ */
+function initHandbookContentInteractions(container) {
+  // DQM Meldungs-ID toggle buttons
+  const toggleButtons = container.querySelectorAll('.dqm-toggle-meldungs-ids');
+  toggleButtons.forEach(btn => {
+    const targetId = btn.id.replace('toggle', '');
+    const target = container.querySelector('#' + targetId);
+
+    if (target) {
+      // Initially collapsed
+      target.style.display = 'none';
+
+      btn.addEventListener('click', () => {
+        if (target.style.display === 'none') {
+          target.style.display = 'block';
+          btn.classList.add('open');
+        } else {
+          target.style.display = 'none';
+          btn.classList.remove('open');
+        }
+      });
+    }
+  });
+
+  // Wrap wide tables in scrollable container
+  const tables = container.querySelectorAll('.parameterliste-table, .returncodeliste-table, .parameter-ueberschrift-table');
+  tables.forEach(table => {
+    if (!table.parentElement.classList.contains('table-wrapper')) {
+      const wrapper = document.createElement('div');
+      wrapper.className = 'table-wrapper';
+      table.parentNode.insertBefore(wrapper, table);
+      wrapper.appendChild(table);
+    }
+  });
 }
 
 function renderServiceOverview(service, searchTerm) {
