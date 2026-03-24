@@ -41,6 +41,20 @@ class HandbookSearchResult(BaseModel):
     rank: float
 
 
+class SnippetInfo(BaseModel):
+    tab_name: str
+    text: str
+
+
+class GroupedSearchResult(BaseModel):
+    service_id: str
+    service_name: str
+    description: str = ""
+    match_count: int
+    matched_tabs: List[str] = []
+    top_snippets: List[SnippetInfo] = []
+
+
 class HandbookServiceSummary(BaseModel):
     service_id: str
     service_name: str
@@ -308,6 +322,40 @@ async def search_handbook(
     )
 
     return [HandbookSearchResult(**r) for r in results]
+
+
+@router.get("/search/grouped", response_model=List[GroupedSearchResult])
+async def search_handbook_grouped(
+    q: str = Query(..., min_length=3, max_length=500, description="Suchbegriff (min. 3 Zeichen)"),
+    top_k: int = Query(10, ge=1, le=50, description="Maximale Anzahl Services"),
+    max_snippets: int = Query(2, ge=1, le=5, description="Max. Snippets pro Service")
+):
+    """
+    Durchsucht das Handbuch und gruppiert Ergebnisse nach Service.
+
+    Optimiert für Auto-Search UIs:
+    - Ergebnisse nach Service zusammengefasst
+    - Match-Count und betroffene Tabs pro Service
+    - Top-Snippets mit Highlighting (>>>match<<<)
+    """
+    if not get_settings().handbook.enabled:
+        raise HTTPException(status_code=404, detail="Handbuch-Feature ist nicht aktiviert")
+
+    indexer = get_handbook_indexer()
+
+    if not indexer.is_built():
+        raise HTTPException(
+            status_code=400,
+            detail="Handbuch-Index wurde noch nicht aufgebaut."
+        )
+
+    results = indexer.search_grouped(
+        query=q,
+        top_k=top_k,
+        max_snippets=max_snippets
+    )
+
+    return [GroupedSearchResult(**r) for r in results]
 
 
 # ══════════════════════════════════════════════════════════════════════════════

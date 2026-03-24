@@ -3554,6 +3554,9 @@ document.addEventListener('DOMContentLoaded', async () => {
   // Initialize @-Mention system
   initMentionSystem();
 
+  // Initialize Handbook Auto-Search
+  initHandbookSearch();
+
   // Nicht-kritische Daten im Hintergrund laden (non-blocking)
   // Fehler werden geloggt aber blockieren UI nicht
   Promise.all([
@@ -7249,15 +7252,52 @@ async function loadHandbookServices() {
   }
 }
 
-async function searchHandbook() {
-  const q = document.getElementById('handbook-search').value.trim();
-  if (!q) return;
+// ── Handbook Search (Auto-Search + Grouped Results) ──
+let handbookSearchTimeout = null;
+const handbookModalState = {
+  isOpen: false,
+  navigationStack: [],
+  currentData: null,
+  activeTab: 'overview',
+  initialSearchTerm: null,
+  serviceCache: {}
+};
 
+function initHandbookSearch() {
+  const input = document.getElementById('handbook-search');
+  if (!input) return;
+
+  // Auto-Search nach 3 Zeichen mit Debounce
+  input.addEventListener('input', (e) => {
+    const q = e.target.value.trim();
+    clearTimeout(handbookSearchTimeout);
+
+    if (q.length < 3) {
+      document.getElementById('handbook-results').innerHTML = '';
+      return;
+    }
+
+    handbookSearchTimeout = setTimeout(() => searchHandbookGrouped(q), 300);
+  });
+
+  // Enter-Taste für sofortige Suche
+  input.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') {
+      clearTimeout(handbookSearchTimeout);
+      const q = e.target.value.trim();
+      if (q.length >= 3) searchHandbookGrouped(q);
+    }
+  });
+}
+
+async function searchHandbookGrouped(query) {
   const container = document.getElementById('handbook-results');
-  container.innerHTML = '<span style="color:var(--text-muted)">Suche...</span>';
+  container.innerHTML = '<div class="search-loading"><span class="spinner-small"></span> Suche...</div>';
 
   try {
-    const res = await fetch(`/api/handbook/search?q=${encodeURIComponent(q)}`);
+    const res = await fetch(`/api/handbook/search/grouped?q=${encodeURIComponent(query)}`);
+    if (!res.ok) throw new Error('Suche fehlgeschlagen');
+
     const results = await res.json();
 
     if (!results || results.length === 0) {
@@ -7266,14 +7306,41 @@ async function searchHandbook() {
     }
 
     container.innerHTML = results.map(r => `
-      <div class="search-result" onclick="addServiceToContext('${escapeHtml(r.service_id)}', '${escapeHtml(r.title)}')">
-        <div class="search-result-title">${escapeHtml(r.title)}</div>
-        <div class="search-result-path">${escapeHtml(r.service_name || '')}</div>
-        <div class="search-result-snippet">${escapeHtml((r.snippet || '').slice(0, 100))}</div>
+      <div class="handbook-grouped-result">
+        <div class="grouped-result-header">
+          <div class="grouped-result-info" onclick="addServiceToContext('${escapeHtml(r.service_id)}', '${escapeHtml(r.service_name)}')">
+            <span class="grouped-result-icon">&#128230;</span>
+            <span class="grouped-result-name">${escapeHtml(r.service_name)}</span>
+          </div>
+          <button class="grouped-result-modal-btn" onclick="openHandbookModal('${escapeHtml(r.service_id)}', '${escapeHtml(query)}')" title="Details anzeigen">
+            &#128203;
+          </button>
+        </div>
+        <div class="grouped-result-meta">
+          ${r.match_count} Treffer in: ${r.matched_tabs.map(t => `<span class="tab-chip">${escapeHtml(t)}</span>`).join(' ')}
+        </div>
+        ${r.top_snippets.slice(0, 2).map(s => `
+          <div class="grouped-result-snippet">${formatSnippetHighlight(s.text)}</div>
+        `).join('')}
       </div>
     `).join('');
   } catch (e) {
     container.innerHTML = `<span style="color:var(--danger)">${e.message}</span>`;
+  }
+}
+
+function formatSnippetHighlight(text) {
+  // Wandelt >>>match<<< in <mark> um
+  return escapeHtml(text)
+    .replace(/&gt;&gt;&gt;/g, '<mark class="search-highlight">')
+    .replace(/&lt;&lt;&lt;/g, '</mark>');
+}
+
+// Legacy-Funktion für Button-Klick
+async function searchHandbook() {
+  const q = document.getElementById('handbook-search').value.trim();
+  if (q.length >= 3) {
+    searchHandbookGrouped(q);
   }
 }
 
@@ -7283,7 +7350,289 @@ function addServiceToContext(serviceId, serviceName) {
   state.context.handbookServices.push({ id: serviceId, label: serviceName });
   syncContextToActiveChat();
   renderContextChips();
+  showToast(`${serviceName} zum Kontext hinzugefügt`, 'success');
 }
+
+// ── Handbook Service Modal ──
+async function openHandbookModal(serviceId, searchTerm = null) {
+  handbookModalState.isOpen = true;
+  handbookModalState.navigationStack = [{ type: 'service', id: serviceId }];
+  handbookModalState.initialSearchTerm = searchTerm;
+  handbookModalState.activeTab = 'overview';
+
+  const modal = document.getElementById('handbook-modal');
+  modal.style.display = 'flex';
+  document.body.classList.add('modal-open');
+
+  await loadAndRenderHandbookView();
+}
+
+function closeHandbookModal() {
+  handbookModalState.isOpen = false;
+  handbookModalState.navigationStack = [];
+  handbookModalState.currentData = null;
+  handbookModalState.initialSearchTerm = null;
+
+  const modal = document.getElementById('handbook-modal');
+  modal.style.display = 'none';
+  document.body.classList.remove('modal-open');
+}
+
+function handbookModalBack() {
+  if (handbookModalState.navigationStack.length > 1) {
+    handbookModalState.navigationStack.pop();
+    handbookModalState.initialSearchTerm = null; // Highlighting entfernen nach Navigation
+    loadAndRenderHandbookView();
+  }
+}
+
+function handbookNavigateTo(type, id) {
+  handbookModalState.navigationStack.push({ type, id });
+  handbookModalState.initialSearchTerm = null; // Highlighting entfernen
+  loadAndRenderHandbookView();
+}
+
+async function loadAndRenderHandbookView() {
+  const currentView = handbookModalState.navigationStack[handbookModalState.navigationStack.length - 1];
+  const modal = document.getElementById('handbook-modal');
+  const content = modal.querySelector('.handbook-modal-content');
+
+  content.innerHTML = '<div class="modal-loading"><span class="spinner"></span> Lade...</div>';
+
+  try {
+    let data;
+
+    if (currentView.type === 'service') {
+      // Cache nutzen
+      if (handbookModalState.serviceCache[currentView.id]) {
+        data = handbookModalState.serviceCache[currentView.id];
+      } else {
+        const res = await fetch(`/api/handbook/services/${encodeURIComponent(currentView.id)}`);
+        if (!res.ok) throw new Error('Service nicht gefunden');
+        data = await res.json();
+        handbookModalState.serviceCache[currentView.id] = data;
+      }
+      renderServiceView(data);
+    } else if (currentView.type === 'field') {
+      const res = await fetch(`/api/handbook/fields/${encodeURIComponent(currentView.id)}`);
+      if (!res.ok) throw new Error('Feld nicht gefunden');
+      data = await res.json();
+      renderFieldView(data);
+    }
+
+    handbookModalState.currentData = data;
+  } catch (e) {
+    content.innerHTML = `<div class="modal-error">Fehler: ${e.message}</div>`;
+  }
+}
+
+function renderServiceView(service) {
+  const modal = document.getElementById('handbook-modal');
+  const canGoBack = handbookModalState.navigationStack.length > 1;
+  const searchTerm = handbookModalState.initialSearchTerm;
+
+  // Tabs aus Service-Daten extrahieren
+  const tabs = service.tabs || [];
+  const defaultTabs = ['overview'];
+  const allTabs = [...defaultTabs, ...tabs.map(t => t.name || t.title).filter(Boolean)];
+
+  // Aktiven Tab validieren
+  if (!allTabs.includes(handbookModalState.activeTab)) {
+    handbookModalState.activeTab = 'overview';
+  }
+
+  modal.querySelector('.handbook-modal-header').innerHTML = `
+    <div class="handbook-modal-nav">
+      ${canGoBack ? `<button class="modal-back-btn" onclick="handbookModalBack()" title="Zurück">&#8592;</button>` : ''}
+      <h2 class="handbook-modal-title">${escapeHtml(service.service_name)}</h2>
+    </div>
+    <button class="modal-close" onclick="closeHandbookModal()">&times;</button>
+  `;
+
+  // Tab-Bar rendern
+  const tabBar = modal.querySelector('.handbook-modal-tabs');
+  tabBar.innerHTML = `
+    <button class="handbook-tab ${handbookModalState.activeTab === 'overview' ? 'active' : ''}" onclick="switchHandbookTab('overview')">Übersicht</button>
+    ${tabs.map(t => `
+      <button class="handbook-tab ${handbookModalState.activeTab === (t.name || t.title) ? 'active' : ''}"
+              onclick="switchHandbookTab('${escapeHtml(t.name || t.title)}')">${escapeHtml(t.title || t.name)}</button>
+    `).join('')}
+    ${service.input_fields?.length ? `<button class="handbook-tab ${handbookModalState.activeTab === 'input' ? 'active' : ''}" onclick="switchHandbookTab('input')">Eingabe</button>` : ''}
+    ${service.output_fields?.length ? `<button class="handbook-tab ${handbookModalState.activeTab === 'output' ? 'active' : ''}" onclick="switchHandbookTab('output')">Ausgabe</button>` : ''}
+  `;
+
+  // Content rendern
+  const content = modal.querySelector('.handbook-modal-content');
+  let html = '';
+
+  if (handbookModalState.activeTab === 'overview') {
+    html = renderServiceOverview(service, searchTerm);
+  } else if (handbookModalState.activeTab === 'input') {
+    html = renderFieldList(service.input_fields, 'Eingabefelder', searchTerm);
+  } else if (handbookModalState.activeTab === 'output') {
+    html = renderFieldList(service.output_fields, 'Ausgabefelder', searchTerm);
+  } else {
+    // Tab-Content aus tabs Array
+    const tab = tabs.find(t => (t.name || t.title) === handbookModalState.activeTab);
+    if (tab && tab.content) {
+      html = `<div class="handbook-tab-content">${highlightText(tab.content, searchTerm)}</div>`;
+    } else {
+      html = `<div class="handbook-tab-content"><p>Kein Inhalt verfügbar.</p></div>`;
+    }
+  }
+
+  content.innerHTML = html;
+}
+
+function renderServiceOverview(service, searchTerm) {
+  let html = '<div class="handbook-overview">';
+
+  // Beschreibung
+  if (service.description) {
+    html += `<div class="overview-section">
+      <h3>Beschreibung</h3>
+      <p>${highlightText(escapeHtml(service.description), searchTerm)}</p>
+    </div>`;
+  }
+
+  // Call Variants
+  if (service.call_variants?.length) {
+    html += `<div class="overview-section">
+      <h3>Aufrufvarianten</h3>
+      <ul class="variant-list">
+        ${service.call_variants.map(v => `<li>${highlightText(escapeHtml(v.name || v), searchTerm)}</li>`).join('')}
+      </ul>
+    </div>`;
+  }
+
+  // Felder-Übersicht mit Links
+  if (service.input_fields?.length) {
+    html += `<div class="overview-section">
+      <h3>Eingabefelder (${service.input_fields.length})</h3>
+      <div class="field-links">
+        ${service.input_fields.slice(0, 10).map(f => `
+          <a class="handbook-link" onclick="handbookNavigateTo('field', '${escapeHtml(f.field_id || f.field_name)}')">${highlightText(escapeHtml(f.field_name), searchTerm)}</a>
+        `).join('')}
+        ${service.input_fields.length > 10 ? `<span class="more-link" onclick="switchHandbookTab('input')">+${service.input_fields.length - 10} weitere...</span>` : ''}
+      </div>
+    </div>`;
+  }
+
+  if (service.output_fields?.length) {
+    html += `<div class="overview-section">
+      <h3>Ausgabefelder (${service.output_fields.length})</h3>
+      <div class="field-links">
+        ${service.output_fields.slice(0, 10).map(f => `
+          <a class="handbook-link" onclick="handbookNavigateTo('field', '${escapeHtml(f.field_id || f.field_name)}')">${highlightText(escapeHtml(f.field_name), searchTerm)}</a>
+        `).join('')}
+        ${service.output_fields.length > 10 ? `<span class="more-link" onclick="switchHandbookTab('output')">+${service.output_fields.length - 10} weitere...</span>` : ''}
+      </div>
+    </div>`;
+  }
+
+  html += '</div>';
+  return html;
+}
+
+function renderFieldList(fields, title, searchTerm) {
+  if (!fields?.length) return `<p>Keine ${title} vorhanden.</p>`;
+
+  return `
+    <div class="handbook-field-list">
+      <h3>${title}</h3>
+      <table class="field-table">
+        <thead>
+          <tr><th>Feldname</th><th>Typ</th><th>Beschreibung</th></tr>
+        </thead>
+        <tbody>
+          ${fields.map(f => `
+            <tr>
+              <td><a class="handbook-link" onclick="handbookNavigateTo('field', '${escapeHtml(f.field_id || f.field_name)}')">${highlightText(escapeHtml(f.field_name), searchTerm)}</a></td>
+              <td>${escapeHtml(f.field_type || '-')}</td>
+              <td>${highlightText(escapeHtml(f.description || '-'), searchTerm)}</td>
+            </tr>
+          `).join('')}
+        </tbody>
+      </table>
+    </div>
+  `;
+}
+
+function renderFieldView(field) {
+  const modal = document.getElementById('handbook-modal');
+  const canGoBack = handbookModalState.navigationStack.length > 1;
+
+  modal.querySelector('.handbook-modal-header').innerHTML = `
+    <div class="handbook-modal-nav">
+      ${canGoBack ? `<button class="modal-back-btn" onclick="handbookModalBack()" title="Zurück">&#8592;</button>` : ''}
+      <h2 class="handbook-modal-title">Feld: ${escapeHtml(field.field_name)}</h2>
+    </div>
+    <button class="modal-close" onclick="closeHandbookModal()">&times;</button>
+  `;
+
+  // Tabs ausblenden für Feldansicht
+  modal.querySelector('.handbook-modal-tabs').innerHTML = '';
+
+  const content = modal.querySelector('.handbook-modal-content');
+  content.innerHTML = `
+    <div class="handbook-field-detail">
+      <div class="field-detail-section">
+        <label>Feldname:</label>
+        <span>${escapeHtml(field.field_name)}</span>
+      </div>
+      ${field.field_type ? `
+        <div class="field-detail-section">
+          <label>Typ:</label>
+          <span>${escapeHtml(field.field_type)}</span>
+        </div>
+      ` : ''}
+      ${field.description ? `
+        <div class="field-detail-section">
+          <label>Beschreibung:</label>
+          <p>${escapeHtml(field.description)}</p>
+        </div>
+      ` : ''}
+      ${field.used_in_services?.length ? `
+        <div class="field-detail-section">
+          <label>Verwendet in:</label>
+          <div class="field-links">
+            ${field.used_in_services.map(s => `
+              <a class="handbook-link" onclick="handbookNavigateTo('service', '${escapeHtml(s)}')">${escapeHtml(s)}</a>
+            `).join('')}
+          </div>
+        </div>
+      ` : ''}
+    </div>
+  `;
+}
+
+function switchHandbookTab(tabName) {
+  handbookModalState.activeTab = tabName;
+  if (handbookModalState.currentData) {
+    renderServiceView(handbookModalState.currentData);
+  }
+}
+
+function highlightText(text, searchTerm) {
+  if (!searchTerm || !text) return text;
+  const regex = new RegExp(`(${escapeRegex(searchTerm)})`, 'gi');
+  return text.replace(regex, '<mark class="search-highlight">$1</mark>');
+}
+
+function escapeRegex(str) {
+  return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+// ESC-Key Handler für Modal
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape' && handbookModalState.isOpen) {
+    if (handbookModalState.navigationStack.length > 1) {
+      handbookModalBack();
+    } else {
+      closeHandbookModal();
+    }
+  }
+});
 
 // ── PDF Management ──
 // Available PDFs (not automatically in context)

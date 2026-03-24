@@ -1520,6 +1520,98 @@ class HandbookIndexer:
             for row in rows
         ]
 
+    def search_grouped(
+        self,
+        query: str,
+        top_k: int = 10,
+        max_snippets: int = 2
+    ) -> List[Dict]:
+        """
+        Volltext-Suche mit Gruppierung nach Service.
+
+        Args:
+            query: Suchbegriff (min. 3 Zeichen empfohlen)
+            top_k: Maximale Anzahl Services
+            max_snippets: Maximale Snippets pro Service
+
+        Returns:
+            Liste von gruppierten Suchergebnissen
+        """
+        if not query.strip() or len(query.strip()) < 2:
+            return []
+
+        safe_query = query.replace('"', '""')
+
+        # Suche mit mehr Ergebnissen für Gruppierung
+        sql = """
+            SELECT file_path, service_name, tab_name, title,
+                   snippet(handbook_fts, 5, '>>>', '<<<', '...', 30) AS snippet,
+                   rank
+            FROM handbook_fts
+            WHERE handbook_fts MATCH ?
+            ORDER BY rank
+            LIMIT 100
+        """
+
+        with self._connect() as con:
+            try:
+                rows = con.execute(sql, [safe_query]).fetchall()
+            except sqlite3.OperationalError:
+                # Fallback für ungültige FTS-Queries
+                like = f"%{query}%"
+                rows = con.execute(
+                    """SELECT file_path, service_name, tab_name, title,
+                              substr(content, 1, 200) AS snippet, 0 AS rank
+                       FROM handbook_fts
+                       WHERE content LIKE ? OR title LIKE ? OR headings LIKE ?
+                       LIMIT 100""",
+                    (like, like, like)
+                ).fetchall()
+
+            # Gruppierung nach Service (innerhalb der Connection)
+            services: Dict[str, Dict] = {}
+
+            for row in rows:
+                service_name = row["service_name"] or "Unbekannt"
+
+                if service_name not in services:
+                    # Service-ID aus handbook_services holen
+                    service_row = con.execute(
+                        "SELECT service_id, description FROM handbook_services WHERE service_name = ?",
+                        (service_name,)
+                    ).fetchone()
+
+                    services[service_name] = {
+                        "service_id": service_row["service_id"] if service_row else service_name.lower().replace(" ", "-"),
+                        "service_name": service_name,
+                        "description": service_row["description"] if service_row else "",
+                        "match_count": 0,
+                        "matched_tabs": set(),
+                        "top_snippets": [],
+                    }
+
+                svc = services[service_name]
+                svc["match_count"] += 1
+
+                if row["tab_name"]:
+                    svc["matched_tabs"].add(row["tab_name"])
+
+                if len(svc["top_snippets"]) < max_snippets:
+                    svc["top_snippets"].append({
+                        "tab_name": row["tab_name"] or "",
+                        "text": row["snippet"] or ""
+                    })
+
+        # In Liste umwandeln, nach Match-Count sortieren
+        result = []
+        for svc in services.values():
+            svc["matched_tabs"] = list(svc["matched_tabs"])
+            result.append(svc)
+
+        result.sort(key=lambda x: x["match_count"], reverse=True)
+
+        return result[:top_k]
+
     def get_page_content(self, file_path: str) -> Optional[str]:
         """Lädt den Inhalt einer Handbuch-Seite."""
         with self._connect() as con:
