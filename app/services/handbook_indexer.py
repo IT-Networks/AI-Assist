@@ -1682,19 +1682,63 @@ class HandbookIndexer:
     def get_service_info(self, service_id: str) -> Optional[Dict]:
         """Gibt strukturierte Service-Informationen zurück."""
         with self._connect() as con:
+            # Fuzzy-Match für service_id (verschiedene Formate möglich)
+            service_id_upper = service_id.upper().replace("-", "_").replace(" ", "_")
+            service_id_lower = service_id.lower().replace("-", "_").replace(" ", "_")
+
             row = con.execute(
-                "SELECT * FROM handbook_services WHERE service_id = ?",
-                (service_id,)
+                """SELECT * FROM handbook_services
+                   WHERE service_id = ?
+                      OR UPPER(REPLACE(REPLACE(service_id, '-', '_'), ' ', '_')) = ?
+                      OR LOWER(REPLACE(REPLACE(service_id, '-', '_'), ' ', '_')) = ?
+                      OR service_name LIKE ?
+                   LIMIT 1""",
+                (service_id, service_id_upper, service_id_lower, f"%{service_id}%")
             ).fetchone()
 
-        if not row:
-            return None
+            if not row:
+                return None
+
+            actual_service_id = row["service_id"]
+            service_name = row["service_name"]
+
+            # Tabs mit Content aus handbook_fts laden
+            tabs_meta = json.loads(row["tabs_json"] or "[]")
+
+            # Tab-Inhalte aus FTS-Index holen
+            fts_rows = con.execute(
+                """SELECT tab_name, title, content
+                   FROM handbook_fts
+                   WHERE service_name = ? OR service_name LIKE ?
+                   ORDER BY tab_name""",
+                (service_name, f"%{service_name}%")
+            ).fetchall()
+
+            # Tabs mit Content anreichern
+            tabs_with_content = []
+            seen_tabs = set()
+
+            for fts_row in fts_rows:
+                tab_name = fts_row["tab_name"] or fts_row["title"] or "Inhalt"
+                if tab_name in seen_tabs:
+                    continue
+                seen_tabs.add(tab_name)
+
+                tabs_with_content.append({
+                    "name": tab_name,
+                    "title": tab_name.replace("_", " ").title(),
+                    "content": fts_row["content"] or ""
+                })
+
+            # Falls keine FTS-Tabs, Metadaten-Tabs verwenden
+            if not tabs_with_content and tabs_meta:
+                tabs_with_content = tabs_meta
 
         return {
-            "service_id": row["service_id"],
-            "service_name": row["service_name"],
-            "description": row["description"],
-            "tabs": json.loads(row["tabs_json"] or "[]"),
+            "service_id": actual_service_id,
+            "service_name": service_name,
+            "description": row["description"] or "",
+            "tabs": tabs_with_content,
             "input_fields": json.loads(row["input_fields_json"] or "[]"),
             "output_fields": json.loads(row["output_fields_json"] or "[]"),
             "call_variants": json.loads(row["call_variants_json"] or "[]"),

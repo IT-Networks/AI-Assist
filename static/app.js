@@ -7486,9 +7486,11 @@ function renderServiceView(service) {
 
 function renderServiceOverview(service, searchTerm) {
   let html = '<div class="handbook-overview">';
+  let hasContent = false;
 
   // Beschreibung
   if (service.description) {
+    hasContent = true;
     html += `<div class="overview-section">
       <h3>Beschreibung</h3>
       <p>${highlightText(escapeHtml(service.description), searchTerm)}</p>
@@ -7497,6 +7499,7 @@ function renderServiceOverview(service, searchTerm) {
 
   // Call Variants
   if (service.call_variants?.length) {
+    hasContent = true;
     html += `<div class="overview-section">
       <h3>Aufrufvarianten</h3>
       <ul class="variant-list">
@@ -7507,6 +7510,7 @@ function renderServiceOverview(service, searchTerm) {
 
   // Felder-Übersicht mit Links
   if (service.input_fields?.length) {
+    hasContent = true;
     html += `<div class="overview-section">
       <h3>Eingabefelder (${service.input_fields.length})</h3>
       <div class="field-links">
@@ -7519,6 +7523,7 @@ function renderServiceOverview(service, searchTerm) {
   }
 
   if (service.output_fields?.length) {
+    hasContent = true;
     html += `<div class="overview-section">
       <h3>Ausgabefelder (${service.output_fields.length})</h3>
       <div class="field-links">
@@ -7527,6 +7532,23 @@ function renderServiceOverview(service, searchTerm) {
         `).join('')}
         ${service.output_fields.length > 10 ? `<span class="more-link" onclick="switchHandbookTab('output')">+${service.output_fields.length - 10} weitere...</span>` : ''}
       </div>
+    </div>`;
+  }
+
+  // Tabs-Preview wenn keine Übersicht-Daten
+  if (!hasContent && service.tabs?.length) {
+    html += `<div class="overview-section">
+      <h3>Verfügbare Inhalte</h3>
+      <p>Wähle einen Tab oben um den Inhalt anzuzeigen:</p>
+      <div class="field-links">
+        ${service.tabs.map(t => `
+          <a class="handbook-link" onclick="switchHandbookTab('${escapeHtml(t.name || t.title)}')">${escapeHtml(t.title || t.name)}</a>
+        `).join('')}
+      </div>
+    </div>`;
+  } else if (!hasContent) {
+    html += `<div class="overview-section">
+      <p style="color:var(--text-muted)">Keine Übersichtsdaten verfügbar. Bitte wähle einen Tab oben.</p>
     </div>`;
   }
 

@@ -3503,12 +3503,13 @@ body {
 }
 
 .grouped-result-modal-btn {
-  background: var(--bg);
+  background: var(--surface);
   border: 1px solid var(--border);
   border-radius: 6px;
   padding: 6px 10px;
   cursor: pointer;
   font-size: 1rem;
+  color: var(--accent);
   transition: all 0.2s;
 }
 
