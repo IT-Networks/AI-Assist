@@ -7653,7 +7653,7 @@ function initHandbookContentInteractions(container) {
 
 /**
  * Intercept clicks on handbook-internal links (parameter, functions, etc.)
- * - Normal click: Navigate within modal
+ * - Normal click: Navigate within modal or open external for parameters
  * - Ctrl+click: Open external handbook in new tab
  */
 function interceptHandbookLinks(container) {
@@ -7678,29 +7678,79 @@ function interceptHandbookLinks(container) {
     event.preventDefault();
     event.stopPropagation();
 
+    // Ctrl+click always opens external
     if (event.ctrlKey || event.metaKey) {
-      // Ctrl+click: Open external handbook
       openExternalHandbookPath(linkInfo.path);
-    } else {
-      // Normal click: Navigate in modal
-      if (linkInfo.type === 'parameter') {
-        handbookNavigateTo('field', linkInfo.name);
-      } else if (linkInfo.type === 'function' || linkInfo.type === 'service') {
-        handbookNavigateTo('service', linkInfo.name);
-      } else if (linkInfo.type === 'dqm') {
-        // DQM links - try to navigate to parameter
-        handbookNavigateTo('field', linkInfo.name);
-      }
+      return;
+    }
+
+    // Normal click handling based on link type
+    switch (linkInfo.type) {
+      case 'tab':
+        // Same-service tab link - switch tab in modal
+        switchHandbookTab(linkInfo.tabName);
+        break;
+
+      case 'anchor':
+        // Anchor link - scroll to element if exists
+        const anchorEl = container.querySelector(`[name="${linkInfo.anchor}"], #${linkInfo.anchor}`);
+        if (anchorEl) {
+          anchorEl.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        }
+        break;
+
+      case 'function':
+        // Try to navigate to service in modal, fallback to external
+        tryNavigateOrExternal('service', linkInfo.name, linkInfo.path);
+        break;
+
+      case 'service':
+        // Try to navigate in modal
+        tryNavigateOrExternal('service', linkInfo.name, linkInfo.path);
+        break;
+
+      case 'parameter':
+      case 'dqm':
+      case 'navigation':
+      case 'external':
+      default:
+        // Open external handbook
+        openExternalHandbookPath(linkInfo.path);
+        break;
     }
   });
 }
 
 /**
+ * Try to navigate in modal, fallback to external handbook on error
+ */
+async function tryNavigateOrExternal(type, id, fallbackPath) {
+  try {
+    const endpoint = type === 'service'
+      ? `/api/handbook/services/${encodeURIComponent(id)}`
+      : `/api/handbook/fields/${encodeURIComponent(id)}`;
+
+    const res = await fetch(endpoint, { method: 'HEAD' });
+
+    if (res.ok) {
+      handbookNavigateTo(type, id);
+    } else {
+      // Not found in index - open external
+      openExternalHandbookPath(fallbackPath);
+    }
+  } catch (e) {
+    // Error - fallback to external
+    openExternalHandbookPath(fallbackPath);
+  }
+}
+
+/**
  * Parse handbook href to extract type and name
  * Examples:
- *   ../parameter/parameter_A.htm#BIC -> { type: 'parameter', name: 'BIC', path: 'parameter/parameter_A.htm#BIC' }
+ *   ../parameter/parameter_A.htm#BIC -> { type: 'parameter', name: 'BIC', path: '...' }
  *   ../funktionen/DATEN_LESEN/... -> { type: 'function', name: 'DATEN_LESEN', path: '...' }
  *   ../dqm/dqm_ART_KZ.htm -> { type: 'dqm', name: 'ART_KZ', path: '...' }
+ *   SERVICE_fachlich.htm -> { type: 'tab', tabName: 'Fachlich', path: '...' }
  */
 function parseHandbookHref(href) {
   if (!href || href.startsWith('http') || href.startsWith('//') || href.startsWith('javascript:')) {
@@ -7710,16 +7760,34 @@ function parseHandbookHref(href) {
   // Normalize path
   const normalizedHref = href.replace(/\\/g, '/');
 
-  // Parameter link: ../parameter/parameter_X.htm#PARAM_NAME
-  const paramMatch = normalizedHref.match(/parameter\/parameter_\w+\.htm#(\w+)/i);
-  if (paramMatch) {
-    return { type: 'parameter', name: paramMatch[1], path: normalizedHref };
+  // Get current service name from modal state for tab detection
+  const currentService = handbookModalState.currentData?.service_name || handbookModalState.currentData?.service_id || '';
+
+  // Tab link within same service: SERVICE_fachlich.htm, SERVICE_parameter.htm, etc.
+  // Pattern: CurrentServiceName_tabname.htm (case insensitive match on service name)
+  if (currentService) {
+    const tabPattern = new RegExp(`^${escapeRegex(currentService)}_(\\w+)\\.htm$`, 'i');
+    const tabMatch = normalizedHref.match(tabPattern);
+    if (tabMatch) {
+      const tabName = tabMatch[1].toLowerCase();
+      // Map common tab names
+      const tabMapping = {
+        'fachlich': 'Fachlich',
+        'parameter': 'Parameter',
+        'dqm': 'DQM',
+        'intern': 'Intern',
+        'use_cases': 'DynS-Use-Cases',
+        'aenderungen': 'Änderungen',
+        'statistik': 'Statistik'
+      };
+      return { type: 'tab', tabName: tabMapping[tabName] || tabName, path: normalizedHref };
+    }
   }
 
-  // Parameter link without anchor: ../parameter/parameter_X.htm
-  const paramMatch2 = normalizedHref.match(/parameter\/parameter_(\w+)\.htm$/i);
-  if (paramMatch2) {
-    return { type: 'parameter', name: paramMatch2[1], path: normalizedHref };
+  // Parameter link: ../parameter/parameter_X.htm#PARAM_NAME or ../parameter/parameter_X.htm
+  const paramMatch = normalizedHref.match(/parameter\/parameter_\w+\.htm(#\w+)?/i);
+  if (paramMatch) {
+    return { type: 'parameter', name: paramMatch[1]?.substring(1) || '', path: normalizedHref };
   }
 
   // Function/Service link: ../funktionen/SERVICE_NAME/
@@ -7734,16 +7802,28 @@ function parseHandbookHref(href) {
     return { type: 'dqm', name: dqmMatch[1], path: normalizedHref };
   }
 
-  // Relative link within same directory (e.g., service links)
-  const relativeMatch = normalizedHref.match(/^([A-Z_][A-Z0-9_]+)\.htm/i);
-  if (relativeMatch) {
-    return { type: 'service', name: relativeMatch[1], path: normalizedHref };
+  // General navigation links (allgemein, prozessgruppen, etc.) - open external
+  if (normalizedHref.includes('/allgemein/') ||
+      normalizedHref.includes('/prozessgruppen/') ||
+      normalizedHref.includes('/dokumentation/') ||
+      normalizedHref.includes('/abkuendigungen/')) {
+    return { type: 'navigation', path: normalizedHref };
   }
 
-  // Anchor-only link
+  // Relative link to another service: SOME_SERVICE.htm (without underscore suffix like _fachlich)
+  const serviceMatch = normalizedHref.match(/^([A-Z][A-Z0-9_]+)\.htm$/i);
+  if (serviceMatch && !serviceMatch[1].includes('_')) {
+    return { type: 'service', name: serviceMatch[1], path: normalizedHref };
+  }
+
+  // Anchor-only link - scroll to anchor
   if (normalizedHref.startsWith('#')) {
-    const anchor = normalizedHref.substring(1);
-    return { type: 'parameter', name: anchor, path: normalizedHref };
+    return { type: 'anchor', anchor: normalizedHref.substring(1), path: normalizedHref };
+  }
+
+  // Any other .htm link - treat as external handbook link
+  if (normalizedHref.endsWith('.htm')) {
+    return { type: 'external', path: normalizedHref };
   }
 
   return null;
