@@ -3832,6 +3832,7 @@ async function loadPersistedChats() {
     for (const c of chats) {
       const chat = chatManager.createChat(c.session_id, c.title || 'Chat');
       chat.needsRestore = true;
+      chat.expectedMessageCount = c.message_count || 0;  // Für Mismatch-Detection
     }
     // Neuesten Chat aktivieren (letzter in der sortierten Liste)
     const last = chatManager.chats[chatManager.chats.length - 1];
@@ -3929,6 +3930,18 @@ async function switchToChat(chatId) {
               appendMessageToPane(incomingChat.pane, msg.role, msg.content);
             }
           }
+        } else if (incomingChat.expectedMessageCount > 0 && !incomingChat._retried) {
+          // Erwartet Nachrichten aber leer erhalten - Retry nach kurzer Verzögerung
+          // (Server-Startup Race-Condition)
+          log.warn(`[switchToChat] Expected ${incomingChat.expectedMessageCount} messages but got 0 - retrying in 500ms`);
+          incomingChat._retried = true;
+          incomingChat.isLoading = false;
+          _updateChatLoadingState(chatId, false);
+          await new Promise(r => setTimeout(r, 500));
+          if (!switchAc.signal.aborted) {
+            return switchToChat(chatId);  // Retry
+          }
+          return;
         } else {
           // Keine Nachrichten - Welcome Screen zeigen
           incomingChat.pane.innerHTML = _contextBarHTML() + welcomeHTML();

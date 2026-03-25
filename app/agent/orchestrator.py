@@ -203,12 +203,16 @@ class AgentOrchestrator:
                 if saved:
                     state.messages_history = saved.get("messages_history", [])
                     state.title = saved.get("title", "")
+                    msg_count = len(state.messages_history)
+                    logger.info(f"[orchestrator] Restored session {session_id}: {msg_count} messages, title='{state.title}'")
                     try:
                         state.mode = AgentMode(saved.get("mode", "read_only"))
                     except ValueError:
                         pass
-            except Exception:
-                pass
+                else:
+                    logger.debug(f"[orchestrator] No saved chat found for session {session_id}")
+            except Exception as e:
+                logger.warning(f"[orchestrator] Failed to restore session {session_id}: {e}")
             self._states[session_id] = state
         return self._states[session_id]
 

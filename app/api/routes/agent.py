@@ -597,8 +597,24 @@ async def list_persisted_chats() -> Dict[str, Any]:
 async def get_session_history(session_id: str) -> Dict[str, Any]:
     """Gibt die Nachrichten-Historie einer Session zurück (aus Speicher oder Disk)."""
     from app.agent.orchestrator import get_agent_orchestrator
+    from app.services.chat_store import load_chat
+
     orchestrator = get_agent_orchestrator()
     state = orchestrator._get_state(session_id)
+
+    # Fallback: Falls State leer ist, nochmal direkt von Disk laden
+    # (schützt gegen Race-Conditions beim Startup)
+    if not state.messages_history:
+        saved = load_chat(session_id)
+        if saved and saved.get("messages_history"):
+            state.messages_history = saved["messages_history"]
+            state.title = saved.get("title", state.title)
+            try:
+                from app.agent.orchestrator import AgentMode
+                state.mode = AgentMode(saved.get("mode", "read_only"))
+            except (ValueError, ImportError):
+                pass
+
     return {
         "session_id": session_id,
         "messages": state.messages_history,
