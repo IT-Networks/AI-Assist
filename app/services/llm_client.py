@@ -477,6 +477,11 @@ class LLMClient:
         max_tokens = max_tokens or self.max_tokens
         timeout = timeout or TIMEOUT_TOOL
 
+        # DEBUG: Model-Check für Mistral-Erkennung (immer loggen)
+        is_mistral = _is_mistral_model(model)
+        print(f"[LLM DEBUG] chat_with_tools called - model='{model}', is_mistral={is_mistral}")
+        logger.warning(f"[llm] Model: '{model}', is_mistral={is_mistral}")
+
         # Reasoning in System-Message injizieren falls aktiviert
         if reasoning:
             messages = self._inject_reasoning(messages, reasoning)
@@ -495,13 +500,14 @@ class LLMClient:
             logger.debug("[llm] Tool-Prefill aktiviert")
 
         # Mistral-Kompatibilität: System-Messages nach Tool-Responses konvertieren
-        logger.info(f"[llm] Model check: '{model}' is_mistral={_is_mistral_model(model)}")
-        if _is_mistral_model(model):
+        if is_mistral:
             original_roles = [m.get("role") for m in messages]
             messages = _sanitize_messages_for_mistral(messages)
             new_roles = [m.get("role") for m in messages]
-            if original_roles != new_roles:
-                logger.info(f"[llm] Mistral sanitization applied: {original_roles} -> {new_roles}")
+            changed = original_roles != new_roles
+            print(f"[LLM DEBUG] Mistral sanitization: changed={changed}")
+            if changed:
+                logger.warning(f"[llm] Mistral sanitization applied: {original_roles} -> {new_roles}")
 
         payload = {
             "model": model,
