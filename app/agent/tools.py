@@ -2557,14 +2557,15 @@ async def read_jira_issue(issue_key: str) -> ToolResult:
         output += f"URL: {issue['url']}\n"
         output += f"\n--- Beschreibung ---\n{issue['description'] or '(keine Beschreibung)'}\n"
 
-        # Subtasks anzeigen
+        # Subtasks anzeigen - mit konkreten Tool-Aufrufen für das LLM
         subtasks = issue.get('subtasks', [])
         if subtasks:
             output += f"\n--- Subtasks ({len(subtasks)}) ---\n"
-            output += "HINWEIS: Diese Liste zeigt nur Übersicht. Für Details zu einem Subtask:\n"
-            output += "         → read_jira_issue(issue_key='SUBTASK-KEY') aufrufen\n\n"
+            output += "WICHTIG: Dies sind nur Überschriften. Für Details MUSS jeder Subtask einzeln geladen werden!\n\n"
+            output += "Verfügbare Subtasks (zum Laden den entsprechenden Aufruf verwenden):\n"
             for st in subtasks:
-                output += f"  • {st['key']}: {st['summary']} [{st['status']}]\n"
+                # Konkreter, kopierbarer Tool-Aufruf für jeden Subtask
+                output += f"  → read_jira_issue(issue_key='{st['key']}')  # {st['summary'][:50]} [{st['status']}]\n"
 
         if issue['comments']:
             output += f"\n--- Kommentare ({len(issue['comments'])}) ---\n"
@@ -2605,13 +2606,14 @@ READ_JIRA_ISSUE_TOOL = Tool(
 
 WANN VERWENDEN: Wenn ein konkreter Issue-Key bekannt ist (z.B. DIKA-123).
 
-SUBTASKS: Die Antwort listet Subtasks nur als Übersicht (Key, Titel, Status).
-Für Details eines Subtasks: Dieses Tool erneut mit dem Subtask-Key aufrufen.
-Beispiel: Hat PROJ-100 Subtasks PROJ-101 und PROJ-102, dann für Details:
-  → read_jira_issue(issue_key='PROJ-101')
-  → read_jira_issue(issue_key='PROJ-102')
+SUBTASKS-WORKFLOW:
+1. Hauptissue lesen: read_jira_issue(issue_key='PROJ-100')
+2. Antwort enthält Subtask-Liste mit DEREN Keys (z.B. PROJ-101, PROJ-102)
+3. Für Subtask-Details: read_jira_issue mit dem SUBTASK-Key aufrufen!
+   RICHTIG: read_jira_issue(issue_key='PROJ-101')  ← Subtask-Key
+   FALSCH:  read_jira_issue(issue_key='PROJ-100')  ← Das ist der Parent!
 
-HINWEIS: search_jira erkennt Issue-Keys automatisch und ruft diese Funktion intern auf.""",
+WICHTIG: Der Subtask-Key ist NICHT der gleiche wie der Parent-Key!""",
     category=ToolCategory.KNOWLEDGE,
     parameters=[
         ToolParameter("issue_key", "string", "Issue-Schlüssel (z.B. 'PROJ-123')"),
