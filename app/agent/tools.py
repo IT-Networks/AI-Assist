@@ -2475,12 +2475,14 @@ async def search_jira(query: str, project: str = "", max_results: int = 15) -> T
         url_match = re.search(r'/browse/([A-Z]+(?:-[A-Z]+)*-\d+)', query, re.IGNORECASE)
         if url_match:
             issue_key = url_match.group(1).upper()
-            return await read_jira_issue(issue_key)
+            # Bei direktem Issue-Key: Subtasks automatisch mitladen
+            return await read_jira_issue(issue_key, include_subtasks=True)
 
         # Direkter Issue-Key (z.B. "DIKA-123" oder "AB-CD-456") - direkt lesen statt suchen
         # Erlaubt Projekt-Keys mit Bindestrichen: ABC-123, AB-CD-123, A-B-C-123
         if re.match(r'^[A-Z]+(?:-[A-Z]+)*-\d+$', query.strip(), re.IGNORECASE):
-            return await read_jira_issue(query.strip().upper())
+            # Bei direktem Issue-Key: Subtasks automatisch mitladen
+            return await read_jira_issue(query.strip().upper(), include_subtasks=True)
 
         client = get_jira_client()
 
@@ -2524,10 +2526,14 @@ async def search_jira(query: str, project: str = "", max_results: int = 15) -> T
         return ToolResult(success=False, error=f"Jira-Fehler: {str(e)}")
 
 
-async def read_jira_issue(issue_key: str) -> ToolResult:
+async def read_jira_issue(issue_key: str, include_subtasks: bool = False) -> ToolResult:
     """Liest ein einzelnes Jira-Issue mit Details und Kommentaren."""
+    import logging
     from app.services.jira_client import get_jira_client
     from app.core.config import settings
+
+    logger = logging.getLogger(__name__)
+    logger.info(f"[read_jira_issue] Lese Issue: {issue_key}, include_subtasks={include_subtasks}")
 
     if not settings.jira.enabled or not settings.jira.base_url:
         return ToolResult(success=False, error="Jira ist nicht konfiguriert oder deaktiviert")
@@ -2551,21 +2557,42 @@ async def read_jira_issue(issue_key: str) -> ToolResult:
         parent = issue.get('parent')
         if parent:
             output += f"\n--- Übergeordnetes Issue ---\n"
-            output += f"🔗 {parent['key']}: {parent['summary']} ({parent['status']})\n"
-            output += f"   URL: {parent['url']}\n"
+            output += f"  {parent['key']}: {parent['summary']} ({parent['status']})\n"
+            output += f"  URL: {parent['url']}\n"
 
         output += f"URL: {issue['url']}\n"
         output += f"\n--- Beschreibung ---\n{issue['description'] or '(keine Beschreibung)'}\n"
 
-        # Subtasks anzeigen - mit konkreten Tool-Aufrufen für das LLM
+        # Subtasks verarbeiten
         subtasks = issue.get('subtasks', [])
         if subtasks:
-            output += f"\n--- Subtasks ({len(subtasks)}) ---\n"
-            output += "WICHTIG: Dies sind nur Überschriften. Für Details MUSS jeder Subtask einzeln geladen werden!\n\n"
-            output += "Verfügbare Subtasks (zum Laden den entsprechenden Aufruf verwenden):\n"
-            for st in subtasks:
-                # Konkreter, kopierbarer Tool-Aufruf für jeden Subtask
-                output += f"  → read_jira_issue(issue_key='{st['key']}')  # {st['summary'][:50]} [{st['status']}]\n"
+            if include_subtasks:
+                # Subtask-Details automatisch laden
+                output += f"\n{'='*60}\n"
+                output += f"SUBTASK-DETAILS ({len(subtasks)} Subtasks)\n"
+                output += f"{'='*60}\n"
+
+                for i, st in enumerate(subtasks, 1):
+                    st_key = st['key']
+                    logger.info(f"[read_jira_issue] Lade Subtask {i}/{len(subtasks)}: {st_key}")
+                    try:
+                        st_issue = await client.get_issue(st_key)
+                        output += f"\n--- Subtask {i}: {st_key} ---\n"
+                        output += f"Titel: {st_issue['summary']}\n"
+                        output += f"Status: {st_issue['status']} | Zugewiesen: {st_issue['assignee']}\n"
+                        output += f"Beschreibung: {st_issue['description'][:500] if st_issue['description'] else '(keine)'}\n"
+                        if st_issue['comments']:
+                            output += f"Letzter Kommentar: {st_issue['comments'][-1]['body'][:200]}...\n"
+                    except Exception as e:
+                        output += f"\n--- Subtask {i}: {st_key} ---\n"
+                        output += f"FEHLER beim Laden: {str(e)}\n"
+            else:
+                # Nur Übersicht zeigen mit Hinweis
+                output += f"\n--- Subtasks ({len(subtasks)}) ---\n"
+                output += "INFO: Subtask-Details nicht geladen. Für vollständige Details:\n"
+                output += f"      read_jira_issue(issue_key='{issue_key}', include_subtasks=true)\n\n"
+                for st in subtasks:
+                    output += f"  - {st['key']}: {st['summary'][:60]} [{st['status']}]\n"
 
         if issue['comments']:
             output += f"\n--- Kommentare ({len(issue['comments'])}) ---\n"
@@ -2581,16 +2608,13 @@ SEARCH_JIRA_TOOL = Tool(
     name="search_jira",
     description="""Durchsucht Jira nach Issues. Unterstützt JQL-Queries, Freitext-Suche und direkte Issue-Keys.
 
-WICHTIG: Bei direktem Issue-Key (z.B. 'DIKA-123') oder Jira-URL wird automatisch das vollständige Issue geladen.
-
-SUBTASKS: Wenn ein Issue Subtasks hat, werden diese als Übersicht angezeigt.
-Für Details zu einem Subtask: read_jira_issue(issue_key='SUBTASK-KEY') aufrufen.
+WICHTIG: Bei direktem Issue-Key oder Jira-URL werden automatisch ALLE Details inkl. Subtask-Details geladen!
 
 Beispiele:
-- "DIKA-123" → Lädt Issue direkt (inkl. Subtask-Liste)
-- "https://jira.example.com/browse/DIKA-123" → Lädt Issue direkt
-- "Login Fehler" → Textsuche
-- "project=DIKA AND status=Open" → JQL-Suche""",
+- "DIKA-123" → Lädt Issue + alle Subtask-Details
+- "https://jira.example.com/browse/DIKA-123" → Lädt Issue + alle Subtask-Details
+- "Login Fehler" → Textsuche (nur Übersicht)
+- "project=DIKA AND status=Open" → JQL-Suche (nur Übersicht)""",
     category=ToolCategory.SEARCH,
     parameters=[
         ToolParameter("query", "string", "Issue-Key (PROJ-123), Jira-URL, Suchbegriff oder JQL-Query"),
@@ -2604,19 +2628,19 @@ READ_JIRA_ISSUE_TOOL = Tool(
     name="read_jira_issue",
     description="""Liest ein einzelnes Jira-Issue mit vollständiger Beschreibung, Details und den letzten Kommentaren.
 
-WANN VERWENDEN: Wenn ein konkreter Issue-Key bekannt ist (z.B. DIKA-123).
+PARAMETER:
+- issue_key: Der Issue-Schlüssel (z.B. 'PROJ-123')
+- include_subtasks: true = Lädt automatisch Details ALLER Subtasks mit (empfohlen!)
+                    false = Zeigt nur Subtask-Übersicht
 
-SUBTASKS-WORKFLOW:
-1. Hauptissue lesen: read_jira_issue(issue_key='PROJ-100')
-2. Antwort enthält Subtask-Liste mit DEREN Keys (z.B. PROJ-101, PROJ-102)
-3. Für Subtask-Details: read_jira_issue mit dem SUBTASK-Key aufrufen!
-   RICHTIG: read_jira_issue(issue_key='PROJ-101')  ← Subtask-Key
-   FALSCH:  read_jira_issue(issue_key='PROJ-100')  ← Das ist der Parent!
+EMPFEHLUNG: Bei Issues mit Subtasks IMMER include_subtasks=true verwenden!
+Beispiel: read_jira_issue(issue_key='PROJ-100', include_subtasks=true)
 
-WICHTIG: Der Subtask-Key ist NICHT der gleiche wie der Parent-Key!""",
+Das lädt das Hauptissue UND alle Subtask-Details in einem Aufruf.""",
     category=ToolCategory.KNOWLEDGE,
     parameters=[
         ToolParameter("issue_key", "string", "Issue-Schlüssel (z.B. 'PROJ-123')"),
+        ToolParameter("include_subtasks", "boolean", "true = Subtask-Details automatisch mitladen (empfohlen)", required=False, default=False),
     ],
     handler=read_jira_issue
 )
