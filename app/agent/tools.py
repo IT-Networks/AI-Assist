@@ -2526,7 +2526,7 @@ async def search_jira(query: str, project: str = "", max_results: int = 15) -> T
         return ToolResult(success=False, error=f"Jira-Fehler: {str(e)}")
 
 
-async def read_jira_issue(issue_key: str, include_subtasks: bool = False) -> ToolResult:
+async def read_jira_issue(issue_key: str, include_subtasks: bool = True) -> ToolResult:
     """Liest ein einzelnes Jira-Issue mit Details und Kommentaren."""
     import logging
     from app.services.jira_client import get_jira_client
@@ -2630,17 +2630,15 @@ READ_JIRA_ISSUE_TOOL = Tool(
 
 PARAMETER:
 - issue_key: Der Issue-Schlüssel (z.B. 'PROJ-123')
-- include_subtasks: true = Lädt automatisch Details ALLER Subtasks mit (empfohlen!)
-                    false = Zeigt nur Subtask-Übersicht
+- include_subtasks: true (DEFAULT) = Lädt automatisch Details ALLER Subtasks mit
+                    false = Zeigt nur Subtask-Übersicht ohne Details
 
-EMPFEHLUNG: Bei Issues mit Subtasks IMMER include_subtasks=true verwenden!
-Beispiel: read_jira_issue(issue_key='PROJ-100', include_subtasks=true)
-
-Das lädt das Hauptissue UND alle Subtask-Details in einem Aufruf.""",
+STANDARD-VERHALTEN: Subtasks werden automatisch mitgeladen.
+Falls ein Issue Subtasks hat, werden deren vollständige Details (Beschreibung, Status, etc.) direkt mitgeliefert.""",
     category=ToolCategory.KNOWLEDGE,
     parameters=[
         ToolParameter("issue_key", "string", "Issue-Schlüssel (z.B. 'PROJ-123')"),
-        ToolParameter("include_subtasks", "boolean", "true = Subtask-Details automatisch mitladen (empfohlen)", required=False, default=False),
+        ToolParameter("include_subtasks", "boolean", "Subtask-Details automatisch mitladen (Default: true)", required=False, default=True),
     ],
     handler=read_jira_issue
 )
