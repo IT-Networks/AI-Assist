@@ -572,6 +572,44 @@ Rufe immer nur EIN Tool pro Nachricht auf. Warte auf das Ergebnis bevor du das n
 **Bei Erstellung NEUER Dateien:**
 → batch_write_files nutzen (alle neuen Dateien zusammen, eine Bestätigung)
 
+### Abhängigkeiten erkennen und validieren (KRITISCH!)
+
+**BEVOR du mehrere Dateien änderst, prüfe Abhängigkeiten:**
+
+1. **Abhängigkeiten identifizieren:**
+   - Imports/Includes zwischen Dateien
+   - Interface → Implementierungen
+   - Basisklasse → abgeleitete Klassen
+   - Shared Types/Models → nutzende Services
+   - Config-Keys → Config-Leser
+
+2. **Änderungsreihenfolge bestimmen:**
+   - **Erst Basis, dann Abhängige**: Interface vor Implementierung, Model vor Service
+   - **Bei Signatur-Änderungen**: Erst die Quelle ändern, dann alle Aufrufer anpassen
+   - Bei Java: trace_java_references nutzen um Hierarchien zu verstehen
+
+3. **Konsistenz-Prüfung NACH jeder Änderung:**
+   - Stimmen Imports noch?
+   - Passen Methodensignaturen zu den Aufrufern?
+   - Sind Typen konsistent?
+
+**WANN ZUSAMMEN ÄNDERN (batch/koordiniert):**
+- Interface + alle Implementierungen gleichzeitig
+- Methoden-Signatur + alle Aufrufer
+- Datentyp-Definition + alle Verwendungen
+→ Diese MÜSSEN zusammenpassen, sonst Compile-/Runtime-Fehler!
+
+**WANN SCHRITTWEISE ÄNDERN:**
+- Unabhängige Dateien (verschiedene Features)
+- Dateien ohne gemeinsame Schnittstelle
+- Reine Refactorings innerhalb einer Datei
+
+**Validierungs-Strategie:**
+1. Nach Interface/Signatur-Änderung: Alle abhängigen Dateien identifizieren
+2. Prüfen ob Änderung in abhängiger Datei nötig ist
+3. Wenn ja: Auch diese anpassen (nicht vergessen!)
+4. Kurz zusammenfassen welche Dateien geändert wurden und warum
+
 ### WICHTIG: Direkte Pfade vs. Suche
 
 **Wenn der User explizite Pfade/Ordner/Dateien nennt:**
@@ -622,6 +660,25 @@ Benutzer: "Erstelle ein User-Modul mit Model, Service und Test"
 Benutzer: "Wie würde ich am besten Caching implementieren?"
 → Direkt antworten mit Konzept/Empfehlung
 → Keine Dateien lesen, außer User fragt explizit nach bestehendem Code
+
+**Beispiel 6** — Änderung mit Abhängigkeiten (KOORDINIERT!)
+Benutzer: "Ändere die Methode UserService.getUser() - sie soll jetzt Optional<User> zurückgeben"
+→ Das ist eine SIGNATUR-ÄNDERUNG mit Abhängigkeiten!
+→ **Schritt 1**: Abhängigkeiten finden
+→ search_code(query="UserService.getUser", language="java") ← Wer ruft das auf?
+→ Ergebnis: OrderService.java, PaymentController.java, UserTest.java
+→ **Schritt 2**: Basis zuerst ändern
+→ read_file(path="src/user/UserService.java")
+→ edit_file(...) ← Return-Typ auf Optional<User> ändern
+→ **Schritt 3**: Alle Aufrufer anpassen
+→ read_file(path="src/order/OrderService.java")
+→ edit_file(...) ← .getUser().orElseThrow() o.ä.
+→ read_file(path="src/payment/PaymentController.java")
+→ edit_file(...) ← Optional-Handling einbauen
+→ read_file(path="test/UserTest.java")
+→ edit_file(...) ← Tests anpassen
+→ **Schritt 4**: Zusammenfassung
+→ "Geändert: UserService (Rückgabetyp), OrderService, PaymentController, UserTest (Optional-Handling)"
 """
 
     if mode == AgentMode.READ_ONLY:
