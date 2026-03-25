@@ -867,19 +867,76 @@ async def grep_content(
 async def write_file(path: str, content: str) -> ToolResult:
     """
     Schreibt Inhalt in eine Datei (benötigt Bestätigung).
+
+    Args:
+        path: Pfad zur Datei (absolut oder relativ)
+        content: Inhalt der geschrieben werden soll
     """
+    import os
+    from pathlib import Path
+    from app.core.config import settings
+
+    # Pfad normalisieren
+    path = path.strip()
+    if not path:
+        return ToolResult(success=False, error="Kein Pfad angegeben")
+
+    # Pfad-Auflösung (analog zu read_file)
+    resolved_path = None
+    p = Path(path)
+
+    if p.is_absolute():
+        # Absoluter Pfad - direkt verwenden
+        resolved_path = str(p)
+    else:
+        # Relativer Pfad - in konfigurierten Verzeichnissen suchen
+        search_bases = []
+
+        # Alle Java-Repos
+        for repo_path in settings.java.get_all_paths():
+            if repo_path:
+                search_bases.append(Path(repo_path))
+
+        # Alle Python-Repos
+        for repo_path in settings.python.get_all_paths():
+            if repo_path:
+                search_bases.append(Path(repo_path))
+
+        # Aktuelles Arbeitsverzeichnis als Fallback
+        search_bases.append(Path(os.getcwd()))
+
+        # 1. Prüfe ob Datei bereits existiert (für Überschreiben)
+        for base in search_bases:
+            full_path = base / path
+            if full_path.exists():
+                resolved_path = str(full_path.resolve())
+                break
+
+        # 2. Wenn Datei nicht existiert: nehme erstes gültiges Basis-Verzeichnis für neue Datei
+        if not resolved_path:
+            for base in search_bases:
+                if base.exists() and base.is_dir():
+                    # Stelle sicher dass Parent-Verzeichnis existiert oder erstellt werden kann
+                    target = base / path
+                    resolved_path = str(target.resolve())
+                    break
+
+        # 3. Fallback: relativer Pfad vom cwd
+        if not resolved_path:
+            resolved_path = str((Path(os.getcwd()) / path).resolve())
+
     try:
         from app.services.file_manager import get_file_manager
         manager = get_file_manager()
-        preview = await manager.write_file(path, content)
+        preview = await manager.write_file(resolved_path, content)
 
         return ToolResult(
             success=True,
             requires_confirmation=True,
-            data=f"Datei wird erstellt/überschrieben: {path}",
+            data=f"Datei wird erstellt/überschrieben: {resolved_path}",
             confirmation_data={
                 "operation": "write_file",
-                "path": path,
+                "path": resolved_path,
                 "is_new": preview.is_new,
                 "diff": preview.diff,
                 "content": content,
@@ -892,7 +949,42 @@ async def write_file(path: str, content: str) -> ToolResult:
 async def create_directory(path: str) -> ToolResult:
     """
     Erstellt ein Verzeichnis (Ordner).
+
+    Args:
+        path: Pfad zum Verzeichnis (absolut oder relativ)
     """
+    import os
+    from pathlib import Path
+    from app.core.config import settings
+
+    # Pfad normalisieren
+    path = path.strip()
+    if not path:
+        return ToolResult(success=False, error="Kein Pfad angegeben")
+
+    # Pfad-Auflösung (analog zu read_file/write_file)
+    p = Path(path)
+
+    if not p.is_absolute():
+        # Relativer Pfad - erstes gültiges Basis-Verzeichnis verwenden
+        search_bases = []
+
+        for repo_path in settings.java.get_all_paths():
+            if repo_path:
+                search_bases.append(Path(repo_path))
+
+        for repo_path in settings.python.get_all_paths():
+            if repo_path:
+                search_bases.append(Path(repo_path))
+
+        search_bases.append(Path(os.getcwd()))
+
+        # Nehme erstes existierendes Basis-Verzeichnis
+        for base in search_bases:
+            if base.exists() and base.is_dir():
+                path = str((base / path).resolve())
+                break
+
     try:
         from app.services.file_manager import get_file_manager
         manager = get_file_manager()
@@ -922,15 +1014,58 @@ async def edit_file(
     Bearbeitet eine Datei durch String-Ersetzung (benötigt Bestätigung).
 
     Args:
-        path: Pfad zur Datei
+        path: Pfad zur Datei (absolut oder relativ)
         old_string: Zu ersetzender Text (muss eindeutig sein bei replace_all=False)
         new_string: Neuer Text
         replace_all: Wenn True, werden ALLE Vorkommen ersetzt
     """
+    import os
+    from pathlib import Path
+    from app.core.config import settings
+
+    # Pfad normalisieren
+    path = path.strip()
+    if not path:
+        return ToolResult(success=False, error="Kein Pfad angegeben")
+
+    # Pfad-Auflösung (analog zu read_file)
+    resolved_path = None
+    p = Path(path)
+
+    if p.is_absolute():
+        resolved_path = str(p)
+    else:
+        # Relativer Pfad - in konfigurierten Verzeichnissen suchen
+        search_bases = []
+
+        for repo_path in settings.java.get_all_paths():
+            if repo_path:
+                search_bases.append(Path(repo_path))
+
+        for repo_path in settings.python.get_all_paths():
+            if repo_path:
+                search_bases.append(Path(repo_path))
+
+        search_bases.append(Path(os.getcwd()))
+
+        # Suche existierende Datei
+        for base in search_bases:
+            full_path = base / path
+            if full_path.exists():
+                resolved_path = str(full_path.resolve())
+                break
+
+        if not resolved_path:
+            searched = ", ".join(str(b) for b in search_bases[:3])
+            return ToolResult(
+                success=False,
+                error=f"Datei nicht gefunden: {path}\nGesucht in: {searched}"
+            )
+
     try:
         from app.services.file_manager import get_file_manager
         manager = get_file_manager()
-        preview = await manager.edit_file(path, old_string, new_string, replace_all)
+        preview = await manager.edit_file(resolved_path, old_string, new_string, replace_all)
 
         # Info über Anzahl der Ersetzungen
         count_info = ""
@@ -940,10 +1075,10 @@ async def edit_file(
         return ToolResult(
             success=True,
             requires_confirmation=True,
-            data=f"Datei wird bearbeitet: {path}{count_info}",
+            data=f"Datei wird bearbeitet: {resolved_path}{count_info}",
             confirmation_data={
                 "operation": "edit_file",
-                "path": path,
+                "path": resolved_path,
                 "diff": preview.diff,
                 "old_string": old_string,
                 "new_string": new_string,
