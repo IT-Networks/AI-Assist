@@ -15374,6 +15374,8 @@ const TEMPLATE_ICONS = {
   api: '🔌',
   test: '🧪',
   config: '⚙️',
+  review: '✅',
+  jira: '🎫',
   default: '📋'
 };
 

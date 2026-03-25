@@ -893,6 +893,33 @@ class PromptTemplatesConfig(BaseModel):
             is_builtin=True,
             sort_order=31
         ),
+        # === Code Review Templates ===
+        PromptTemplate(
+            id="codereview_findings",
+            name="Code Review bearbeiten",
+            description="Bearbeite Code Review Findings aus einem Jira-Ticket",
+            icon="bug",
+            category="review",
+            prompt="""Bearbeite die Code Review Findings aus dem Jira-Ticket.
+
+## Aufgabe
+Lies das Jira **{{jira_key}}** mit allen Subtasks (jedes Finding ist ein Subtask) und bearbeite diese Schritt für Schritt im Repository **{{repo}}**.
+
+## Workflow
+1. **Jira lesen**: `read_jira_issue(issue_key="{{jira_key}}", include_subtasks=true)`
+2. **Übersicht zeigen**: Liste alle Findings mit Status
+3. **Pro Finding**:
+   - Subtask-Details lesen
+   - Betroffene Datei(en) im Repo lesen
+   - Fix erklären und bestätigen lassen
+   - Änderung mit edit_file durchführen
+4. **Abschluss**: Zusammenfassung + Git-Commit-Vorschlag
+
+Starte jetzt mit dem Lesen des Jira-Tickets.""",
+            placeholders=["jira_key", "repo"],
+            is_builtin=True,
+            sort_order=40
+        ),
     ])
 
 
