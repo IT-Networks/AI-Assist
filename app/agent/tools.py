@@ -678,16 +678,76 @@ async def list_files(
     pattern: str = "*",
     recursive: bool = False
 ) -> ToolResult:
-    """Listet Dateien in einem Verzeichnis auf."""
+    """
+    Listet Dateien in einem Verzeichnis auf.
+
+    Args:
+        path: Pfad zum Verzeichnis (absolut oder relativ)
+        pattern: Glob-Pattern für Dateinamen (default: *)
+        recursive: Rekursiv suchen
+    """
+    import os
+    from pathlib import Path
+    from app.core.config import settings
+
+    # Pfad normalisieren
+    path = path.strip()
+    if not path:
+        return ToolResult(success=False, error="Kein Pfad angegeben")
+
+    # Pfad-Auflösung (analog zu read_file)
+    resolved_path = None
+    p = Path(path)
+
+    if p.is_absolute():
+        if p.exists() and p.is_dir():
+            resolved_path = str(p)
+        else:
+            return ToolResult(success=False, error=f"Verzeichnis nicht gefunden: {path}")
+    else:
+        # Relativer Pfad - in konfigurierten Verzeichnissen suchen
+        search_bases = []
+
+        for repo_path in settings.java.get_all_paths():
+            if repo_path:
+                search_bases.append(Path(repo_path))
+
+        for repo_path in settings.python.get_all_paths():
+            if repo_path:
+                search_bases.append(Path(repo_path))
+
+        search_bases.append(Path(os.getcwd()))
+
+        # Suche existierendes Verzeichnis
+        for base in search_bases:
+            full_path = base / path
+            if full_path.exists() and full_path.is_dir():
+                resolved_path = str(full_path.resolve())
+                break
+
+        # Fallback: "." oder leerer Pfad → erstes Repo-Verzeichnis
+        if not resolved_path and path in (".", ""):
+            for base in search_bases:
+                if base.exists() and base.is_dir():
+                    resolved_path = str(base.resolve())
+                    break
+
+        if not resolved_path:
+            searched = ", ".join(str(b) for b in search_bases[:3])
+            return ToolResult(
+                success=False,
+                error=f"Verzeichnis nicht gefunden: {path}\nGesucht in: {searched}"
+            )
+
     try:
         from app.services.file_manager import get_file_manager
         manager = get_file_manager()
-        files = await manager.list_files(path, pattern=pattern, recursive=recursive)
+        files = await manager.list_files(resolved_path, pattern=pattern, recursive=recursive)
 
         if not files:
-            return ToolResult(success=True, data=f"Keine Dateien gefunden in {path}")
+            return ToolResult(success=True, data=f"Keine Dateien gefunden in {resolved_path}")
 
-        output = f"Dateien in {path}:\n"
+        output = f"Dateien in {resolved_path}:\n"
         for f in files[:50]:  # Max 50 Dateien
             output += f"  {f}\n"
 
