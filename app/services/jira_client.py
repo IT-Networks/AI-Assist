@@ -88,7 +88,7 @@ class JiraClient:
         payload = {
             "jql": jql,
             "maxResults": max_results,
-            "fields": ["summary", "status", "assignee", "priority", "updated", "issuetype"],
+            "fields": ["summary", "status", "assignee", "priority", "updated", "issuetype", "parent", "subtasks"],
         }
 
         client = _get_http_client()
@@ -108,6 +108,12 @@ class JiraClient:
         results = []
         for issue in data.get("issues", []):
             fields = issue.get("fields", {})
+            # Parent-Key extrahieren (falls Subtask)
+            parent_data = fields.get("parent")
+            parent_key = parent_data.get("key", "") if parent_data else ""
+            # Subtask-Anzahl
+            subtasks = fields.get("subtasks", [])
+            subtask_count = len(subtasks)
             results.append({
                 "key": issue.get("key", ""),
                 "summary": fields.get("summary", ""),
@@ -116,6 +122,8 @@ class JiraClient:
                 "priority": (fields.get("priority") or {}).get("name", ""),
                 "type": (fields.get("issuetype") or {}).get("name", ""),
                 "updated": fields.get("updated", ""),
+                "parent_key": parent_key,
+                "subtask_count": subtask_count,
                 "url": f"{self.base_url}/browse/{issue.get('key', '')}",
             })
         return results
@@ -172,6 +180,32 @@ class JiraClient:
                 "body": body,
             })
 
+        # Subtasks extrahieren (vollständiger Key, nicht nur ID)
+        subtasks = []
+        for st in fields.get("subtasks", []):
+            st_key = st.get("key", "")
+            st_fields = st.get("fields", {})
+            subtasks.append({
+                "key": st_key,
+                "summary": st_fields.get("summary", ""),
+                "status": (st_fields.get("status") or {}).get("name", ""),
+                "type": (st_fields.get("issuetype") or {}).get("name", "Sub-task"),
+                "url": f"{self.base_url}/browse/{st_key}",
+            })
+
+        # Parent-Issue ermitteln (falls dies ein Subtask ist)
+        parent = None
+        parent_data = fields.get("parent")
+        if parent_data:
+            parent_key = parent_data.get("key", "")
+            parent_fields = parent_data.get("fields", {})
+            parent = {
+                "key": parent_key,
+                "summary": parent_fields.get("summary", ""),
+                "status": (parent_fields.get("status") or {}).get("name", ""),
+                "url": f"{self.base_url}/browse/{parent_key}",
+            }
+
         return {
             "key": data.get("key", ""),
             "summary": fields.get("summary", ""),
@@ -186,6 +220,8 @@ class JiraClient:
             "labels": fields.get("labels", []),
             "components": [c.get("name", "") for c in fields.get("components", [])],
             "comments": comments,
+            "subtasks": subtasks,
+            "parent": parent,
             "url": f"{self.base_url}/browse/{data.get('key', '')}",
         }
 

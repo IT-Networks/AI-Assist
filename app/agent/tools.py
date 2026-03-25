@@ -2491,6 +2491,14 @@ async def search_jira(query: str, project: str = "", max_results: int = 15) -> T
             output += f"🎫 {r['key']}: {r['summary']}\n"
             output += f"   Status: {r['status']} | Typ: {r['type']} | Priorität: {r['priority']}\n"
             output += f"   Zugewiesen: {r['assignee']} | Aktualisiert: {r['updated'][:10] if r['updated'] else '-'}\n"
+            # Parent anzeigen (falls Subtask)
+            parent_key = r.get('parent_key', '')
+            if parent_key:
+                output += f"   ↳ Subtask von: {parent_key}\n"
+            # Subtask-Anzahl anzeigen
+            subtask_count = r.get('subtask_count', 0)
+            if subtask_count > 0:
+                output += f"   📎 {subtask_count} Subtask(s)\n"
             output += f"   URL: {r['url']}\n\n"
 
         return ToolResult(success=True, data=output)
@@ -2520,8 +2528,24 @@ async def read_jira_issue(issue_key: str) -> ToolResult:
             output += f"Labels: {', '.join(issue['labels'])}\n"
         if issue['components']:
             output += f"Komponenten: {', '.join(issue['components'])}\n"
+
+        # Parent-Issue anzeigen (falls Subtask)
+        parent = issue.get('parent')
+        if parent:
+            output += f"\n--- Übergeordnetes Issue ---\n"
+            output += f"🔗 {parent['key']}: {parent['summary']} ({parent['status']})\n"
+            output += f"   URL: {parent['url']}\n"
+
         output += f"URL: {issue['url']}\n"
         output += f"\n--- Beschreibung ---\n{issue['description'] or '(keine Beschreibung)'}\n"
+
+        # Subtasks anzeigen
+        subtasks = issue.get('subtasks', [])
+        if subtasks:
+            output += f"\n--- Subtasks ({len(subtasks)}) ---\n"
+            for st in subtasks:
+                output += f"📎 {st['key']}: {st['summary']} ({st['status']})\n"
+                output += f"   URL: {st['url']}\n"
 
         if issue['comments']:
             output += f"\n--- Kommentare ({len(issue['comments'])}) ---\n"
