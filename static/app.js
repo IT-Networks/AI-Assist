@@ -5084,6 +5084,12 @@ async function sendChatInternal(message) {
     return;
   }
 
+  // Stuck-Hint entfernen wenn vorhanden (neue Anfrage = neuer Versuch)
+  const stuckHint = activeChat.pane?.querySelector('.stuck-hint');
+  if (stuckHint) {
+    stuckHint.remove();
+  }
+
   // Nur interne Nachrichten ([CONTINUE], etc.) nicht anzeigen
   if (!message.startsWith('[')) {
     appendMessage('user', message);
@@ -5764,7 +5770,8 @@ function showStuckDetectedNotification(data, chat) {
         <div class="hint-suggestion">${suggestionHtml}</div>
       </div>
     `;
-    hintDiv.scrollIntoView({ behavior: 'smooth', block: 'end' });
+    // Immer nach unten scrollen statt zum Hint-Element
+    scrollToBottom();
   }
 
   log.warn('[Stuck Detected]', data);
