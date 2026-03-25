@@ -265,6 +265,7 @@ class LLMClient:
         model = model or self.default_model
         # Mistral-Kompatibilität
         if _is_mistral_model(model):
+            logger.info(f"[llm.chat] Mistral detected: {model}, sanitizing messages")
             messages = _sanitize_messages_for_mistral(messages)
         payload = {
             "model": model,
@@ -494,8 +495,13 @@ class LLMClient:
             logger.debug("[llm] Tool-Prefill aktiviert")
 
         # Mistral-Kompatibilität: System-Messages nach Tool-Responses konvertieren
+        logger.info(f"[llm] Model check: '{model}' is_mistral={_is_mistral_model(model)}")
         if _is_mistral_model(model):
+            original_roles = [m.get("role") for m in messages]
             messages = _sanitize_messages_for_mistral(messages)
+            new_roles = [m.get("role") for m in messages]
+            if original_roles != new_roles:
+                logger.info(f"[llm] Mistral sanitization applied: {original_roles} -> {new_roles}")
 
         payload = {
             "model": model,
