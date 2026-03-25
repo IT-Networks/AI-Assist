@@ -610,6 +610,16 @@ class LLMClient:
             if changed:
                 logger.warning(f"[llm] Mistral sanitization: {original_roles} -> {new_roles}")
 
+        # Für Mistral-Modelle: Optimierungen für Tool-Calls
+        if is_mistral and tools:
+            # 1. Längerer Timeout - Mistral mit Tools braucht mehr Zeit
+            timeout = max(timeout, 180.0)  # 3 Minuten
+            # 2. Niedrigere Temperature für konsistente Tool-Calls (Mistral-Empfehlung)
+            if temperature > 0.3:
+                temperature = 0.2
+                print(f"[LLM DEBUG] Mistral: temperature reduced to {temperature} for tool consistency")
+            print(f"[LLM DEBUG] Mistral with tools: timeout={timeout}s, temp={temperature}")
+
         payload = {
             "model": model,
             "messages": messages,
@@ -621,6 +631,9 @@ class LLMClient:
         if tools:
             payload["tools"] = tools
             payload["tool_choice"] = tool_choice
+            # Debug: Log tool and message info
+            total_msg_chars = sum(len(str(m.get("content", ""))) for m in messages)
+            print(f"[LLM DEBUG] Payload: {len(messages)} msgs ({total_msg_chars} chars), {len(tools)} tools, timeout={timeout}s")
 
         last_exc = None
         for attempt, delay in enumerate([0] + _RETRY_DELAYS):
@@ -629,12 +642,18 @@ class LLMClient:
                 await asyncio.sleep(delay)
             try:
                 client = _get_http_client()
+                import time
+                start_time = time.time()
+                print(f"[LLM DEBUG] Sending request to {model}... (attempt {attempt + 1})")
+
                 response = await client.post(
                     f"{self.base_url}/chat/completions",
                     headers=self._headers(),
                     json=payload,
                     timeout=timeout,
                 )
+                elapsed = time.time() - start_time
+                print(f"[LLM DEBUG] Response received in {elapsed:.1f}s (status {response.status_code})")
                 response.raise_for_status()
                 data = response.json()
 
