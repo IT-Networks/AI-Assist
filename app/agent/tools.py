@@ -237,42 +237,30 @@ class ToolRegistry:
 # Tool Implementations
 # ══════════════════════════════════════════════════════════════════════════════
 
-async def get_active_repositories() -> ToolResult:
+async def get_project_paths() -> ToolResult:
     """
-    Zeigt die aktuell konfigurierten Repository-Pfade und Suchverzeichnisse.
-    Hilft der AI zu verstehen, wo lokale Dateien gesucht werden.
+    Zeigt die indexierten Projekt-Pfade.
+    Diese Pfade können für Dateioperationen verwendet werden.
     """
     from app.core.config import settings
     from pathlib import Path
 
-    output = "=== Aktive Repositories und Suchpfade ===\n\n"
+    output = "=== Indexierte Projekt-Pfade ===\n\n"
 
-    # Java Repository
-    java_path = settings.java.get_active_path() if hasattr(settings.java, 'get_active_path') else None
-    if java_path:
-        exists = "✓" if Path(java_path).exists() else "✗ (nicht erreichbar)"
-        output += f"📁 Java-Repository: {java_path} {exists}\n"
+    # Erlaubte Pfade aus file_operations
+    allowed_paths = settings.file_operations.allowed_paths
+    if allowed_paths:
+        for i, path in enumerate(allowed_paths, 1):
+            exists = "✓" if Path(path).exists() else "✗ (nicht erreichbar)"
+            output += f"📁 Projekt {i}: {path} {exists}\n"
     else:
-        output += "📁 Java-Repository: nicht konfiguriert\n"
+        output += "⚠️ Keine Projekt-Pfade konfiguriert.\n"
+        output += "Konfiguriere 'file_operations.allowed_paths' in config.yaml\n"
 
-    # Python Repository
-    python_path = settings.python.get_active_path() if hasattr(settings.python, 'get_active_path') else None
-    if python_path:
-        exists = "✓" if Path(python_path).exists() else "✗ (nicht erreichbar)"
-        output += f"📁 Python-Repository: {python_path} {exists}\n"
-    else:
-        output += "📁 Python-Repository: nicht konfiguriert\n"
-
-    output += "\n--- Pfad-Auflösung ---\n"
-    output += "Relative Pfade werden in folgender Reihenfolge gesucht:\n"
-    output += "1. Java-Repository (falls konfiguriert)\n"
-    output += "2. Python-Repository (falls konfiguriert)\n"
-    output += "3. Aktuelles Arbeitsverzeichnis\n"
-
-    output += "\n--- Tipps ---\n"
+    output += "\n--- Verwendung ---\n"
+    output += "• Für Dateioperationen: Absolute Pfade innerhalb dieser Verzeichnisse verwenden\n"
     output += "• Pfade aus search_code Ergebnissen direkt mit read_file verwenden\n"
     output += "• Bei Stacktraces: Datei-Pfad aus Stacktrace direkt übernehmen\n"
-    output += "• Für spezifische Suche: Absoluten Pfad oder Unterverzeichnis angeben\n"
 
     return ToolResult(success=True, data=output)
 
@@ -1850,14 +1838,14 @@ LIST_FILES_TOOL = Tool(
     name="list_files",
     description=(
         "Listet Dateien in einem LOKALEN Verzeichnis auf. Für Pattern-Suche nutze glob_files. "
-        "PFAD: Absolut oder relativ. Bei '.' wird im aktiven Java/Python-Repo gesucht. "
+        "PFAD: Absoluter Pfad zum Verzeichnis. "
         "WICHTIG: Für GitHub-Repos verwende github_list_repos."
     ),
     category=ToolCategory.FILE,
     parameters=[
         ToolParameter("path", "string",
-            "Verzeichnispfad. Absolut (z.B. 'C:/repo/src') oder relativ zum aktiven Repository. "
-            "Nutze get_active_repositories um konfigurierte Pfade zu sehen."
+            "Absoluter Verzeichnispfad (z.B. 'C:/repo/src'). "
+            "Nutze get_project_paths um indexierte Projekt-Pfade zu sehen."
         ),
         ToolParameter("pattern", "string", "Glob-Pattern (z.B. '*.java')", required=False, default="*"),
         ToolParameter("recursive", "boolean", "Auch Unterverzeichnisse durchsuchen", required=False, default=False),
@@ -1870,15 +1858,15 @@ GLOB_FILES_TOOL = Tool(
     description=(
         "Sucht Dateien nach Glob-Pattern (wie Claude Code). Schneller als list_files für Pattern-Suche. "
         "Patterns: '**/*.py' (rekursiv), 'src/**/*.java', '*.md'. "
-        "PFAD: Bei '.' (default) wird im aktiven Java/Python-Repo gesucht. "
+        "PFAD: Absoluter Pfad zum Basisverzeichnis. "
         "Sortiert standardmäßig nach Änderungsdatum (neueste zuerst)."
     ),
     category=ToolCategory.FILE,
     parameters=[
         ToolParameter("pattern", "string", "Glob-Pattern (z.B. '**/*.py', 'src/**/*.java')"),
         ToolParameter("path", "string",
-            "Basisverzeichnis. '.' = aktives Repository (Java oder Python). "
-            "Für spezifisches Repo: Absoluten Pfad oder Pfad aus get_active_repositories verwenden.",
+            "Absoluter Pfad zum Basisverzeichnis. "
+            "Nutze get_project_paths für indexierte Projekt-Pfade.",
             required=False, default="."
         ),
         ToolParameter("sort_by", "string", "Sortierung: mtime|name|size", required=False, default="mtime"),
@@ -1894,14 +1882,14 @@ GREP_CONTENT_TOOL = Tool(
         "NUTZE WENN: Du in einem SPEZIFISCHEN Verzeichnis/Pfad suchen willst. "
         "Für ALLGEMEINE Code-Suche: search_code ist einfacher (hat Sprachfilter). "
         "UNTERSCHIED zu search_code: grep_content erlaubt freie Pfadangabe + beliebige Glob-Patterns. "
-        "PFAD: '.' = aktives Repository, oder spezifischer Pfad wie 'src/main/java/com/example'. "
+        "PFAD: Absoluter Pfad zum Verzeichnis. "
         "Zeigt Kontext-Zeilen vor/nach dem Treffer."
     ),
     category=ToolCategory.SEARCH,
     parameters=[
         ToolParameter("pattern", "string", "Suchtext oder Regex (z.B. 'def process_', 'class.*Handler', Fehlermeldung)"),
         ToolParameter("path", "string",
-            "Verzeichnis oder Datei. '.' = aktives Repository. "
+            "Absoluter Pfad zum Verzeichnis oder zur Datei. "
             "Bei Stacktrace: Verzeichnis aus Stacktrace-Pfad (z.B. 'src/main/java/com/example').",
             required=False, default="."
         ),
@@ -1913,16 +1901,16 @@ GREP_CONTENT_TOOL = Tool(
     handler=grep_content
 )
 
-GET_ACTIVE_REPOSITORIES_TOOL = Tool(
-    name="get_active_repositories",
+GET_PROJECT_PATHS_TOOL = Tool(
+    name="get_project_paths",
     description=(
-        "Zeigt die aktuell konfigurierten Repository-Pfade und erklärt die Pfad-Auflösung. "
-        "NUTZE DIESES TOOL wenn du unsicher bist, wo lokale Dateien gesucht werden oder welche Pfade gültig sind. "
+        "Zeigt die indexierten Projekt-Pfade für Dateioperationen. "
+        "NUTZE DIESES TOOL wenn du wissen willst, welche Verzeichnisse für Lese-/Schreiboperationen verfügbar sind. "
         "Hilft bei Stacktrace-Analyse und gezielter Dateisuche."
     ),
     category=ToolCategory.KNOWLEDGE,
     parameters=[],
-    handler=get_active_repositories
+    handler=get_project_paths
 )
 
 WRITE_FILE_TOOL = Tool(
@@ -1930,12 +1918,13 @@ WRITE_FILE_TOOL = Tool(
     description=(
         "Erstellt oder überschreibt eine LOKALE DATEI (keine Ordner!). BENÖTIGT USER-BESTÄTIGUNG. "
         "WICHTIG: Für Ordner verwende create_directory! Pfad muss Dateiendung haben (z.B. .py, .java, .md). "
-        "Pfad: Relativ (src/file.py) oder absolut. Relative Pfade werden im Projekt-Verzeichnis erstellt."
+        "Pfad: Absolut oder relativ zum indexierten Projekt-Verzeichnis. "
+        "NICHT für GitHub-Repos - diese können nicht direkt beschrieben werden."
     ),
     category=ToolCategory.FILE,
     is_write_operation=True,
     parameters=[
-        ToolParameter("path", "string", "Pfad zur Datei (relativ oder absolut, mit Dateiendung!)"),
+        ToolParameter("path", "string", "Absoluter Pfad zur Datei (mit Dateiendung!)"),
         ToolParameter("content", "string", "Neuer Dateiinhalt"),
     ],
     handler=write_file
@@ -1958,11 +1947,11 @@ CREATE_DIRECTORY_TOOL = Tool(
 EDIT_FILE_TOOL = Tool(
     name="edit_file",
     description=(
-        "Bearbeitet eine Datei durch String-Ersetzung (wie Claude Code Edit). BENÖTIGT BESTÄTIGUNG. "
+        "Bearbeitet eine LOKALE Datei durch String-Ersetzung (wie Claude Code Edit). BENÖTIGT BESTÄTIGUNG. "
         "WICHTIG: old_string muss EINDEUTIG sein! Bei mehrfachem Vorkommen: "
         "1) Mehr Kontext in old_string aufnehmen, oder 2) replace_all=true für alle Ersetzungen. "
-        "Pfad: Relativ (src/file.py) oder absolut (/home/user/project/src/file.py). "
-        "Relative Pfade werden automatisch im Projekt-Verzeichnis gesucht."
+        "Pfad: Absolut oder relativ zum indexierten Projekt-Verzeichnis. "
+        "NICHT für GitHub-Repos - diese können nicht direkt bearbeitet werden."
     ),
     category=ToolCategory.FILE,
     is_write_operation=True,
@@ -2455,14 +2444,16 @@ async def search_jira(query: str, project: str = "", max_results: int = 15) -> T
         return ToolResult(success=False, error="Jira ist nicht konfiguriert oder deaktiviert")
 
     try:
-        # Issue-Key aus URL extrahieren (z.B. https://jira.example.com/browse/DIKA-123)
-        url_match = re.search(r'/browse/([A-Z]+-\d+)', query, re.IGNORECASE)
+        # Issue-Key aus URL extrahieren (z.B. https://jira.example.com/browse/DIKA-123 oder AB-CD-456)
+        # Pattern: Projekt-Key (Buchstaben mit optionalen Bindestrichen) + Bindestrich + Zahl
+        url_match = re.search(r'/browse/([A-Z]+(?:-[A-Z]+)*-\d+)', query, re.IGNORECASE)
         if url_match:
             issue_key = url_match.group(1).upper()
             return await read_jira_issue(issue_key)
 
-        # Direkter Issue-Key (z.B. "DIKA-123") - direkt lesen statt suchen
-        if re.match(r'^[A-Z]+-\d+$', query.strip(), re.IGNORECASE):
+        # Direkter Issue-Key (z.B. "DIKA-123" oder "AB-CD-456") - direkt lesen statt suchen
+        # Erlaubt Projekt-Keys mit Bindestrichen: ABC-123, AB-CD-123, A-B-C-123
+        if re.match(r'^[A-Z]+(?:-[A-Z]+)*-\d+$', query.strip(), re.IGNORECASE):
             return await read_jira_issue(query.strip().upper())
 
         client = get_jira_client()
@@ -2659,7 +2650,7 @@ def create_default_registry() -> ToolRegistry:
     registry.register(GET_SERVICE_INFO_TOOL)
     registry.register(GET_PDF_INFO_TOOL)
     registry.register(READ_PDF_PAGES_TOOL)
-    registry.register(GET_ACTIVE_REPOSITORIES_TOOL)
+    registry.register(GET_PROJECT_PATHS_TOOL)
 
     # Analysis Tools
     registry.register(TRACE_JAVA_REFERENCES_TOOL)
