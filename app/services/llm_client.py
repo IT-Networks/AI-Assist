@@ -77,7 +77,21 @@ def _sanitize_messages_for_mistral(messages: List[Dict]) -> List[Dict]:
 
         elif role == "assistant":
             # Check if this assistant has tool_calls
-            last_had_tool_calls = bool(msg_copy.get("tool_calls"))
+            tool_calls = msg_copy.get("tool_calls")
+            content = msg_copy.get("content")
+            last_had_tool_calls = bool(tool_calls)
+
+            # Mistral: Assistant muss entweder content ODER tool_calls haben
+            # Leere Assistant-Messages sind ungültig!
+            if not content and not tool_calls:
+                # Skip empty assistant messages entirely
+                logger.debug("[llm] Mistral: Skipping empty assistant message (no content, no tool_calls)")
+                continue
+
+            # Ensure content is not None when no tool_calls (Mistral requirement)
+            if not tool_calls and content is None:
+                msg_copy["content"] = ""
+
             seen_non_system = True
 
         else:  # user
@@ -564,7 +578,8 @@ class LLMClient:
 
         # Tool-Prefill: Assistant-Message mit [TOOL_CALLS] Prefix hinzufügen
         # Zwingt das Modell, im richtigen Format zu antworten
-        if use_tool_prefill and tools:
+        # NICHT für Mistral - dort ist prefix: True nicht unterstützt
+        if use_tool_prefill and tools and not is_mistral:
             messages = [dict(m) for m in messages]  # Kopie
             # LiteLLM-Style Prefill mit prefix: true
             messages.append({
@@ -574,15 +589,26 @@ class LLMClient:
             })
             logger.debug("[llm] Tool-Prefill aktiviert")
 
-        # Mistral-Kompatibilität: System-Messages nach Tool-Responses konvertieren
+        # Mistral-Kompatibilität: Strikte Message-Validierung
         if is_mistral:
+            original_count = len(messages)
             original_roles = [m.get("role") for m in messages]
+            # Debug: Log assistant messages before sanitization
+            for i, m in enumerate(messages):
+                if m.get("role") == "assistant":
+                    has_content = bool(m.get("content"))
+                    has_tools = bool(m.get("tool_calls"))
+                    print(f"[LLM DEBUG] Pre-sanitize assistant[{i}]: content={has_content}, tool_calls={has_tools}")
+
             messages = _sanitize_messages_for_mistral(messages)
+
+            new_count = len(messages)
             new_roles = [m.get("role") for m in messages]
-            changed = original_roles != new_roles
-            print(f"[LLM DEBUG] Mistral sanitization: changed={changed}")
+            changed = original_roles != new_roles or original_count != new_count
+            print(f"[LLM DEBUG] Mistral sanitization: {original_count}→{new_count} msgs, changed={changed}")
+            print(f"[LLM DEBUG] Roles: {original_roles} -> {new_roles}")
             if changed:
-                logger.warning(f"[llm] Mistral sanitization applied: {original_roles} -> {new_roles}")
+                logger.warning(f"[llm] Mistral sanitization: {original_roles} -> {new_roles}")
 
         payload = {
             "model": model,
