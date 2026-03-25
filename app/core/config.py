@@ -197,21 +197,28 @@ class RepoEntry(BaseModel):
 
 
 class JavaConfig(BaseModel):
-    repo_path: str = ""  # Aktiver Repo-Pfad (Kompatibilität)
+    repo_path: str = ""  # Haupt-Repo-Pfad (Kompatibilität)
     repos: List[RepoEntry] = []  # Liste aller Repos
-    active_repo: str = ""  # Name des aktiven Repos
+    active_repo: str = ""  # DEPRECATED: Wird ignoriert, alle Repos sind durchsuchbar
     exclude_dirs: List[str] = ["target", ".git", "node_modules", ".idea"]
     max_file_size_kb: int = 500
 
+    def get_all_paths(self) -> List[str]:
+        """Gibt alle konfigurierten Repo-Pfade zurück."""
+        paths = []
+        # Alle Repos aus der Liste
+        for repo in self.repos:
+            if repo.path:
+                paths.append(repo.path)
+        # repo_path als Fallback/zusätzlicher Pfad
+        if self.repo_path and self.repo_path not in paths:
+            paths.append(self.repo_path)
+        return paths
+
     def get_active_path(self) -> str:
-        """Gibt den Pfad des aktiven Repos zurück."""
-        # Wenn active_repo gesetzt ist, suche in repos Liste
-        if self.active_repo and self.repos:
-            for repo in self.repos:
-                if repo.name == self.active_repo:
-                    return repo.path
-        # Fallback auf repo_path (Kompatibilität)
-        return self.repo_path
+        """Gibt den ersten Repo-Pfad zurück (Abwärtskompatibilität)."""
+        paths = self.get_all_paths()
+        return paths[0] if paths else ""
 
 
 class ConfluenceConfig(BaseModel):
@@ -227,19 +234,26 @@ class ConfluenceConfig(BaseModel):
 
 
 class PythonConfig(BaseModel):
-    repo_path: str = ""  # Aktiver Repo-Pfad (Kompatibilität)
+    repo_path: str = ""  # Haupt-Repo-Pfad (Kompatibilität)
     repos: List[RepoEntry] = []  # Liste aller Repos
-    active_repo: str = ""  # Name des aktiven Repos
+    active_repo: str = ""  # DEPRECATED: Wird ignoriert, alle Repos sind durchsuchbar
     exclude_dirs: List[str] = ["__pycache__", ".venv", ".git", "node_modules", ".mypy_cache", ".pytest_cache", "dist", "build"]
     max_file_size_kb: int = 500
 
+    def get_all_paths(self) -> List[str]:
+        """Gibt alle konfigurierten Repo-Pfade zurück."""
+        paths = []
+        for repo in self.repos:
+            if repo.path:
+                paths.append(repo.path)
+        if self.repo_path and self.repo_path not in paths:
+            paths.append(self.repo_path)
+        return paths
+
     def get_active_path(self) -> str:
-        """Gibt den Pfad des aktiven Repos zurück."""
-        if self.active_repo and self.repos:
-            for repo in self.repos:
-                if repo.name == self.active_repo:
-                    return repo.path
-        return self.repo_path
+        """Gibt den ersten Repo-Pfad zurück (Abwärtskompatibilität)."""
+        paths = self.get_all_paths()
+        return paths[0] if paths else ""
 
 
 class ToolsConfig(BaseModel):

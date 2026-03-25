@@ -239,28 +239,46 @@ class ToolRegistry:
 
 async def get_project_paths() -> ToolResult:
     """
-    Zeigt die indexierten Projekt-Pfade.
-    Diese Pfade können für Dateioperationen verwendet werden.
+    Zeigt alle konfigurierten Projekt-Pfade (Java, Python, file_operations).
+    Diese Pfade können für Dateioperationen und Code-Suche verwendet werden.
     """
     from app.core.config import settings
     from pathlib import Path
 
-    output = "=== Indexierte Projekt-Pfade ===\n\n"
+    output = "=== Konfigurierte Projekt-Pfade ===\n\n"
 
-    # Erlaubte Pfade aus file_operations
+    # Java-Repos
+    java_paths = settings.java.get_all_paths()
+    if java_paths:
+        output += "📁 Java-Repositories:\n"
+        for path in java_paths:
+            exists = "✓" if Path(path).exists() else "✗ (nicht erreichbar)"
+            output += f"   • {path} {exists}\n"
+    else:
+        output += "📁 Java-Repositories: nicht konfiguriert\n"
+
+    # Python-Repos
+    python_paths = settings.python.get_all_paths()
+    if python_paths:
+        output += "\n📁 Python-Repositories:\n"
+        for path in python_paths:
+            exists = "✓" if Path(path).exists() else "✗ (nicht erreichbar)"
+            output += f"   • {path} {exists}\n"
+    else:
+        output += "\n📁 Python-Repositories: nicht konfiguriert\n"
+
+    # file_operations.allowed_paths (für Schreiboperationen)
     allowed_paths = settings.file_operations.allowed_paths
     if allowed_paths:
-        for i, path in enumerate(allowed_paths, 1):
+        output += "\n📁 Schreib-Pfade (file_operations):\n"
+        for path in allowed_paths:
             exists = "✓" if Path(path).exists() else "✗ (nicht erreichbar)"
-            output += f"📁 Projekt {i}: {path} {exists}\n"
-    else:
-        output += "⚠️ Keine Projekt-Pfade konfiguriert.\n"
-        output += "Konfiguriere 'file_operations.allowed_paths' in config.yaml\n"
+            output += f"   • {path} {exists}\n"
 
     output += "\n--- Verwendung ---\n"
-    output += "• Für Dateioperationen: Absolute Pfade innerhalb dieser Verzeichnisse verwenden\n"
+    output += "• search_code: Durchsucht alle Java/Python-Repos\n"
+    output += "• read_file/edit_file: Absoluter Pfad innerhalb der Projekt-Verzeichnisse\n"
     output += "• Pfade aus search_code Ergebnissen direkt mit read_file verwenden\n"
-    output += "• Bei Stacktraces: Datei-Pfad aus Stacktrace direkt übernehmen\n"
 
     return ToolResult(success=True, data=output)
 
@@ -276,7 +294,7 @@ async def search_code(
     read_files: bool = False
 ) -> ToolResult:
     """
-    Durchsucht Code-Repositories mit ripgrep (rg) oder grep.
+    Durchsucht ALLE konfigurierten Code-Repositories mit ripgrep (rg) oder grep.
 
     Verwendet ripgrep als primäres Such-Tool mit GNU grep als Fallback.
     Keine Index-Abhängigkeit - durchsucht Dateien direkt.
@@ -288,56 +306,70 @@ async def search_code(
 
     logger = logging.getLogger(__name__)
 
-    # Basis-Pfad bestimmen
-    base_path = None
-    repo_name = None
+    # Alle Repo-Pfade sammeln
+    search_paths = []
 
-    # Prüfe Java-Repo
-    if language in ("all", "java", "sql") and settings.java.get_active_path():
-        java_path = settings.java.get_active_path()
-        if Path(java_path).exists():
-            base_path = java_path
-            repo_name = "Java-Repo"
+    # Java-Repos
+    if language in ("all", "java", "sql"):
+        for path in settings.java.get_all_paths():
+            if Path(path).exists():
+                search_paths.append(("Java", path))
 
-    # Prüfe Python-Repo (überschreibt Java wenn language=python)
-    if language in ("all", "python") and settings.python.get_active_path():
-        python_path = settings.python.get_active_path()
-        if Path(python_path).exists():
-            if language == "python" or base_path is None:
-                base_path = python_path
-                repo_name = "Python-Repo"
+    # Python-Repos
+    if language in ("all", "python"):
+        for path in settings.python.get_all_paths():
+            if Path(path).exists():
+                search_paths.append(("Python", path))
 
-    if not base_path:
+    if not search_paths:
         return ToolResult(
             success=False,
-            error="Kein aktives Repository konfiguriert. Nutze get_active_repositories."
+            error="Keine Repositories konfiguriert. Nutze get_project_paths für verfügbare Pfade."
         )
 
     try:
         engine = get_code_search_engine()
-        matches, tool_used, duration = await engine.search(
-            query=query,
-            base_path=base_path,
-            language=language,
-            file_pattern=file_pattern,
-            max_results=max_results,
-            context_lines=context_lines,
-            case_sensitive=case_sensitive,
-            subpath=subpath
-        )
+        all_matches = []
+        total_duration = 0.0
+        tool_used = ""
+        searched_repos = []
 
-        if not matches:
+        # Alle Repos durchsuchen
+        for repo_type, base_path in search_paths:
+            try:
+                matches, tool, duration = await engine.search(
+                    query=query,
+                    base_path=base_path,
+                    language=language,
+                    file_pattern=file_pattern,
+                    max_results=max_results,
+                    context_lines=context_lines,
+                    case_sensitive=case_sensitive,
+                    subpath=subpath
+                )
+                all_matches.extend(matches)
+                total_duration += duration
+                tool_used = tool
+                searched_repos.append(f"{repo_type}: {base_path}")
+            except Exception as e:
+                logger.warning(f"[search_code] Fehler bei {base_path}: {e}")
+
+        if not all_matches:
+            repos_info = ", ".join(searched_repos)
             return ToolResult(
                 success=True,
-                data=f"Keine Treffer für '{query}' in {repo_name} (via {tool_used}, {duration:.2f}s)"
+                data=f"Keine Treffer für '{query}' in {len(search_paths)} Repos (via {tool_used}, {total_duration:.2f}s)\nDurchsucht: {repos_info}"
             )
 
+        # Auf max_results begrenzen
+        all_matches = all_matches[:max_results]
+
         # Formatieren (wie Claude Code Grep Output)
-        output = f"Gefunden: {len(matches)} Treffer für '{query}' in {repo_name}\n"
-        output += f"(via {tool_used}, {duration:.2f}s)\n\n"
+        output = f"Gefunden: {len(all_matches)} Treffer für '{query}' in {len(search_paths)} Repos\n"
+        output += f"(via {tool_used}, {total_duration:.2f}s)\n\n"
 
         current_file = None
-        for match in matches:
+        for match in all_matches:
             # Datei-Header wenn neue Datei
             if match.file_path != current_file:
                 current_file = match.file_path
@@ -361,12 +393,13 @@ async def search_code(
             output += "\n"
 
         # Dateiinhalt lesen wenn gewünscht
-        if read_files and matches:
-            unique_files = list(dict.fromkeys(m.file_path for m in matches))[:3]
+        if read_files and all_matches:
+            unique_files = list(dict.fromkeys(m.file_path for m in all_matches))[:3]
             output += "\n=== Dateiinhalte ===\n"
             for file_path in unique_files:
                 try:
-                    full_path = Path(base_path) / file_path
+                    # Vollständiger Pfad ist bereits im match enthalten
+                    full_path = Path(file_path)
                     if full_path.exists():
                         content = full_path.read_text(encoding="utf-8", errors="replace")
                         ext = full_path.suffix.lstrip(".")
@@ -483,14 +516,12 @@ async def read_file(
         try:
             test_path = Path(path).resolve()
             # Stelle sicher dass wir in einem erlaubten Verzeichnis sind
-            java_path = settings.java.get_active_path() if hasattr(settings.java, 'get_active_path') else None
-            python_path = settings.python.get_active_path() if hasattr(settings.python, 'get_active_path') else None
-            cwd = os.getcwd()
+            allowed_roots = settings.java.get_all_paths() + settings.python.get_all_paths()
+            allowed_roots.append(os.getcwd())
 
-            allowed_roots = [p for p in [java_path, python_path, cwd] if p]
             is_safe = any(
                 str(test_path).startswith(str(Path(root).resolve()))
-                for root in allowed_roots
+                for root in allowed_roots if root
             )
             if not is_safe:
                 logger.warning(f"[read_file] Path traversal blocked: {path} -> {test_path}")
@@ -524,18 +555,18 @@ async def read_file(
         else:
             return ToolResult(success=False, error=f"Datei nicht gefunden: {path}")
     else:
-        # 2. Relativer Pfad - versuche verschiedene Basis-Verzeichnisse
+        # 2. Relativer Pfad - versuche alle konfigurierten Repo-Verzeichnisse
         search_bases = []
 
-        # Java Repo
-        java_path = settings.java.get_active_path() if hasattr(settings.java, 'get_active_path') else None
-        if java_path:
-            search_bases.append(Path(java_path))
+        # Alle Java-Repos
+        for repo_path in settings.java.get_all_paths():
+            if repo_path:
+                search_bases.append(Path(repo_path))
 
-        # Python Repo
-        python_path = settings.python.get_active_path() if hasattr(settings.python, 'get_active_path') else None
-        if python_path:
-            search_bases.append(Path(python_path))
+        # Alle Python-Repos
+        for repo_path in settings.python.get_all_paths():
+            if repo_path:
+                search_bases.append(Path(repo_path))
 
         # Aktuelles Arbeitsverzeichnis als Fallback
         search_bases.append(Path(os.getcwd()))
@@ -676,6 +707,7 @@ async def glob_files(
 ) -> ToolResult:
     """
     Sucht Dateien nach Glob-Pattern (wie Claude Code Glob Tool).
+    Durchsucht alle konfigurierten Repos wenn path="." ist.
     """
     from app.core.config import settings
     from pathlib import Path as PyPath
@@ -685,26 +717,23 @@ async def glob_files(
     resolved_from = None  # Track woher der Pfad aufgelöst wurde
 
     if not PyPath(path).is_absolute():
-        # Versuche relativen Pfad in Repos zu finden
-        java_path = settings.java.get_active_path()
-        python_path = settings.python.get_active_path()
+        # Alle konfigurierten Repo-Pfade sammeln
+        all_paths = settings.java.get_all_paths() + settings.python.get_all_paths()
 
         # Wenn path != ".", prüfe ob Unterverzeichnis in einem Repo existiert
         if path != ".":
-            if java_path and (PyPath(java_path) / path).exists():
-                base_path = str(PyPath(java_path) / path)
-                resolved_from = f"Java-Repo: {java_path}"
-            elif python_path and (PyPath(python_path) / path).exists():
-                base_path = str(PyPath(python_path) / path)
-                resolved_from = f"Python-Repo: {python_path}"
+            for repo_path in all_paths:
+                if repo_path and (PyPath(repo_path) / path).exists():
+                    base_path = str(PyPath(repo_path) / path)
+                    resolved_from = repo_path
+                    break
         else:
             # Standard: Erstes verfügbares Repo
-            if java_path and PyPath(java_path).exists():
-                base_path = java_path
-                resolved_from = f"Java-Repo: {java_path}"
-            elif python_path and PyPath(python_path).exists():
-                base_path = python_path
-                resolved_from = f"Python-Repo: {python_path}"
+            for repo_path in all_paths:
+                if repo_path and PyPath(repo_path).exists():
+                    base_path = repo_path
+                    resolved_from = repo_path
+                    break
 
     try:
         from app.services.file_manager import get_file_manager
@@ -754,31 +783,28 @@ async def grep_content(
     subpath = ""
 
     if not PyPath(path).is_absolute():
-        java_path = settings.java.get_active_path()
-        python_path = settings.python.get_active_path()
+        # Alle konfigurierten Repo-Pfade sammeln
+        all_paths = settings.java.get_all_paths() + settings.python.get_all_paths()
 
         # Wenn path != ".", prüfe ob Unterverzeichnis in einem Repo existiert
         if path != ".":
-            if java_path and (PyPath(java_path) / path).exists():
-                base_path = java_path
-                subpath = path
-                resolved_from = f"Java-Repo/{path}"
-            elif python_path and (PyPath(python_path) / path).exists():
-                base_path = python_path
-                subpath = path
-                resolved_from = f"Python-Repo/{path}"
+            for repo_path in all_paths:
+                if repo_path and (PyPath(repo_path) / path).exists():
+                    base_path = repo_path
+                    subpath = path
+                    resolved_from = f"{repo_path}/{path}"
+                    break
             else:
                 # Direkter Pfad versuchen
                 if PyPath(path).exists():
                     base_path = path
                     resolved_from = path
         else:
-            if java_path and PyPath(java_path).exists():
-                base_path = java_path
-                resolved_from = "Java-Repo"
-            elif python_path and PyPath(python_path).exists():
-                base_path = python_path
-                resolved_from = "Python-Repo"
+            for repo_path in all_paths:
+                if repo_path and PyPath(repo_path).exists():
+                    base_path = repo_path
+                    resolved_from = repo_path
+                    break
 
     try:
         engine = get_code_search_engine()
