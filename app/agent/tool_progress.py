@@ -329,28 +329,33 @@ class ToolProgressTracker:
         return StuckDetectionResult(is_stuck=False)
 
     def _check_cyclic_pattern(self) -> StuckDetectionResult:
-        """Erkennt zyklische Patterns wie A→B→A→B."""
+        """Erkennt zyklische Patterns wie A→B→A→B mit IDENTISCHEN Argumenten."""
         if len(self._state.call_signatures) < self.CYCLE_LENGTH * 2:
             return StuckDetectionResult(is_stuck=False)
 
-        # Prüfe auf 2er-Zyklen (A→B→A→B)
+        # Prüfe auf 2er-Zyklen (A→B→A→B) - aber nur wenn Tool+Args gleich sind!
+        # Wichtig: read_file mit verschiedenen Dateien ist KEIN Zyklus
         recent = self._state.call_signatures[-self.CYCLE_LENGTH * 2:]
-        tool_sequence = [s.tool_name for s in recent]
+
+        # Kombiniere Tool-Name + Args-Hash für echte Zyklus-Erkennung
+        # So wird read_file(A) → read_file(B) nicht als Zyklus erkannt
+        tool_sequence = [f"{s.tool_name}:{s.args_hash}" for s in recent]
 
         # Extrahiere potentielle Zyklen
         for cycle_len in [2, 3]:
             if self._has_cycle(tool_sequence, cycle_len):
-                cycle_tools = tool_sequence[:cycle_len]
+                # Für die Anzeige nur Tool-Namen extrahieren
+                cycle_tools = [s.tool_name for s in recent[:cycle_len]]
                 return StuckDetectionResult(
                     is_stuck=True,
                     reason=StuckReason.CYCLIC_PATTERN,
                     details=(
                         f"Zyklisches Muster erkannt: {' → '.join(cycle_tools)} "
-                        f"wiederholt sich"
+                        f"mit identischen Argumenten wiederholt sich"
                     ),
                     suggestion=(
-                        f"Du wechselst zwischen {', '.join(set(cycle_tools))} hin und her. "
-                        "Das deutet auf einen Deadlock hin. Versuche:\n"
+                        f"Du wechselst zwischen {', '.join(set(cycle_tools))} hin und her "
+                        "mit den GLEICHEN Argumenten. Das deutet auf einen Deadlock hin. Versuche:\n"
                         "- Einen komplett anderen Ansatz\n"
                         "- Die bisherigen Ergebnisse zusammenzufassen\n"
                         "- Den User um Klärung zu bitten"
