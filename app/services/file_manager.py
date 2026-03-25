@@ -112,7 +112,7 @@ class FileManager:
         Validiert ob der Pfad erlaubt ist.
 
         Args:
-            path: Zu validierender Pfad
+            path: Zu validierender Pfad (absolut oder relativ)
             for_write: True wenn Schreibzugriff benötigt wird
 
         Raises:
@@ -121,7 +121,26 @@ class FileManager:
         """
         # Pfad normalisieren
         try:
-            resolved = Path(path).resolve()
+            input_path = Path(path)
+
+            # Wenn relativer Pfad und allowed_paths definiert:
+            # Versuche den Pfad relativ zu jedem allowed_path aufzulösen
+            if not input_path.is_absolute() and self.allowed_paths:
+                for allowed_base in self.allowed_paths:
+                    candidate = (allowed_base / input_path).resolve()
+                    # Prüfen ob Kandidat existiert oder im allowed_path liegt
+                    if candidate.exists() or self._is_subpath(candidate, allowed_base):
+                        resolved = candidate
+                        break
+                else:
+                    # Kein passender Pfad gefunden - verwende ersten allowed_path als Basis
+                    if self.allowed_paths:
+                        resolved = (self.allowed_paths[0] / input_path).resolve()
+                    else:
+                        resolved = input_path.resolve()
+            else:
+                resolved = input_path.resolve()
+
         except Exception as e:
             raise ValueError(f"Ungültiger Pfad: {path}") from e
 

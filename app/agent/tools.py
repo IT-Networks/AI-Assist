@@ -1930,12 +1930,12 @@ WRITE_FILE_TOOL = Tool(
     description=(
         "Erstellt oder überschreibt eine LOKALE DATEI (keine Ordner!). BENÖTIGT USER-BESTÄTIGUNG. "
         "WICHTIG: Für Ordner verwende create_directory! Pfad muss Dateiendung haben (z.B. .py, .java, .md). "
-        "GitHub-Repos können nicht direkt beschrieben werden."
+        "Pfad: Relativ (src/file.py) oder absolut. Relative Pfade werden im Projekt-Verzeichnis erstellt."
     ),
     category=ToolCategory.FILE,
     is_write_operation=True,
     parameters=[
-        ToolParameter("path", "string", "Pfad zur Datei (mit Dateiendung!)"),
+        ToolParameter("path", "string", "Pfad zur Datei (relativ oder absolut, mit Dateiendung!)"),
         ToolParameter("content", "string", "Neuer Dateiinhalt"),
     ],
     handler=write_file
@@ -1961,12 +1961,13 @@ EDIT_FILE_TOOL = Tool(
         "Bearbeitet eine Datei durch String-Ersetzung (wie Claude Code Edit). BENÖTIGT BESTÄTIGUNG. "
         "WICHTIG: old_string muss EINDEUTIG sein! Bei mehrfachem Vorkommen: "
         "1) Mehr Kontext in old_string aufnehmen, oder 2) replace_all=true für alle Ersetzungen. "
-        "Für GitHub-Repos: Nicht direkt möglich."
+        "Pfad: Relativ (src/file.py) oder absolut (/home/user/project/src/file.py). "
+        "Relative Pfade werden automatisch im Projekt-Verzeichnis gesucht."
     ),
     category=ToolCategory.FILE,
     is_write_operation=True,
     parameters=[
-        ToolParameter("path", "string", "Pfad zur Datei"),
+        ToolParameter("path", "string", "Pfad zur Datei (relativ oder absolut)"),
         ToolParameter("old_string", "string", "Zu ersetzender Text (muss eindeutig sein!)"),
         ToolParameter("new_string", "string", "Neuer Text"),
         ToolParameter("replace_all", "boolean", "Alle Vorkommen ersetzen (default: false)", required=False, default=False),
