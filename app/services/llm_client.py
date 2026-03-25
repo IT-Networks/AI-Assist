@@ -47,6 +47,7 @@ def _sanitize_messages_for_mistral(messages: List[Dict]) -> List[Dict]:
     for msg in messages:
         msg_copy = dict(msg)
         role = msg_copy.get("role", "")
+        final_role = role  # Track actual role after conversion
 
         if role == "system":
             if seen_non_system:
@@ -56,11 +57,14 @@ def _sanitize_messages_for_mistral(messages: List[Dict]) -> List[Dict]:
                     "role": "user",
                     "content": f"[System Hinweis]\n{content}"
                 }
+                final_role = "user"
+                seen_user_or_assistant = True
                 logger.debug("[llm] Converted late system message to user message for Mistral compatibility")
             # System am Anfang ist OK
 
         elif role == "tool":
             # Tool-Messages sind nur nach Assistant erlaubt
+            # Konvertiere wenn: 1) kein User/Assistant gesehen, 2) direkt nach System
             if not seen_user_or_assistant or last_role == "system":
                 # Tool nach System oder ganz am Anfang → als User-Message
                 content = msg_copy.get("content", "")
@@ -69,6 +73,8 @@ def _sanitize_messages_for_mistral(messages: List[Dict]) -> List[Dict]:
                     "role": "user",
                     "content": f"[Tool-Ergebnis ({tool_call_id})]\n{content}"
                 }
+                final_role = "user"
+                seen_user_or_assistant = True  # Now we've seen a "user" message
                 logger.debug(f"[llm] Converted orphan tool message to user message for Mistral compatibility")
             seen_non_system = True
 
@@ -78,9 +84,26 @@ def _sanitize_messages_for_mistral(messages: List[Dict]) -> List[Dict]:
                 seen_user_or_assistant = True
 
         result.append(msg_copy)
-        last_role = role
+        last_role = final_role  # Use CONVERTED role, not original!
 
-    return result
+    # Final validation: ensure no tool directly after system
+    validated = []
+    prev_role = None
+    for msg in result:
+        role = msg.get("role", "")
+        if role == "tool" and prev_role == "system":
+            # Should not happen after above logic, but safety net
+            content = msg.get("content", "")
+            tool_call_id = msg.get("tool_call_id", "unknown")
+            msg = {
+                "role": "user",
+                "content": f"[Tool-Ergebnis ({tool_call_id})]\n{content}"
+            }
+            logger.warning("[llm] Final validation: converted tool after system to user")
+        validated.append(msg)
+        prev_role = msg.get("role", "")
+
+    return validated
 
 
 def _parse_tool_calls_from_content(content: str) -> tuple[str, List[Dict]]:
