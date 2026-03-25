@@ -13,6 +13,54 @@ from app.core.exceptions import LLMError
 logger = logging.getLogger(__name__)
 
 
+def _is_mistral_model(model: str) -> bool:
+    """Prüft ob das Modell Mistral-basiert ist (strikte Message-Ordering)."""
+    if not model:
+        return False
+    model_lower = model.lower()
+    return any(name in model_lower for name in ("mistral", "devstral", "codestral", "pixtral"))
+
+
+def _sanitize_messages_for_mistral(messages: List[Dict]) -> List[Dict]:
+    """
+    Sanitiert Messages für Mistral-Kompatibilität.
+
+    Mistral-Modelle erlauben keine System-Messages nach User/Assistant/Tool-Messages.
+    Diese Funktion konvertiert späte System-Messages zu User-Messages.
+
+    Args:
+        messages: Original-Nachrichten
+
+    Returns:
+        Sanitierte Nachrichten (Kopie)
+    """
+    if not messages:
+        return messages
+
+    result = []
+    seen_non_system = False
+
+    for msg in messages:
+        msg_copy = dict(msg)
+        role = msg_copy.get("role", "")
+
+        if role == "system":
+            if seen_non_system:
+                # System-Message nach User/Assistant/Tool → konvertiere zu User mit Prefix
+                content = msg_copy.get("content", "")
+                msg_copy = {
+                    "role": "user",
+                    "content": f"[System Hinweis]\n{content}"
+                }
+                logger.debug("[llm] Converted late system message to user message for Mistral compatibility")
+        else:
+            seen_non_system = True
+
+        result.append(msg_copy)
+
+    return result
+
+
 def _parse_tool_calls_from_content(content: str) -> tuple[str, List[Dict]]:
     """
     Parst [TOOL_CALLS][{...}] Format aus dem Content (für Mistral/lokale Modelle).
@@ -215,6 +263,9 @@ class LLMClient:
         model: str = None,
     ) -> str:
         model = model or self.default_model
+        # Mistral-Kompatibilität
+        if _is_mistral_model(model):
+            messages = _sanitize_messages_for_mistral(messages)
         payload = {
             "model": model,
             "messages": messages,
@@ -257,6 +308,9 @@ class LLMClient:
         model: str = None,
     ) -> AsyncGenerator[str, None]:
         model = model or self.default_model
+        # Mistral-Kompatibilität
+        if _is_mistral_model(model):
+            messages = _sanitize_messages_for_mistral(messages)
         payload = {
             "model": model,
             "messages": messages,
@@ -438,6 +492,10 @@ class LLMClient:
                 "prefix": True  # LiteLLM-spezifisch
             })
             logger.debug("[llm] Tool-Prefill aktiviert")
+
+        # Mistral-Kompatibilität: System-Messages nach Tool-Responses konvertieren
+        if _is_mistral_model(model):
+            messages = _sanitize_messages_for_mistral(messages)
 
         payload = {
             "model": model,
