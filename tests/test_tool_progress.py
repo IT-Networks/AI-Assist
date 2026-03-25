@@ -179,16 +179,17 @@ class TestToolProgressTracker:
         def make_result(i):
             return ToolResult(success=True, data=f"class Class{i} in file{i}.java")
 
-        # Mindestens 8 Calls für 2x2-Zyklus
+        # Echter Zyklus: GLEICHE Tool+Args wiederholt (A→B→A→B mit identischen Args)
+        # Seit v2.10.37 wird args_hash berücksichtigt - unterschiedliche Args = kein Zyklus
         calls = [
-            ("search_code", {"q": "1"}),
-            ("read_file", {"p": "a"}),
-            ("search_code", {"q": "2"}),
-            ("read_file", {"p": "b"}),
-            ("search_code", {"q": "3"}),
-            ("read_file", {"p": "c"}),
-            ("search_code", {"q": "4"}),
-            ("read_file", {"p": "d"}),
+            ("search_code", {"q": "test"}),
+            ("read_file", {"p": "file.java"}),
+            ("search_code", {"q": "test"}),      # Gleiche Args wie #0
+            ("read_file", {"p": "file.java"}),   # Gleiche Args wie #1
+            ("search_code", {"q": "test"}),      # Gleiche Args wie #0, #2
+            ("read_file", {"p": "file.java"}),   # Gleiche Args wie #1, #3
+            ("search_code", {"q": "test"}),
+            ("read_file", {"p": "file.java"}),
         ]
 
         stuck = None
