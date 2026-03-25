@@ -5306,7 +5306,8 @@ async function processAgentEvent(event, bubble, msgDiv, chat) {
     case 'tool_start': {
       // PR-Tools: Keine Card im Chat (gehen in Workspace Panel)
       if (!data.workspaceOnly) {
-        const toolCard = createToolCard(data.name, data.arguments, 'running', data.model);
+        // data.id muss übergeben werden für korrekte Zuordnung bei parallelen Tools!
+        const toolCard = createToolCard(data.name, data.arguments, 'running', data.model, data.id);
         bubble.appendChild(toolCard);
       }
       // Tool-History per-Chat pflegen, bei aktivem Chat in state spiegeln
@@ -5832,10 +5833,11 @@ function displayTokenUsage(usage, chat) {
   if (document.contains(chat.pane)) scrollToBottom();
 }
 
-function createToolCard(toolName, args, status, model = null) {
+function createToolCard(toolName, args, status, model = null, toolId = null) {
   const card = document.createElement('div');
   card.className = 'tool-call-card';
-  card.dataset.toolId = toolName + Date.now();
+  // Verwende übergebene toolId oder generiere Fallback
+  card.dataset.toolId = toolId || (toolName + Date.now());
 
   const statusClass = status === 'running' ? 'running' : (status === 'success' ? 'success' : 'error');
   const statusText = status === 'running' ? 'Läuft...' : (status === 'success' ? 'Fertig' : 'Fehler');
@@ -5860,8 +5862,16 @@ function createToolCard(toolName, args, status, model = null) {
 function updateToolCard(toolId, status, result, pane) {
   // Im Chat-Pane suchen (funktioniert auch wenn Pane detached ist)
   const root = pane || document;
-  const cards = root.querySelectorAll('.tool-call-card');
-  const card = cards[cards.length - 1]; // Last card
+
+  // Suche Card mit passender toolId (wichtig für parallele Tool-Calls!)
+  let card = root.querySelector(`.tool-call-card[data-tool-id="${toolId}"]`);
+
+  // Fallback: Letzte Card wenn keine ID matcht (legacy)
+  if (!card) {
+    const cards = root.querySelectorAll('.tool-call-card');
+    card = cards[cards.length - 1];
+    log.warn(`[updateToolCard] No card found for toolId=${toolId}, using last card as fallback`);
+  }
 
   if (card) {
     const statusEl = card.querySelector('.tool-call-status');
