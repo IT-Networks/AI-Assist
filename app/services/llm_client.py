@@ -25,8 +25,10 @@ def _sanitize_messages_for_mistral(messages: List[Dict]) -> List[Dict]:
     """
     Sanitiert Messages für Mistral-Kompatibilität.
 
-    Mistral-Modelle erlauben keine System-Messages nach User/Assistant/Tool-Messages.
-    Diese Funktion konvertiert späte System-Messages zu User-Messages.
+    Mistral-Modelle haben strikte Regeln:
+    1. System-Messages nur am Anfang erlaubt
+    2. Tool-Messages nur nach Assistant-Messages mit tool_calls erlaubt
+    3. Nach System muss User oder Assistant kommen, NICHT Tool
 
     Args:
         messages: Original-Nachrichten
@@ -39,6 +41,8 @@ def _sanitize_messages_for_mistral(messages: List[Dict]) -> List[Dict]:
 
     result = []
     seen_non_system = False
+    seen_user_or_assistant = False
+    last_role = None
 
     for msg in messages:
         msg_copy = dict(msg)
@@ -53,10 +57,28 @@ def _sanitize_messages_for_mistral(messages: List[Dict]) -> List[Dict]:
                     "content": f"[System Hinweis]\n{content}"
                 }
                 logger.debug("[llm] Converted late system message to user message for Mistral compatibility")
-        else:
+            # System am Anfang ist OK
+
+        elif role == "tool":
+            # Tool-Messages sind nur nach Assistant erlaubt
+            if not seen_user_or_assistant or last_role == "system":
+                # Tool nach System oder ganz am Anfang → als User-Message
+                content = msg_copy.get("content", "")
+                tool_call_id = msg_copy.get("tool_call_id", "unknown")
+                msg_copy = {
+                    "role": "user",
+                    "content": f"[Tool-Ergebnis ({tool_call_id})]\n{content}"
+                }
+                logger.debug(f"[llm] Converted orphan tool message to user message for Mistral compatibility")
             seen_non_system = True
 
+        else:
+            seen_non_system = True
+            if role in ("user", "assistant"):
+                seen_user_or_assistant = True
+
         result.append(msg_copy)
+        last_role = role
 
     return result
 
