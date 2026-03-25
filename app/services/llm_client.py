@@ -25,10 +25,11 @@ def _sanitize_messages_for_mistral(messages: List[Dict]) -> List[Dict]:
     """
     Sanitiert Messages für Mistral-Kompatibilität.
 
-    Mistral-Modelle haben strikte Regeln:
+    Mistral-Modelle haben SEHR strikte Regeln:
     1. System-Messages nur am Anfang erlaubt
-    2. Tool-Messages nur nach Assistant-Messages mit tool_calls erlaubt
-    3. Nach System muss User oder Assistant kommen, NICHT Tool
+    2. Tool-Messages NUR nach Assistant-Messages MIT tool_calls erlaubt
+    3. Rollen müssen alternieren: user/assistant/user/assistant
+    4. Nach User/System darf KEIN Tool kommen!
 
     Args:
         messages: Original-Nachrichten
@@ -41,32 +42,29 @@ def _sanitize_messages_for_mistral(messages: List[Dict]) -> List[Dict]:
 
     result = []
     seen_non_system = False
-    seen_user_or_assistant = False
     last_role = None
+    last_had_tool_calls = False  # Track if last assistant had tool_calls
 
     for msg in messages:
         msg_copy = dict(msg)
         role = msg_copy.get("role", "")
-        final_role = role  # Track actual role after conversion
+        final_role = role
 
         if role == "system":
             if seen_non_system:
-                # System-Message nach User/Assistant/Tool → konvertiere zu User mit Prefix
+                # System-Message nach anderen Rollen → konvertiere zu User
                 content = msg_copy.get("content", "")
                 msg_copy = {
                     "role": "user",
                     "content": f"[System Hinweis]\n{content}"
                 }
                 final_role = "user"
-                seen_user_or_assistant = True
-                logger.debug("[llm] Converted late system message to user message for Mistral compatibility")
-            # System am Anfang ist OK
+                logger.debug("[llm] Mistral: Converted late system to user")
 
         elif role == "tool":
-            # Tool-Messages sind nur nach Assistant erlaubt
-            # Konvertiere wenn: 1) kein User/Assistant gesehen, 2) direkt nach System
-            if not seen_user_or_assistant or last_role == "system":
-                # Tool nach System oder ganz am Anfang → als User-Message
+            # Tool-Messages sind NUR nach Assistant MIT tool_calls erlaubt!
+            # Nach user, system, oder assistant OHNE tool_calls → konvertieren
+            if last_role != "assistant" or not last_had_tool_calls:
                 content = msg_copy.get("content", "")
                 tool_call_id = msg_copy.get("tool_call_id", "unknown")
                 msg_copy = {
@@ -74,34 +72,66 @@ def _sanitize_messages_for_mistral(messages: List[Dict]) -> List[Dict]:
                     "content": f"[Tool-Ergebnis ({tool_call_id})]\n{content}"
                 }
                 final_role = "user"
-                seen_user_or_assistant = True  # Now we've seen a "user" message
-                logger.debug(f"[llm] Converted orphan tool message to user message for Mistral compatibility")
+                logger.debug(f"[llm] Mistral: Converted orphan tool to user (last_role={last_role}, had_tool_calls={last_had_tool_calls})")
             seen_non_system = True
 
-        else:
+        elif role == "assistant":
+            # Check if this assistant has tool_calls
+            last_had_tool_calls = bool(msg_copy.get("tool_calls"))
             seen_non_system = True
-            if role in ("user", "assistant"):
-                seen_user_or_assistant = True
+
+        else:  # user
+            seen_non_system = True
+            last_had_tool_calls = False  # Reset after user message
 
         result.append(msg_copy)
-        last_role = final_role  # Use CONVERTED role, not original!
+        last_role = final_role
 
-    # Final validation: ensure no tool directly after system
-    validated = []
-    prev_role = None
+    # Consolidate multiple system messages at the start
+    consolidated = []
+    system_contents = []
+    in_system_block = True
+
     for msg in result:
         role = msg.get("role", "")
-        if role == "tool" and prev_role == "system":
-            # Should not happen after above logic, but safety net
+        if role == "system" and in_system_block:
+            system_contents.append(msg.get("content", ""))
+        else:
+            in_system_block = False
+            consolidated.append(msg)
+
+    # Add single consolidated system message at start if any
+    if system_contents:
+        consolidated.insert(0, {
+            "role": "system",
+            "content": "\n\n".join(system_contents)
+        })
+
+    # Final validation pass - ensure valid sequence
+    validated = []
+    prev_role = None
+    prev_had_tool_calls = False
+
+    for msg in consolidated:
+        role = msg.get("role", "")
+
+        # Tool can only follow assistant with tool_calls
+        if role == "tool" and (prev_role != "assistant" or not prev_had_tool_calls):
             content = msg.get("content", "")
             tool_call_id = msg.get("tool_call_id", "unknown")
             msg = {
                 "role": "user",
                 "content": f"[Tool-Ergebnis ({tool_call_id})]\n{content}"
             }
-            logger.warning("[llm] Final validation: converted tool after system to user")
+            logger.warning(f"[llm] Mistral final validation: tool after {prev_role} → user")
+            role = "user"
+
         validated.append(msg)
-        prev_role = msg.get("role", "")
+        prev_role = role
+        if role == "assistant":
+            prev_had_tool_calls = bool(msg.get("tool_calls"))
+        elif role != "tool":
+            prev_had_tool_calls = False
 
     return validated
 
