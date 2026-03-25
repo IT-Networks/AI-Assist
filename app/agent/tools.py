@@ -2561,9 +2561,10 @@ async def read_jira_issue(issue_key: str) -> ToolResult:
         subtasks = issue.get('subtasks', [])
         if subtasks:
             output += f"\n--- Subtasks ({len(subtasks)}) ---\n"
+            output += "HINWEIS: Diese Liste zeigt nur Übersicht. Für Details zu einem Subtask:\n"
+            output += "         → read_jira_issue(issue_key='SUBTASK-KEY') aufrufen\n\n"
             for st in subtasks:
-                output += f"📎 {st['key']}: {st['summary']} ({st['status']})\n"
-                output += f"   URL: {st['url']}\n"
+                output += f"  • {st['key']}: {st['summary']} [{st['status']}]\n"
 
         if issue['comments']:
             output += f"\n--- Kommentare ({len(issue['comments'])}) ---\n"
@@ -2581,8 +2582,11 @@ SEARCH_JIRA_TOOL = Tool(
 
 WICHTIG: Bei direktem Issue-Key (z.B. 'DIKA-123') oder Jira-URL wird automatisch das vollständige Issue geladen.
 
+SUBTASKS: Wenn ein Issue Subtasks hat, werden diese als Übersicht angezeigt.
+Für Details zu einem Subtask: read_jira_issue(issue_key='SUBTASK-KEY') aufrufen.
+
 Beispiele:
-- "DIKA-123" → Lädt Issue direkt
+- "DIKA-123" → Lädt Issue direkt (inkl. Subtask-Liste)
 - "https://jira.example.com/browse/DIKA-123" → Lädt Issue direkt
 - "Login Fehler" → Textsuche
 - "project=DIKA AND status=Open" → JQL-Suche""",
@@ -2600,6 +2604,13 @@ READ_JIRA_ISSUE_TOOL = Tool(
     description="""Liest ein einzelnes Jira-Issue mit vollständiger Beschreibung, Details und den letzten Kommentaren.
 
 WANN VERWENDEN: Wenn ein konkreter Issue-Key bekannt ist (z.B. DIKA-123).
+
+SUBTASKS: Die Antwort listet Subtasks nur als Übersicht (Key, Titel, Status).
+Für Details eines Subtasks: Dieses Tool erneut mit dem Subtask-Key aufrufen.
+Beispiel: Hat PROJ-100 Subtasks PROJ-101 und PROJ-102, dann für Details:
+  → read_jira_issue(issue_key='PROJ-101')
+  → read_jira_issue(issue_key='PROJ-102')
+
 HINWEIS: search_jira erkennt Issue-Keys automatisch und ruft diese Funktion intern auf.""",
     category=ToolCategory.KNOWLEDGE,
     parameters=[
