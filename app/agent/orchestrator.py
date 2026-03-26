@@ -1763,17 +1763,24 @@ class AgentOrchestrator:
 
                     # Messages für nächste Iteration aufbauen (natives Format)
                     if native_tools:
+                        # WICHTIG: Tool-Call-IDs müssen zwischen assistant.tool_calls und
+                        # tool.tool_call_id übereinstimmen! Wir nutzen die originalen IDs aus
+                        # tools_to_process (raw API Response) und updaten die Ergebnisse.
                         messages.append({
                             "role": "assistant",
                             "content": content if content else None,
                             "tool_calls": current_tool_calls_for_messages
                         })
-                        for tc in parsed_tool_calls:
-                            if tc.result:
+                        # Tool-Responses mit IDs aus current_tool_calls_for_messages (nicht parsed_tool_calls!)
+                        for i, raw_tc in enumerate(current_tool_calls_for_messages):
+                            parsed_tc = parsed_tool_calls[i] if i < len(parsed_tool_calls) else None
+                            if parsed_tc and parsed_tc.result:
+                                # ID muss mit der ID in tool_calls übereinstimmen!
+                                tc_id = raw_tc.get("id") or parsed_tc.id
                                 messages.append({
                                     "role": "tool",
-                                    "tool_call_id": tc.id,
-                                    "content": _truncate_result(tc.result.to_context(), tool_name=tc.name)
+                                    "tool_call_id": tc_id,
+                                    "content": _truncate_result(parsed_tc.result.to_context(), tool_name=parsed_tc.name)
                                 })
                     else:
                         messages.append({"role": "assistant", "content": content or ""})
@@ -1802,9 +1809,10 @@ class AgentOrchestrator:
                         read_count = state.read_files_this_request.get(file_path, 0)
                         if read_count >= 2:
                             logger.debug("[agent] Loop-Prävention: {file_path} wurde bereits {read_count}x gelesen, überspringe")
+                            tc_id = tc.get("id") or tool_call.id  # ID muss mit tc übereinstimmen
                             messages.append({
                                 "role": "tool",
-                                "tool_call_id": tool_call.id,
+                                "tool_call_id": tc_id,
                                 "content": f"[HINWEIS] Die Datei '{file_path}' wurde bereits {read_count}x gelesen. Bitte nutze den bereits erhaltenen Inhalt aus dem Kontext weiter oder verwende search_code für gezielte Suchen."
                             })
                             current_tool_calls_for_messages.append(tc)
@@ -1817,9 +1825,10 @@ class AgentOrchestrator:
                         edit_count = state.edit_files_this_request.get(file_path, 0)
                         if edit_count >= 2:
                             logger.debug(f"[agent] Loop-Prävention: {file_path} wurde bereits {edit_count}x bearbeitet")
+                            tc_id = tc.get("id") or tool_call.id  # ID muss mit tc übereinstimmen
                             messages.append({
                                 "role": "tool",
-                                "tool_call_id": tool_call.id,
+                                "tool_call_id": tc_id,
                                 "content": f"[STOP] Die Datei '{file_path}' wurde bereits {edit_count}x bearbeitet. "
                                            "Die Aufgabe scheint abgeschlossen zu sein. "
                                            "Bitte fasse zusammen was du geändert hast und warte auf weitere Anweisungen vom User."
@@ -1834,9 +1843,10 @@ class AgentOrchestrator:
                         write_count = state.write_files_this_request.get(file_path, 0)
                         if write_count >= 1:
                             logger.debug(f"[agent] Loop-Prävention: {file_path} wurde bereits geschrieben")
+                            tc_id = tc.get("id") or tool_call.id  # ID muss mit tc übereinstimmen
                             messages.append({
                                 "role": "tool",
-                                "tool_call_id": tool_call.id,
+                                "tool_call_id": tc_id,
                                 "content": f"[STOP] Die Datei '{file_path}' wurde bereits geschrieben. "
                                            "Weitere Schreibvorgänge sind nicht erlaubt ohne explizite User-Anweisung. "
                                            "Bitte fasse zusammen was du gemacht hast."
@@ -1889,14 +1899,16 @@ class AgentOrchestrator:
                         tool_call.result = result
                         has_used_tools = True
                         current_tool_calls_for_messages.append(tc)
+                        # WICHTIG: Tool-Call-ID muss mit der ID in tc übereinstimmen!
+                        tc_id = tc.get("id") or tool_call.id
                         messages.append({
                             "role": "tool",
-                            "tool_call_id": tool_call.id,
+                            "tool_call_id": tc_id,
                             "content": result.to_context()
                         })
                         state.tool_calls_history.append(tool_call)
                         yield AgentEvent(AgentEventType.TOOL_RESULT, {
-                            "id": tool_call.id,
+                            "id": tc_id,
                             "name": tool_call.name,
                             "result": result.to_context()[:500],
                             "success": True,
