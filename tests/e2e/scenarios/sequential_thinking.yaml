@@ -1,0 +1,352 @@
+# E2E Test Scenarios: Sequential Thinking (MCP)
+# Tests for /seq command and --ultrathink flag integration
+# Sequential Thinking provides structured multi-step reasoning
+#
+# ThinkingModes: QUICK (1-2), NORMAL (3-5), DEEP (5-10), ULTRA (10-15 steps)
+# ThinkingTypes: ANALYSIS, HYPOTHESIS, VERIFICATION, PLANNING, DECISION, REVISION, CONCLUSION
+
+name: Sequential Thinking Tests
+description: E2E tests for MCP Sequential Thinking tool and /seq command
+model: gptoss120b
+tags:
+  - sequential_thinking
+  - mcp
+  - reasoning
+
+scenarios:
+  # ============================================================================
+  # Basic /seq Command Tests
+  # ============================================================================
+
+  - name: seq_basic_analysis
+    description: Basic sequential thinking for simple analysis
+    prompt: |
+      /seq Analysiere die Struktur der Calculator-Klasse in example.py
+    expected_tools:
+      - name: sequential_thinking
+        required: false
+      - name: read_file
+        required: false
+    allow_extra_tools: true
+    response:
+      contains:
+        - "Calculator"
+    timeout: 120.0
+    tags:
+      - seq
+      - basic
+
+  - name: seq_with_context
+    description: Sequential thinking with codebase context
+    prompt: |
+      /seq Wie interagieren die Komponenten im Projekt miteinander?
+    expected_tools:
+      - name: sequential_thinking
+        required: false
+      - name: read_file
+        required: false
+      - name: search_code
+        required: false
+    allow_extra_tools: true
+    timeout: 180.0
+    tags:
+      - seq
+      - context
+
+  # ============================================================================
+  # Thinking Mode Tests
+  # ============================================================================
+
+  - name: seq_quick_mode
+    description: Sequential thinking with quick mode (1-2 steps)
+    prompt: |
+      /seq Was macht die greet() Funktion? --mode quick
+    expected_tools:
+      - name: read_file
+        required: false
+    allow_extra_tools: true
+    response:
+      contains:
+        - "greet"
+    timeout: 60.0
+    tags:
+      - seq
+      - quick_mode
+
+  - name: seq_deep_mode
+    description: Sequential thinking with deep mode (5-10 steps)
+    prompt: |
+      /seq Analysiere potenzielle Bugs in der divide() Methode --mode deep
+    expected_tools:
+      - name: sequential_thinking
+        required: false
+      - name: read_file
+        required: false
+    allow_extra_tools: true
+    response:
+      contains:
+        - "divide"
+    timeout: 180.0
+    tags:
+      - seq
+      - deep_mode
+
+  - name: seq_ultra_mode
+    description: Sequential thinking with ultra mode (10-15 steps)
+    prompt: |
+      /seq Erstelle eine vollständige Architektur-Analyse des Projekts --mode ultra
+    expected_tools:
+      - name: sequential_thinking
+        required: false
+      - name: read_file
+        required: false
+      - name: list_files
+        required: false
+    allow_extra_tools: true
+    timeout: 300.0
+    tags:
+      - seq
+      - ultra_mode
+
+  # ============================================================================
+  # --ultrathink Flag Integration Tests
+  # ============================================================================
+
+  - name: ultrathink_with_brainstorm
+    description: Brainstorm command with ultrathink flag
+    prompt: |
+      /brainstorm Neues Caching-System für die API --ultrathink
+    expected_tools:
+      - name: sequential_thinking
+        required: false
+      - name: read_file
+        required: false
+    allow_extra_tools: true
+    response:
+      contains:
+        - "Cache"
+    timeout: 240.0
+    tags:
+      - ultrathink
+      - brainstorm
+
+  - name: ultrathink_with_design
+    description: Design command with ultrathink flag
+    prompt: |
+      /design Microservice-Architektur für User-Service --ultrathink
+    expected_tools:
+      - name: sequential_thinking
+        required: false
+      - name: read_file
+        required: false
+    allow_extra_tools: true
+    response:
+      contains:
+        - "Service"
+    timeout: 240.0
+    tags:
+      - ultrathink
+      - design
+
+  - name: ultrathink_with_analyze
+    description: Analyze command with ultrathink flag
+    prompt: |
+      /analyze Sicherheitsrisiken im Code --ultrathink --focus security
+    expected_tools:
+      - name: sequential_thinking
+        required: false
+      - name: read_file
+        required: false
+    allow_extra_tools: true
+    timeout: 240.0
+    tags:
+      - ultrathink
+      - analyze
+      - security
+
+  # ============================================================================
+  # Complex Reasoning Scenarios
+  # ============================================================================
+
+  - name: seq_complex_debugging
+    description: Complex debugging with sequential reasoning
+    prompt: |
+      /seq Die Calculator-Klasse hat Performance-Probleme bei großen Zahlen.
+      Analysiere schrittweise:
+      1. Welche Methoden könnten betroffen sein?
+      2. Was sind mögliche Ursachen?
+      3. Welche Lösungen gibt es?
+    expected_tools:
+      - name: sequential_thinking
+        required: false
+      - name: read_file
+        required: false
+    allow_extra_tools: true
+    response:
+      contains:
+        - "Calculator"
+    timeout: 180.0
+    tags:
+      - seq
+      - debugging
+      - complex
+
+  - name: seq_architectural_decision
+    description: Architectural decision with multi-step analysis
+    prompt: |
+      /seq Soll ich für das Logging-System Dependency Injection oder Singleton verwenden?
+      Berücksichtige: Testbarkeit, Performance, Wartbarkeit
+    expected_tools:
+      - name: sequential_thinking
+        required: false
+      - name: read_file
+        required: false
+    allow_extra_tools: true
+    timeout: 180.0
+    tags:
+      - seq
+      - architecture
+      - decision
+
+  - name: seq_refactoring_plan
+    description: Sequential thinking for refactoring planning
+    prompt: |
+      /seq Plane ein Refactoring der example.py Datei.
+      Analysiere den aktuellen Code und erstelle einen Schritt-für-Schritt Plan.
+    expected_tools:
+      - name: sequential_thinking
+        required: false
+      - name: read_file
+        required: true
+    allow_extra_tools: true
+    response:
+      contains:
+        - "example.py"
+    timeout: 180.0
+    tags:
+      - seq
+      - refactoring
+      - planning
+
+  # ============================================================================
+  # Thinking Type Validation
+  # ============================================================================
+
+  - name: seq_hypothesis_testing
+    description: Sequential thinking with hypothesis formation
+    prompt: |
+      /seq Hypothese: Die greet() Funktion könnte optimiert werden.
+      Teste diese Hypothese durch Code-Analyse.
+    expected_tools:
+      - name: sequential_thinking
+        required: false
+      - name: read_file
+        required: false
+    allow_extra_tools: true
+    response:
+      contains:
+        - "greet"
+    timeout: 120.0
+    tags:
+      - seq
+      - hypothesis
+
+  - name: seq_verification_workflow
+    description: Sequential thinking with verification steps
+    prompt: |
+      /seq Verifiziere dass alle Methoden der Calculator-Klasse korrekt typisiert sind.
+    expected_tools:
+      - name: sequential_thinking
+        required: false
+      - name: read_file
+        required: true
+    allow_extra_tools: true
+    response:
+      contains:
+        - "Calculator"
+    timeout: 120.0
+    tags:
+      - seq
+      - verification
+
+  # ============================================================================
+  # Edge Cases and Error Handling
+  # ============================================================================
+
+  - name: seq_empty_context
+    description: Sequential thinking without specific context
+    prompt: |
+      /seq Was ist der beste Ansatz für Error Handling in Python?
+    expected_tools:
+      - name: sequential_thinking
+        required: false
+    allow_extra_tools: true
+    response:
+      contains:
+        - "Error"
+    timeout: 120.0
+    tags:
+      - seq
+      - edge_case
+
+  - name: seq_invalid_mode_fallback
+    description: Sequential thinking with invalid mode falls back to normal
+    prompt: |
+      /seq Analysiere die Code-Struktur --mode invalid_mode
+    expected_tools:
+      - name: sequential_thinking
+        required: false
+      - name: read_file
+        required: false
+    allow_extra_tools: true
+    timeout: 120.0
+    tags:
+      - seq
+      - fallback
+      - edge_case
+
+  # ============================================================================
+  # Integration with Other Commands
+  # ============================================================================
+
+  - name: seq_then_implement
+    description: Sequential analysis followed by implementation
+    prompt: |
+      /seq Analysiere wie eine modulo() Methode in Calculator implementiert werden sollte,
+      dann /implement sie direkt.
+    expected_tools:
+      - name: sequential_thinking
+        required: false
+      - name: read_file
+        required: true
+      - name: edit_file
+        required: false
+    allow_extra_tools: true
+    response:
+      contains:
+        - "modulo"
+    timeout: 240.0
+    tags:
+      - seq
+      - implement
+      - workflow
+
+  - name: troubleshoot_with_seq
+    description: Troubleshooting with sequential thinking integration
+    prompt: |
+      /troubleshoot Die divide() Methode wirft Fehler --seq
+    expected_tools:
+      - name: sequential_thinking
+        required: false
+      - name: read_file
+        required: false
+    allow_extra_tools: true
+    response:
+      contains:
+        - "divide"
+    timeout: 180.0
+    tags:
+      - troubleshoot
+      - seq
+      - integration
+
