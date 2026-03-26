@@ -173,6 +173,10 @@ def _sanitize_messages_for_mistral(messages: List[Dict]) -> List[Dict]:
         })
 
     # Final validation pass - ensure valid sequence
+    # Mistral rules:
+    # 1. tool can only follow assistant with tool_calls
+    # 2. user cannot directly follow tool (must have assistant in between)
+    # 3. Consecutive same roles (except tool) should be merged
     validated = []
     prev_role = None
     prev_had_tool_calls = False
@@ -190,6 +194,23 @@ def _sanitize_messages_for_mistral(messages: List[Dict]) -> List[Dict]:
             }
             logger.warning(f"[llm] Mistral final validation: tool after {prev_role} → user")
             role = "user"
+
+        # User cannot directly follow tool - insert empty assistant
+        if role == "user" and prev_role == "tool":
+            validated.append({
+                "role": "assistant",
+                "content": ""  # Empty assistant to bridge tool → user
+            })
+            logger.warning("[llm] Mistral: Inserted empty assistant between tool and user")
+
+        # Merge consecutive user messages (can happen after tool→user conversions)
+        if role == "user" and prev_role == "user" and validated:
+            # Append to previous user message
+            prev_content = validated[-1].get("content", "")
+            new_content = msg.get("content", "")
+            validated[-1]["content"] = f"{prev_content}\n\n{new_content}"
+            logger.debug("[llm] Mistral: Merged consecutive user messages")
+            continue  # Don't append, we merged
 
         validated.append(msg)
         prev_role = role
