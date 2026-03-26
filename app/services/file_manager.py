@@ -504,7 +504,9 @@ class FileManager:
 
         # Prüfen ob String existiert
         if old_string not in content:
-            raise ValueError(f"String nicht gefunden in {path}:\n{old_string[:100]}...")
+            # Bessere Fehleranalyse für hilfreiche Meldung
+            error_details = self._analyze_string_mismatch(content, old_string, path)
+            raise ValueError(error_details)
 
         # Anzahl der Vorkommen zählen
         count = content.count(old_string)
@@ -606,6 +608,73 @@ class FileManager:
     # ══════════════════════════════════════════════════════════════════════════
     # Helpers
     # ══════════════════════════════════════════════════════════════════════════
+
+    def _analyze_string_mismatch(self, content: str, old_string: str, path: str) -> str:
+        """
+        Analysiert warum ein String nicht gefunden wurde und gibt hilfreiche Hinweise.
+
+        Prüft auf:
+        - Whitespace-Unterschiede (Tabs vs Spaces, Zeilenumbrüche)
+        - Ähnliche Zeilen im Content
+        - Ob der String teilweise vorkommt
+        """
+        lines = content.splitlines()
+        old_lines = old_string.splitlines()
+        first_old_line = old_lines[0].strip() if old_lines else ""
+
+        hints = []
+
+        # 1. Prüfe auf Whitespace-normalisierte Übereinstimmung
+        normalized_content = " ".join(content.split())
+        normalized_old = " ".join(old_string.split())
+        if normalized_old in normalized_content:
+            hints.append(
+                "WHITESPACE-PROBLEM: Der Text existiert, aber mit anderen Leerzeichen/Tabs/Zeilenumbrüchen. "
+                "Lies die Datei mit read_file und kopiere den EXAKTEN Text inklusive Einrückung."
+            )
+
+        # 2. Suche nach ähnlichen Zeilen (erste Zeile des old_string)
+        if first_old_line and len(first_old_line) > 10:
+            similar_lines = []
+            for i, line in enumerate(lines, 1):
+                # Ähnlichkeit prüfen
+                if first_old_line[:20] in line or line.strip().startswith(first_old_line[:15]):
+                    similar_lines.append(f"  Zeile {i}: {line[:80]}")
+                    if len(similar_lines) >= 3:
+                        break
+
+            if similar_lines:
+                hints.append(
+                    f"ÄHNLICHE ZEILEN gefunden:\n" + "\n".join(similar_lines) +
+                    "\n  → Verwende den EXAKTEN Text aus read_file!"
+                )
+
+        # 3. Prüfe ob einzelne Wörter vorkommen
+        if not hints:
+            words = [w for w in old_string.split() if len(w) > 5][:5]
+            found_words = [w for w in words if w in content]
+            if found_words:
+                hints.append(
+                    f"Einige Wörter gefunden ({', '.join(found_words[:3])}), aber nicht der exakte String. "
+                    "Der Code wurde möglicherweise geändert. Lies die aktuelle Datei mit read_file."
+                )
+
+        # 4. Allgemeiner Hinweis wenn keine spezifischen Probleme gefunden
+        if not hints:
+            hints.append(
+                "Der Text existiert nicht in der Datei. Mögliche Ursachen:\n"
+                "  1. Du hast die Datei nicht gelesen - nutze zuerst read_file\n"
+                "  2. Du hast den Text aus dem Gedächtnis rekonstruiert statt zu kopieren\n"
+                "  3. Die Datei wurde zwischenzeitlich geändert"
+            )
+
+        # Zusammenstellen der Fehlermeldung
+        error_msg = f"String nicht gefunden in {path}\n\n"
+        error_msg += f"Gesuchter Text (erste 150 Zeichen):\n{old_string[:150]}...\n\n"
+        error_msg += "ANALYSE:\n" + "\n\n".join(hints)
+        error_msg += "\n\nLÖSUNG: Lies die Datei mit read_file und kopiere den EXAKTEN Text für old_string."
+
+        return error_msg
 
     def _generate_diff(
         self,

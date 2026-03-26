@@ -1672,17 +1672,23 @@ class AgentOrchestrator:
                 parsed_tool_calls: List[ToolCall] = []
                 for tc in tools_to_process:
                     raw_args = tc["function"]["arguments"]
+                    tool_name = tc["function"]["name"]
+                    parse_error = None
+
                     if isinstance(raw_args, str):
                         try:
                             parsed_args = json.loads(raw_args)
-                        except json.JSONDecodeError:
-                            parsed_args = {}
+                        except json.JSONDecodeError as e:
+                            # JSON-Parsing fehlgeschlagen - speichere Error für bessere Meldung
+                            parsed_args = {"__parse_error__": str(e), "__raw_args__": raw_args[:500]}
+                            parse_error = str(e)
+                            logger.warning(f"[agent] JSON parse error for {tool_name}: {e}, raw: {raw_args[:200]}")
                     else:
                         parsed_args = raw_args
 
                     parsed_tool_calls.append(ToolCall(
                         id=tc.get("id", f"call_{len(state.tool_calls_history)}"),
-                        name=tc["function"]["name"],
+                        name=tool_name,
                         arguments=parsed_args
                     ))
 

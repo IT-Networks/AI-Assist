@@ -215,6 +215,19 @@ class ToolRegistry:
         # wenn Text-Parser 'name' fälschlicherweise in arguments einfügt)
         kwargs.pop("name", None)
 
+        # Prüfe auf JSON-Parse-Fehler (vom Orchestrator gesetzt)
+        if "__parse_error__" in kwargs:
+            parse_error = kwargs.pop("__parse_error__")
+            raw_args = kwargs.pop("__raw_args__", "")
+            return ToolResult(
+                success=False,
+                error=(
+                    f"Tool '{name}': JSON-Parsing der Argumente fehlgeschlagen: {parse_error}\n"
+                    f"Rohes Argument: {raw_args[:200]}...\n"
+                    f"Bitte korrigiere die JSON-Syntax und rufe das Tool erneut auf."
+                )
+            )
+
         tool = self._tools.get(name)
         if not tool:
             return ToolResult(success=False, error=f"Unbekanntes Tool: {name}")
@@ -226,11 +239,21 @@ class ToolRegistry:
         # Verhindert dass Python-TypeErrors als kryptische Fehlermeldungen beim LLM ankommen.
         missing = [p.name for p in tool.parameters if p.required and p.name not in kwargs]
         if missing:
+            # Spezielle Hilfe für edit_file
+            extra_hint = ""
+            if name == "edit_file":
+                extra_hint = (
+                    "\n\nHINWEIS für edit_file: Du musst ALLE Parameter angeben:\n"
+                    "- path: Pfad zur Datei\n"
+                    "- old_string: Der EXAKTE Text der ersetzt werden soll (kopiere aus read_file!)\n"
+                    "- new_string: Der neue Text\n"
+                    "WICHTIG: Lies die Datei zuerst mit read_file um den exakten old_string zu bekommen!"
+                )
             return ToolResult(
                 success=False,
                 error=(
                     f"Tool '{name}': Pflichtparameter fehlen: {', '.join(missing)}. "
-                    f"Bitte erneut aufrufen und alle Pflichtparameter angeben."
+                    f"Bitte erneut aufrufen und alle Pflichtparameter angeben.{extra_hint}"
                 )
             )
 
@@ -2175,18 +2198,19 @@ CREATE_DIRECTORY_TOOL = Tool(
 EDIT_FILE_TOOL = Tool(
     name="edit_file",
     description=(
-        "Bearbeitet eine LOKALE Datei durch String-Ersetzung (wie Claude Code Edit). BENÖTIGT BESTÄTIGUNG. "
-        "WICHTIG: old_string muss EINDEUTIG sein! Bei mehrfachem Vorkommen: "
-        "1) Mehr Kontext in old_string aufnehmen, oder 2) replace_all=true für alle Ersetzungen. "
-        "Pfad: Absolut oder relativ zum indexierten Projekt-Verzeichnis. "
-        "NICHT für GitHub-Repos - diese können nicht direkt bearbeitet werden."
+        "Bearbeitet eine LOKALE Datei durch String-Ersetzung (wie Claude Code Edit). BENÖTIGT BESTÄTIGUNG.\n\n"
+        "KRITISCH - IMMER ZUERST read_file AUSFÜHREN!\n"
+        "Der old_string muss EXAKT mit dem Dateiinhalt übereinstimmen - inkl. Leerzeichen, Tabs, Zeilenumbrüche.\n"
+        "Kopiere old_string DIREKT aus dem read_file Output, nicht aus dem Gedächtnis rekonstruieren!\n\n"
+        "Bei mehrfachem Vorkommen: 1) Mehr Kontext in old_string, oder 2) replace_all=true.\n"
+        "Pfad: Absolut oder relativ. NICHT für GitHub-Repos - diese können nicht direkt bearbeitet werden."
     ),
     category=ToolCategory.FILE,
     is_write_operation=True,
     parameters=[
         ToolParameter("path", "string", "Pfad zur Datei (relativ oder absolut)"),
-        ToolParameter("old_string", "string", "Zu ersetzender Text (muss eindeutig sein!)"),
-        ToolParameter("new_string", "string", "Neuer Text"),
+        ToolParameter("old_string", "string", "EXAKTER zu ersetzender Text - muss 1:1 aus read_file kopiert werden inkl. aller Whitespaces!"),
+        ToolParameter("new_string", "string", "Neuer Text der old_string ersetzt"),
         ToolParameter("replace_all", "boolean", "Alle Vorkommen ersetzen (default: false)", required=False, default=False),
     ],
     handler=edit_file
