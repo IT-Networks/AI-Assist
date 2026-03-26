@@ -1,0 +1,17 @@
+{
+  "session_id": "f55e95d8-a6ee-41a5-85bf-0ae597173bdb",
+  "title": "/seq Analysiere die Code-Struktur --mode invalid_mode\n",
+  "mode": "read_only",
+  "messages_history": [
+    {
+      "role": "user",
+      "content": "/seq Analysiere die Code-Struktur --mode invalid_mode\n"
+    },
+    {
+      "role": "assistant",
+      "content": "Es scheint, dass der angegebene Modus \"invalid_mode\" nicht unterstützt wird. Bitte wähle einen gültigen Modus oder spezifiziere die Art der Analyse, die du durchführen möchtest. Mögliche Optionen könnten sein: \"Code-Analyse\", \"Fehleranalyse\", \"Performance-Analyse\" oder \"Struktur-Analyse\"."
+    }
+  ],
+  "created_at": 1774529320.1566207,
+  "updated_at": 1774529320.1566207
+}

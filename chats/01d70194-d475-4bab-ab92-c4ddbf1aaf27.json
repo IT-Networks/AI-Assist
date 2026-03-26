@@ -1,0 +1,17 @@
+{
+  "session_id": "01d70194-d475-4bab-ab92-c4ddbf1aaf27",
+  "title": "Find all files that contain the word 'test'",
+  "mode": "read_only",
+  "messages_history": [
+    {
+      "role": "user",
+      "content": "Find all files that contain the word 'test'"
+    },
+    {
+      "role": "assistant",
+      "content": "Die Suche nach dem Wort \"test\" hat die folgende Datei ergeben:\n\n### Gefundene Datei:\n- **tests/test_example.py**\n  - Diese Datei enthält Unit-Tests für das Modul `example.py` und umfasst mehrere Testmethoden wie `test_greet_basic`, `test_add_positive` und weitere.\n\nMöchtest du den Inhalt dieser Datei sehen oder weitere Informationen dazu?"
+    }
+  ],
+  "created_at": 1774516851.7760758,
+  "updated_at": 1774516851.7760758
+}

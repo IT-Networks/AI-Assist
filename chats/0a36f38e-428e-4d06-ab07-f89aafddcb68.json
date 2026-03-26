@@ -1,0 +1,17 @@
+{
+  "session_id": "0a36f38e-428e-4d06-ab07-f89aafddcb68",
+  "title": "Show me the open issues in this repository",
+  "mode": "read_only",
+  "messages_history": [
+    {
+      "role": "user",
+      "content": "Show me the open issues in this repository"
+    },
+    {
+      "role": "assistant",
+      "content": "Please provide the name of the repository you would like to check for open issues."
+    }
+  ],
+  "created_at": 1774473529.5785904,
+  "updated_at": 1774473529.5785904
+}

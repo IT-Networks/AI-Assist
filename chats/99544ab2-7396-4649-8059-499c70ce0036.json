@@ -1,0 +1,17 @@
+{
+  "session_id": "99544ab2-7396-4649-8059-499c70ce0036",
+  "title": "/test Führe die Unit-Tests aus --type unit\n",
+  "mode": "read_only",
+  "messages_history": [
+    {
+      "role": "user",
+      "content": "/test Führe die Unit-Tests aus --type unit\n"
+    },
+    {
+      "role": "assistant",
+      "content": "Es scheint, dass ich die Unit-Tests nicht ausführen kann, da die erforderliche Umgebung nicht verfügbar ist. \n\nFalls du die Tests lokal ausführen möchtest, kannst du dies mit dem folgenden Befehl in deinem Terminal tun:\n\n```bash\npytest tests/test_example.py\n```\n\nWenn du weitere Unterstützung benötigst oder Fragen hast, lass es mich wissen!"
+    }
+  ],
+  "created_at": 1774522117.3796663,
+  "updated_at": 1774522117.3796663
+}

@@ -1,0 +1,17 @@
+{
+  "session_id": "2e08a793-31e3-4c41-98f7-2a368dac1f0e",
+  "title": "Get the details of PR #1 in the AI-Assist repository",
+  "mode": "read_only",
+  "messages_history": [
+    {
+      "role": "user",
+      "content": "Get the details of PR #1 in the AI-Assist repository"
+    },
+    {
+      "role": "assistant",
+      "content": "Es gab einen Fehler beim Abrufen der Details für PR #1 im AI-Assist Repository. Die PR-Diff-Analyse wird jedoch im Workspace-Panel durchgeführt. \n\nWenn du weitere Informationen benötigst oder eine andere Anfrage hast, lass es mich wissen!"
+    }
+  ],
+  "created_at": 1774516659.979987,
+  "updated_at": 1774516659.979987
+}

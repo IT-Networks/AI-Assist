@@ -1,0 +1,17 @@
+{
+  "session_id": "cf9f8f95-9611-4d4c-891e-a3ca7d84a3e9",
+  "title": "Use read_file to read example.py. Show me the first 10 lines…",
+  "mode": "read_only",
+  "messages_history": [
+    {
+      "role": "user",
+      "content": "Use read_file to read example.py. Show me the first 10 lines."
+    },
+    {
+      "role": "assistant",
+      "content": "Hier sind die ersten 10 Zeilen der Datei `example.py`:\n\n```python\n\"\"\"\nExample Python module for E2E testing.\n\nThis module provides sample functions and classes for testing\nAI-Assist tool capabilities.\n\"\"\"\n\nfrom typing import Optional\n```\n\nMöchtest du weitere Zeilen oder Informationen zu dieser Datei?"
+    }
+  ],
+  "created_at": 1774518156.6252577,
+  "updated_at": 1774518156.6252577
+}

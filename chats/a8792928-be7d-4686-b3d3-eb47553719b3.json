@@ -1,0 +1,17 @@
+{
+  "session_id": "a8792928-be7d-4686-b3d3-eb47553719b3",
+  "title": "Sage einfach Hallo auf Deutsch.",
+  "mode": "read_only",
+  "messages_history": [
+    {
+      "role": "user",
+      "content": "Sage einfach Hallo auf Deutsch."
+    },
+    {
+      "role": "assistant",
+      "content": "Hallo!"
+    }
+  ],
+  "created_at": 1774459810.830461,
+  "updated_at": 1774459810.830461
+}

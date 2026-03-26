@@ -1,0 +1,17 @@
+{
+  "session_id": "2c8238ff-1838-4809-87e8-b6b4f834c688",
+  "title": "Show me the open issues in this repository",
+  "mode": "read_only",
+  "messages_history": [
+    {
+      "role": "user",
+      "content": "Show me the open issues in this repository"
+    },
+    {
+      "role": "assistant",
+      "content": "It seems there was an error while trying to fetch the open issues from the repository. Please provide the name of the repository or the owner/repo format so I can attempt to retrieve the information again."
+    }
+  ],
+  "created_at": 1774516714.7562284,
+  "updated_at": 1774516714.7562284
+}

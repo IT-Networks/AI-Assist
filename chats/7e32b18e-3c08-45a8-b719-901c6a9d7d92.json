@@ -1,0 +1,17 @@
+{
+  "session_id": "7e32b18e-3c08-45a8-b719-901c6a9d7d92",
+  "title": "What files were modified in PR #1 and summarize the changes",
+  "mode": "read_only",
+  "messages_history": [
+    {
+      "role": "user",
+      "content": "What files were modified in PR #1 and summarize the changes"
+    },
+    {
+      "role": "assistant",
+      "content": "Bitte teile mir den Namen des Repositories mit, damit ich die Informationen zu PR #1 abrufen kann."
+    }
+  ],
+  "created_at": 1774516397.3995898,
+  "updated_at": 1774516397.3995898
+}

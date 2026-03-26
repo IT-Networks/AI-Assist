@@ -1,0 +1,17 @@
+{
+  "session_id": "fa4d7738-d60e-4d4f-b564-9842a476689b",
+  "title": "Use read_jira_issue to read the full details of issue BUG-1.…",
+  "mode": "read_only",
+  "messages_history": [
+    {
+      "role": "user",
+      "content": "Use read_jira_issue to read the full details of issue BUG-1.\nInclude the description, acceptance criteria, and affected files.\n"
+    },
+    {
+      "role": "assistant",
+      "content": "The function `read_jira_issue` is currently not available, so I cannot retrieve the details of the Jira issue BUG-1. If you have any other requests or need assistance with something else, feel free to let me know!"
+    }
+  ],
+  "created_at": 1774516745.1925037,
+  "updated_at": 1774516745.1925037
+}

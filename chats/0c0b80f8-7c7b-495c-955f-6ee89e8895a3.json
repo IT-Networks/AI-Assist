@@ -1,0 +1,17 @@
+{
+  "session_id": "0c0b80f8-7c7b-495c-955f-6ee89e8895a3",
+  "title": "Liste alle Python-Dateien im Ordner C:/Users/marku/OneDrive/…",
+  "mode": "read_only",
+  "messages_history": [
+    {
+      "role": "user",
+      "content": "Liste alle Python-Dateien im Ordner C:/Users/marku/OneDrive/Dokumente/VisualCode/AI-Assist/LLM-Test-Proxy/app auf."
+    },
+    {
+      "role": "assistant",
+      "content": "Im Ordner `C:/Users/marku/OneDrive/Dokumente/VisualCode/AI-Assist/LLM-Test-Proxy/app` befinden sich folgende Python-Dateien:\n\n- `__init__.py`\n- `config.py`\n- `main.py`\n\nWenn du weitere Informationen zu einer dieser Dateien benötigst, lass es mich wissen!"
+    }
+  ],
+  "created_at": 1774459976.8794148,
+  "updated_at": 1774459976.8794148
+}

@@ -1,0 +1,17 @@
+{
+  "session_id": "b949105a-bb7f-4d4a-809b-5da4e85f6d23",
+  "title": "What is the project name and version in config.json?",
+  "mode": "read_only",
+  "messages_history": [
+    {
+      "role": "user",
+      "content": "What is the project name and version in config.json?"
+    },
+    {
+      "role": "assistant",
+      "content": "It seems that there are no configured Java or Python repositories available, which means I cannot search for the `config.json` file in the project. \n\nIf you have a specific path where this file might be located, please provide it, and I can check that location directly."
+    }
+  ],
+  "created_at": 1774473651.5868793,
+  "updated_at": 1774473651.5868793
+}

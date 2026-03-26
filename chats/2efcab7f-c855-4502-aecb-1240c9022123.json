@@ -1,0 +1,17 @@
+{
+  "session_id": "2efcab7f-c855-4502-aecb-1240c9022123",
+  "title": "List all branches in this repository",
+  "mode": "read_only",
+  "messages_history": [
+    {
+      "role": "user",
+      "content": "List all branches in this repository"
+    },
+    {
+      "role": "assistant",
+      "content": "Es scheint ein Problem mit der Verbindung zu GitHub zu geben, und ich kann die Branches in diesem Repository nicht auflisten. Möglicherweise ist die Konfiguration für die GitHub-Organisation nicht korrekt oder es gibt ein Authentifizierungsproblem.\n\nBitte überprüfe die GitHub-Repository-Einstellungen oder gib mir mehr Informationen über das Repository, das du analysieren möchtest."
+    }
+  ],
+  "created_at": 1774475698.4437082,
+  "updated_at": 1774475698.4437082
+}

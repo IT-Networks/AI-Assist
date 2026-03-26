@@ -1,0 +1,17 @@
+{
+  "session_id": "63136825-5e26-433c-85fa-8414a9decdb5",
+  "title": "[NO_TASK] Einfache Frage: Was ist 2+2?\n",
+  "mode": "read_only",
+  "messages_history": [
+    {
+      "role": "user",
+      "content": "[NO_TASK] Einfache Frage: Was ist 2+2?\n"
+    },
+    {
+      "role": "assistant",
+      "content": "2 + 2 = 4."
+    }
+  ],
+  "created_at": 1774530802.7838845,
+  "updated_at": 1774530802.7838845
+}

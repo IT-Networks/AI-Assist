@@ -1,0 +1,27 @@
+{
+  "suite_name": "Sequential Thinking Tests",
+  "timestamp": "2026-03-26T13:49:52.469772",
+  "summary": {
+    "total": 1,
+    "passed": 1,
+    "failed": 0,
+    "success_rate": 100.0,
+    "duration_ms": 18622
+  },
+  "tests": [
+    {
+      "name": "seq_basic_analysis",
+      "passed": true,
+      "prompt": "/seq Analysiere die Struktur der Calculator-Klasse in example.py\n",
+      "expected_tools": [
+        "sequential_thinking",
+        "read_file"
+      ],
+      "actual_tools": [],
+      "response_preview": "Die Calculator-Klasse in example.py ist eine einfache Implementierung eines Taschenrechners, die grundlegende mathematische Operationen unterst\u00fctzt. Hier ist eine detaillierte Analyse ihrer Struktur:\n",
+      "duration_ms": 18622,
+      "errors": [],
+      "timestamp": "2026-03-26T13:49:52.469772"
+    }
+  ]
+}

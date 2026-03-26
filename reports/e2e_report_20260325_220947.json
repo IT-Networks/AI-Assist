@@ -1,0 +1,238 @@
+{
+  "suite_name": "GitHub Operations",
+  "timestamp": "2026-03-25T22:02:04.459807",
+  "summary": {
+    "total": 9,
+    "passed": 0,
+    "failed": 9,
+    "success_rate": 0.0,
+    "duration_ms": 136004
+  },
+  "tests": [
+    {
+      "name": "get_pr_details",
+      "passed": false,
+      "prompt": "Get the details of PR #1 in the AI-Assist repository",
+      "expected_tools": [
+        "get_pr"
+      ],
+      "actual_tools": [
+        {
+          "name": "github_pr_details",
+          "arguments": {
+            "repo": "AI-Assist",
+            "pr_number": 1
+          },
+          "status": "error",
+          "order": 0,
+          "error": null
+        }
+      ],
+      "response_preview": "PR #1 wird im Workspace analysiert.",
+      "duration_ms": 12560,
+      "errors": [
+        "Expected tools not called: ['get_pr']. Actual tools: ['github_pr_details']. ",
+        "Tool 'get_pr' was not called. Actual tools: ['github_pr_details']. "
+      ],
+      "timestamp": "2026-03-25T22:00:01.016328"
+    },
+    {
+      "name": "list_open_prs",
+      "passed": false,
+      "prompt": "Show me all open pull requests in this repository",
+      "expected_tools": [
+        "list_prs"
+      ],
+      "actual_tools": [
+        {
+          "name": "github_list_prs",
+          "arguments": {
+            "repo": "owner/repo",
+            "state": "open"
+          },
+          "status": "error",
+          "order": 0,
+          "error": null
+        }
+      ],
+      "response_preview": "Es scheint, dass ich momentan keinen Zugriff auf GitHub habe, um die offenen Pull Requests in diesem Repository anzuzeigen. Wenn du mir den Repository-Namen oder weitere Details gibst, kann ich dir m\u00f6",
+      "duration_ms": 7596,
+      "errors": [
+        "Expected tools not called: ['list_prs']. Actual tools: ['github_list_prs']. ",
+        "Tool 'list_prs' was not called. Actual tools: ['github_list_prs']. "
+      ],
+      "timestamp": "2026-03-25T22:00:08.613193"
+    },
+    {
+      "name": "get_pr_diff",
+      "passed": false,
+      "prompt": "Show me the code changes in PR #1",
+      "expected_tools": [
+        "get_pr_diff"
+      ],
+      "actual_tools": [
+        {
+          "name": "github_pr_diff",
+          "arguments": {
+            "pr_number": 1
+          },
+          "status": "error",
+          "order": 0,
+          "error": null
+        }
+      ],
+      "response_preview": "",
+      "duration_ms": 27627,
+      "errors": [
+        "Expected tools not called: ['get_pr_diff']. Actual tools: ['github_pr_diff']. "
+      ],
+      "timestamp": "2026-03-25T22:00:36.241171"
+    },
+    {
+      "name": "analyze_pr_files",
+      "passed": false,
+      "prompt": "What files were modified in PR #1 and summarize the changes",
+      "expected_tools": [
+        "get_pr",
+        "get_pr_diff"
+      ],
+      "actual_tools": [
+        {
+          "name": "github_pr_diff",
+          "arguments": {
+            "pr_number": 1
+          },
+          "status": "error",
+          "order": 0,
+          "error": null
+        }
+      ],
+      "response_preview": "",
+      "duration_ms": 25387,
+      "errors": [
+        "Expected tools not called: ['get_pr']. Actual tools: ['github_pr_diff']. "
+      ],
+      "timestamp": "2026-03-25T22:01:01.629799"
+    },
+    {
+      "name": "get_repo_info",
+      "passed": false,
+      "prompt": "What is the description and main language of this repository?",
+      "expected_tools": [
+        "get_repo_info"
+      ],
+      "actual_tools": [],
+      "response_preview": "The repository is named **'AI-Assist'** and is described as an **enterprise AI assistant with a Claude-code-like architecture, specialized in Java/WebSphere Liberty development**. The main language of",
+      "duration_ms": 9770,
+      "errors": [
+        "Expected tools not called: ['get_repo_info']. Actual tools: []. "
+      ],
+      "timestamp": "2026-03-25T22:01:11.400306"
+    },
+    {
+      "name": "list_branches",
+      "passed": false,
+      "prompt": "List all branches in this repository",
+      "expected_tools": [
+        "list_branches"
+      ],
+      "actual_tools": [
+        {
+          "name": "github_list_branches",
+          "arguments": {
+            "repo": "owner/repo"
+          },
+          "status": "error",
+          "order": 0,
+          "error": null
+        }
+      ],
+      "response_preview": "Es scheint, dass ich die Branches in diesem Repository nicht auflisten kann, da der Zugriff auf die `.git`-Verzeichnisse blockiert ist. Bitte \u00fcberpr\u00fcfen Sie die Berechtigungen oder die Repository-Eins",
+      "duration_ms": 17804,
+      "errors": [
+        "Expected tools not called: ['list_branches']. Actual tools: ['github_list_branches']. ",
+        "Response missing expected text: ['main']. Response preview: Es scheint, dass ich die Branches in diesem Repository nicht auflisten kann, da der Zugriff auf die `.git`-Verzeichnisse blockiert ist. Bitte \u00fcberpr\u00fcfen Sie die Berechtigungen oder die Repository-Eins.... "
+      ],
+      "timestamp": "2026-03-25T22:01:29.204469"
+    },
+    {
+      "name": "list_issues",
+      "passed": false,
+      "prompt": "Show me the open issues in this repository",
+      "expected_tools": [
+        "list_issues"
+      ],
+      "actual_tools": [],
+      "response_preview": "Please provide the name of the repository you would like to check for open issues.",
+      "duration_ms": 3092,
+      "errors": [
+        "Expected tools not called: ['list_issues']. Actual tools: []. ",
+        "Tool 'list_issues' was not called. Actual tools: []. "
+      ],
+      "timestamp": "2026-03-25T22:01:32.296518"
+    },
+    {
+      "name": "pr_and_code_review",
+      "passed": false,
+      "prompt": "Get PR #1 details and show me the main file that was changed",
+      "expected_tools": [
+        "get_pr",
+        "read_file"
+      ],
+      "actual_tools": [
+        {
+          "name": "github_pr_details",
+          "arguments": {
+            "pr_number": 1
+          },
+          "status": "error",
+          "order": 0,
+          "error": null
+        },
+        {
+          "name": "github_pr_diff",
+          "arguments": {
+            "pr_number": 1
+          },
+          "status": "error",
+          "order": 1,
+          "error": null
+        }
+      ],
+      "response_preview": "",
+      "duration_ms": 4723,
+      "errors": [
+        "Expected tools not called: ['get_pr']. Actual tools: ['github_pr_details', 'github_pr_diff']. "
+      ],
+      "timestamp": "2026-03-25T22:01:37.020197"
+    },
+    {
+      "name": "search_in_pr_context",
+      "passed": false,
+      "prompt": "In PR #1, find any functions that were added or modified",
+      "expected_tools": [
+        "get_pr_diff",
+        "search_code"
+      ],
+      "actual_tools": [
+        {
+          "name": "github_pr_diff",
+          "arguments": {
+            "repo": "owner/repo",
+            "pr_number": 1,
+            "include_patch": true
+          },
+          "status": "error",
+          "order": 0,
+          "error": null
+        }
+      ],
+      "response_preview": "",
+      "duration_ms": 27439,
+      "errors": [
+        "Expected tools not called: ['get_pr_diff']. Actual tools: ['github_pr_diff']. "
+      ],
+      "timestamp": "2026-03-25T22:02:04.459807"
+    }
+  ]
+}

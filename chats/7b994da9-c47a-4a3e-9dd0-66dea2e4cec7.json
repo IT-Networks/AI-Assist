@@ -1,0 +1,17 @@
+{
+  "session_id": "7b994da9-c47a-4a3e-9dd0-66dea2e4cec7",
+  "title": "Create a new file called 'test_output.txt' with the content …",
+  "mode": "read_only",
+  "messages_history": [
+    {
+      "role": "user",
+      "content": "Create a new file called 'test_output.txt' with the content 'Hello from E2E test'"
+    },
+    {
+      "role": "assistant",
+      "content": "I cannot create files directly. However, you can easily create the file manually. Here’s how you can do it:\n\n1. Open a text editor (like Notepad, VSCode, or any other).\n2. Copy and paste the following content into the editor:\n\n```\nHello from E2E test\n```\n\n3. Save the file as `test_output.txt`.\n\nIf you need further assistance or a script to automate this, let me know!"
+    }
+  ],
+  "created_at": 1774473819.022916,
+  "updated_at": 1774473819.022916
+}

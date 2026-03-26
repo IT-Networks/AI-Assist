@@ -1,0 +1,17 @@
+{
+  "session_id": "95db9ade-0428-4c24-9ebd-9972f61523a1",
+  "title": "Find all files that contain the word 'test'",
+  "mode": "read_only",
+  "messages_history": [
+    {
+      "role": "user",
+      "content": "Find all files that contain the word 'test'"
+    },
+    {
+      "role": "assistant",
+      "content": "Es sind keine konfigurierten Repositories vorhanden, um nach Dateien zu suchen, die das Wort \"test\" enthalten. Bitte stelle sicher, dass die Repositories korrekt konfiguriert sind, oder gib mir weitere Anweisungen."
+    }
+  ],
+  "created_at": 1774473910.6519616,
+  "updated_at": 1774473910.6519616
+}

@@ -1,0 +1,473 @@
+{
+  "suite_name": "Tool Boundary Tests",
+  "timestamp": "2026-03-26T14:18:37.480849",
+  "summary": {
+    "total": 17,
+    "passed": 10,
+    "failed": 7,
+    "success_rate": 58.82352941176471,
+    "duration_ms": 269921
+  },
+  "tests": [
+    {
+      "name": "read_large_file",
+      "passed": true,
+      "prompt": "Use read_file to read the file large_file.py (1000+ lines).\nSummarize its structure.\n",
+      "expected_tools": [
+        "read_file"
+      ],
+      "actual_tools": [
+        {
+          "name": "read_file",
+          "arguments": {
+            "path": "large_file.py",
+            "limit": 1000
+          },
+          "status": "error",
+          "order": 0,
+          "error": ""
+        }
+      ],
+      "response_preview": "Die Datei `large_file.py` konnte nicht gefunden werden, da sie nicht im erlaubten Verzeichnis vorhanden ist. Bitte stellen Sie sicher, dass die Datei im richtigen Verzeichnis liegt oder geben Sie mir ",
+      "duration_ms": 11568,
+      "errors": [],
+      "timestamp": "2026-03-26T14:14:19.127952"
+    },
+    {
+      "name": "read_binary_file",
+      "passed": false,
+      "prompt": "Use read_file to read image.png.\nReport what happens with binary content.\n",
+      "expected_tools": [
+        "read_file"
+      ],
+      "actual_tools": [],
+      "response_preview": "I cannot read or process binary files such as images directly using the `read_file` function. This function is designed for text-based content and documentation retrieval. Attempting to read a binary ",
+      "duration_ms": 8682,
+      "errors": [
+        "Expected tools not called: ['read_file']. Actual tools: []. "
+      ],
+      "timestamp": "2026-03-26T14:14:27.810231"
+    },
+    {
+      "name": "edit_nonexistent_file",
+      "passed": false,
+      "prompt": "Use edit_file to add content to nonexistent_file.py.\nReport how the error is handled.\n",
+      "expected_tools": [
+        "edit_file"
+      ],
+      "actual_tools": [],
+      "response_preview": "The `edit_file` function is typically designed to modify existing files. If you attempt to use it on a file that does not exist, it will likely raise an error indicating that the file cannot be found ",
+      "duration_ms": 23662,
+      "errors": [
+        "Expected tools not called: ['edit_file']. Actual tools: []. "
+      ],
+      "timestamp": "2026-03-26T14:14:51.472290"
+    },
+    {
+      "name": "write_to_readonly_directory",
+      "passed": false,
+      "prompt": "Use write_file to create /etc/test.txt.\nReport how permission errors are handled.\n",
+      "expected_tools": [
+        "write_file"
+      ],
+      "actual_tools": [],
+      "response_preview": "The `write_file_safe` function in the `src/utils.py` file is designed to handle permission errors when attempting to write to a file. Here\u2019s how it works:\n\n1. **Try-Except Block**: The function uses a",
+      "duration_ms": 14208,
+      "errors": [
+        "Expected tools not called: ['write_file']. Actual tools: []. "
+      ],
+      "timestamp": "2026-03-26T14:15:05.680605"
+    },
+    {
+      "name": "search_no_matches",
+      "passed": true,
+      "prompt": "Use search_code to find \"xyznonexistent123\" in the codebase.\nReport how empty results are handled.\n",
+      "expected_tools": [
+        "search_code"
+      ],
+      "actual_tools": [
+        {
+          "name": "search_code",
+          "arguments": {
+            "query": "xyznonexistent123",
+            "language": "all"
+          },
+          "status": "success",
+          "order": 0,
+          "error": null
+        }
+      ],
+      "response_preview": "Die Suche nach \"xyznonexistent123\" in der Codebasis ergab keine Treffer. Das System meldet, dass keine Ergebnisse gefunden wurden. In solchen F\u00e4llen wird in der Regel eine Meldung angezeigt, die darau",
+      "duration_ms": 13287,
+      "errors": [],
+      "timestamp": "2026-03-26T14:15:18.968471"
+    },
+    {
+      "name": "search_very_common_term",
+      "passed": true,
+      "prompt": "Use search_code to find \"def\" in all Python files.\nHow many results are returned? Is there pagination?\n",
+      "expected_tools": [
+        "search_code"
+      ],
+      "actual_tools": [
+        {
+          "name": "search_code",
+          "arguments": {
+            "query": "def",
+            "language": "python"
+          },
+          "status": "success",
+          "order": 0,
+          "error": null
+        }
+      ],
+      "response_preview": "The search for \"def\" in all Python files returned **20 results**. There is **no pagination** since all results fit within a single response.",
+      "duration_ms": 7297,
+      "errors": [],
+      "timestamp": "2026-03-26T14:15:26.266357"
+    },
+    {
+      "name": "search_regex_pattern",
+      "passed": true,
+      "prompt": "Use search_code with pattern \"def\\s+\\w+\\(.*\\):\" to find function definitions.\nDoes regex work correctly?\n",
+      "expected_tools": [
+        "search_code"
+      ],
+      "actual_tools": [
+        {
+          "name": "search_code",
+          "arguments": {
+            "query": "def\\s+\\w+\\(.*\\):",
+            "language": "python"
+          },
+          "status": "success",
+          "order": 0,
+          "error": null
+        }
+      ],
+      "response_preview": "The regex pattern `def\\s+\\w+\\(.*\\):` successfully found function definitions in the Python code. Here are some of the matches:\n\n- In `tests/test_example.py`:\n  - `def test_greet_basic(self):` at line ",
+      "duration_ms": 10108,
+      "errors": [],
+      "timestamp": "2026-03-26T14:15:36.375039"
+    },
+    {
+      "name": "max_sequential_reads",
+      "passed": true,
+      "prompt": "Read the following files one by one:\n1. example.py\n2. src/main.py\n3. src/utils.py\n4. tests/test_example.py\n5. config.json\n\nAfter reading all, summarize what you found.\n",
+      "expected_tools": [
+        "read_file"
+      ],
+      "actual_tools": [
+        {
+          "name": "read_file",
+          "arguments": {
+            "path": "config.json"
+          },
+          "status": "success",
+          "order": 4,
+          "error": null
+        },
+        {
+          "name": "read_file",
+          "arguments": {},
+          "status": "success",
+          "order": 5,
+          "error": null
+        },
+        {
+          "name": "read_file",
+          "arguments": {},
+          "status": "success",
+          "order": 6,
+          "error": null
+        },
+        {
+          "name": "read_file",
+          "arguments": {},
+          "status": "success",
+          "order": 7,
+          "error": null
+        },
+        {
+          "name": "read_file",
+          "arguments": {},
+          "status": "success",
+          "order": 8,
+          "error": null
+        }
+      ],
+      "response_preview": "Hier sind die Inhalte der Dateien, die ich gelesen habe:\n\n=== Datei: example.py ===\n```python\n\"\"\"\nExample Python module for E2E testing.\n\nThis module provides sample functions and classes for testing\n",
+      "duration_ms": 42152,
+      "errors": [],
+      "timestamp": "2026-03-26T14:16:18.527473"
+    },
+    {
+      "name": "read_edit_read_cycle",
+      "passed": false,
+      "prompt": "1. Use read_file to read example.py\n2. Use edit_file to add a comment at the top\n3. Use read_file again to verify the change\n\nNote: The system may limit repeated operations.\n",
+      "expected_tools": [
+        "read_file",
+        "edit_file"
+      ],
+      "actual_tools": [
+        {
+          "name": "read_file",
+          "arguments": {
+            "path": "example.py"
+          },
+          "status": "success",
+          "order": 0,
+          "error": null
+        },
+        {
+          "name": "read_file",
+          "arguments": {
+            "path": "example.py"
+          },
+          "status": "success",
+          "order": 1,
+          "error": null
+        }
+      ],
+      "response_preview": "",
+      "duration_ms": 14495,
+      "errors": [
+        "Expected tools not called: ['edit_file']. Actual tools: ['read_file', 'read_file']. "
+      ],
+      "timestamp": "2026-03-26T14:16:33.023809"
+    },
+    {
+      "name": "concurrent_tool_calls",
+      "passed": true,
+      "prompt": "Read these files simultaneously:\n- example.py\n- config.json\n- README.md\n\nReport how many tool calls were made.\n",
+      "expected_tools": [
+        "read_file"
+      ],
+      "actual_tools": [
+        {
+          "name": "read_file",
+          "arguments": {
+            "path": "README.md"
+          },
+          "status": "success",
+          "order": 2,
+          "error": null
+        },
+        {
+          "name": "read_file",
+          "arguments": {},
+          "status": "success",
+          "order": 3,
+          "error": null
+        },
+        {
+          "name": "read_file",
+          "arguments": {},
+          "status": "success",
+          "order": 4,
+          "error": null
+        }
+      ],
+      "response_preview": "Drei Toolaufrufe wurden erfolgreich durchgef\u00fchrt, um die Dateien `example.py`, `config.json` und `README.md` zu lesen. Hier sind die Inhalte der Dateien:\n\n### example.py\n```python\n\"\"\"\nExample Python m",
+      "duration_ms": 31569,
+      "errors": [],
+      "timestamp": "2026-03-26T14:17:04.593321"
+    },
+    {
+      "name": "invalid_file_path",
+      "passed": true,
+      "prompt": "Use read_file to read \"file<>:*?.py\".\nHow are invalid path characters handled?\n",
+      "expected_tools": [
+        "read_file"
+      ],
+      "actual_tools": [
+        {
+          "name": "read_file",
+          "arguments": {
+            "path": "file<>:*?.py"
+          },
+          "status": "error",
+          "order": 0,
+          "error": ""
+        }
+      ],
+      "response_preview": "Die Datei \"file<>:*?.py\" konnte nicht gefunden werden. Dies deutet darauf hin, dass der Dateiname ung\u00fcltige Zeichen enth\u00e4lt, die in Dateisystemen nicht erlaubt sind. In Python und den meisten Betriebs",
+      "duration_ms": 17796,
+      "errors": [],
+      "timestamp": "2026-03-26T14:17:22.390071"
+    },
+    {
+      "name": "empty_parameters",
+      "passed": true,
+      "prompt": "Use search_code without providing a query.\nWhat error message is returned?\n",
+      "expected_tools": [
+        "search_code"
+      ],
+      "actual_tools": [],
+      "response_preview": "The error message returned would indicate that a query must be provided for the `search_code` function to execute. It typically states that the input is required and cannot be empty.",
+      "duration_ms": 3864,
+      "errors": [],
+      "timestamp": "2026-03-26T14:17:26.254994"
+    },
+    {
+      "name": "very_long_content",
+      "passed": false,
+      "prompt": "Use write_file to create a file with 10000 lines of \"Hello World\".\nIs there a content size limit?\n",
+      "expected_tools": [
+        "write_file"
+      ],
+      "actual_tools": [],
+      "response_preview": "Creating a file with 10,000 lines of \"Hello World\" is feasible. However, the content size limits depend on the file system and the programming language used. In many environments, there isn't a strict",
+      "duration_ms": 9493,
+      "errors": [
+        "Expected tools not called: ['write_file']. Actual tools: []. "
+      ],
+      "timestamp": "2026-03-26T14:17:35.748023"
+    },
+    {
+      "name": "github_then_local",
+      "passed": false,
+      "prompt": "1. Use github_pr_details to get PR #1 from AI-Assist repo\n2. Use read_file to read a local file mentioned in the PR\n\nNote the difference between GitHub and local tools.\n",
+      "expected_tools": [
+        "github_pr_details",
+        "read_file"
+      ],
+      "actual_tools": [
+        {
+          "name": "github_pr_details",
+          "arguments": {
+            "repo": "AI-Assist",
+            "pr_number": 1
+          },
+          "status": "error",
+          "order": 0,
+          "error": ""
+        }
+      ],
+      "response_preview": "PR #1 wird im Workspace analysiert. \n\nBitte geben Sie mir den Pfad zu einer lokalen Datei, die im PR erw\u00e4hnt wird, damit ich sie lesen kann.",
+      "duration_ms": 5694,
+      "errors": [
+        "Expected tools not called: ['read_file']. Actual tools: ['github_pr_details']. "
+      ],
+      "timestamp": "2026-03-26T14:17:41.442671"
+    },
+    {
+      "name": "search_then_modify",
+      "passed": false,
+      "prompt": "1. Use search_code to find the \"greet\" function\n2. Use read_file to read the file containing it\n3. Use edit_file to add a docstring to the greet function\n",
+      "expected_tools": [
+        "search_code",
+        "read_file",
+        "edit_file"
+      ],
+      "actual_tools": [
+        {
+          "name": "search_code",
+          "arguments": {
+            "query": "greet",
+            "language": "python"
+          },
+          "status": "success",
+          "order": 0,
+          "error": null
+        },
+        {
+          "name": "read_file",
+          "arguments": {
+            "path": "example.py"
+          },
+          "status": "success",
+          "order": 1,
+          "error": null
+        },
+        {
+          "name": "read_file",
+          "arguments": {
+            "path": "example.py"
+          },
+          "status": "success",
+          "order": 2,
+          "error": null
+        }
+      ],
+      "response_preview": "Die Funktion `greet` in der Datei `example.py` ist bereits mit einer Docstring versehen, die die Argumente und den R\u00fcckgabewert beschreibt. Hier ist der relevante Code:\n\n```python\ndef greet(name: str)",
+      "duration_ms": 19618,
+      "errors": [
+        "Expected tools not called: ['edit_file']. Actual tools: ['search_code', 'read_file', 'read_file']. "
+      ],
+      "timestamp": "2026-03-26T14:18:01.060953"
+    },
+    {
+      "name": "accumulate_context",
+      "passed": true,
+      "prompt": "Perform these operations and track what you remember:\n1. Read example.py - note the function names\n2. Read config.json - note the version\n3. Read README.md - note the project name\n4. Search for \"Calculator\" - note how many matches\n5. Summarize ALL the information you collected\n",
+      "expected_tools": [
+        "read_file",
+        "search_code"
+      ],
+      "actual_tools": [
+        {
+          "name": "read_file",
+          "arguments": {
+            "path": "README.md"
+          },
+          "status": "success",
+          "order": 2,
+          "error": null
+        },
+        {
+          "name": "search_code",
+          "arguments": {
+            "query": "Calculator",
+            "language": "python"
+          },
+          "status": "success",
+          "order": 3,
+          "error": null
+        },
+        {
+          "name": "read_file",
+          "arguments": {},
+          "status": "success",
+          "order": 4,
+          "error": null
+        },
+        {
+          "name": "read_file",
+          "arguments": {},
+          "status": "success",
+          "order": 5,
+          "error": null
+        }
+      ],
+      "response_preview": "Hier sind die gesammelten Informationen aus den angeforderten Dateien:\n\n1. **Funktionen in `example.py`:**\n   - `greet(name: str) -> str`\n   - `add(a: int, b: int) -> int`\n   - `multiply(x: int, y: in",
+      "duration_ms": 29117,
+      "errors": [],
+      "timestamp": "2026-03-26T14:18:30.178139"
+    },
+    {
+      "name": "tool_result_truncation",
+      "passed": true,
+      "prompt": "Use list_files to list ALL files in the repository recursively.\nHow many files are returned? Is the result truncated?\n",
+      "expected_tools": [
+        "list_files"
+      ],
+      "actual_tools": [
+        {
+          "name": "list_files",
+          "arguments": {
+            "path": ".",
+            "recursive": true
+          },
+          "status": "success",
+          "order": 0,
+          "error": null
+        }
+      ],
+      "response_preview": "A total of 8 files were found in the repository. The result is not truncated, as all files have been listed.",
+      "duration_ms": 7302,
+      "errors": [],
+      "timestamp": "2026-03-26T14:18:37.480849"
+    }
+  ]
+}

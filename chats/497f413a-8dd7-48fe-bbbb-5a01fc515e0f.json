@@ -1,0 +1,17 @@
+{
+  "session_id": "497f413a-8dd7-48fe-bbbb-5a01fc515e0f",
+  "title": "What is the project name and version in config.json?",
+  "mode": "read_only",
+  "messages_history": [
+    {
+      "role": "user",
+      "content": "What is the project name and version in config.json?"
+    },
+    {
+      "role": "assistant",
+      "content": "The project name in `config.json` is **'test-project'** and the version is **'1.0.0'**."
+    }
+  ],
+  "created_at": 1774475761.1439672,
+  "updated_at": 1774475761.1439672
+}

@@ -338,7 +338,7 @@ class JiraConfig(BaseModel):
     enabled: bool = False
     base_url: str = ""  # z.B. https://jira.example.com
     username: str = ""
-    api_token: str = ""   # Atlassian Cloud API Token (bevorzugt)
+    api_token: str = ""   # Bei leerem username: Bearer Token, sonst Basic Auth (username:api_token)
     password: str = ""    # Server/DC Passwort (Fallback)
     default_project: str = ""  # Standard-Projektschlüssel (z.B. "PROJ")
     verify_ssl: bool = True  # False für selbstsignierte Zertifikate

@@ -527,6 +527,12 @@ class ConfluenceClient:
 _confluence_client: Optional[ConfluenceClient] = None
 
 
+def reset_confluence_client():
+    """Setzt den Confluence-Client zurück (nach Settings-Änderung aufrufen)."""
+    global _confluence_client
+    _confluence_client = None
+
+
 def get_confluence_client() -> ConfluenceClient:
     """Gibt den Confluence-Client zurück (Singleton)."""
     global _confluence_client

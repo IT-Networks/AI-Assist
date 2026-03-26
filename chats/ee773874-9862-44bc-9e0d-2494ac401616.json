@@ -1,0 +1,17 @@
+{
+  "session_id": "ee773874-9862-44bc-9e0d-2494ac401616",
+  "title": "Use search_jira to find issues with status \"Archived\" in pro…",
+  "mode": "read_only",
+  "messages_history": [
+    {
+      "role": "user",
+      "content": "Use search_jira to find issues with status \"Archived\" in project EMPTY.\nReport if no issues are found.\n"
+    },
+    {
+      "role": "assistant",
+      "content": "Es scheint, dass Jira nicht konfiguriert oder deaktiviert ist, weshalb ich keine Issues mit dem Status \"Archived\" im Projekt \"EMPTY\" suchen kann. Wenn du weitere Informationen benötigst oder eine andere Anfrage hast, lass es mich wissen!"
+    }
+  ],
+  "created_at": 1774516368.1302564,
+  "updated_at": 1774516368.1302564
+}

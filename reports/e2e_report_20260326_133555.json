@@ -1,0 +1,105 @@
+{
+  "suite_name": "Task Decomposition Tests",
+  "timestamp": "2026-03-26T13:35:55.959999",
+  "summary": {
+    "total": 3,
+    "passed": 3,
+    "failed": 0,
+    "success_rate": 100.0,
+    "duration_ms": 113328
+  },
+  "tests": [
+    {
+      "name": "task_decomposition_complex_feature",
+      "passed": true,
+      "prompt": "Implementiere ein vollst\u00e4ndiges Logging-System mit:\n1. Logger-Klasse mit verschiedenen Log-Levels (DEBUG, INFO, WARNING, ERROR)\n2. File-Handler f\u00fcr Log-Ausgabe in Dateien\n3. Console-Handler f\u00fcr Terminal-Ausgabe\n4. Unit-Tests f\u00fcr alle Komponenten\n",
+      "expected_tools": [
+        "read_file",
+        "write_file"
+      ],
+      "actual_tools": [],
+      "response_preview": "Hier ist eine vollst\u00e4ndige Implementierung eines Logging-Systems in Python, das die Anforderungen erf\u00fcllt:\n\n### Logger-Klasse mit verschiedenen Log-Levels\n\n```python\nimport logging\nimport os\n\nclass Cu",
+      "duration_ms": 44999,
+      "errors": [],
+      "timestamp": "2026-03-26T13:34:47.631265"
+    },
+    {
+      "name": "task_decomposition_multi_step",
+      "passed": true,
+      "prompt": "F\u00fchre folgende Schritte aus:\n1. Lies die Python-Datei example.py und analysiere die Calculator-Klasse\n2. F\u00fcge eine sqrt() Methode zur Calculator-Klasse hinzu\n3. Schreibe einen Unit-Test f\u00fcr die sqrt() Methode\n4. Zeige den ge\u00e4nderten Code\n",
+      "expected_tools": [
+        "read_file",
+        "edit_file"
+      ],
+      "actual_tools": [
+        {
+          "name": "read_file",
+          "arguments": {
+            "path": "example.py"
+          },
+          "status": "success",
+          "order": 0,
+          "error": null
+        }
+      ],
+      "response_preview": "Die `Calculator`-Klasse in der Datei `example.py` bietet grundlegende mathematische Operationen wie Addition, Subtraktion, Multiplikation und Division. Sie enth\u00e4lt auch Methoden zur Verwaltung des Ber",
+      "duration_ms": 35052,
+      "errors": [],
+      "timestamp": "2026-03-26T13:35:22.683651"
+    },
+    {
+      "name": "task_decomposition_research_and_implement",
+      "passed": true,
+      "prompt": "Recherchiere Best Practices f\u00fcr Python Error Handling gem\u00e4\u00df der Dokumentation,\ndann implementiere eine verbesserte Exception-Behandlung in der Calculator-Klasse\n",
+      "expected_tools": [
+        "read_file",
+        "search_code"
+      ],
+      "actual_tools": [
+        {
+          "name": "search_handbook",
+          "arguments": {
+            "query": "Python Error Handling",
+            "top_k": 5
+          },
+          "status": "error",
+          "order": 0,
+          "error": ""
+        },
+        {
+          "name": "search_skills",
+          "arguments": {
+            "query": "Python Error Handling",
+            "top_k": 5
+          },
+          "status": "success",
+          "order": 1,
+          "error": null
+        },
+        {
+          "name": "search_code",
+          "arguments": {
+            "query": "class Calculator",
+            "language": "python"
+          },
+          "status": "success",
+          "order": 2,
+          "error": null
+        },
+        {
+          "name": "read_file",
+          "arguments": {
+            "path": "example.py"
+          },
+          "status": "success",
+          "order": 3,
+          "error": null
+        }
+      ],
+      "response_preview": "Die Recherche zu Best Practices f\u00fcr das Error Handling in Python hat ergeben, dass es wichtig ist, spezifische Ausnahmen zu verwenden, um Fehler pr\u00e4zise zu behandeln. Hier sind einige empfohlene Prakt",
+      "duration_ms": 33275,
+      "errors": [],
+      "timestamp": "2026-03-26T13:35:55.959999"
+    }
+  ]
+}

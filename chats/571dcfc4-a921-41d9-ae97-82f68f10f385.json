@@ -1,0 +1,17 @@
+{
+  "session_id": "571dcfc4-a921-41d9-ae97-82f68f10f385",
+  "title": "Use search_code to find all functions with \"add\" in their na…",
+  "mode": "read_only",
+  "messages_history": [
+    {
+      "role": "user",
+      "content": "Use search_code to find all functions with \"add\" in their name"
+    },
+    {
+      "role": "assistant",
+      "content": "Ich habe alle Funktionen mit \"add\" im Namen gefunden. Hier sind die relevanten Ergebnisse:\n\n### 1. Datei: `example.py`\n```python\ndef add(a: int, b: int) -> int:\n    \"\"\"\n    Add two numbers.\n    ```\n    \n### 2. Datei: `tests/test_example.py`\n- **Testklasse:** `TestMathFunctions`\n  - **Methode:** `test_add_positive`\n    ```python\n    assert add(2, 3) == 5\n    ```\n  - **Methode:** `test_add_negative`\n    ```python\n    assert add(-2, -3) == -5\n    ```\n  - **Methode:** `test_add_zero`\n    ```python\n    assert add(5, 0) == 5\n    ```\n  - **Methode:** `test_add`\n    ```python\n    calc = Calculator(10)\n    result = calc.add(5)\n    ```\n\nDie `add`-Funktion in `example.py` addiert zwei Zahlen, während die Testmethoden in `tests/test_example.py` verschiedene Szenarien für die `add`-Funktion testen.\n\nMöchtest du weitere Informationen zu einer dieser Funktionen oder etwas anderes tun?"
+    }
+  ],
+  "created_at": 1774518282.4105346,
+  "updated_at": 1774518282.4105346
+}

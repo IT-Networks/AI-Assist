@@ -1,0 +1,478 @@
+{
+  "suite_name": "Multi-Tool Workflows",
+  "timestamp": "2026-03-25T22:30:26.300538",
+  "summary": {
+    "total": 12,
+    "passed": 4,
+    "failed": 8,
+    "success_rate": 33.33333333333333,
+    "duration_ms": 315363
+  },
+  "tests": [
+    {
+      "name": "understand_codebase",
+      "passed": true,
+      "prompt": "Give me an overview of this project - list the files and explain what the main modules do",
+      "expected_tools": [
+        "list_files",
+        "read_file"
+      ],
+      "actual_tools": [
+        {
+          "name": "get_project_paths",
+          "arguments": {},
+          "status": "error",
+          "order": 0,
+          "error": null
+        },
+        {
+          "name": "list_files",
+          "arguments": {
+            "path": "."
+          },
+          "status": "error",
+          "order": 1,
+          "error": null
+        },
+        {
+          "name": "read_file",
+          "arguments": {
+            "path": "chains.jsonl"
+          },
+          "status": "error",
+          "order": 5,
+          "error": null
+        },
+        {
+          "name": "read_file",
+          "arguments": {},
+          "status": "success",
+          "order": 6,
+          "error": null
+        },
+        {
+          "name": "read_file",
+          "arguments": {},
+          "status": "success",
+          "order": 7,
+          "error": null
+        },
+        {
+          "name": "read_file",
+          "arguments": {},
+          "status": "success",
+          "order": 8,
+          "error": null
+        }
+      ],
+      "response_preview": "",
+      "duration_ms": 24467,
+      "errors": [],
+      "timestamp": "2026-03-25T22:25:35.403890"
+    },
+    {
+      "name": "find_and_explain_function",
+      "passed": true,
+      "prompt": "Find the 'greet' function and explain how it works",
+      "expected_tools": [
+        "search_code"
+      ],
+      "actual_tools": [
+        {
+          "name": "search_code",
+          "arguments": {
+            "query": "greet",
+            "language": "all"
+          },
+          "status": "error",
+          "order": 0,
+          "error": null
+        },
+        {
+          "name": "get_project_paths",
+          "arguments": {},
+          "status": "error",
+          "order": 1,
+          "error": null
+        }
+      ],
+      "response_preview": "Es scheint, dass keine konfigurierten Repositories vorhanden sind, um die 'greet' Funktion zu finden. Bitte stelle sicher, dass die Repositories korrekt konfiguriert sind, oder gib mir spezifische Pfa",
+      "duration_ms": 27489,
+      "errors": [],
+      "timestamp": "2026-03-25T22:26:02.893799"
+    },
+    {
+      "name": "read_modify_verify",
+      "passed": false,
+      "prompt": "Add type hints to the 'add' function in example.py and show me the result",
+      "expected_tools": [
+        "read_file",
+        "edit_file"
+      ],
+      "actual_tools": [
+        {
+          "name": "read_file",
+          "arguments": {
+            "path": "example.py"
+          },
+          "status": "error",
+          "order": 0,
+          "error": null
+        },
+        {
+          "name": "search_code",
+          "arguments": {
+            "query": "def add",
+            "language": "python"
+          },
+          "status": "error",
+          "order": 1,
+          "error": null
+        },
+        {
+          "name": "get_project_paths",
+          "arguments": {},
+          "status": "error",
+          "order": 2,
+          "error": null
+        }
+      ],
+      "response_preview": "Es scheint, dass keine Python-Repositories konfiguriert sind, und ich kann die Datei `example.py` nicht finden. Bitte stelle sicher, dass das Repository korrekt konfiguriert ist oder teile mir den gen",
+      "duration_ms": 25486,
+      "errors": [
+        "Expected tools not called: ['edit_file']. Actual tools: ['read_file', 'search_code', 'get_project_paths']. "
+      ],
+      "timestamp": "2026-03-25T22:26:28.380430"
+    },
+    {
+      "name": "create_test_for_function",
+      "passed": false,
+      "prompt": "Read the Calculator class in example.py and create a test file for it",
+      "expected_tools": [
+        "read_file",
+        "write_file"
+      ],
+      "actual_tools": [
+        {
+          "name": "read_file",
+          "arguments": {
+            "path": "example.py"
+          },
+          "status": "error",
+          "order": 0,
+          "error": null
+        },
+        {
+          "name": "search_code",
+          "arguments": {
+            "query": "Calculator",
+            "language": "python"
+          },
+          "status": "error",
+          "order": 1,
+          "error": null
+        },
+        {
+          "name": "get_project_paths",
+          "arguments": {},
+          "status": "error",
+          "order": 2,
+          "error": null
+        }
+      ],
+      "response_preview": "Es scheint, dass keine Python-Repositories konfiguriert sind, und ich kann die `Calculator`-Klasse in `example.py` nicht finden. Bitte stelle sicher, dass das Repository korrekt konfiguriert ist oder ",
+      "duration_ms": 24964,
+      "errors": [
+        "Expected tools not called: ['write_file']. Actual tools: ['read_file', 'search_code', 'get_project_paths']. ",
+        "Response missing expected text: ['test']. Response preview: Es scheint, dass keine Python-Repositories konfiguriert sind, und ich kann die `Calculator`-Klasse in `example.py` nicht finden. Bitte stelle sicher, dass das Repository korrekt konfiguriert ist oder .... "
+      ],
+      "timestamp": "2026-03-25T22:26:53.345001"
+    },
+    {
+      "name": "find_all_usages",
+      "passed": true,
+      "prompt": "Find where 'greet' is defined and all places where it's called",
+      "expected_tools": [
+        "search_code"
+      ],
+      "actual_tools": [
+        {
+          "name": "search_code",
+          "arguments": {
+            "query": "greet",
+            "language": "all"
+          },
+          "status": "error",
+          "order": 0,
+          "error": null
+        },
+        {
+          "name": "graph_dependents",
+          "arguments": {
+            "element_id": "greet"
+          },
+          "status": "error",
+          "order": 1,
+          "error": null
+        },
+        {
+          "name": "get_project_paths",
+          "arguments": {},
+          "status": "error",
+          "order": 2,
+          "error": null
+        }
+      ],
+      "response_preview": "Es scheint, dass keine Repositories konfiguriert sind, was bedeutet, dass ich nicht nach der Definition oder den Aufrufen von `greet` suchen kann. Bitte stelle sicher, dass die Repositories korrekt ko",
+      "duration_ms": 28437,
+      "errors": [],
+      "timestamp": "2026-03-25T22:27:21.782900"
+    },
+    {
+      "name": "dependency_analysis",
+      "passed": true,
+      "prompt": "Show me all imports in main.py and verify those modules exist",
+      "expected_tools": [
+        "read_file"
+      ],
+      "actual_tools": [
+        {
+          "name": "read_file",
+          "arguments": {
+            "path": "main.py"
+          },
+          "status": "error",
+          "order": 0,
+          "error": null
+        },
+        {
+          "name": "docker_list_packages",
+          "arguments": {},
+          "status": "error",
+          "order": 1,
+          "error": null
+        },
+        {
+          "name": "query_database",
+          "arguments": {
+            "query": "SELECT * FROM information_schema.tables WHERE table_schema = 'public' LIMIT 1"
+          },
+          "status": "error",
+          "order": 2,
+          "error": null
+        }
+      ],
+      "response_preview": "Die Datei `main.py` enth\u00e4lt die folgenden Import-Anweisungen:\n\n```python\nimport asyncio\nimport sys\nfrom contextlib import asynccontextmanager\nfrom typing import Any, Dict\nfrom fastapi import FastAPI\nf",
+      "duration_ms": 20139,
+      "errors": [],
+      "timestamp": "2026-03-25T22:27:41.922108"
+    },
+    {
+      "name": "document_module",
+      "passed": false,
+      "prompt": "Read example.py and update README.md to document its functions",
+      "expected_tools": [
+        "read_file",
+        "edit_file"
+      ],
+      "actual_tools": [
+        {
+          "name": "read_file",
+          "arguments": {
+            "path": "example.py"
+          },
+          "status": "error",
+          "order": 0,
+          "error": null
+        },
+        {
+          "name": "list_files",
+          "arguments": {
+            "path": "AI-Assist"
+          },
+          "status": "error",
+          "order": 1,
+          "error": null
+        },
+        {
+          "name": "list_files",
+          "arguments": {
+            "path": "C:/Users/marku/OneDrive/Dokumente/VisualCode/AI-Assist"
+          },
+          "status": "error",
+          "order": 2,
+          "error": null
+        }
+      ],
+      "response_preview": "Die Datei `example.py` konnte nicht gefunden werden, und es gibt auch keine Dateien im angegebenen Verzeichnis `AI-Assist`. \n\nBitte \u00fcberpr\u00fcfen Sie den Pfad oder die Existenz der Datei. Wenn Sie weiter",
+      "duration_ms": 32772,
+      "errors": [
+        "Expected tools not called: ['edit_file']. Actual tools: ['read_file', 'list_files', 'list_files']. "
+      ],
+      "timestamp": "2026-03-25T22:28:14.694530"
+    },
+    {
+      "name": "rename_function",
+      "passed": false,
+      "prompt": "Rename the function 'add' to 'sum_numbers' in example.py and update any calls to it",
+      "expected_tools": [
+        "read_file",
+        "edit_file"
+      ],
+      "actual_tools": [
+        {
+          "name": "read_file",
+          "arguments": {
+            "path": "example.py"
+          },
+          "status": "error",
+          "order": 0,
+          "error": null
+        },
+        {
+          "name": "list_files",
+          "arguments": {
+            "path": "C:\\Users\\marku\\OneDrive\\Dokumente\\VisualCode\\AI-Assist"
+          },
+          "status": "error",
+          "order": 1,
+          "error": null
+        }
+      ],
+      "response_preview": "Es scheint, dass die Datei `example.py` nicht im angegebenen Verzeichnis gefunden werden konnte und es sind keine Dateien im Verzeichnis vorhanden. Bitte \u00fcberpr\u00fcfen Sie den Pfad oder den Dateinamen un",
+      "duration_ms": 30243,
+      "errors": [
+        "Expected tools not called: ['edit_file']. Actual tools: ['read_file', 'list_files']. ",
+        "Response missing expected text: ['sum_numbers']. Response preview: Es scheint, dass die Datei `example.py` nicht im angegebenen Verzeichnis gefunden werden konnte und es sind keine Dateien im Verzeichnis vorhanden. Bitte \u00fcberpr\u00fcfen Sie den Pfad oder den Dateinamen un.... "
+      ],
+      "timestamp": "2026-03-25T22:28:44.938002"
+    },
+    {
+      "name": "extract_class",
+      "passed": false,
+      "prompt": "Read example.py and create a new MathOperations class that includes the add function",
+      "expected_tools": [
+        "read_file",
+        "write_file"
+      ],
+      "actual_tools": [
+        {
+          "name": "read_file",
+          "arguments": {
+            "path": "example.py"
+          },
+          "status": "error",
+          "order": 0,
+          "error": null
+        },
+        {
+          "name": "list_files",
+          "arguments": {
+            "path": "C:\\Users\\marku\\OneDrive\\Dokumente\\VisualCode\\AI-Assist\\AI-Assist"
+          },
+          "status": "error",
+          "order": 1,
+          "error": null
+        }
+      ],
+      "response_preview": "Die Datei `example.py` konnte nicht gefunden werden. In dem Verzeichnis befinden sich jedoch folgende Dateien:\n\n- `.coverage`\n- `.env.example`\n- `.gitignore`\n- `README.md`\n- `ROADMAP.md`\n- `VERSION`\n-",
+      "duration_ms": 39516,
+      "errors": [
+        "Expected tools not called: ['write_file']. Actual tools: ['read_file', 'list_files']. "
+      ],
+      "timestamp": "2026-03-25T22:29:24.454004"
+    },
+    {
+      "name": "handle_missing_file",
+      "passed": false,
+      "prompt": "Read the file 'nonexistent_file.py' and summarize its contents",
+      "expected_tools": [
+        "read_file"
+      ],
+      "actual_tools": [],
+      "response_preview": "Die angegebene Datei 'nonexistent_file.py' existiert nicht im Repository. Daher kann ich ihren Inhalt nicht lesen oder zusammenfassen. Wenn du eine andere Datei hast, die du analysieren m\u00f6chtest, lass",
+      "duration_ms": 6698,
+      "errors": [
+        "Expected tools not called: ['read_file']. Actual tools: []. "
+      ],
+      "timestamp": "2026-03-25T22:29:31.152485"
+    },
+    {
+      "name": "full_feature_implementation",
+      "passed": false,
+      "prompt": "Add a 'divide' function to example.py that handles division by zero gracefully",
+      "expected_tools": [
+        "read_file",
+        "edit_file"
+      ],
+      "actual_tools": [
+        {
+          "name": "read_file",
+          "arguments": {
+            "path": "example.py"
+          },
+          "status": "error",
+          "order": 0,
+          "error": null
+        },
+        {
+          "name": "search_code",
+          "arguments": {
+            "query": "example.py",
+            "language": "python"
+          },
+          "status": "error",
+          "order": 1,
+          "error": null
+        },
+        {
+          "name": "get_project_paths",
+          "arguments": {},
+          "status": "error",
+          "order": 2,
+          "error": null
+        }
+      ],
+      "response_preview": "Es scheint, dass in deinem aktuellen Arbeitsverzeichnis keine Python-Repositories konfiguriert sind, und ich kann die Datei `example.py` nicht finden. \n\nBitte stelle sicher, dass du im richtigen Verze",
+      "duration_ms": 32915,
+      "errors": [
+        "Expected tools not called: ['edit_file']. Actual tools: ['read_file', 'search_code', 'get_project_paths']. ",
+        "Response missing expected text: ['divide']. Response preview: Es scheint, dass in deinem aktuellen Arbeitsverzeichnis keine Python-Repositories konfiguriert sind, und ich kann die Datei `example.py` nicht finden. \n\nBitte stelle sicher, dass du im richtigen Verze.... "
+      ],
+      "timestamp": "2026-03-25T22:30:04.068014"
+    },
+    {
+      "name": "code_review_workflow",
+      "passed": false,
+      "prompt": "Review the code in example.py and suggest improvements",
+      "expected_tools": [
+        "read_file"
+      ],
+      "actual_tools": [
+        {
+          "name": "search_code",
+          "arguments": {
+            "query": "example.py",
+            "language": "python"
+          },
+          "status": "error",
+          "order": 0,
+          "error": null
+        },
+        {
+          "name": "get_project_paths",
+          "arguments": {},
+          "status": "error",
+          "order": 1,
+          "error": null
+        }
+      ],
+      "response_preview": "Es scheint, dass ich keinen Zugriff auf ein konfiguriertes Python-Repository habe, um die Datei `example.py` zu finden und zu \u00fcberpr\u00fcfen. Bitte lade die Datei hoch oder gib mir den Code, den ich \u00fcberp",
+      "duration_ms": 22232,
+      "errors": [
+        "Expected tools not called: ['read_file']. Actual tools: ['search_code', 'get_project_paths']. "
+      ],
+      "timestamp": "2026-03-25T22:30:26.300538"
+    }
+  ]
+}

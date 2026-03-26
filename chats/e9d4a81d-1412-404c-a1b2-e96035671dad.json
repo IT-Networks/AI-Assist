@@ -1,0 +1,17 @@
+{
+  "session_id": "e9d4a81d-1412-404c-a1b2-e96035671dad",
+  "title": "What files were modified in PR #1 and summarize the changes",
+  "mode": "read_only",
+  "messages_history": [
+    {
+      "role": "user",
+      "content": "What files were modified in PR #1 and summarize the changes"
+    },
+    {
+      "role": "assistant",
+      "content": "PR #1 wird im Workspace analysiert."
+    }
+  ],
+  "created_at": 1774527378.0650716,
+  "updated_at": 1774527378.0650716
+}

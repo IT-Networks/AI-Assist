@@ -1,0 +1,600 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>E2E Test Report - Multi-Tool Workflows</title>
+    <style>
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: #0d1117;
+            color: #c9d1d9;
+            line-height: 1.6;
+            padding: 20px;
+        }
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+        h1 {
+            color: #58a6ff;
+            margin-bottom: 20px;
+            padding-bottom: 10px;
+            border-bottom: 1px solid #30363d;
+        }
+        .summary {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+            gap: 15px;
+            margin-bottom: 30px;
+        }
+        .metric {
+            background: #161b22;
+            border: 1px solid #30363d;
+            border-radius: 8px;
+            padding: 15px;
+            text-align: center;
+        }
+        .metric-value {
+            font-size: 28px;
+            font-weight: bold;
+            color: #58a6ff;
+        }
+        .metric-value.success {
+            color: #3fb950;
+        }
+        .metric-value.failure {
+            color: #f85149;
+        }
+        .metric-label {
+            font-size: 12px;
+            color: #8b949e;
+            text-transform: uppercase;
+        }
+        .test-card {
+            background: #161b22;
+            border: 1px solid #30363d;
+            border-radius: 8px;
+            margin-bottom: 15px;
+            overflow: hidden;
+        }
+        .test-header {
+            padding: 15px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            cursor: pointer;
+            border-bottom: 1px solid #30363d;
+        }
+        .test-header:hover {
+            background: #1f2937;
+        }
+        .test-title {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        .status-badge {
+            padding: 4px 10px;
+            border-radius: 12px;
+            font-size: 12px;
+            font-weight: 600;
+        }
+        .status-badge.passed {
+            background: rgba(63, 185, 80, 0.2);
+            color: #3fb950;
+        }
+        .status-badge.failed {
+            background: rgba(248, 81, 73, 0.2);
+            color: #f85149;
+        }
+        .test-details {
+            padding: 15px;
+            display: none;
+        }
+        .test-details.open {
+            display: block;
+        }
+        .detail-section {
+            margin-bottom: 15px;
+        }
+        .detail-label {
+            font-size: 11px;
+            color: #8b949e;
+            text-transform: uppercase;
+            margin-bottom: 5px;
+        }
+        .prompt {
+            background: #0d1117;
+            border: 1px solid #30363d;
+            border-radius: 4px;
+            padding: 10px;
+            font-family: monospace;
+            font-size: 13px;
+            white-space: pre-wrap;
+        }
+        .tool-list {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+        }
+        .tool-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 5px;
+            padding: 4px 10px;
+            border-radius: 4px;
+            font-size: 12px;
+            font-family: monospace;
+        }
+        .tool-badge.expected {
+            background: rgba(88, 166, 255, 0.2);
+            color: #58a6ff;
+            border: 1px solid rgba(88, 166, 255, 0.3);
+        }
+        .tool-badge.actual {
+            background: rgba(63, 185, 80, 0.2);
+            color: #3fb950;
+            border: 1px solid rgba(63, 185, 80, 0.3);
+        }
+        .tool-badge.error {
+            background: rgba(248, 81, 73, 0.2);
+            color: #f85149;
+            border: 1px solid rgba(248, 81, 73, 0.3);
+        }
+        .tool-order {
+            background: #30363d;
+            border-radius: 50%;
+            width: 18px;
+            height: 18px;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 10px;
+        }
+        .errors {
+            background: rgba(248, 81, 73, 0.1);
+            border: 1px solid rgba(248, 81, 73, 0.3);
+            border-radius: 4px;
+            padding: 10px;
+            color: #f85149;
+            font-size: 13px;
+        }
+        .duration {
+            color: #8b949e;
+            font-size: 13px;
+        }
+        .response-preview {
+            background: #0d1117;
+            border: 1px solid #30363d;
+            border-radius: 4px;
+            padding: 10px;
+            font-size: 13px;
+            max-height: 150px;
+            overflow-y: auto;
+        }
+        .timestamp {
+            color: #8b949e;
+            font-size: 12px;
+            margin-top: 20px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>E2E Test Report: Multi-Tool Workflows</h1>
+
+        <div class="summary">
+            <div class="metric">
+                <div class="metric-value">12</div>
+                <div class="metric-label">Total Tests</div>
+            </div>
+            <div class="metric">
+                <div class="metric-value success">4</div>
+                <div class="metric-label">Passed</div>
+            </div>
+            <div class="metric">
+                <div class="metric-value failure">8</div>
+                <div class="metric-label">Failed</div>
+            </div>
+            <div class="metric">
+                <div class="metric-value">33.3%</div>
+                <div class="metric-label">Success Rate</div>
+            </div>
+            <div class="metric">
+                <div class="metric-value">315.4s</div>
+                <div class="metric-label">Duration</div>
+            </div>
+        </div>
+
+        <div class="tests">
+            
+        <div class="test-card">
+            <div class="test-header">
+                <div class="test-title">
+                    <span class="status-badge passed">PASSED</span>
+                    <span>understand_codebase</span>
+                </div>
+                <span class="duration">24467ms</span>
+            </div>
+            <div class="test-details">
+                <div class="detail-section">
+                    <div class="detail-label">Prompt</div>
+                    <div class="prompt">Give me an overview of this project - list the files and explain what the main modules do</div>
+                </div>
+                <div class="detail-section">
+                    <div class="detail-label">Expected Tools</div>
+                    <div class="tool-list"><span class="tool-badge expected">list_files</span> <span class="tool-badge expected">read_file</span></div>
+                </div>
+                <div class="detail-section">
+                    <div class="detail-label">Actual Tools</div>
+                    <div class="tool-list"><span class="tool-badge error"><span class="tool-order">1</span>get_project_paths</span> <span class="tool-badge error"><span class="tool-order">2</span>list_files</span> <span class="tool-badge error"><span class="tool-order">6</span>read_file</span> <span class="tool-badge actual"><span class="tool-order">7</span>read_file</span> <span class="tool-badge actual"><span class="tool-order">8</span>read_file</span> <span class="tool-badge actual"><span class="tool-order">9</span>read_file</span></div>
+                </div>
+                
+                <div class="detail-section">
+                    <div class="detail-label">Response Preview</div>
+                    <div class="response-preview"><em>No response</em></div>
+                </div>
+            </div>
+        </div>
+
+        <div class="test-card">
+            <div class="test-header">
+                <div class="test-title">
+                    <span class="status-badge passed">PASSED</span>
+                    <span>find_and_explain_function</span>
+                </div>
+                <span class="duration">27489ms</span>
+            </div>
+            <div class="test-details">
+                <div class="detail-section">
+                    <div class="detail-label">Prompt</div>
+                    <div class="prompt">Find the 'greet' function and explain how it works</div>
+                </div>
+                <div class="detail-section">
+                    <div class="detail-label">Expected Tools</div>
+                    <div class="tool-list"><span class="tool-badge expected">search_code</span></div>
+                </div>
+                <div class="detail-section">
+                    <div class="detail-label">Actual Tools</div>
+                    <div class="tool-list"><span class="tool-badge error"><span class="tool-order">1</span>search_code</span> <span class="tool-badge error"><span class="tool-order">2</span>get_project_paths</span></div>
+                </div>
+                
+                <div class="detail-section">
+                    <div class="detail-label">Response Preview</div>
+                    <div class="response-preview">Es scheint, dass keine konfigurierten Repositories vorhanden sind, um die 'greet' Funktion zu finden. Bitte stelle sicher, dass die Repositories korrekt konfiguriert sind, oder gib mir spezifische Pfa</div>
+                </div>
+            </div>
+        </div>
+
+        <div class="test-card">
+            <div class="test-header">
+                <div class="test-title">
+                    <span class="status-badge failed">FAILED</span>
+                    <span>read_modify_verify</span>
+                </div>
+                <span class="duration">25486ms</span>
+            </div>
+            <div class="test-details">
+                <div class="detail-section">
+                    <div class="detail-label">Prompt</div>
+                    <div class="prompt">Add type hints to the 'add' function in example.py and show me the result</div>
+                </div>
+                <div class="detail-section">
+                    <div class="detail-label">Expected Tools</div>
+                    <div class="tool-list"><span class="tool-badge expected">read_file</span> <span class="tool-badge expected">edit_file</span></div>
+                </div>
+                <div class="detail-section">
+                    <div class="detail-label">Actual Tools</div>
+                    <div class="tool-list"><span class="tool-badge error"><span class="tool-order">1</span>read_file</span> <span class="tool-badge error"><span class="tool-order">2</span>search_code</span> <span class="tool-badge error"><span class="tool-order">3</span>get_project_paths</span></div>
+                </div>
+                <div class="detail-section"><div class="detail-label">Errors</div><div class="errors">Expected tools not called: ['edit_file']. Actual tools: ['read_file', 'search_code', 'get_project_paths']. </div></div>
+                <div class="detail-section">
+                    <div class="detail-label">Response Preview</div>
+                    <div class="response-preview">Es scheint, dass keine Python-Repositories konfiguriert sind, und ich kann die Datei `example.py` nicht finden. Bitte stelle sicher, dass das Repository korrekt konfiguriert ist oder teile mir den gen</div>
+                </div>
+            </div>
+        </div>
+
+        <div class="test-card">
+            <div class="test-header">
+                <div class="test-title">
+                    <span class="status-badge failed">FAILED</span>
+                    <span>create_test_for_function</span>
+                </div>
+                <span class="duration">24964ms</span>
+            </div>
+            <div class="test-details">
+                <div class="detail-section">
+                    <div class="detail-label">Prompt</div>
+                    <div class="prompt">Read the Calculator class in example.py and create a test file for it</div>
+                </div>
+                <div class="detail-section">
+                    <div class="detail-label">Expected Tools</div>
+                    <div class="tool-list"><span class="tool-badge expected">read_file</span> <span class="tool-badge expected">write_file</span></div>
+                </div>
+                <div class="detail-section">
+                    <div class="detail-label">Actual Tools</div>
+                    <div class="tool-list"><span class="tool-badge error"><span class="tool-order">1</span>read_file</span> <span class="tool-badge error"><span class="tool-order">2</span>search_code</span> <span class="tool-badge error"><span class="tool-order">3</span>get_project_paths</span></div>
+                </div>
+                <div class="detail-section"><div class="detail-label">Errors</div><div class="errors">Expected tools not called: ['write_file']. Actual tools: ['read_file', 'search_code', 'get_project_paths']. <br>Response missing expected text: ['test']. Response preview: Es scheint, dass keine Python-Repositories konfiguriert sind, und ich kann die `Calculator`-Klasse in `example.py` nicht finden. Bitte stelle sicher, dass das Repository korrekt konfiguriert ist oder .... </div></div>
+                <div class="detail-section">
+                    <div class="detail-label">Response Preview</div>
+                    <div class="response-preview">Es scheint, dass keine Python-Repositories konfiguriert sind, und ich kann die `Calculator`-Klasse in `example.py` nicht finden. Bitte stelle sicher, dass das Repository korrekt konfiguriert ist oder </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="test-card">
+            <div class="test-header">
+                <div class="test-title">
+                    <span class="status-badge passed">PASSED</span>
+                    <span>find_all_usages</span>
+                </div>
+                <span class="duration">28437ms</span>
+            </div>
+            <div class="test-details">
+                <div class="detail-section">
+                    <div class="detail-label">Prompt</div>
+                    <div class="prompt">Find where 'greet' is defined and all places where it's called</div>
+                </div>
+                <div class="detail-section">
+                    <div class="detail-label">Expected Tools</div>
+                    <div class="tool-list"><span class="tool-badge expected">search_code</span></div>
+                </div>
+                <div class="detail-section">
+                    <div class="detail-label">Actual Tools</div>
+                    <div class="tool-list"><span class="tool-badge error"><span class="tool-order">1</span>search_code</span> <span class="tool-badge error"><span class="tool-order">2</span>graph_dependents</span> <span class="tool-badge error"><span class="tool-order">3</span>get_project_paths</span></div>
+                </div>
+                
+                <div class="detail-section">
+                    <div class="detail-label">Response Preview</div>
+                    <div class="response-preview">Es scheint, dass keine Repositories konfiguriert sind, was bedeutet, dass ich nicht nach der Definition oder den Aufrufen von `greet` suchen kann. Bitte stelle sicher, dass die Repositories korrekt ko</div>
+                </div>
+            </div>
+        </div>
+
+        <div class="test-card">
+            <div class="test-header">
+                <div class="test-title">
+                    <span class="status-badge passed">PASSED</span>
+                    <span>dependency_analysis</span>
+                </div>
+                <span class="duration">20139ms</span>
+            </div>
+            <div class="test-details">
+                <div class="detail-section">
+                    <div class="detail-label">Prompt</div>
+                    <div class="prompt">Show me all imports in main.py and verify those modules exist</div>
+                </div>
+                <div class="detail-section">
+                    <div class="detail-label">Expected Tools</div>
+                    <div class="tool-list"><span class="tool-badge expected">read_file</span></div>
+                </div>
+                <div class="detail-section">
+                    <div class="detail-label">Actual Tools</div>
+                    <div class="tool-list"><span class="tool-badge error"><span class="tool-order">1</span>read_file</span> <span class="tool-badge error"><span class="tool-order">2</span>docker_list_packages</span> <span class="tool-badge error"><span class="tool-order">3</span>query_database</span></div>
+                </div>
+                
+                <div class="detail-section">
+                    <div class="detail-label">Response Preview</div>
+                    <div class="response-preview">Die Datei `main.py` enthält die folgenden Import-Anweisungen:
+
+```python
+import asyncio
+import sys
+from contextlib import asynccontextmanager
+from typing import Any, Dict
+from fastapi import FastAPI
+f</div>
+                </div>
+            </div>
+        </div>
+
+        <div class="test-card">
+            <div class="test-header">
+                <div class="test-title">
+                    <span class="status-badge failed">FAILED</span>
+                    <span>document_module</span>
+                </div>
+                <span class="duration">32772ms</span>
+            </div>
+            <div class="test-details">
+                <div class="detail-section">
+                    <div class="detail-label">Prompt</div>
+                    <div class="prompt">Read example.py and update README.md to document its functions</div>
+                </div>
+                <div class="detail-section">
+                    <div class="detail-label">Expected Tools</div>
+                    <div class="tool-list"><span class="tool-badge expected">read_file</span> <span class="tool-badge expected">edit_file</span></div>
+                </div>
+                <div class="detail-section">
+                    <div class="detail-label">Actual Tools</div>
+                    <div class="tool-list"><span class="tool-badge error"><span class="tool-order">1</span>read_file</span> <span class="tool-badge error"><span class="tool-order">2</span>list_files</span> <span class="tool-badge error"><span class="tool-order">3</span>list_files</span></div>
+                </div>
+                <div class="detail-section"><div class="detail-label">Errors</div><div class="errors">Expected tools not called: ['edit_file']. Actual tools: ['read_file', 'list_files', 'list_files']. </div></div>
+                <div class="detail-section">
+                    <div class="detail-label">Response Preview</div>
+                    <div class="response-preview">Die Datei `example.py` konnte nicht gefunden werden, und es gibt auch keine Dateien im angegebenen Verzeichnis `AI-Assist`. 
+
+Bitte überprüfen Sie den Pfad oder die Existenz der Datei. Wenn Sie weiter</div>
+                </div>
+            </div>
+        </div>
+
+        <div class="test-card">
+            <div class="test-header">
+                <div class="test-title">
+                    <span class="status-badge failed">FAILED</span>
+                    <span>rename_function</span>
+                </div>
+                <span class="duration">30243ms</span>
+            </div>
+            <div class="test-details">
+                <div class="detail-section">
+                    <div class="detail-label">Prompt</div>
+                    <div class="prompt">Rename the function 'add' to 'sum_numbers' in example.py and update any calls to it</div>
+                </div>
+                <div class="detail-section">
+                    <div class="detail-label">Expected Tools</div>
+                    <div class="tool-list"><span class="tool-badge expected">read_file</span> <span class="tool-badge expected">edit_file</span></div>
+                </div>
+                <div class="detail-section">
+                    <div class="detail-label">Actual Tools</div>
+                    <div class="tool-list"><span class="tool-badge error"><span class="tool-order">1</span>read_file</span> <span class="tool-badge error"><span class="tool-order">2</span>list_files</span></div>
+                </div>
+                <div class="detail-section"><div class="detail-label">Errors</div><div class="errors">Expected tools not called: ['edit_file']. Actual tools: ['read_file', 'list_files']. <br>Response missing expected text: ['sum_numbers']. Response preview: Es scheint, dass die Datei `example.py` nicht im angegebenen Verzeichnis gefunden werden konnte und es sind keine Dateien im Verzeichnis vorhanden. Bitte überprüfen Sie den Pfad oder den Dateinamen un.... </div></div>
+                <div class="detail-section">
+                    <div class="detail-label">Response Preview</div>
+                    <div class="response-preview">Es scheint, dass die Datei `example.py` nicht im angegebenen Verzeichnis gefunden werden konnte und es sind keine Dateien im Verzeichnis vorhanden. Bitte überprüfen Sie den Pfad oder den Dateinamen un</div>
+                </div>
+            </div>
+        </div>
+
+        <div class="test-card">
+            <div class="test-header">
+                <div class="test-title">
+                    <span class="status-badge failed">FAILED</span>
+                    <span>extract_class</span>
+                </div>
+                <span class="duration">39516ms</span>
+            </div>
+            <div class="test-details">
+                <div class="detail-section">
+                    <div class="detail-label">Prompt</div>
+                    <div class="prompt">Read example.py and create a new MathOperations class that includes the add function</div>
+                </div>
+                <div class="detail-section">
+                    <div class="detail-label">Expected Tools</div>
+                    <div class="tool-list"><span class="tool-badge expected">read_file</span> <span class="tool-badge expected">write_file</span></div>
+                </div>
+                <div class="detail-section">
+                    <div class="detail-label">Actual Tools</div>
+                    <div class="tool-list"><span class="tool-badge error"><span class="tool-order">1</span>read_file</span> <span class="tool-badge error"><span class="tool-order">2</span>list_files</span></div>
+                </div>
+                <div class="detail-section"><div class="detail-label">Errors</div><div class="errors">Expected tools not called: ['write_file']. Actual tools: ['read_file', 'list_files']. </div></div>
+                <div class="detail-section">
+                    <div class="detail-label">Response Preview</div>
+                    <div class="response-preview">Die Datei `example.py` konnte nicht gefunden werden. In dem Verzeichnis befinden sich jedoch folgende Dateien:
+
+- `.coverage`
+- `.env.example`
+- `.gitignore`
+- `README.md`
+- `ROADMAP.md`
+- `VERSION`
+-</div>
+                </div>
+            </div>
+        </div>
+
+        <div class="test-card">
+            <div class="test-header">
+                <div class="test-title">
+                    <span class="status-badge failed">FAILED</span>
+                    <span>handle_missing_file</span>
+                </div>
+                <span class="duration">6698ms</span>
+            </div>
+            <div class="test-details">
+                <div class="detail-section">
+                    <div class="detail-label">Prompt</div>
+                    <div class="prompt">Read the file 'nonexistent_file.py' and summarize its contents</div>
+                </div>
+                <div class="detail-section">
+                    <div class="detail-label">Expected Tools</div>
+                    <div class="tool-list"><span class="tool-badge expected">read_file</span></div>
+                </div>
+                <div class="detail-section">
+                    <div class="detail-label">Actual Tools</div>
+                    <div class="tool-list"><em>None</em></div>
+                </div>
+                <div class="detail-section"><div class="detail-label">Errors</div><div class="errors">Expected tools not called: ['read_file']. Actual tools: []. </div></div>
+                <div class="detail-section">
+                    <div class="detail-label">Response Preview</div>
+                    <div class="response-preview">Die angegebene Datei 'nonexistent_file.py' existiert nicht im Repository. Daher kann ich ihren Inhalt nicht lesen oder zusammenfassen. Wenn du eine andere Datei hast, die du analysieren möchtest, lass</div>
+                </div>
+            </div>
+        </div>
+
+        <div class="test-card">
+            <div class="test-header">
+                <div class="test-title">
+                    <span class="status-badge failed">FAILED</span>
+                    <span>full_feature_implementation</span>
+                </div>
+                <span class="duration">32915ms</span>
+            </div>
+            <div class="test-details">
+                <div class="detail-section">
+                    <div class="detail-label">Prompt</div>
+                    <div class="prompt">Add a 'divide' function to example.py that handles division by zero gracefully</div>
+                </div>
+                <div class="detail-section">
+                    <div class="detail-label">Expected Tools</div>
+                    <div class="tool-list"><span class="tool-badge expected">read_file</span> <span class="tool-badge expected">edit_file</span></div>
+                </div>
+                <div class="detail-section">
+                    <div class="detail-label">Actual Tools</div>
+                    <div class="tool-list"><span class="tool-badge error"><span class="tool-order">1</span>read_file</span> <span class="tool-badge error"><span class="tool-order">2</span>search_code</span> <span class="tool-badge error"><span class="tool-order">3</span>get_project_paths</span></div>
+                </div>
+                <div class="detail-section"><div class="detail-label">Errors</div><div class="errors">Expected tools not called: ['edit_file']. Actual tools: ['read_file', 'search_code', 'get_project_paths']. <br>Response missing expected text: ['divide']. Response preview: Es scheint, dass in deinem aktuellen Arbeitsverzeichnis keine Python-Repositories konfiguriert sind, und ich kann die Datei `example.py` nicht finden. 
+
+Bitte stelle sicher, dass du im richtigen Verze.... </div></div>
+                <div class="detail-section">
+                    <div class="detail-label">Response Preview</div>
+                    <div class="response-preview">Es scheint, dass in deinem aktuellen Arbeitsverzeichnis keine Python-Repositories konfiguriert sind, und ich kann die Datei `example.py` nicht finden. 
+
+Bitte stelle sicher, dass du im richtigen Verze</div>
+                </div>
+            </div>
+        </div>
+
+        <div class="test-card">
+            <div class="test-header">
+                <div class="test-title">
+                    <span class="status-badge failed">FAILED</span>
+                    <span>code_review_workflow</span>
+                </div>
+                <span class="duration">22232ms</span>
+            </div>
+            <div class="test-details">
+                <div class="detail-section">
+                    <div class="detail-label">Prompt</div>
+                    <div class="prompt">Review the code in example.py and suggest improvements</div>
+                </div>
+                <div class="detail-section">
+                    <div class="detail-label">Expected Tools</div>
+                    <div class="tool-list"><span class="tool-badge expected">read_file</span></div>
+                </div>
+                <div class="detail-section">
+                    <div class="detail-label">Actual Tools</div>
+                    <div class="tool-list"><span class="tool-badge error"><span class="tool-order">1</span>search_code</span> <span class="tool-badge error"><span class="tool-order">2</span>get_project_paths</span></div>
+                </div>
+                <div class="detail-section"><div class="detail-label">Errors</div><div class="errors">Expected tools not called: ['read_file']. Actual tools: ['search_code', 'get_project_paths']. </div></div>
+                <div class="detail-section">
+                    <div class="detail-label">Response Preview</div>
+                    <div class="response-preview">Es scheint, dass ich keinen Zugriff auf ein konfiguriertes Python-Repository habe, um die Datei `example.py` zu finden und zu überprüfen. Bitte lade die Datei hoch oder gib mir den Code, den ich überp</div>
+                </div>
+            </div>
+        </div>
+        </div>
+
+        <div class="timestamp">Generated: 2026-03-25 22:30:26</div>
+    </div>
+
+    <script>
+        document.querySelectorAll('.test-header').forEach(header => {
+            header.addEventListener('click', () => {
+                const details = header.nextElementSibling;
+                details.classList.toggle('open');
+            });
+        });
+    </script>
+</body>
+</html>

@@ -1,0 +1,491 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>E2E Test Report - GitHub Operations</title>
+    <style>
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: #0d1117;
+            color: #c9d1d9;
+            line-height: 1.6;
+            padding: 20px;
+        }
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+        h1 {
+            color: #58a6ff;
+            margin-bottom: 20px;
+            padding-bottom: 10px;
+            border-bottom: 1px solid #30363d;
+        }
+        .summary {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+            gap: 15px;
+            margin-bottom: 30px;
+        }
+        .metric {
+            background: #161b22;
+            border: 1px solid #30363d;
+            border-radius: 8px;
+            padding: 15px;
+            text-align: center;
+        }
+        .metric-value {
+            font-size: 28px;
+            font-weight: bold;
+            color: #58a6ff;
+        }
+        .metric-value.success {
+            color: #3fb950;
+        }
+        .metric-value.failure {
+            color: #f85149;
+        }
+        .metric-label {
+            font-size: 12px;
+            color: #8b949e;
+            text-transform: uppercase;
+        }
+        .test-card {
+            background: #161b22;
+            border: 1px solid #30363d;
+            border-radius: 8px;
+            margin-bottom: 15px;
+            overflow: hidden;
+        }
+        .test-header {
+            padding: 15px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            cursor: pointer;
+            border-bottom: 1px solid #30363d;
+        }
+        .test-header:hover {
+            background: #1f2937;
+        }
+        .test-title {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        .status-badge {
+            padding: 4px 10px;
+            border-radius: 12px;
+            font-size: 12px;
+            font-weight: 600;
+        }
+        .status-badge.passed {
+            background: rgba(63, 185, 80, 0.2);
+            color: #3fb950;
+        }
+        .status-badge.failed {
+            background: rgba(248, 81, 73, 0.2);
+            color: #f85149;
+        }
+        .test-details {
+            padding: 15px;
+            display: none;
+        }
+        .test-details.open {
+            display: block;
+        }
+        .detail-section {
+            margin-bottom: 15px;
+        }
+        .detail-label {
+            font-size: 11px;
+            color: #8b949e;
+            text-transform: uppercase;
+            margin-bottom: 5px;
+        }
+        .prompt {
+            background: #0d1117;
+            border: 1px solid #30363d;
+            border-radius: 4px;
+            padding: 10px;
+            font-family: monospace;
+            font-size: 13px;
+            white-space: pre-wrap;
+        }
+        .tool-list {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+        }
+        .tool-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 5px;
+            padding: 4px 10px;
+            border-radius: 4px;
+            font-size: 12px;
+            font-family: monospace;
+        }
+        .tool-badge.expected {
+            background: rgba(88, 166, 255, 0.2);
+            color: #58a6ff;
+            border: 1px solid rgba(88, 166, 255, 0.3);
+        }
+        .tool-badge.actual {
+            background: rgba(63, 185, 80, 0.2);
+            color: #3fb950;
+            border: 1px solid rgba(63, 185, 80, 0.3);
+        }
+        .tool-badge.error {
+            background: rgba(248, 81, 73, 0.2);
+            color: #f85149;
+            border: 1px solid rgba(248, 81, 73, 0.3);
+        }
+        .tool-order {
+            background: #30363d;
+            border-radius: 50%;
+            width: 18px;
+            height: 18px;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 10px;
+        }
+        .errors {
+            background: rgba(248, 81, 73, 0.1);
+            border: 1px solid rgba(248, 81, 73, 0.3);
+            border-radius: 4px;
+            padding: 10px;
+            color: #f85149;
+            font-size: 13px;
+        }
+        .duration {
+            color: #8b949e;
+            font-size: 13px;
+        }
+        .response-preview {
+            background: #0d1117;
+            border: 1px solid #30363d;
+            border-radius: 4px;
+            padding: 10px;
+            font-size: 13px;
+            max-height: 150px;
+            overflow-y: auto;
+        }
+        .timestamp {
+            color: #8b949e;
+            font-size: 12px;
+            margin-top: 20px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>E2E Test Report: GitHub Operations</h1>
+
+        <div class="summary">
+            <div class="metric">
+                <div class="metric-value">9</div>
+                <div class="metric-label">Total Tests</div>
+            </div>
+            <div class="metric">
+                <div class="metric-value success">0</div>
+                <div class="metric-label">Passed</div>
+            </div>
+            <div class="metric">
+                <div class="metric-value failure">9</div>
+                <div class="metric-label">Failed</div>
+            </div>
+            <div class="metric">
+                <div class="metric-value">0.0%</div>
+                <div class="metric-label">Success Rate</div>
+            </div>
+            <div class="metric">
+                <div class="metric-value">136.0s</div>
+                <div class="metric-label">Duration</div>
+            </div>
+        </div>
+
+        <div class="tests">
+            
+        <div class="test-card">
+            <div class="test-header">
+                <div class="test-title">
+                    <span class="status-badge failed">FAILED</span>
+                    <span>get_pr_details</span>
+                </div>
+                <span class="duration">12560ms</span>
+            </div>
+            <div class="test-details">
+                <div class="detail-section">
+                    <div class="detail-label">Prompt</div>
+                    <div class="prompt">Get the details of PR #1 in the AI-Assist repository</div>
+                </div>
+                <div class="detail-section">
+                    <div class="detail-label">Expected Tools</div>
+                    <div class="tool-list"><span class="tool-badge expected">get_pr</span></div>
+                </div>
+                <div class="detail-section">
+                    <div class="detail-label">Actual Tools</div>
+                    <div class="tool-list"><span class="tool-badge error"><span class="tool-order">1</span>github_pr_details</span></div>
+                </div>
+                <div class="detail-section"><div class="detail-label">Errors</div><div class="errors">Expected tools not called: ['get_pr']. Actual tools: ['github_pr_details']. <br>Tool 'get_pr' was not called. Actual tools: ['github_pr_details']. </div></div>
+                <div class="detail-section">
+                    <div class="detail-label">Response Preview</div>
+                    <div class="response-preview">PR #1 wird im Workspace analysiert.</div>
+                </div>
+            </div>
+        </div>
+
+        <div class="test-card">
+            <div class="test-header">
+                <div class="test-title">
+                    <span class="status-badge failed">FAILED</span>
+                    <span>list_open_prs</span>
+                </div>
+                <span class="duration">7596ms</span>
+            </div>
+            <div class="test-details">
+                <div class="detail-section">
+                    <div class="detail-label">Prompt</div>
+                    <div class="prompt">Show me all open pull requests in this repository</div>
+                </div>
+                <div class="detail-section">
+                    <div class="detail-label">Expected Tools</div>
+                    <div class="tool-list"><span class="tool-badge expected">list_prs</span></div>
+                </div>
+                <div class="detail-section">
+                    <div class="detail-label">Actual Tools</div>
+                    <div class="tool-list"><span class="tool-badge error"><span class="tool-order">1</span>github_list_prs</span></div>
+                </div>
+                <div class="detail-section"><div class="detail-label">Errors</div><div class="errors">Expected tools not called: ['list_prs']. Actual tools: ['github_list_prs']. <br>Tool 'list_prs' was not called. Actual tools: ['github_list_prs']. </div></div>
+                <div class="detail-section">
+                    <div class="detail-label">Response Preview</div>
+                    <div class="response-preview">Es scheint, dass ich momentan keinen Zugriff auf GitHub habe, um die offenen Pull Requests in diesem Repository anzuzeigen. Wenn du mir den Repository-Namen oder weitere Details gibst, kann ich dir mö</div>
+                </div>
+            </div>
+        </div>
+
+        <div class="test-card">
+            <div class="test-header">
+                <div class="test-title">
+                    <span class="status-badge failed">FAILED</span>
+                    <span>get_pr_diff</span>
+                </div>
+                <span class="duration">27627ms</span>
+            </div>
+            <div class="test-details">
+                <div class="detail-section">
+                    <div class="detail-label">Prompt</div>
+                    <div class="prompt">Show me the code changes in PR #1</div>
+                </div>
+                <div class="detail-section">
+                    <div class="detail-label">Expected Tools</div>
+                    <div class="tool-list"><span class="tool-badge expected">get_pr_diff</span></div>
+                </div>
+                <div class="detail-section">
+                    <div class="detail-label">Actual Tools</div>
+                    <div class="tool-list"><span class="tool-badge error"><span class="tool-order">1</span>github_pr_diff</span></div>
+                </div>
+                <div class="detail-section"><div class="detail-label">Errors</div><div class="errors">Expected tools not called: ['get_pr_diff']. Actual tools: ['github_pr_diff']. </div></div>
+                <div class="detail-section">
+                    <div class="detail-label">Response Preview</div>
+                    <div class="response-preview"><em>No response</em></div>
+                </div>
+            </div>
+        </div>
+
+        <div class="test-card">
+            <div class="test-header">
+                <div class="test-title">
+                    <span class="status-badge failed">FAILED</span>
+                    <span>analyze_pr_files</span>
+                </div>
+                <span class="duration">25387ms</span>
+            </div>
+            <div class="test-details">
+                <div class="detail-section">
+                    <div class="detail-label">Prompt</div>
+                    <div class="prompt">What files were modified in PR #1 and summarize the changes</div>
+                </div>
+                <div class="detail-section">
+                    <div class="detail-label">Expected Tools</div>
+                    <div class="tool-list"><span class="tool-badge expected">get_pr</span> <span class="tool-badge expected">get_pr_diff</span></div>
+                </div>
+                <div class="detail-section">
+                    <div class="detail-label">Actual Tools</div>
+                    <div class="tool-list"><span class="tool-badge error"><span class="tool-order">1</span>github_pr_diff</span></div>
+                </div>
+                <div class="detail-section"><div class="detail-label">Errors</div><div class="errors">Expected tools not called: ['get_pr']. Actual tools: ['github_pr_diff']. </div></div>
+                <div class="detail-section">
+                    <div class="detail-label">Response Preview</div>
+                    <div class="response-preview"><em>No response</em></div>
+                </div>
+            </div>
+        </div>
+
+        <div class="test-card">
+            <div class="test-header">
+                <div class="test-title">
+                    <span class="status-badge failed">FAILED</span>
+                    <span>get_repo_info</span>
+                </div>
+                <span class="duration">9770ms</span>
+            </div>
+            <div class="test-details">
+                <div class="detail-section">
+                    <div class="detail-label">Prompt</div>
+                    <div class="prompt">What is the description and main language of this repository?</div>
+                </div>
+                <div class="detail-section">
+                    <div class="detail-label">Expected Tools</div>
+                    <div class="tool-list"><span class="tool-badge expected">get_repo_info</span></div>
+                </div>
+                <div class="detail-section">
+                    <div class="detail-label">Actual Tools</div>
+                    <div class="tool-list"><em>None</em></div>
+                </div>
+                <div class="detail-section"><div class="detail-label">Errors</div><div class="errors">Expected tools not called: ['get_repo_info']. Actual tools: []. </div></div>
+                <div class="detail-section">
+                    <div class="detail-label">Response Preview</div>
+                    <div class="response-preview">The repository is named **'AI-Assist'** and is described as an **enterprise AI assistant with a Claude-code-like architecture, specialized in Java/WebSphere Liberty development**. The main language of</div>
+                </div>
+            </div>
+        </div>
+
+        <div class="test-card">
+            <div class="test-header">
+                <div class="test-title">
+                    <span class="status-badge failed">FAILED</span>
+                    <span>list_branches</span>
+                </div>
+                <span class="duration">17804ms</span>
+            </div>
+            <div class="test-details">
+                <div class="detail-section">
+                    <div class="detail-label">Prompt</div>
+                    <div class="prompt">List all branches in this repository</div>
+                </div>
+                <div class="detail-section">
+                    <div class="detail-label">Expected Tools</div>
+                    <div class="tool-list"><span class="tool-badge expected">list_branches</span></div>
+                </div>
+                <div class="detail-section">
+                    <div class="detail-label">Actual Tools</div>
+                    <div class="tool-list"><span class="tool-badge error"><span class="tool-order">1</span>github_list_branches</span></div>
+                </div>
+                <div class="detail-section"><div class="detail-label">Errors</div><div class="errors">Expected tools not called: ['list_branches']. Actual tools: ['github_list_branches']. <br>Response missing expected text: ['main']. Response preview: Es scheint, dass ich die Branches in diesem Repository nicht auflisten kann, da der Zugriff auf die `.git`-Verzeichnisse blockiert ist. Bitte überprüfen Sie die Berechtigungen oder die Repository-Eins.... </div></div>
+                <div class="detail-section">
+                    <div class="detail-label">Response Preview</div>
+                    <div class="response-preview">Es scheint, dass ich die Branches in diesem Repository nicht auflisten kann, da der Zugriff auf die `.git`-Verzeichnisse blockiert ist. Bitte überprüfen Sie die Berechtigungen oder die Repository-Eins</div>
+                </div>
+            </div>
+        </div>
+
+        <div class="test-card">
+            <div class="test-header">
+                <div class="test-title">
+                    <span class="status-badge failed">FAILED</span>
+                    <span>list_issues</span>
+                </div>
+                <span class="duration">3092ms</span>
+            </div>
+            <div class="test-details">
+                <div class="detail-section">
+                    <div class="detail-label">Prompt</div>
+                    <div class="prompt">Show me the open issues in this repository</div>
+                </div>
+                <div class="detail-section">
+                    <div class="detail-label">Expected Tools</div>
+                    <div class="tool-list"><span class="tool-badge expected">list_issues</span></div>
+                </div>
+                <div class="detail-section">
+                    <div class="detail-label">Actual Tools</div>
+                    <div class="tool-list"><em>None</em></div>
+                </div>
+                <div class="detail-section"><div class="detail-label">Errors</div><div class="errors">Expected tools not called: ['list_issues']. Actual tools: []. <br>Tool 'list_issues' was not called. Actual tools: []. </div></div>
+                <div class="detail-section">
+                    <div class="detail-label">Response Preview</div>
+                    <div class="response-preview">Please provide the name of the repository you would like to check for open issues.</div>
+                </div>
+            </div>
+        </div>
+
+        <div class="test-card">
+            <div class="test-header">
+                <div class="test-title">
+                    <span class="status-badge failed">FAILED</span>
+                    <span>pr_and_code_review</span>
+                </div>
+                <span class="duration">4723ms</span>
+            </div>
+            <div class="test-details">
+                <div class="detail-section">
+                    <div class="detail-label">Prompt</div>
+                    <div class="prompt">Get PR #1 details and show me the main file that was changed</div>
+                </div>
+                <div class="detail-section">
+                    <div class="detail-label">Expected Tools</div>
+                    <div class="tool-list"><span class="tool-badge expected">get_pr</span> <span class="tool-badge expected">read_file</span></div>
+                </div>
+                <div class="detail-section">
+                    <div class="detail-label">Actual Tools</div>
+                    <div class="tool-list"><span class="tool-badge error"><span class="tool-order">1</span>github_pr_details</span> <span class="tool-badge error"><span class="tool-order">2</span>github_pr_diff</span></div>
+                </div>
+                <div class="detail-section"><div class="detail-label">Errors</div><div class="errors">Expected tools not called: ['get_pr']. Actual tools: ['github_pr_details', 'github_pr_diff']. </div></div>
+                <div class="detail-section">
+                    <div class="detail-label">Response Preview</div>
+                    <div class="response-preview"><em>No response</em></div>
+                </div>
+            </div>
+        </div>
+
+        <div class="test-card">
+            <div class="test-header">
+                <div class="test-title">
+                    <span class="status-badge failed">FAILED</span>
+                    <span>search_in_pr_context</span>
+                </div>
+                <span class="duration">27439ms</span>
+            </div>
+            <div class="test-details">
+                <div class="detail-section">
+                    <div class="detail-label">Prompt</div>
+                    <div class="prompt">In PR #1, find any functions that were added or modified</div>
+                </div>
+                <div class="detail-section">
+                    <div class="detail-label">Expected Tools</div>
+                    <div class="tool-list"><span class="tool-badge expected">get_pr_diff</span> <span class="tool-badge expected">search_code</span></div>
+                </div>
+                <div class="detail-section">
+                    <div class="detail-label">Actual Tools</div>
+                    <div class="tool-list"><span class="tool-badge error"><span class="tool-order">1</span>github_pr_diff</span></div>
+                </div>
+                <div class="detail-section"><div class="detail-label">Errors</div><div class="errors">Expected tools not called: ['get_pr_diff']. Actual tools: ['github_pr_diff']. </div></div>
+                <div class="detail-section">
+                    <div class="detail-label">Response Preview</div>
+                    <div class="response-preview"><em>No response</em></div>
+                </div>
+            </div>
+        </div>
+        </div>
+
+        <div class="timestamp">Generated: 2026-03-25 22:02:04</div>
+    </div>
+
+    <script>
+        document.querySelectorAll('.test-header').forEach(header => {
+            header.addEventListener('click', () => {
+                const details = header.nextElementSibling;
+                details.classList.toggle('open');
+            });
+        });
+    </script>
+</body>
+</html>

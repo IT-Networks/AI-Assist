@@ -1,0 +1,17 @@
+{
+  "session_id": "6df65008-5263-4461-a7ce-fcfc278cc1f7",
+  "title": "What is the description and main language of this repository…",
+  "mode": "read_only",
+  "messages_history": [
+    {
+      "role": "user",
+      "content": "What is the description and main language of this repository?"
+    },
+    {
+      "role": "assistant",
+      "content": "The repository is named **'AI-Assist'** and is described as an **enterprise AI assistant with a Claude-code-like architecture, specialized in Java/WebSphere Liberty development**. The main language of the repository is **Python**, as indicated by the presence of files like **'main.py'** and **'requirements.txt'**."
+    }
+  ],
+  "created_at": 1774472471.1234128,
+  "updated_at": 1774472471.1234128
+}

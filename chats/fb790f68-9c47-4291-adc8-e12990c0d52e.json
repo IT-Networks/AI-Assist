@@ -1,0 +1,17 @@
+{
+  "session_id": "fb790f68-9c47-4291-adc8-e12990c0d52e",
+  "title": "List all branches in this repository",
+  "mode": "read_only",
+  "messages_history": [
+    {
+      "role": "user",
+      "content": "List all branches in this repository"
+    },
+    {
+      "role": "assistant",
+      "content": "In diesem Repository gibt es nur einen Branch:\n\n- **Branch Name:** master\n  - **Aktueller Branch:** Ja\n  - **SHA:** 0748ce0\n  - **Letzter Commit:** Initial commit: E2E test project setup\n\nWenn du weitere Informationen benötigst, lass es mich wissen!"
+    }
+  ],
+  "created_at": 1774516407.0180502,
+  "updated_at": 1774516407.0180502
+}

@@ -1,0 +1,17 @@
+{
+  "session_id": "3c636931-00ee-4f9e-9b4f-a00c5551693e",
+  "title": "Add a new function called 'subtract' to example.py that subt…",
+  "mode": "read_only",
+  "messages_history": [
+    {
+      "role": "user",
+      "content": "Add a new function called 'subtract' to example.py that subtracts two numbers"
+    },
+    {
+      "role": "assistant",
+      "content": "Die Datei `example.py` konnte nicht gefunden werden. Es gibt jedoch eine Datei namens `main.py`. Möchtest du die Subtraktionsfunktion in `main.py` hinzufügen?"
+    }
+  ],
+  "created_at": 1774473843.4689171,
+  "updated_at": 1774473843.4689171
+}

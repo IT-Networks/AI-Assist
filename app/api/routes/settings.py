@@ -272,6 +272,17 @@ async def update_section_settings(
         new_section = section_class(**current_dict)
         setattr(settings, section, new_section)
 
+        # Service-Clients zurücksetzen wenn deren Config geändert wurde
+        if section == "confluence":
+            from app.services.confluence_client import reset_confluence_client
+            reset_confluence_client()
+        elif section == "jira":
+            from app.services.jira_client import reset_jira_client
+            reset_jira_client()
+        elif section == "servicenow":
+            from app.services.servicenow_client import reset_servicenow_client
+            reset_servicenow_client()
+
     except Exception as e:
         raise HTTPException(
             status_code=400,
@@ -412,6 +423,14 @@ async def reload_settings() -> Dict[str, Any]:
         # Auch lokale Referenz aktualisieren
         import app.core.config
         app.core.config.settings = new_settings
+
+        # Service-Clients zurücksetzen damit neue Config verwendet wird
+        from app.services.confluence_client import reset_confluence_client
+        from app.services.jira_client import reset_jira_client
+        from app.services.servicenow_client import reset_servicenow_client
+        reset_confluence_client()
+        reset_jira_client()
+        reset_servicenow_client()
 
     except Exception as e:
         raise HTTPException(

@@ -1,0 +1,314 @@
+{
+  "suite_name": "Sequential Thinking Tests",
+  "timestamp": "2026-03-26T13:52:15.893309",
+  "summary": {
+    "total": 14,
+    "passed": 10,
+    "failed": 4,
+    "success_rate": 71.42857142857143,
+    "duration_ms": 974823
+  },
+  "tests": [
+    {
+      "name": "seq_basic_analysis",
+      "passed": true,
+      "prompt": "/seq Analysiere die Struktur der Calculator-Klasse in example.py\n",
+      "expected_tools": [
+        "sequential_thinking",
+        "read_file"
+      ],
+      "actual_tools": [],
+      "response_preview": "Die Analyse der Struktur der `Calculator`-Klasse in `example.py` zeigt Folgendes:\n\n1. **Konstruktor (`__init__`)**:\n   - Der Konstruktor akzeptiert einen optionalen Startwert, der als Anfangswert f\u00fcr ",
+      "duration_ms": 15631,
+      "errors": [],
+      "timestamp": "2026-03-26T13:36:16.701445"
+    },
+    {
+      "name": "seq_with_context",
+      "passed": true,
+      "prompt": "/seq Wie interagieren die Komponenten im Projekt miteinander?\n",
+      "expected_tools": [
+        "sequential_thinking",
+        "read_file",
+        "search_code"
+      ],
+      "actual_tools": [
+        {
+          "name": "sequential_thinking",
+          "arguments": {
+            "query": "Wie interagieren die Komponenten im Projekt miteinander?",
+            "context": "Das Projekt besteht aus mehreren Komponenten, darunter Services, Datenbanken und Frontend-Elemente. Es ist wichtig zu verstehen, wie diese Komponenten kommunizieren und welche Abh\u00e4ngigkeiten bestehen."
+          },
+          "status": "error",
+          "order": 0,
+          "error": ""
+        }
+      ],
+      "response_preview": "Es scheint, dass ich die maximale Anzahl an Schritten erreicht habe, ohne eine vollst\u00e4ndige Antwort zu erhalten. Um die Interaktionen der Komponenten im Projekt besser zu verstehen, k\u00f6nnten wir folgen",
+      "duration_ms": 114763,
+      "errors": [],
+      "timestamp": "2026-03-26T13:38:11.466393"
+    },
+    {
+      "name": "seq_quick_mode",
+      "passed": true,
+      "prompt": "/seq Was macht die greet() Funktion? --mode quick\n",
+      "expected_tools": [
+        "read_file"
+      ],
+      "actual_tools": [],
+      "response_preview": "Die `greet()` Funktion in der Datei `example.py` begr\u00fc\u00dft eine Person mit ihrem Namen. Sie nimmt einen Parameter `name` vom Typ `str` entgegen und gibt eine Begr\u00fc\u00dfungsnachricht zur\u00fcck, die den Namen de",
+      "duration_ms": 24274,
+      "errors": [],
+      "timestamp": "2026-03-26T13:38:35.740514"
+    },
+    {
+      "name": "seq_deep_mode",
+      "passed": false,
+      "prompt": "/seq Analysiere potenzielle Bugs in der divide() Methode --mode deep\n",
+      "expected_tools": [
+        "sequential_thinking",
+        "read_file"
+      ],
+      "actual_tools": [],
+      "response_preview": "",
+      "duration_ms": 120269,
+      "errors": [
+        "Exception: "
+      ],
+      "timestamp": "2026-03-26T13:40:36.010342"
+    },
+    {
+      "name": "seq_ultra_mode",
+      "passed": false,
+      "prompt": "/seq Erstelle eine vollst\u00e4ndige Architektur-Analyse des Projekts --mode ultra\n",
+      "expected_tools": [
+        "sequential_thinking",
+        "read_file",
+        "list_files"
+      ],
+      "actual_tools": [],
+      "response_preview": "",
+      "duration_ms": 120542,
+      "errors": [
+        "Exception: "
+      ],
+      "timestamp": "2026-03-26T13:42:36.553334"
+    },
+    {
+      "name": "seq_complex_debugging",
+      "passed": true,
+      "prompt": "/seq Die Calculator-Klasse hat Performance-Probleme bei gro\u00dfen Zahlen.\nAnalysiere schrittweise:\n1. Welche Methoden k\u00f6nnten betroffen sein?\n2. Was sind m\u00f6gliche Ursachen?\n3. Welche L\u00f6sungen gibt es?\n",
+      "expected_tools": [
+        "sequential_thinking",
+        "read_file"
+      ],
+      "actual_tools": [
+        {
+          "name": "sequential_thinking",
+          "arguments": {
+            "query": "Die Calculator-Klasse hat Performance-Probleme bei gro\u00dfen Zahlen.",
+            "max_steps": 3
+          },
+          "status": "error",
+          "order": 0,
+          "error": ""
+        }
+      ],
+      "response_preview": "Die Analyse der Performance-Probleme der Calculator-Klasse bei gro\u00dfen Zahlen hat folgende Schritte ergeben:\n\n1. **Betroffene Methoden**:\n   - **Addition**: Bei sehr gro\u00dfen Zahlen kann die Addition lan",
+      "duration_ms": 92317,
+      "errors": [],
+      "timestamp": "2026-03-26T13:44:08.870828"
+    },
+    {
+      "name": "seq_architectural_decision",
+      "passed": true,
+      "prompt": "/seq Soll ich f\u00fcr das Logging-System Dependency Injection oder Singleton verwenden?\nBer\u00fccksichtige: Testbarkeit, Performance, Wartbarkeit\n",
+      "expected_tools": [
+        "sequential_thinking",
+        "read_file"
+      ],
+      "actual_tools": [],
+      "response_preview": "Hier ist eine strukturierte Analyse der Vor- und Nachteile von Dependency Injection (DI) und Singleton im Kontext eines Logging-Systems, unter Ber\u00fccksichtigung von Testbarkeit, Performance und Wartbar",
+      "duration_ms": 32849,
+      "errors": [],
+      "timestamp": "2026-03-26T13:44:41.720542"
+    },
+    {
+      "name": "seq_refactoring_plan",
+      "passed": true,
+      "prompt": "/seq Plane ein Refactoring der example.py Datei.\nAnalysiere den aktuellen Code und erstelle einen Schritt-f\u00fcr-Schritt Plan.\n",
+      "expected_tools": [
+        "sequential_thinking",
+        "read_file"
+      ],
+      "actual_tools": [
+        {
+          "name": "read_file",
+          "arguments": {
+            "path": "example.py"
+          },
+          "status": "success",
+          "order": 0,
+          "error": null
+        }
+      ],
+      "response_preview": "Hier ist der aktuelle Code der `example.py` Datei:\n\n```python\n\"\"\"\nExample Python module for E2E testing.\n\nThis module provides sample functions and classes for testing\nAI-Assist tool capabilities.\n\"\"\"",
+      "duration_ms": 35095,
+      "errors": [],
+      "timestamp": "2026-03-26T13:45:16.816063"
+    },
+    {
+      "name": "seq_hypothesis_testing",
+      "passed": true,
+      "prompt": "/seq Hypothese: Die greet() Funktion k\u00f6nnte optimiert werden.\nTeste diese Hypothese durch Code-Analyse.\n",
+      "expected_tools": [
+        "sequential_thinking",
+        "read_file"
+      ],
+      "actual_tools": [
+        {
+          "name": "sequential_thinking",
+          "arguments": {
+            "query": "Die greet() Funktion k\u00f6nnte optimiert werden. Teste diese Hypothese durch Code-Analyse.",
+            "context": "Die greet() Funktion nimmt einen Namen als Parameter und gibt eine formatierte Begr\u00fc\u00dfung zur\u00fcck. Die Implementierung verwendet f-Strings, was eine effiziente Methode zur String-Interpolation ist. Es gibt keine offensichtlichen Performance-Probleme oder Optimierungsm\u00f6glichkeiten in der aktuellen Implementierung.",
+            "max_steps": 5
+          },
+          "status": "error",
+          "order": 0,
+          "error": ""
+        }
+      ],
+      "response_preview": "Die Hypothese, dass die `greet()` Funktion optimiert werden k\u00f6nnte, wurde analysiert. Hier sind die Schritte, die zur \u00dcberpr\u00fcfung dieser Hypothese unternommen wurden:\n\n1. **Funktionalit\u00e4t der greet() ",
+      "duration_ms": 81472,
+      "errors": [],
+      "timestamp": "2026-03-26T13:46:38.288655"
+    },
+    {
+      "name": "seq_verification_workflow",
+      "passed": false,
+      "prompt": "/seq Verifiziere dass alle Methoden der Calculator-Klasse korrekt typisiert sind.\n",
+      "expected_tools": [
+        "sequential_thinking",
+        "read_file"
+      ],
+      "actual_tools": [
+        {
+          "name": "search_code",
+          "arguments": {
+            "query": "class Calculator",
+            "language": "java"
+          },
+          "status": "error",
+          "order": 0,
+          "error": ""
+        },
+        {
+          "name": "get_project_paths",
+          "arguments": {},
+          "status": "success",
+          "order": 1,
+          "error": null
+        }
+      ],
+      "response_preview": "Es sind keine Java-Repositories konfiguriert, daher kann ich die Methoden der Calculator-Klasse nicht verifizieren. M\u00f6chtest du, dass ich in einem Python-Repository nach einer \u00e4hnlichen Klasse suche o",
+      "duration_ms": 15898,
+      "errors": [
+        "Expected tools not called: ['read_file']. Actual tools: ['search_code', 'get_project_paths']. "
+      ],
+      "timestamp": "2026-03-26T13:46:54.186877"
+    },
+    {
+      "name": "seq_empty_context",
+      "passed": true,
+      "prompt": "/seq Was ist der beste Ansatz f\u00fcr Error Handling in Python?\n",
+      "expected_tools": [
+        "sequential_thinking"
+      ],
+      "actual_tools": [
+        {
+          "name": "sequential_thinking",
+          "arguments": {
+            "query": "Was ist der beste Ansatz f\u00fcr Error Handling in Python?",
+            "max_steps": 5
+          },
+          "status": "error",
+          "order": 0,
+          "error": ""
+        }
+      ],
+      "response_preview": "Hier sind einige bew\u00e4hrte Ans\u00e4tze f\u00fcr das Error Handling in Python:\n\n1. **Verwendung von try-except-Bl\u00f6cken**:\n   - Der grundlegende Ansatz f\u00fcr das Error Handling in Python ist die Verwendung von `try",
+      "duration_ms": 89731,
+      "errors": [],
+      "timestamp": "2026-03-26T13:48:23.918857"
+    },
+    {
+      "name": "seq_invalid_mode_fallback",
+      "passed": true,
+      "prompt": "/seq Analysiere die Code-Struktur --mode invalid_mode\n",
+      "expected_tools": [
+        "sequential_thinking",
+        "read_file"
+      ],
+      "actual_tools": [],
+      "response_preview": "Es scheint, dass der angegebene Modus \"invalid_mode\" nicht unterst\u00fctzt wird. Bitte w\u00e4hle einen g\u00fcltigen Modus oder spezifiziere die Art der Analyse, die du durchf\u00fchren m\u00f6chtest. M\u00f6gliche Optionen k\u00f6nn",
+      "duration_ms": 16509,
+      "errors": [],
+      "timestamp": "2026-03-26T13:48:40.428518"
+    },
+    {
+      "name": "seq_then_implement",
+      "passed": false,
+      "prompt": "/seq Analysiere wie eine modulo() Methode in Calculator implementiert werden sollte,\ndann /implement sie direkt.\n",
+      "expected_tools": [
+        "sequential_thinking",
+        "read_file",
+        "edit_file"
+      ],
+      "actual_tools": [
+        {
+          "name": "sequential_thinking",
+          "arguments": {
+            "query": "Wie sollte eine modulo() Methode in einem Calculator implementiert werden?",
+            "max_steps": 5
+          },
+          "status": "error",
+          "order": 0,
+          "error": ""
+        }
+      ],
+      "response_preview": "Es scheint, dass ich die maximale Anzahl an Denkschritten erreicht habe, ohne eine klare Antwort zu erhalten. Ich werde nun die Implementierung einer `modulo()` Methode in einem Calculator direkt ange",
+      "duration_ms": 107180,
+      "errors": [
+        "Expected tools not called: ['read_file']. Actual tools: ['sequential_thinking']. "
+      ],
+      "timestamp": "2026-03-26T13:50:27.608678"
+    },
+    {
+      "name": "troubleshoot_with_seq",
+      "passed": true,
+      "prompt": "/troubleshoot Die divide() Methode wirft Fehler --seq\n",
+      "expected_tools": [
+        "sequential_thinking",
+        "read_file"
+      ],
+      "actual_tools": [
+        {
+          "name": "sequential_thinking",
+          "arguments": {
+            "query": "Die divide() Methode wirft Fehler, wenn versucht wird, durch Null zu teilen. Ich m\u00f6chte die Ursachen und m\u00f6gliche L\u00f6sungen analysieren.",
+            "context": "Die Methode `divide(self, x: float) -> Optional[float]` gibt `None` zur\u00fcck, wenn `x` gleich 0 ist. Die Tests in `tests/test_example.py` umfassen `test_divide`, der die Division durch 2 testet, und `test_divide_by_zero`, der sicherstellt, dass die Methode korrekt mit der Division durch Null umgeht.",
+            "max_steps": 5
+          },
+          "status": "error",
+          "order": 0,
+          "error": ""
+        }
+      ],
+      "response_preview": "Es scheint, dass ich die maximale Anzahl an Schritten erreicht habe, ohne eine vollst\u00e4ndige Analyse durchzuf\u00fchren. Ich werde die Analyse in mehreren Schritten fortsetzen, um die Ursachen f\u00fcr den Fehle",
+      "duration_ms": 108283,
+      "errors": [],
+      "timestamp": "2026-03-26T13:52:15.892304"
+    }
+  ]
+}

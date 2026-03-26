@@ -1,0 +1,805 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>E2E Test Report - Tool Boundary Tests</title>
+    <style>
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: #0d1117;
+            color: #c9d1d9;
+            line-height: 1.6;
+            padding: 20px;
+        }
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+        h1 {
+            color: #58a6ff;
+            margin-bottom: 20px;
+            padding-bottom: 10px;
+            border-bottom: 1px solid #30363d;
+        }
+        .summary {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+            gap: 15px;
+            margin-bottom: 30px;
+        }
+        .metric {
+            background: #161b22;
+            border: 1px solid #30363d;
+            border-radius: 8px;
+            padding: 15px;
+            text-align: center;
+        }
+        .metric-value {
+            font-size: 28px;
+            font-weight: bold;
+            color: #58a6ff;
+        }
+        .metric-value.success {
+            color: #3fb950;
+        }
+        .metric-value.failure {
+            color: #f85149;
+        }
+        .metric-label {
+            font-size: 12px;
+            color: #8b949e;
+            text-transform: uppercase;
+        }
+        .test-card {
+            background: #161b22;
+            border: 1px solid #30363d;
+            border-radius: 8px;
+            margin-bottom: 15px;
+            overflow: hidden;
+        }
+        .test-header {
+            padding: 15px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            cursor: pointer;
+            border-bottom: 1px solid #30363d;
+        }
+        .test-header:hover {
+            background: #1f2937;
+        }
+        .test-title {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        .status-badge {
+            padding: 4px 10px;
+            border-radius: 12px;
+            font-size: 12px;
+            font-weight: 600;
+        }
+        .status-badge.passed {
+            background: rgba(63, 185, 80, 0.2);
+            color: #3fb950;
+        }
+        .status-badge.failed {
+            background: rgba(248, 81, 73, 0.2);
+            color: #f85149;
+        }
+        .test-details {
+            padding: 15px;
+            display: none;
+        }
+        .test-details.open {
+            display: block;
+        }
+        .detail-section {
+            margin-bottom: 15px;
+        }
+        .detail-label {
+            font-size: 11px;
+            color: #8b949e;
+            text-transform: uppercase;
+            margin-bottom: 5px;
+        }
+        .prompt {
+            background: #0d1117;
+            border: 1px solid #30363d;
+            border-radius: 4px;
+            padding: 10px;
+            font-family: monospace;
+            font-size: 13px;
+            white-space: pre-wrap;
+        }
+        .tool-list {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+        }
+        .tool-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 5px;
+            padding: 4px 10px;
+            border-radius: 4px;
+            font-size: 12px;
+            font-family: monospace;
+        }
+        .tool-badge.expected {
+            background: rgba(88, 166, 255, 0.2);
+            color: #58a6ff;
+            border: 1px solid rgba(88, 166, 255, 0.3);
+        }
+        .tool-badge.actual {
+            background: rgba(63, 185, 80, 0.2);
+            color: #3fb950;
+            border: 1px solid rgba(63, 185, 80, 0.3);
+        }
+        .tool-badge.error {
+            background: rgba(248, 81, 73, 0.2);
+            color: #f85149;
+            border: 1px solid rgba(248, 81, 73, 0.3);
+        }
+        .tool-order {
+            background: #30363d;
+            border-radius: 50%;
+            width: 18px;
+            height: 18px;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 10px;
+        }
+        .errors {
+            background: rgba(248, 81, 73, 0.1);
+            border: 1px solid rgba(248, 81, 73, 0.3);
+            border-radius: 4px;
+            padding: 10px;
+            color: #f85149;
+            font-size: 13px;
+        }
+        .duration {
+            color: #8b949e;
+            font-size: 13px;
+        }
+        .response-preview {
+            background: #0d1117;
+            border: 1px solid #30363d;
+            border-radius: 4px;
+            padding: 10px;
+            font-size: 13px;
+            max-height: 150px;
+            overflow-y: auto;
+        }
+        .timestamp {
+            color: #8b949e;
+            font-size: 12px;
+            margin-top: 20px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>E2E Test Report: Tool Boundary Tests</h1>
+
+        <div class="summary">
+            <div class="metric">
+                <div class="metric-value">17</div>
+                <div class="metric-label">Total Tests</div>
+            </div>
+            <div class="metric">
+                <div class="metric-value success">10</div>
+                <div class="metric-label">Passed</div>
+            </div>
+            <div class="metric">
+                <div class="metric-value failure">7</div>
+                <div class="metric-label">Failed</div>
+            </div>
+            <div class="metric">
+                <div class="metric-value">58.8%</div>
+                <div class="metric-label">Success Rate</div>
+            </div>
+            <div class="metric">
+                <div class="metric-value">269.9s</div>
+                <div class="metric-label">Duration</div>
+            </div>
+        </div>
+
+        <div class="tests">
+            
+        <div class="test-card">
+            <div class="test-header">
+                <div class="test-title">
+                    <span class="status-badge passed">PASSED</span>
+                    <span>read_large_file</span>
+                </div>
+                <span class="duration">11568ms</span>
+            </div>
+            <div class="test-details">
+                <div class="detail-section">
+                    <div class="detail-label">Prompt</div>
+                    <div class="prompt">Use read_file to read the file large_file.py (1000+ lines).
+Summarize its structure.
+</div>
+                </div>
+                <div class="detail-section">
+                    <div class="detail-label">Expected Tools</div>
+                    <div class="tool-list"><span class="tool-badge expected">read_file</span></div>
+                </div>
+                <div class="detail-section">
+                    <div class="detail-label">Actual Tools</div>
+                    <div class="tool-list"><span class="tool-badge error"><span class="tool-order">1</span>read_file</span></div>
+                </div>
+                
+                <div class="detail-section">
+                    <div class="detail-label">Response Preview</div>
+                    <div class="response-preview">Die Datei `large_file.py` konnte nicht gefunden werden, da sie nicht im erlaubten Verzeichnis vorhanden ist. Bitte stellen Sie sicher, dass die Datei im richtigen Verzeichnis liegt oder geben Sie mir </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="test-card">
+            <div class="test-header">
+                <div class="test-title">
+                    <span class="status-badge failed">FAILED</span>
+                    <span>read_binary_file</span>
+                </div>
+                <span class="duration">8682ms</span>
+            </div>
+            <div class="test-details">
+                <div class="detail-section">
+                    <div class="detail-label">Prompt</div>
+                    <div class="prompt">Use read_file to read image.png.
+Report what happens with binary content.
+</div>
+                </div>
+                <div class="detail-section">
+                    <div class="detail-label">Expected Tools</div>
+                    <div class="tool-list"><span class="tool-badge expected">read_file</span></div>
+                </div>
+                <div class="detail-section">
+                    <div class="detail-label">Actual Tools</div>
+                    <div class="tool-list"><em>None</em></div>
+                </div>
+                <div class="detail-section"><div class="detail-label">Errors</div><div class="errors">Expected tools not called: ['read_file']. Actual tools: []. </div></div>
+                <div class="detail-section">
+                    <div class="detail-label">Response Preview</div>
+                    <div class="response-preview">I cannot read or process binary files such as images directly using the `read_file` function. This function is designed for text-based content and documentation retrieval. Attempting to read a binary </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="test-card">
+            <div class="test-header">
+                <div class="test-title">
+                    <span class="status-badge failed">FAILED</span>
+                    <span>edit_nonexistent_file</span>
+                </div>
+                <span class="duration">23662ms</span>
+            </div>
+            <div class="test-details">
+                <div class="detail-section">
+                    <div class="detail-label">Prompt</div>
+                    <div class="prompt">Use edit_file to add content to nonexistent_file.py.
+Report how the error is handled.
+</div>
+                </div>
+                <div class="detail-section">
+                    <div class="detail-label">Expected Tools</div>
+                    <div class="tool-list"><span class="tool-badge expected">edit_file</span></div>
+                </div>
+                <div class="detail-section">
+                    <div class="detail-label">Actual Tools</div>
+                    <div class="tool-list"><em>None</em></div>
+                </div>
+                <div class="detail-section"><div class="detail-label">Errors</div><div class="errors">Expected tools not called: ['edit_file']. Actual tools: []. </div></div>
+                <div class="detail-section">
+                    <div class="detail-label">Response Preview</div>
+                    <div class="response-preview">The `edit_file` function is typically designed to modify existing files. If you attempt to use it on a file that does not exist, it will likely raise an error indicating that the file cannot be found </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="test-card">
+            <div class="test-header">
+                <div class="test-title">
+                    <span class="status-badge failed">FAILED</span>
+                    <span>write_to_readonly_directory</span>
+                </div>
+                <span class="duration">14208ms</span>
+            </div>
+            <div class="test-details">
+                <div class="detail-section">
+                    <div class="detail-label">Prompt</div>
+                    <div class="prompt">Use write_file to create /etc/test.txt.
+Report how permission errors are handled.
+</div>
+                </div>
+                <div class="detail-section">
+                    <div class="detail-label">Expected Tools</div>
+                    <div class="tool-list"><span class="tool-badge expected">write_file</span></div>
+                </div>
+                <div class="detail-section">
+                    <div class="detail-label">Actual Tools</div>
+                    <div class="tool-list"><em>None</em></div>
+                </div>
+                <div class="detail-section"><div class="detail-label">Errors</div><div class="errors">Expected tools not called: ['write_file']. Actual tools: []. </div></div>
+                <div class="detail-section">
+                    <div class="detail-label">Response Preview</div>
+                    <div class="response-preview">The `write_file_safe` function in the `src/utils.py` file is designed to handle permission errors when attempting to write to a file. Here’s how it works:
+
+1. **Try-Except Block**: The function uses a</div>
+                </div>
+            </div>
+        </div>
+
+        <div class="test-card">
+            <div class="test-header">
+                <div class="test-title">
+                    <span class="status-badge passed">PASSED</span>
+                    <span>search_no_matches</span>
+                </div>
+                <span class="duration">13287ms</span>
+            </div>
+            <div class="test-details">
+                <div class="detail-section">
+                    <div class="detail-label">Prompt</div>
+                    <div class="prompt">Use search_code to find "xyznonexistent123" in the codebase.
+Report how empty results are handled.
+</div>
+                </div>
+                <div class="detail-section">
+                    <div class="detail-label">Expected Tools</div>
+                    <div class="tool-list"><span class="tool-badge expected">search_code</span></div>
+                </div>
+                <div class="detail-section">
+                    <div class="detail-label">Actual Tools</div>
+                    <div class="tool-list"><span class="tool-badge actual"><span class="tool-order">1</span>search_code</span></div>
+                </div>
+                
+                <div class="detail-section">
+                    <div class="detail-label">Response Preview</div>
+                    <div class="response-preview">Die Suche nach "xyznonexistent123" in der Codebasis ergab keine Treffer. Das System meldet, dass keine Ergebnisse gefunden wurden. In solchen Fällen wird in der Regel eine Meldung angezeigt, die darau</div>
+                </div>
+            </div>
+        </div>
+
+        <div class="test-card">
+            <div class="test-header">
+                <div class="test-title">
+                    <span class="status-badge passed">PASSED</span>
+                    <span>search_very_common_term</span>
+                </div>
+                <span class="duration">7297ms</span>
+            </div>
+            <div class="test-details">
+                <div class="detail-section">
+                    <div class="detail-label">Prompt</div>
+                    <div class="prompt">Use search_code to find "def" in all Python files.
+How many results are returned? Is there pagination?
+</div>
+                </div>
+                <div class="detail-section">
+                    <div class="detail-label">Expected Tools</div>
+                    <div class="tool-list"><span class="tool-badge expected">search_code</span></div>
+                </div>
+                <div class="detail-section">
+                    <div class="detail-label">Actual Tools</div>
+                    <div class="tool-list"><span class="tool-badge actual"><span class="tool-order">1</span>search_code</span></div>
+                </div>
+                
+                <div class="detail-section">
+                    <div class="detail-label">Response Preview</div>
+                    <div class="response-preview">The search for "def" in all Python files returned **20 results**. There is **no pagination** since all results fit within a single response.</div>
+                </div>
+            </div>
+        </div>
+
+        <div class="test-card">
+            <div class="test-header">
+                <div class="test-title">
+                    <span class="status-badge passed">PASSED</span>
+                    <span>search_regex_pattern</span>
+                </div>
+                <span class="duration">10108ms</span>
+            </div>
+            <div class="test-details">
+                <div class="detail-section">
+                    <div class="detail-label">Prompt</div>
+                    <div class="prompt">Use search_code with pattern "def\s+\w+\(.*\):" to find function definitions.
+Does regex work correctly?
+</div>
+                </div>
+                <div class="detail-section">
+                    <div class="detail-label">Expected Tools</div>
+                    <div class="tool-list"><span class="tool-badge expected">search_code</span></div>
+                </div>
+                <div class="detail-section">
+                    <div class="detail-label">Actual Tools</div>
+                    <div class="tool-list"><span class="tool-badge actual"><span class="tool-order">1</span>search_code</span></div>
+                </div>
+                
+                <div class="detail-section">
+                    <div class="detail-label">Response Preview</div>
+                    <div class="response-preview">The regex pattern `def\s+\w+\(.*\):` successfully found function definitions in the Python code. Here are some of the matches:
+
+- In `tests/test_example.py`:
+  - `def test_greet_basic(self):` at line </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="test-card">
+            <div class="test-header">
+                <div class="test-title">
+                    <span class="status-badge passed">PASSED</span>
+                    <span>max_sequential_reads</span>
+                </div>
+                <span class="duration">42152ms</span>
+            </div>
+            <div class="test-details">
+                <div class="detail-section">
+                    <div class="detail-label">Prompt</div>
+                    <div class="prompt">Read the following files one by one:
+1. example.py
+2. src/main.py
+3. src/utils.py
+4. tests/test_example.py
+5. config.json
+
+After reading all, summarize what you found.
+</div>
+                </div>
+                <div class="detail-section">
+                    <div class="detail-label">Expected Tools</div>
+                    <div class="tool-list"><span class="tool-badge expected">read_file</span></div>
+                </div>
+                <div class="detail-section">
+                    <div class="detail-label">Actual Tools</div>
+                    <div class="tool-list"><span class="tool-badge actual"><span class="tool-order">5</span>read_file</span> <span class="tool-badge actual"><span class="tool-order">6</span>read_file</span> <span class="tool-badge actual"><span class="tool-order">7</span>read_file</span> <span class="tool-badge actual"><span class="tool-order">8</span>read_file</span> <span class="tool-badge actual"><span class="tool-order">9</span>read_file</span></div>
+                </div>
+                
+                <div class="detail-section">
+                    <div class="detail-label">Response Preview</div>
+                    <div class="response-preview">Hier sind die Inhalte der Dateien, die ich gelesen habe:
+
+=== Datei: example.py ===
+```python
+"""
+Example Python module for E2E testing.
+
+This module provides sample functions and classes for testing
+</div>
+                </div>
+            </div>
+        </div>
+
+        <div class="test-card">
+            <div class="test-header">
+                <div class="test-title">
+                    <span class="status-badge failed">FAILED</span>
+                    <span>read_edit_read_cycle</span>
+                </div>
+                <span class="duration">14495ms</span>
+            </div>
+            <div class="test-details">
+                <div class="detail-section">
+                    <div class="detail-label">Prompt</div>
+                    <div class="prompt">1. Use read_file to read example.py
+2. Use edit_file to add a comment at the top
+3. Use read_file again to verify the change
+
+Note: The system may limit repeated operations.
+</div>
+                </div>
+                <div class="detail-section">
+                    <div class="detail-label">Expected Tools</div>
+                    <div class="tool-list"><span class="tool-badge expected">read_file</span> <span class="tool-badge expected">edit_file</span></div>
+                </div>
+                <div class="detail-section">
+                    <div class="detail-label">Actual Tools</div>
+                    <div class="tool-list"><span class="tool-badge actual"><span class="tool-order">1</span>read_file</span> <span class="tool-badge actual"><span class="tool-order">2</span>read_file</span></div>
+                </div>
+                <div class="detail-section"><div class="detail-label">Errors</div><div class="errors">Expected tools not called: ['edit_file']. Actual tools: ['read_file', 'read_file']. </div></div>
+                <div class="detail-section">
+                    <div class="detail-label">Response Preview</div>
+                    <div class="response-preview"><em>No response</em></div>
+                </div>
+            </div>
+        </div>
+
+        <div class="test-card">
+            <div class="test-header">
+                <div class="test-title">
+                    <span class="status-badge passed">PASSED</span>
+                    <span>concurrent_tool_calls</span>
+                </div>
+                <span class="duration">31569ms</span>
+            </div>
+            <div class="test-details">
+                <div class="detail-section">
+                    <div class="detail-label">Prompt</div>
+                    <div class="prompt">Read these files simultaneously:
+- example.py
+- config.json
+- README.md
+
+Report how many tool calls were made.
+</div>
+                </div>
+                <div class="detail-section">
+                    <div class="detail-label">Expected Tools</div>
+                    <div class="tool-list"><span class="tool-badge expected">read_file</span></div>
+                </div>
+                <div class="detail-section">
+                    <div class="detail-label">Actual Tools</div>
+                    <div class="tool-list"><span class="tool-badge actual"><span class="tool-order">3</span>read_file</span> <span class="tool-badge actual"><span class="tool-order">4</span>read_file</span> <span class="tool-badge actual"><span class="tool-order">5</span>read_file</span></div>
+                </div>
+                
+                <div class="detail-section">
+                    <div class="detail-label">Response Preview</div>
+                    <div class="response-preview">Drei Toolaufrufe wurden erfolgreich durchgeführt, um die Dateien `example.py`, `config.json` und `README.md` zu lesen. Hier sind die Inhalte der Dateien:
+
+### example.py
+```python
+"""
+Example Python m</div>
+                </div>
+            </div>
+        </div>
+
+        <div class="test-card">
+            <div class="test-header">
+                <div class="test-title">
+                    <span class="status-badge passed">PASSED</span>
+                    <span>invalid_file_path</span>
+                </div>
+                <span class="duration">17796ms</span>
+            </div>
+            <div class="test-details">
+                <div class="detail-section">
+                    <div class="detail-label">Prompt</div>
+                    <div class="prompt">Use read_file to read "file<>:*?.py".
+How are invalid path characters handled?
+</div>
+                </div>
+                <div class="detail-section">
+                    <div class="detail-label">Expected Tools</div>
+                    <div class="tool-list"><span class="tool-badge expected">read_file</span></div>
+                </div>
+                <div class="detail-section">
+                    <div class="detail-label">Actual Tools</div>
+                    <div class="tool-list"><span class="tool-badge error"><span class="tool-order">1</span>read_file</span></div>
+                </div>
+                
+                <div class="detail-section">
+                    <div class="detail-label">Response Preview</div>
+                    <div class="response-preview">Die Datei "file<>:*?.py" konnte nicht gefunden werden. Dies deutet darauf hin, dass der Dateiname ungültige Zeichen enthält, die in Dateisystemen nicht erlaubt sind. In Python und den meisten Betriebs</div>
+                </div>
+            </div>
+        </div>
+
+        <div class="test-card">
+            <div class="test-header">
+                <div class="test-title">
+                    <span class="status-badge passed">PASSED</span>
+                    <span>empty_parameters</span>
+                </div>
+                <span class="duration">3864ms</span>
+            </div>
+            <div class="test-details">
+                <div class="detail-section">
+                    <div class="detail-label">Prompt</div>
+                    <div class="prompt">Use search_code without providing a query.
+What error message is returned?
+</div>
+                </div>
+                <div class="detail-section">
+                    <div class="detail-label">Expected Tools</div>
+                    <div class="tool-list"><span class="tool-badge expected">search_code</span></div>
+                </div>
+                <div class="detail-section">
+                    <div class="detail-label">Actual Tools</div>
+                    <div class="tool-list"><em>None</em></div>
+                </div>
+                
+                <div class="detail-section">
+                    <div class="detail-label">Response Preview</div>
+                    <div class="response-preview">The error message returned would indicate that a query must be provided for the `search_code` function to execute. It typically states that the input is required and cannot be empty.</div>
+                </div>
+            </div>
+        </div>
+
+        <div class="test-card">
+            <div class="test-header">
+                <div class="test-title">
+                    <span class="status-badge failed">FAILED</span>
+                    <span>very_long_content</span>
+                </div>
+                <span class="duration">9493ms</span>
+            </div>
+            <div class="test-details">
+                <div class="detail-section">
+                    <div class="detail-label">Prompt</div>
+                    <div class="prompt">Use write_file to create a file with 10000 lines of "Hello World".
+Is there a content size limit?
+</div>
+                </div>
+                <div class="detail-section">
+                    <div class="detail-label">Expected Tools</div>
+                    <div class="tool-list"><span class="tool-badge expected">write_file</span></div>
+                </div>
+                <div class="detail-section">
+                    <div class="detail-label">Actual Tools</div>
+                    <div class="tool-list"><em>None</em></div>
+                </div>
+                <div class="detail-section"><div class="detail-label">Errors</div><div class="errors">Expected tools not called: ['write_file']. Actual tools: []. </div></div>
+                <div class="detail-section">
+                    <div class="detail-label">Response Preview</div>
+                    <div class="response-preview">Creating a file with 10,000 lines of "Hello World" is feasible. However, the content size limits depend on the file system and the programming language used. In many environments, there isn't a strict</div>
+                </div>
+            </div>
+        </div>
+
+        <div class="test-card">
+            <div class="test-header">
+                <div class="test-title">
+                    <span class="status-badge failed">FAILED</span>
+                    <span>github_then_local</span>
+                </div>
+                <span class="duration">5694ms</span>
+            </div>
+            <div class="test-details">
+                <div class="detail-section">
+                    <div class="detail-label">Prompt</div>
+                    <div class="prompt">1. Use github_pr_details to get PR #1 from AI-Assist repo
+2. Use read_file to read a local file mentioned in the PR
+
+Note the difference between GitHub and local tools.
+</div>
+                </div>
+                <div class="detail-section">
+                    <div class="detail-label">Expected Tools</div>
+                    <div class="tool-list"><span class="tool-badge expected">github_pr_details</span> <span class="tool-badge expected">read_file</span></div>
+                </div>
+                <div class="detail-section">
+                    <div class="detail-label">Actual Tools</div>
+                    <div class="tool-list"><span class="tool-badge error"><span class="tool-order">1</span>github_pr_details</span></div>
+                </div>
+                <div class="detail-section"><div class="detail-label">Errors</div><div class="errors">Expected tools not called: ['read_file']. Actual tools: ['github_pr_details']. </div></div>
+                <div class="detail-section">
+                    <div class="detail-label">Response Preview</div>
+                    <div class="response-preview">PR #1 wird im Workspace analysiert. 
+
+Bitte geben Sie mir den Pfad zu einer lokalen Datei, die im PR erwähnt wird, damit ich sie lesen kann.</div>
+                </div>
+            </div>
+        </div>
+
+        <div class="test-card">
+            <div class="test-header">
+                <div class="test-title">
+                    <span class="status-badge failed">FAILED</span>
+                    <span>search_then_modify</span>
+                </div>
+                <span class="duration">19618ms</span>
+            </div>
+            <div class="test-details">
+                <div class="detail-section">
+                    <div class="detail-label">Prompt</div>
+                    <div class="prompt">1. Use search_code to find the "greet" function
+2. Use read_file to read the file containing it
+3. Use edit_file to add a docstring to the greet function
+</div>
+                </div>
+                <div class="detail-section">
+                    <div class="detail-label">Expected Tools</div>
+                    <div class="tool-list"><span class="tool-badge expected">search_code</span> <span class="tool-badge expected">read_file</span> <span class="tool-badge expected">edit_file</span></div>
+                </div>
+                <div class="detail-section">
+                    <div class="detail-label">Actual Tools</div>
+                    <div class="tool-list"><span class="tool-badge actual"><span class="tool-order">1</span>search_code</span> <span class="tool-badge actual"><span class="tool-order">2</span>read_file</span> <span class="tool-badge actual"><span class="tool-order">3</span>read_file</span></div>
+                </div>
+                <div class="detail-section"><div class="detail-label">Errors</div><div class="errors">Expected tools not called: ['edit_file']. Actual tools: ['search_code', 'read_file', 'read_file']. </div></div>
+                <div class="detail-section">
+                    <div class="detail-label">Response Preview</div>
+                    <div class="response-preview">Die Funktion `greet` in der Datei `example.py` ist bereits mit einer Docstring versehen, die die Argumente und den Rückgabewert beschreibt. Hier ist der relevante Code:
+
+```python
+def greet(name: str)</div>
+                </div>
+            </div>
+        </div>
+
+        <div class="test-card">
+            <div class="test-header">
+                <div class="test-title">
+                    <span class="status-badge passed">PASSED</span>
+                    <span>accumulate_context</span>
+                </div>
+                <span class="duration">29117ms</span>
+            </div>
+            <div class="test-details">
+                <div class="detail-section">
+                    <div class="detail-label">Prompt</div>
+                    <div class="prompt">Perform these operations and track what you remember:
+1. Read example.py - note the function names
+2. Read config.json - note the version
+3. Read README.md - note the project name
+4. Search for "Calculator" - note how many matches
+5. Summarize ALL the information you collected
+</div>
+                </div>
+                <div class="detail-section">
+                    <div class="detail-label">Expected Tools</div>
+                    <div class="tool-list"><span class="tool-badge expected">read_file</span> <span class="tool-badge expected">search_code</span></div>
+                </div>
+                <div class="detail-section">
+                    <div class="detail-label">Actual Tools</div>
+                    <div class="tool-list"><span class="tool-badge actual"><span class="tool-order">3</span>read_file</span> <span class="tool-badge actual"><span class="tool-order">4</span>search_code</span> <span class="tool-badge actual"><span class="tool-order">5</span>read_file</span> <span class="tool-badge actual"><span class="tool-order">6</span>read_file</span></div>
+                </div>
+                
+                <div class="detail-section">
+                    <div class="detail-label">Response Preview</div>
+                    <div class="response-preview">Hier sind die gesammelten Informationen aus den angeforderten Dateien:
+
+1. **Funktionen in `example.py`:**
+   - `greet(name: str) -> str`
+   - `add(a: int, b: int) -> int`
+   - `multiply(x: int, y: in</div>
+                </div>
+            </div>
+        </div>
+
+        <div class="test-card">
+            <div class="test-header">
+                <div class="test-title">
+                    <span class="status-badge passed">PASSED</span>
+                    <span>tool_result_truncation</span>
+                </div>
+                <span class="duration">7302ms</span>
+            </div>
+            <div class="test-details">
+                <div class="detail-section">
+                    <div class="detail-label">Prompt</div>
+                    <div class="prompt">Use list_files to list ALL files in the repository recursively.
+How many files are returned? Is the result truncated?
+</div>
+                </div>
+                <div class="detail-section">
+                    <div class="detail-label">Expected Tools</div>
+                    <div class="tool-list"><span class="tool-badge expected">list_files</span></div>
+                </div>
+                <div class="detail-section">
+                    <div class="detail-label">Actual Tools</div>
+                    <div class="tool-list"><span class="tool-badge actual"><span class="tool-order">1</span>list_files</span></div>
+                </div>
+                
+                <div class="detail-section">
+                    <div class="detail-label">Response Preview</div>
+                    <div class="response-preview">A total of 8 files were found in the repository. The result is not truncated, as all files have been listed.</div>
+                </div>
+            </div>
+        </div>
+        </div>
+
+        <div class="timestamp">Generated: 2026-03-26 14:18:37</div>
+    </div>
+
+    <script>
+        document.querySelectorAll('.test-header').forEach(header => {
+            header.addEventListener('click', () => {
+                const details = header.nextElementSibling;
+                details.classList.toggle('open');
+            });
+        });
+    </script>
+</body>
+</html>

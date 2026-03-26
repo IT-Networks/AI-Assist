@@ -1,0 +1,17 @@
+{
+  "session_id": "61413951-d8e5-4894-8d8d-60c2ba1498e7",
+  "title": "Use search_code to find \"def\" in all Python files.\nHow many …",
+  "mode": "read_only",
+  "messages_history": [
+    {
+      "role": "user",
+      "content": "Use search_code to find \"def\" in all Python files.\nHow many results are returned? Is there pagination?\n"
+    },
+    {
+      "role": "assistant",
+      "content": "The search for \"def\" in all Python files returned a total of 20 results. There is no pagination since the maximum number of results was reached in a single query."
+    }
+  ],
+  "created_at": 1774516586.9728808,
+  "updated_at": 1774516586.9728808
+}

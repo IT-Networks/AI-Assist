@@ -306,6 +306,12 @@ class ServiceNowClient:
 _client: Optional[ServiceNowClient] = None
 
 
+def reset_servicenow_client():
+    """Setzt den ServiceNow-Client zurück (nach Settings-Änderung aufrufen)."""
+    global _client
+    _client = None
+
+
 def get_servicenow_client() -> ServiceNowClient:
     """Gibt die Singleton-Instanz des ServiceNow-Clients zurueck."""
     global _client

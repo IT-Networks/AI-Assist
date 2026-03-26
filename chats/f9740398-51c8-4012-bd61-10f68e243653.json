@@ -1,0 +1,17 @@
+{
+  "session_id": "f9740398-51c8-4012-bd61-10f68e243653",
+  "title": "Read the file example.py and tell me what functions are defi…",
+  "mode": "read_only",
+  "messages_history": [
+    {
+      "role": "user",
+      "content": "Read the file example.py and tell me what functions are defined in it"
+    },
+    {
+      "role": "assistant",
+      "content": "Es sind keine konfigurierten Python-Repositories vorhanden, daher kann ich die Datei `example.py` nicht finden oder die Funktionen darin auflisten. Bitte stelle sicher, dass das Repository korrekt konfiguriert ist oder lade die Datei hoch, damit ich sie analysieren kann."
+    }
+  ],
+  "created_at": 1774473576.918287,
+  "updated_at": 1774473576.918287
+}

@@ -2,7 +2,7 @@
 Jira REST API Client.
 
 Unterstützt JQL-Suche und Issue-Abruf über Jira REST API v2.
-Auth: Basic Auth (username + api_token oder password).
+Auth: api_token ohne username = Bearer Auth, mit username = Basic Auth.
 """
 
 import base64
@@ -55,10 +55,16 @@ class JiraClient:
 
     def _headers(self) -> Dict:
         headers = {"Accept": "application/json", "Content-Type": "application/json"}
-        secret = self._get_secret()
-        if self.username and secret:
-            creds = base64.b64encode(f"{self.username}:{secret}".encode()).decode()
-            headers["Authorization"] = f"Basic {creds}"
+
+        # Wenn api_token gesetzt aber kein username → Bearer Auth (PAT)
+        if self.api_token and not self.username:
+            headers["Authorization"] = f"Bearer {self.api_token}"
+        else:
+            # Basic Auth: Username + API-Token/Password
+            secret = self._get_secret()
+            if self.username and secret:
+                creds = base64.b64encode(f"{self.username}:{secret}".encode()).decode()
+                headers["Authorization"] = f"Basic {creds}"
         return headers
 
     def _api_url(self, path: str) -> str:
@@ -228,6 +234,12 @@ class JiraClient:
 
 # Singleton
 _jira_client: Optional[JiraClient] = None
+
+
+def reset_jira_client():
+    """Setzt den Jira-Client zurück (nach Settings-Änderung aufrufen)."""
+    global _jira_client
+    _jira_client = None
 
 
 def get_jira_client() -> JiraClient:

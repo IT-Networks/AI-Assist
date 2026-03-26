@@ -1,0 +1,17 @@
+{
+  "session_id": "bdf2aefa-e9a8-4b3a-91ec-95bcb423225f",
+  "title": "Show me all open pull requests in this repository",
+  "mode": "read_only",
+  "messages_history": [
+    {
+      "role": "user",
+      "content": "Show me all open pull requests in this repository"
+    },
+    {
+      "role": "assistant",
+      "content": "It seems there was an error while trying to fetch the open pull requests. Please provide the name of the repository or the owner/repo format so I can attempt to retrieve the information again."
+    }
+  ],
+  "created_at": 1774516664.2589967,
+  "updated_at": 1774516664.2589967
+}

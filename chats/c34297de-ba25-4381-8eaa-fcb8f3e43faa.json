@@ -1,0 +1,17 @@
+{
+  "session_id": "c34297de-ba25-4381-8eaa-fcb8f3e43faa",
+  "title": "Get the details of PR #1 in the AI-Assist repository",
+  "mode": "read_only",
+  "messages_history": [
+    {
+      "role": "user",
+      "content": "Get the details of PR #1 in the AI-Assist repository"
+    },
+    {
+      "role": "assistant",
+      "content": "PR #1 wird im Workspace analysiert. Wenn du weitere Informationen benötigst, lass es mich wissen!"
+    }
+  ],
+  "created_at": 1774473462.1913078,
+  "updated_at": 1774473462.1913078
+}

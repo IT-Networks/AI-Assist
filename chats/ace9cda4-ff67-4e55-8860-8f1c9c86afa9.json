@@ -1,0 +1,17 @@
+{
+  "session_id": "ace9cda4-ff67-4e55-8860-8f1c9c86afa9",
+  "title": "Show me all open pull requests in this repository",
+  "mode": "read_only",
+  "messages_history": [
+    {
+      "role": "user",
+      "content": "Show me all open pull requests in this repository"
+    },
+    {
+      "role": "assistant",
+      "content": "Please provide the name of the repository (in the format `owner/repo` or just `repo-name`) so I can list all open pull requests for you."
+    }
+  ],
+  "created_at": 1774527354.8672233,
+  "updated_at": 1774527354.8672233
+}

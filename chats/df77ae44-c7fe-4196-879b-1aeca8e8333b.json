@@ -1,0 +1,17 @@
+{
+  "session_id": "df77ae44-c7fe-4196-879b-1aeca8e8333b",
+  "title": "Use read_jira_issue to read issue NONEXISTENT-999.\nIf it doe…",
+  "mode": "read_only",
+  "messages_history": [
+    {
+      "role": "user",
+      "content": "Use read_jira_issue to read issue NONEXISTENT-999.\nIf it doesn't exist, report that clearly.\n"
+    },
+    {
+      "role": "assistant",
+      "content": "Die Jira-Issue NONEXISTENT-999 kann nicht abgerufen werden, da Jira entweder nicht konfiguriert oder deaktiviert ist."
+    }
+  ],
+  "created_at": 1774516357.0337503,
+  "updated_at": 1774516357.0337503
+}

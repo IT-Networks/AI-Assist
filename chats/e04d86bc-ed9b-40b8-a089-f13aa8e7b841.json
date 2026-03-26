@@ -1,0 +1,17 @@
+{
+  "session_id": "e04d86bc-ed9b-40b8-a089-f13aa8e7b841",
+  "title": "Create a new file called 'test_output.txt' with the content …",
+  "mode": "read_only",
+  "messages_history": [
+    {
+      "role": "user",
+      "content": "Create a new file called 'test_output.txt' with the content 'Hello from E2E test'"
+    },
+    {
+      "role": "assistant",
+      "content": "I cannot create files directly. However, you can easily create the file manually. Here’s how you can do it in Python:\n\n```python\nwith open('test_output.txt', 'w') as file:\n    file.write('Hello from E2E test')\n```\n\nYou can run this code in your local Python environment to create the file. If you need further assistance, feel free to ask!"
+    }
+  ],
+  "created_at": 1774473393.8601243,
+  "updated_at": 1774473393.8601243
+}

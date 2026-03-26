@@ -1,0 +1,677 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>E2E Test Report - Sequential Thinking Tests</title>
+    <style>
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: #0d1117;
+            color: #c9d1d9;
+            line-height: 1.6;
+            padding: 20px;
+        }
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+        h1 {
+            color: #58a6ff;
+            margin-bottom: 20px;
+            padding-bottom: 10px;
+            border-bottom: 1px solid #30363d;
+        }
+        .summary {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+            gap: 15px;
+            margin-bottom: 30px;
+        }
+        .metric {
+            background: #161b22;
+            border: 1px solid #30363d;
+            border-radius: 8px;
+            padding: 15px;
+            text-align: center;
+        }
+        .metric-value {
+            font-size: 28px;
+            font-weight: bold;
+            color: #58a6ff;
+        }
+        .metric-value.success {
+            color: #3fb950;
+        }
+        .metric-value.failure {
+            color: #f85149;
+        }
+        .metric-label {
+            font-size: 12px;
+            color: #8b949e;
+            text-transform: uppercase;
+        }
+        .test-card {
+            background: #161b22;
+            border: 1px solid #30363d;
+            border-radius: 8px;
+            margin-bottom: 15px;
+            overflow: hidden;
+        }
+        .test-header {
+            padding: 15px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            cursor: pointer;
+            border-bottom: 1px solid #30363d;
+        }
+        .test-header:hover {
+            background: #1f2937;
+        }
+        .test-title {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        .status-badge {
+            padding: 4px 10px;
+            border-radius: 12px;
+            font-size: 12px;
+            font-weight: 600;
+        }
+        .status-badge.passed {
+            background: rgba(63, 185, 80, 0.2);
+            color: #3fb950;
+        }
+        .status-badge.failed {
+            background: rgba(248, 81, 73, 0.2);
+            color: #f85149;
+        }
+        .test-details {
+            padding: 15px;
+            display: none;
+        }
+        .test-details.open {
+            display: block;
+        }
+        .detail-section {
+            margin-bottom: 15px;
+        }
+        .detail-label {
+            font-size: 11px;
+            color: #8b949e;
+            text-transform: uppercase;
+            margin-bottom: 5px;
+        }
+        .prompt {
+            background: #0d1117;
+            border: 1px solid #30363d;
+            border-radius: 4px;
+            padding: 10px;
+            font-family: monospace;
+            font-size: 13px;
+            white-space: pre-wrap;
+        }
+        .tool-list {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+        }
+        .tool-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 5px;
+            padding: 4px 10px;
+            border-radius: 4px;
+            font-size: 12px;
+            font-family: monospace;
+        }
+        .tool-badge.expected {
+            background: rgba(88, 166, 255, 0.2);
+            color: #58a6ff;
+            border: 1px solid rgba(88, 166, 255, 0.3);
+        }
+        .tool-badge.actual {
+            background: rgba(63, 185, 80, 0.2);
+            color: #3fb950;
+            border: 1px solid rgba(63, 185, 80, 0.3);
+        }
+        .tool-badge.error {
+            background: rgba(248, 81, 73, 0.2);
+            color: #f85149;
+            border: 1px solid rgba(248, 81, 73, 0.3);
+        }
+        .tool-order {
+            background: #30363d;
+            border-radius: 50%;
+            width: 18px;
+            height: 18px;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 10px;
+        }
+        .errors {
+            background: rgba(248, 81, 73, 0.1);
+            border: 1px solid rgba(248, 81, 73, 0.3);
+            border-radius: 4px;
+            padding: 10px;
+            color: #f85149;
+            font-size: 13px;
+        }
+        .duration {
+            color: #8b949e;
+            font-size: 13px;
+        }
+        .response-preview {
+            background: #0d1117;
+            border: 1px solid #30363d;
+            border-radius: 4px;
+            padding: 10px;
+            font-size: 13px;
+            max-height: 150px;
+            overflow-y: auto;
+        }
+        .timestamp {
+            color: #8b949e;
+            font-size: 12px;
+            margin-top: 20px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>E2E Test Report: Sequential Thinking Tests</h1>
+
+        <div class="summary">
+            <div class="metric">
+                <div class="metric-value">14</div>
+                <div class="metric-label">Total Tests</div>
+            </div>
+            <div class="metric">
+                <div class="metric-value success">10</div>
+                <div class="metric-label">Passed</div>
+            </div>
+            <div class="metric">
+                <div class="metric-value failure">4</div>
+                <div class="metric-label">Failed</div>
+            </div>
+            <div class="metric">
+                <div class="metric-value">71.4%</div>
+                <div class="metric-label">Success Rate</div>
+            </div>
+            <div class="metric">
+                <div class="metric-value">974.8s</div>
+                <div class="metric-label">Duration</div>
+            </div>
+        </div>
+
+        <div class="tests">
+            
+        <div class="test-card">
+            <div class="test-header">
+                <div class="test-title">
+                    <span class="status-badge passed">PASSED</span>
+                    <span>seq_basic_analysis</span>
+                </div>
+                <span class="duration">15631ms</span>
+            </div>
+            <div class="test-details">
+                <div class="detail-section">
+                    <div class="detail-label">Prompt</div>
+                    <div class="prompt">/seq Analysiere die Struktur der Calculator-Klasse in example.py
+</div>
+                </div>
+                <div class="detail-section">
+                    <div class="detail-label">Expected Tools</div>
+                    <div class="tool-list"><span class="tool-badge expected">sequential_thinking</span> <span class="tool-badge expected">read_file</span></div>
+                </div>
+                <div class="detail-section">
+                    <div class="detail-label">Actual Tools</div>
+                    <div class="tool-list"><em>None</em></div>
+                </div>
+                
+                <div class="detail-section">
+                    <div class="detail-label">Response Preview</div>
+                    <div class="response-preview">Die Analyse der Struktur der `Calculator`-Klasse in `example.py` zeigt Folgendes:
+
+1. **Konstruktor (`__init__`)**:
+   - Der Konstruktor akzeptiert einen optionalen Startwert, der als Anfangswert für </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="test-card">
+            <div class="test-header">
+                <div class="test-title">
+                    <span class="status-badge passed">PASSED</span>
+                    <span>seq_with_context</span>
+                </div>
+                <span class="duration">114763ms</span>
+            </div>
+            <div class="test-details">
+                <div class="detail-section">
+                    <div class="detail-label">Prompt</div>
+                    <div class="prompt">/seq Wie interagieren die Komponenten im Projekt miteinander?
+</div>
+                </div>
+                <div class="detail-section">
+                    <div class="detail-label">Expected Tools</div>
+                    <div class="tool-list"><span class="tool-badge expected">sequential_thinking</span> <span class="tool-badge expected">read_file</span> <span class="tool-badge expected">search_code</span></div>
+                </div>
+                <div class="detail-section">
+                    <div class="detail-label">Actual Tools</div>
+                    <div class="tool-list"><span class="tool-badge error"><span class="tool-order">1</span>sequential_thinking</span></div>
+                </div>
+                
+                <div class="detail-section">
+                    <div class="detail-label">Response Preview</div>
+                    <div class="response-preview">Es scheint, dass ich die maximale Anzahl an Schritten erreicht habe, ohne eine vollständige Antwort zu erhalten. Um die Interaktionen der Komponenten im Projekt besser zu verstehen, könnten wir folgen</div>
+                </div>
+            </div>
+        </div>
+
+        <div class="test-card">
+            <div class="test-header">
+                <div class="test-title">
+                    <span class="status-badge passed">PASSED</span>
+                    <span>seq_quick_mode</span>
+                </div>
+                <span class="duration">24274ms</span>
+            </div>
+            <div class="test-details">
+                <div class="detail-section">
+                    <div class="detail-label">Prompt</div>
+                    <div class="prompt">/seq Was macht die greet() Funktion? --mode quick
+</div>
+                </div>
+                <div class="detail-section">
+                    <div class="detail-label">Expected Tools</div>
+                    <div class="tool-list"><span class="tool-badge expected">read_file</span></div>
+                </div>
+                <div class="detail-section">
+                    <div class="detail-label">Actual Tools</div>
+                    <div class="tool-list"><em>None</em></div>
+                </div>
+                
+                <div class="detail-section">
+                    <div class="detail-label">Response Preview</div>
+                    <div class="response-preview">Die `greet()` Funktion in der Datei `example.py` begrüßt eine Person mit ihrem Namen. Sie nimmt einen Parameter `name` vom Typ `str` entgegen und gibt eine Begrüßungsnachricht zurück, die den Namen de</div>
+                </div>
+            </div>
+        </div>
+
+        <div class="test-card">
+            <div class="test-header">
+                <div class="test-title">
+                    <span class="status-badge failed">FAILED</span>
+                    <span>seq_deep_mode</span>
+                </div>
+                <span class="duration">120269ms</span>
+            </div>
+            <div class="test-details">
+                <div class="detail-section">
+                    <div class="detail-label">Prompt</div>
+                    <div class="prompt">/seq Analysiere potenzielle Bugs in der divide() Methode --mode deep
+</div>
+                </div>
+                <div class="detail-section">
+                    <div class="detail-label">Expected Tools</div>
+                    <div class="tool-list"><span class="tool-badge expected">sequential_thinking</span> <span class="tool-badge expected">read_file</span></div>
+                </div>
+                <div class="detail-section">
+                    <div class="detail-label">Actual Tools</div>
+                    <div class="tool-list"><em>None</em></div>
+                </div>
+                <div class="detail-section"><div class="detail-label">Errors</div><div class="errors">Exception: </div></div>
+                <div class="detail-section">
+                    <div class="detail-label">Response Preview</div>
+                    <div class="response-preview"><em>No response</em></div>
+                </div>
+            </div>
+        </div>
+
+        <div class="test-card">
+            <div class="test-header">
+                <div class="test-title">
+                    <span class="status-badge failed">FAILED</span>
+                    <span>seq_ultra_mode</span>
+                </div>
+                <span class="duration">120542ms</span>
+            </div>
+            <div class="test-details">
+                <div class="detail-section">
+                    <div class="detail-label">Prompt</div>
+                    <div class="prompt">/seq Erstelle eine vollständige Architektur-Analyse des Projekts --mode ultra
+</div>
+                </div>
+                <div class="detail-section">
+                    <div class="detail-label">Expected Tools</div>
+                    <div class="tool-list"><span class="tool-badge expected">sequential_thinking</span> <span class="tool-badge expected">read_file</span> <span class="tool-badge expected">list_files</span></div>
+                </div>
+                <div class="detail-section">
+                    <div class="detail-label">Actual Tools</div>
+                    <div class="tool-list"><em>None</em></div>
+                </div>
+                <div class="detail-section"><div class="detail-label">Errors</div><div class="errors">Exception: </div></div>
+                <div class="detail-section">
+                    <div class="detail-label">Response Preview</div>
+                    <div class="response-preview"><em>No response</em></div>
+                </div>
+            </div>
+        </div>
+
+        <div class="test-card">
+            <div class="test-header">
+                <div class="test-title">
+                    <span class="status-badge passed">PASSED</span>
+                    <span>seq_complex_debugging</span>
+                </div>
+                <span class="duration">92317ms</span>
+            </div>
+            <div class="test-details">
+                <div class="detail-section">
+                    <div class="detail-label">Prompt</div>
+                    <div class="prompt">/seq Die Calculator-Klasse hat Performance-Probleme bei großen Zahlen.
+Analysiere schrittweise:
+1. Welche Methoden könnten betroffen sein?
+2. Was sind mögliche Ursachen?
+3. Welche Lösungen gibt es?
+</div>
+                </div>
+                <div class="detail-section">
+                    <div class="detail-label">Expected Tools</div>
+                    <div class="tool-list"><span class="tool-badge expected">sequential_thinking</span> <span class="tool-badge expected">read_file</span></div>
+                </div>
+                <div class="detail-section">
+                    <div class="detail-label">Actual Tools</div>
+                    <div class="tool-list"><span class="tool-badge error"><span class="tool-order">1</span>sequential_thinking</span></div>
+                </div>
+                
+                <div class="detail-section">
+                    <div class="detail-label">Response Preview</div>
+                    <div class="response-preview">Die Analyse der Performance-Probleme der Calculator-Klasse bei großen Zahlen hat folgende Schritte ergeben:
+
+1. **Betroffene Methoden**:
+   - **Addition**: Bei sehr großen Zahlen kann die Addition lan</div>
+                </div>
+            </div>
+        </div>
+
+        <div class="test-card">
+            <div class="test-header">
+                <div class="test-title">
+                    <span class="status-badge passed">PASSED</span>
+                    <span>seq_architectural_decision</span>
+                </div>
+                <span class="duration">32849ms</span>
+            </div>
+            <div class="test-details">
+                <div class="detail-section">
+                    <div class="detail-label">Prompt</div>
+                    <div class="prompt">/seq Soll ich für das Logging-System Dependency Injection oder Singleton verwenden?
+Berücksichtige: Testbarkeit, Performance, Wartbarkeit
+</div>
+                </div>
+                <div class="detail-section">
+                    <div class="detail-label">Expected Tools</div>
+                    <div class="tool-list"><span class="tool-badge expected">sequential_thinking</span> <span class="tool-badge expected">read_file</span></div>
+                </div>
+                <div class="detail-section">
+                    <div class="detail-label">Actual Tools</div>
+                    <div class="tool-list"><em>None</em></div>
+                </div>
+                
+                <div class="detail-section">
+                    <div class="detail-label">Response Preview</div>
+                    <div class="response-preview">Hier ist eine strukturierte Analyse der Vor- und Nachteile von Dependency Injection (DI) und Singleton im Kontext eines Logging-Systems, unter Berücksichtigung von Testbarkeit, Performance und Wartbar</div>
+                </div>
+            </div>
+        </div>
+
+        <div class="test-card">
+            <div class="test-header">
+                <div class="test-title">
+                    <span class="status-badge passed">PASSED</span>
+                    <span>seq_refactoring_plan</span>
+                </div>
+                <span class="duration">35095ms</span>
+            </div>
+            <div class="test-details">
+                <div class="detail-section">
+                    <div class="detail-label">Prompt</div>
+                    <div class="prompt">/seq Plane ein Refactoring der example.py Datei.
+Analysiere den aktuellen Code und erstelle einen Schritt-für-Schritt Plan.
+</div>
+                </div>
+                <div class="detail-section">
+                    <div class="detail-label">Expected Tools</div>
+                    <div class="tool-list"><span class="tool-badge expected">sequential_thinking</span> <span class="tool-badge expected">read_file</span></div>
+                </div>
+                <div class="detail-section">
+                    <div class="detail-label">Actual Tools</div>
+                    <div class="tool-list"><span class="tool-badge actual"><span class="tool-order">1</span>read_file</span></div>
+                </div>
+                
+                <div class="detail-section">
+                    <div class="detail-label">Response Preview</div>
+                    <div class="response-preview">Hier ist der aktuelle Code der `example.py` Datei:
+
+```python
+"""
+Example Python module for E2E testing.
+
+This module provides sample functions and classes for testing
+AI-Assist tool capabilities.
+"""</div>
+                </div>
+            </div>
+        </div>
+
+        <div class="test-card">
+            <div class="test-header">
+                <div class="test-title">
+                    <span class="status-badge passed">PASSED</span>
+                    <span>seq_hypothesis_testing</span>
+                </div>
+                <span class="duration">81472ms</span>
+            </div>
+            <div class="test-details">
+                <div class="detail-section">
+                    <div class="detail-label">Prompt</div>
+                    <div class="prompt">/seq Hypothese: Die greet() Funktion könnte optimiert werden.
+Teste diese Hypothese durch Code-Analyse.
+</div>
+                </div>
+                <div class="detail-section">
+                    <div class="detail-label">Expected Tools</div>
+                    <div class="tool-list"><span class="tool-badge expected">sequential_thinking</span> <span class="tool-badge expected">read_file</span></div>
+                </div>
+                <div class="detail-section">
+                    <div class="detail-label">Actual Tools</div>
+                    <div class="tool-list"><span class="tool-badge error"><span class="tool-order">1</span>sequential_thinking</span></div>
+                </div>
+                
+                <div class="detail-section">
+                    <div class="detail-label">Response Preview</div>
+                    <div class="response-preview">Die Hypothese, dass die `greet()` Funktion optimiert werden könnte, wurde analysiert. Hier sind die Schritte, die zur Überprüfung dieser Hypothese unternommen wurden:
+
+1. **Funktionalität der greet() </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="test-card">
+            <div class="test-header">
+                <div class="test-title">
+                    <span class="status-badge failed">FAILED</span>
+                    <span>seq_verification_workflow</span>
+                </div>
+                <span class="duration">15898ms</span>
+            </div>
+            <div class="test-details">
+                <div class="detail-section">
+                    <div class="detail-label">Prompt</div>
+                    <div class="prompt">/seq Verifiziere dass alle Methoden der Calculator-Klasse korrekt typisiert sind.
+</div>
+                </div>
+                <div class="detail-section">
+                    <div class="detail-label">Expected Tools</div>
+                    <div class="tool-list"><span class="tool-badge expected">sequential_thinking</span> <span class="tool-badge expected">read_file</span></div>
+                </div>
+                <div class="detail-section">
+                    <div class="detail-label">Actual Tools</div>
+                    <div class="tool-list"><span class="tool-badge error"><span class="tool-order">1</span>search_code</span> <span class="tool-badge actual"><span class="tool-order">2</span>get_project_paths</span></div>
+                </div>
+                <div class="detail-section"><div class="detail-label">Errors</div><div class="errors">Expected tools not called: ['read_file']. Actual tools: ['search_code', 'get_project_paths']. </div></div>
+                <div class="detail-section">
+                    <div class="detail-label">Response Preview</div>
+                    <div class="response-preview">Es sind keine Java-Repositories konfiguriert, daher kann ich die Methoden der Calculator-Klasse nicht verifizieren. Möchtest du, dass ich in einem Python-Repository nach einer ähnlichen Klasse suche o</div>
+                </div>
+            </div>
+        </div>
+
+        <div class="test-card">
+            <div class="test-header">
+                <div class="test-title">
+                    <span class="status-badge passed">PASSED</span>
+                    <span>seq_empty_context</span>
+                </div>
+                <span class="duration">89731ms</span>
+            </div>
+            <div class="test-details">
+                <div class="detail-section">
+                    <div class="detail-label">Prompt</div>
+                    <div class="prompt">/seq Was ist der beste Ansatz für Error Handling in Python?
+</div>
+                </div>
+                <div class="detail-section">
+                    <div class="detail-label">Expected Tools</div>
+                    <div class="tool-list"><span class="tool-badge expected">sequential_thinking</span></div>
+                </div>
+                <div class="detail-section">
+                    <div class="detail-label">Actual Tools</div>
+                    <div class="tool-list"><span class="tool-badge error"><span class="tool-order">1</span>sequential_thinking</span></div>
+                </div>
+                
+                <div class="detail-section">
+                    <div class="detail-label">Response Preview</div>
+                    <div class="response-preview">Hier sind einige bewährte Ansätze für das Error Handling in Python:
+
+1. **Verwendung von try-except-Blöcken**:
+   - Der grundlegende Ansatz für das Error Handling in Python ist die Verwendung von `try</div>
+                </div>
+            </div>
+        </div>
+
+        <div class="test-card">
+            <div class="test-header">
+                <div class="test-title">
+                    <span class="status-badge passed">PASSED</span>
+                    <span>seq_invalid_mode_fallback</span>
+                </div>
+                <span class="duration">16509ms</span>
+            </div>
+            <div class="test-details">
+                <div class="detail-section">
+                    <div class="detail-label">Prompt</div>
+                    <div class="prompt">/seq Analysiere die Code-Struktur --mode invalid_mode
+</div>
+                </div>
+                <div class="detail-section">
+                    <div class="detail-label">Expected Tools</div>
+                    <div class="tool-list"><span class="tool-badge expected">sequential_thinking</span> <span class="tool-badge expected">read_file</span></div>
+                </div>
+                <div class="detail-section">
+                    <div class="detail-label">Actual Tools</div>
+                    <div class="tool-list"><em>None</em></div>
+                </div>
+                
+                <div class="detail-section">
+                    <div class="detail-label">Response Preview</div>
+                    <div class="response-preview">Es scheint, dass der angegebene Modus "invalid_mode" nicht unterstützt wird. Bitte wähle einen gültigen Modus oder spezifiziere die Art der Analyse, die du durchführen möchtest. Mögliche Optionen könn</div>
+                </div>
+            </div>
+        </div>
+
+        <div class="test-card">
+            <div class="test-header">
+                <div class="test-title">
+                    <span class="status-badge failed">FAILED</span>
+                    <span>seq_then_implement</span>
+                </div>
+                <span class="duration">107180ms</span>
+            </div>
+            <div class="test-details">
+                <div class="detail-section">
+                    <div class="detail-label">Prompt</div>
+                    <div class="prompt">/seq Analysiere wie eine modulo() Methode in Calculator implementiert werden sollte,
+dann /implement sie direkt.
+</div>
+                </div>
+                <div class="detail-section">
+                    <div class="detail-label">Expected Tools</div>
+                    <div class="tool-list"><span class="tool-badge expected">sequential_thinking</span> <span class="tool-badge expected">read_file</span> <span class="tool-badge expected">edit_file</span></div>
+                </div>
+                <div class="detail-section">
+                    <div class="detail-label">Actual Tools</div>
+                    <div class="tool-list"><span class="tool-badge error"><span class="tool-order">1</span>sequential_thinking</span></div>
+                </div>
+                <div class="detail-section"><div class="detail-label">Errors</div><div class="errors">Expected tools not called: ['read_file']. Actual tools: ['sequential_thinking']. </div></div>
+                <div class="detail-section">
+                    <div class="detail-label">Response Preview</div>
+                    <div class="response-preview">Es scheint, dass ich die maximale Anzahl an Denkschritten erreicht habe, ohne eine klare Antwort zu erhalten. Ich werde nun die Implementierung einer `modulo()` Methode in einem Calculator direkt ange</div>
+                </div>
+            </div>
+        </div>
+
+        <div class="test-card">
+            <div class="test-header">
+                <div class="test-title">
+                    <span class="status-badge passed">PASSED</span>
+                    <span>troubleshoot_with_seq</span>
+                </div>
+                <span class="duration">108283ms</span>
+            </div>
+            <div class="test-details">
+                <div class="detail-section">
+                    <div class="detail-label">Prompt</div>
+                    <div class="prompt">/troubleshoot Die divide() Methode wirft Fehler --seq
+</div>
+                </div>
+                <div class="detail-section">
+                    <div class="detail-label">Expected Tools</div>
+                    <div class="tool-list"><span class="tool-badge expected">sequential_thinking</span> <span class="tool-badge expected">read_file</span></div>
+                </div>
+                <div class="detail-section">
+                    <div class="detail-label">Actual Tools</div>
+                    <div class="tool-list"><span class="tool-badge error"><span class="tool-order">1</span>sequential_thinking</span></div>
+                </div>
+                
+                <div class="detail-section">
+                    <div class="detail-label">Response Preview</div>
+                    <div class="response-preview">Es scheint, dass ich die maximale Anzahl an Schritten erreicht habe, ohne eine vollständige Analyse durchzuführen. Ich werde die Analyse in mehreren Schritten fortsetzen, um die Ursachen für den Fehle</div>
+                </div>
+            </div>
+        </div>
+        </div>
+
+        <div class="timestamp">Generated: 2026-03-26 13:52:15</div>
+    </div>
+
+    <script>
+        document.querySelectorAll('.test-header').forEach(header => {
+            header.addEventListener('click', () => {
+                const details = header.nextElementSibling;
+                details.classList.toggle('open');
+            });
+        });
+    </script>
+</body>
+</html>

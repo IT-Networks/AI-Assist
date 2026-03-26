@@ -1,0 +1,17 @@
+{
+  "session_id": "a589da06-352c-4251-96f3-45127c8627ae",
+  "title": "[COMMAND: /brainstorm]\n\nErweitere die Calculator-Klasse um t…",
+  "mode": "read_only",
+  "messages_history": [
+    {
+      "role": "user",
+      "content": "[COMMAND: /brainstorm]\n\nErweitere die Calculator-Klasse um trigonometrische Funktionen"
+    },
+    {
+      "role": "assistant",
+      "content": "Um die `Calculator`-Klasse um trigonometrische Funktionen zu erweitern, können wir die Methoden `sin`, `cos` und `tan` hinzufügen. Diese Funktionen verwenden die `math`-Bibliothek in Python, um die entsprechenden Berechnungen durchzuführen. Hier ist ein Beispiel, wie die erweiterte Klasse aussehen könnte:\n\n=== FILE: example.py ===\n```python\nimport math\n\nclass Calculator:\n    def add(self, a, b):\n        return a + b\n\n    def subtract(self, a, b):\n        return a - b\n\n    def multiply(self, a, b):\n        return a * b\n\n    def divide(self, a, b):\n        if b == 0:\n            raise ValueError(\"Cannot divide by zero.\")\n        return a / b\n\n    def sin(self, angle):\n        \"\"\"Berechnet den Sinus eines Winkels in Grad.\"\"\"\n        return math.sin(math.radians(angle))\n\n    def cos(self, angle):\n        \"\"\"Berechnet den Kosinus eines Winkels in Grad.\"\"\"\n        return math.cos(math.radians(angle))\n\n    def tan(self, angle):\n        \"\"\"Berechnet den Tangens eines Winkels in Grad.\"\"\"\n        return math.tan(math.radians(angle))\n```\n=== END FILE ===\n\n### Änderungen:\n1. **Import der `math`-Bibliothek**: Notwendig für trigonometrische Berechnungen.\n2. **Hinzufügen von Methoden**:\n   - `sin(angle)`: Berechnet den Sinus eines Winkels in Grad.\n   - `cos(angle)`: Berechnet den Kosinus eines Winkels in Grad.\n   - `tan(angle)`: Berechnet den Tangens eines Winkels in Grad.\n\nMöchtest du weitere Änderungen oder Tests für diese neuen Funktionen hinzufügen?"
+    }
+  ],
+  "created_at": 1774521569.7526648,
+  "updated_at": 1774521569.7526648
+}

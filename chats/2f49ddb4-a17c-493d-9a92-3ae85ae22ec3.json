@@ -1,0 +1,17 @@
+{
+  "session_id": "2f49ddb4-a17c-493d-9a92-3ae85ae22ec3",
+  "title": "Use github_pr_details to get PR #1 details",
+  "mode": "read_only",
+  "messages_history": [
+    {
+      "role": "user",
+      "content": "Use github_pr_details to get PR #1 details"
+    },
+    {
+      "role": "assistant",
+      "content": "Ich kann die Details für PR #1 nicht abrufen, da das Repository nicht angegeben ist. Bitte teile mir das Repository mit, oder ich kann die Informationen im Workspace-Panel analysieren, wo der PR-Diff bereits untersucht wird."
+    }
+  ],
+  "created_at": 1774518289.1919012,
+  "updated_at": 1774518289.1919012
+}

@@ -1,0 +1,17 @@
+{
+  "session_id": "42b83378-3bb7-456d-b3b3-a11b588f211f",
+  "title": "[CONTINUE] Fahre mit der vorherigen Aufgabe fort\n",
+  "mode": "read_only",
+  "messages_history": [
+    {
+      "role": "user",
+      "content": "[CONTINUE] Fahre mit der vorherigen Aufgabe fort\n"
+    },
+    {
+      "role": "assistant",
+      "content": "Es wurden keine relevanten Informationen zu 'OrderService' in den verfügbaren Java- oder Python-Dateien gefunden. Möchtest du nach einem anderen Begriff suchen oder eine andere Anfrage stellen?"
+    }
+  ],
+  "created_at": 1774530799.5023174,
+  "updated_at": 1774530799.5023174
+}

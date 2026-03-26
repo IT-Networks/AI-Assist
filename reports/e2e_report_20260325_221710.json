@@ -1,0 +1,215 @@
+{
+  "suite_name": "GitHub Operations",
+  "timestamp": "2026-03-25T22:13:32.499903",
+  "summary": {
+    "total": 8,
+    "passed": 7,
+    "failed": 1,
+    "success_rate": 87.5,
+    "duration_ms": 92699
+  },
+  "tests": [
+    {
+      "name": "get_pr_details",
+      "passed": true,
+      "prompt": "Get the details of PR #1 in the AI-Assist repository",
+      "expected_tools": [
+        "github_pr_details"
+      ],
+      "actual_tools": [
+        {
+          "name": "github_pr_details",
+          "arguments": {
+            "repo": "AI-Assist",
+            "pr_number": 1
+          },
+          "status": "error",
+          "order": 0,
+          "error": null
+        }
+      ],
+      "response_preview": "PR #1 wird im Workspace analysiert.",
+      "duration_ms": 3255,
+      "errors": [],
+      "timestamp": "2026-03-25T22:12:03.056212"
+    },
+    {
+      "name": "list_open_prs",
+      "passed": true,
+      "prompt": "Show me all open pull requests in this repository",
+      "expected_tools": [
+        "github_list_prs"
+      ],
+      "actual_tools": [
+        {
+          "name": "github_list_prs",
+          "arguments": {
+            "repo": "owner/repo",
+            "state": "open"
+          },
+          "status": "error",
+          "order": 0,
+          "error": null
+        }
+      ],
+      "response_preview": "Es scheint, dass ich momentan keinen Zugriff auf GitHub habe, um die offenen Pull Requests in diesem Repository anzuzeigen. Wenn du mir den Repository-Namen oder weitere Details gibst, kann ich dir m\u00f6",
+      "duration_ms": 3454,
+      "errors": [],
+      "timestamp": "2026-03-25T22:12:06.510570"
+    },
+    {
+      "name": "get_pr_diff",
+      "passed": true,
+      "prompt": "Show me the code changes in PR #1",
+      "expected_tools": [
+        "github_pr_diff"
+      ],
+      "actual_tools": [
+        {
+          "name": "github_pr_diff",
+          "arguments": {
+            "repo": "owner/repo",
+            "pr_number": 1
+          },
+          "status": "error",
+          "order": 0,
+          "error": null
+        }
+      ],
+      "response_preview": "",
+      "duration_ms": 17016,
+      "errors": [],
+      "timestamp": "2026-03-25T22:12:23.527438"
+    },
+    {
+      "name": "analyze_pr_files",
+      "passed": true,
+      "prompt": "What files were modified in PR #1 and summarize the changes",
+      "expected_tools": [
+        "github_pr_diff"
+      ],
+      "actual_tools": [
+        {
+          "name": "github_pr_diff",
+          "arguments": {
+            "pr_number": 1
+          },
+          "status": "error",
+          "order": 0,
+          "error": null
+        }
+      ],
+      "response_preview": "",
+      "duration_ms": 20949,
+      "errors": [],
+      "timestamp": "2026-03-25T22:12:44.476637"
+    },
+    {
+      "name": "list_branches",
+      "passed": true,
+      "prompt": "List all branches in this repository",
+      "expected_tools": [
+        "github_list_branches"
+      ],
+      "actual_tools": [
+        {
+          "name": "github_list_branches",
+          "arguments": {},
+          "status": "error",
+          "order": 0,
+          "error": null
+        },
+        {
+          "name": "git_branch_list",
+          "arguments": {},
+          "status": "error",
+          "order": 1,
+          "error": null
+        },
+        {
+          "name": "get_project_paths",
+          "arguments": {},
+          "status": "error",
+          "order": 2,
+          "error": null
+        }
+      ],
+      "response_preview": "Es scheint, dass in diesem Umfeld keine konfigurierten Repositories vorhanden sind. Daher kann ich die Branches nicht auflisten. Bitte stelle sicher, dass du in einem g\u00fcltigen Git-Repository arbeitest",
+      "duration_ms": 9548,
+      "errors": [],
+      "timestamp": "2026-03-25T22:12:54.024909"
+    },
+    {
+      "name": "list_issues",
+      "passed": false,
+      "prompt": "Show me the open issues in this repository",
+      "expected_tools": [
+        "github_list_issues"
+      ],
+      "actual_tools": [],
+      "response_preview": "Please provide the name of the repository (in the format `owner/repo` or just `repo-name`) so I can list the open issues for you.",
+      "duration_ms": 2727,
+      "errors": [
+        "Expected tools not called: ['github_list_issues']. Actual tools: []. "
+      ],
+      "timestamp": "2026-03-25T22:12:56.752906"
+    },
+    {
+      "name": "pr_and_code_review",
+      "passed": true,
+      "prompt": "Get PR #1 details and show me the main file that was changed",
+      "expected_tools": [
+        "github_pr_details"
+      ],
+      "actual_tools": [
+        {
+          "name": "github_pr_details",
+          "arguments": {
+            "repo": "owner/repo",
+            "pr_number": 1
+          },
+          "status": "error",
+          "order": 0,
+          "error": null
+        },
+        {
+          "name": "github_pr_diff",
+          "arguments": {
+            "repo": "owner/repo",
+            "pr_number": 1
+          },
+          "status": "error",
+          "order": 1,
+          "error": null
+        }
+      ],
+      "response_preview": "",
+      "duration_ms": 18061,
+      "errors": [],
+      "timestamp": "2026-03-25T22:13:14.814654"
+    },
+    {
+      "name": "search_in_pr_context",
+      "passed": true,
+      "prompt": "In PR #1, find any functions that were added or modified",
+      "expected_tools": [
+        "github_pr_diff"
+      ],
+      "actual_tools": [
+        {
+          "name": "github_pr_diff",
+          "arguments": {
+            "pr_number": 1
+          },
+          "status": "error",
+          "order": 0,
+          "error": null
+        }
+      ],
+      "response_preview": "",
+      "duration_ms": 17685,
+      "errors": [],
+      "timestamp": "2026-03-25T22:13:32.499903"
+    }
+  ]
+}

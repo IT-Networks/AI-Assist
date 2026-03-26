@@ -1,0 +1,17 @@
+{
+  "session_id": "216ad632-3857-4ad8-b481-ca7230cdcb8a",
+  "title": "Use search_jira to find all open bugs in the BUG project.\nLi…",
+  "mode": "read_only",
+  "messages_history": [
+    {
+      "role": "user",
+      "content": "Use search_jira to find all open bugs in the BUG project.\nList the issue keys and summaries.\n"
+    },
+    {
+      "role": "assistant",
+      "content": "Es scheint, dass ich die Jira-Datenbank nicht direkt durchsuchen kann, da die Funktion nicht verfügbar ist. Bitte verwenden Sie die Jira-API oder ein entsprechendes Tool, um die offenen Bugs im BUG-Projekt zu finden. Wenn Sie weitere Unterstützung benötigen, lassen Sie es mich wissen!"
+    }
+  ],
+  "created_at": 1774519526.5906327,
+  "updated_at": 1774519526.5906327
+}

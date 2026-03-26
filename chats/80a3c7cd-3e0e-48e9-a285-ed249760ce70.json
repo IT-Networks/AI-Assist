@@ -1,0 +1,17 @@
+{
+  "session_id": "80a3c7cd-3e0e-48e9-a285-ed249760ce70",
+  "title": "List all branches in this repository",
+  "mode": "read_only",
+  "messages_history": [
+    {
+      "role": "user",
+      "content": "List all branches in this repository"
+    },
+    {
+      "role": "assistant",
+      "content": "Es scheint, dass ich keinen Zugriff auf die Branches in diesem Repository habe, da kein Standard-Repository konfiguriert ist. Bitte stelle sicher, dass du in einem Git-Repository arbeitest oder gib den Pfad zu einem Repository an."
+    }
+  ],
+  "created_at": 1774473379.0210147,
+  "updated_at": 1774473379.0210147
+}

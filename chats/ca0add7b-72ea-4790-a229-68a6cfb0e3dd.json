@@ -1,0 +1,17 @@
+{
+  "session_id": "ca0add7b-72ea-4790-a229-68a6cfb0e3dd",
+  "title": "Show me all open pull requests in this repository",
+  "mode": "read_only",
+  "messages_history": [
+    {
+      "role": "user",
+      "content": "Show me all open pull requests in this repository"
+    },
+    {
+      "role": "assistant",
+      "content": "Es gab einen Verbindungsfehler beim Abrufen der offenen Pull Requests. Bitte überprüfen Sie die Repository-Details oder versuchen Sie es später erneut. Wenn Sie spezifische Informationen zu einem bestimmten Repository haben, lassen Sie es mich wissen, und ich werde es erneut versuchen."
+    }
+  ],
+  "created_at": 1774516062.8341258,
+  "updated_at": 1774516062.8341258
+}

@@ -1,0 +1,17 @@
+{
+  "session_id": "0113002c-9e7d-443c-b553-164942d46bd1",
+  "title": "What is the project name and version in config.json?",
+  "mode": "read_only",
+  "messages_history": [
+    {
+      "role": "user",
+      "content": "What is the project name and version in config.json?"
+    },
+    {
+      "role": "assistant",
+      "content": "To find the project name and version in the `config.json` file, you would typically look for a structure similar to this:\n\nIf you have access to the `config.json` file, you can open it and check for the `name` and `version` fields. If you need help locating or reading the file, please provide the path or let me know how I can assist you further!"
+    }
+  ],
+  "created_at": 1774472566.615467,
+  "updated_at": 1774472566.615467
+}

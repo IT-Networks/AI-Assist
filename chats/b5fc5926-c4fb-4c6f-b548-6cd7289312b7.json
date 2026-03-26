@@ -1,0 +1,17 @@
+{
+  "session_id": "b5fc5926-c4fb-4c6f-b548-6cd7289312b7",
+  "title": "Show me all open pull requests in this repository",
+  "mode": "read_only",
+  "messages_history": [
+    {
+      "role": "user",
+      "content": "Show me all open pull requests in this repository"
+    },
+    {
+      "role": "assistant",
+      "content": "Es scheint, dass ich momentan keinen Zugriff auf GitHub habe, um die offenen Pull Requests in diesem Repository anzuzeigen. Wenn du mir den Namen des Repositories oder weitere Details gibst, kann ich dir möglicherweise auf andere Weise helfen."
+    }
+  ],
+  "created_at": 1774473466.5017228,
+  "updated_at": 1774473466.5017228
+}
