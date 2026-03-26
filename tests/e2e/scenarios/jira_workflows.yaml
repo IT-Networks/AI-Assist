@@ -1,0 +1,227 @@
+# E2E Test Scenarios: Jira Integration Workflows
+# Tests complex Jira-based workflows with tool chains
+# Requires: Jira mock data loaded before tests
+
+name: Jira Integration Workflows
+description: Tests for Jira issue processing and code modification workflows
+model: gptoss120b
+tags:
+  - jira
+  - integration
+  - workflow
+
+scenarios:
+  # ============================================================================
+  # Basic Jira Reading
+  # ============================================================================
+
+  - name: search_jira_issues
+    description: Search Jira for open bugs
+    prompt: |
+      Use search_jira to find all open bugs in the BUG project.
+      List the issue keys and summaries.
+    expected_tools:
+      - name: search_jira
+        required: true
+        args:
+          project: BUG
+          status: Open
+    allow_extra_tools: true
+    response:
+      contains:
+        - "BUG-"
+
+  - name: read_jira_issue_details
+    description: Read detailed Jira issue
+    prompt: |
+      Use read_jira_issue to read the full details of issue BUG-1.
+      Include the description, acceptance criteria, and affected files.
+    expected_tools:
+      - name: read_jira_issue
+        required: true
+        args:
+          issue_key: BUG-1
+    allow_extra_tools: true
+    response:
+      contains:
+        - "BUG-1"
+        - "acceptance"
+
+  # ============================================================================
+  # Jira + Code Workflows
+  # ============================================================================
+
+  - name: jira_bug_analysis
+    description: Read bug from Jira, then analyze affected code
+    prompt: |
+      1. Use read_jira_issue to read BUG-1
+      2. The issue mentions affected files - use read_file to read each affected file
+      3. Summarize what code changes might be needed based on the bug description
+    expected_tools:
+      - name: read_jira_issue
+        required: true
+      - name: read_file
+        required: true
+    strict_order: true
+    allow_extra_tools: true
+    timeout: 180.0
+    response:
+      contains:
+        - "divide"
+    tags:
+      - bug_analysis
+      - multi_step
+
+  - name: jira_fix_implementation
+    description: Read bug, analyze code, implement fix
+    prompt: |
+      Complete workflow:
+      1. Read Jira issue BUG-1 to understand the bug
+      2. Read the affected file mentioned in the issue
+      3. Use edit_file to implement the fix described in the issue
+      4. The fix should handle division by zero properly
+    expected_tools:
+      - name: read_jira_issue
+        required: true
+      - name: read_file
+        required: true
+      - name: edit_file
+        required: true
+    strict_order: true
+    allow_extra_tools: true
+    timeout: 240.0
+    response:
+      contains:
+        - "zero"
+    tags:
+      - bug_fix
+      - implementation
+
+  # ============================================================================
+  # Code Review Workflows
+  # ============================================================================
+
+  - name: code_review_subtasks
+    description: Process code review with subtasks
+    prompt: |
+      Process the code review story CR-1:
+      1. Use read_jira_issue to read the main story
+      2. For each subtask mentioned, read its details
+      3. Read the affected files listed in the story
+      4. Provide a summary of what needs to be reviewed
+    expected_tools:
+      - name: read_jira_issue
+        required: true
+      - name: read_file
+        required: true
+    allow_extra_tools: true
+    timeout: 300.0
+    response:
+      contains:
+        - "review"
+        - "subtask"
+    tags:
+      - code_review
+      - subtasks
+
+  - name: code_review_style_check
+    description: Execute style check subtask from code review
+    prompt: |
+      Execute the "Check code style" subtask:
+      1. Read Jira issue CR-2 (the style check subtask)
+      2. Read the affected files from the parent story CR-1
+      3. Use validate_file or compile_files to check for style issues
+      4. Report any style violations found
+    expected_tools:
+      - name: read_jira_issue
+        required: true
+      - name: read_file
+        required: true
+    allow_extra_tools: true
+    timeout: 180.0
+    tags:
+      - code_review
+      - style_check
+
+  # ============================================================================
+  # Feature Implementation Workflows
+  # ============================================================================
+
+  - name: feature_implementation_planning
+    description: Plan feature implementation from Jira story
+    prompt: |
+      Plan the implementation for feature FEAT-1:
+      1. Read the Jira story to understand requirements
+      2. Read the files that will be modified
+      3. Create a step-by-step implementation plan
+      Don't actually implement - just plan
+    expected_tools:
+      - name: read_jira_issue
+        required: true
+      - name: read_file
+        required: true
+    allow_extra_tools: true
+    response:
+      contains:
+        - "power"
+        - "step"
+    tags:
+      - feature
+      - planning
+
+  - name: feature_full_implementation
+    description: Full feature implementation from Jira
+    prompt: |
+      Implement feature FEAT-1 completely:
+      1. Read the Jira story for requirements
+      2. Read the affected files
+      3. Use edit_file to implement the power() function
+      4. The function should handle edge cases mentioned in acceptance criteria
+    expected_tools:
+      - name: read_jira_issue
+        required: true
+      - name: read_file
+        required: true
+      - name: edit_file
+        required: true
+    strict_order: true
+    allow_extra_tools: true
+    timeout: 300.0
+    response:
+      contains:
+        - "power"
+    tags:
+      - feature
+      - implementation
+
+  # ============================================================================
+  # Edge Cases and Error Handling
+  # ============================================================================
+
+  - name: jira_issue_not_found
+    description: Handle non-existent Jira issue gracefully
+    prompt: |
+      Use read_jira_issue to read issue NONEXISTENT-999.
+      If it doesn't exist, report that clearly.
+    expected_tools:
+      - name: read_jira_issue
+        required: true
+    allow_extra_tools: true
+    response:
+      contains:
+        - "not found"
+    tags:
+      - error_handling
+
+  - name: jira_search_no_results
+    description: Handle empty search results
+    prompt: |
+      Use search_jira to find issues with status "Archived" in project EMPTY.
+      Report if no issues are found.
+    expected_tools:
+      - name: search_jira
+        required: true
+    allow_extra_tools: true
+    tags:
+      - error_handling
+      - empty_results

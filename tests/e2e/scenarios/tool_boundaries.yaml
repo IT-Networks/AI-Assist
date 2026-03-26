@@ -1,0 +1,298 @@
+# E2E Test Scenarios: Tool Boundary Tests
+# Tests limits, edge cases, and error handling of tools
+# Purpose: Discover and document tool limitations
+
+name: Tool Boundary Tests
+description: Tests for tool limits, edge cases, and error handling behavior
+model: gptoss120b
+tags:
+  - boundaries
+  - edge_cases
+  - error_handling
+
+scenarios:
+  # ============================================================================
+  # File Operation Limits
+  # ============================================================================
+
+  - name: read_large_file
+    description: Test reading a large file
+    prompt: |
+      Use read_file to read the file large_file.py (1000+ lines).
+      Summarize its structure.
+    expected_tools:
+      - name: read_file
+        required: true
+    allow_extra_tools: true
+    timeout: 60.0
+    tags:
+      - file_limits
+      - large_file
+
+  - name: read_binary_file
+    description: Test handling of binary file read
+    prompt: |
+      Use read_file to read image.png.
+      Report what happens with binary content.
+    expected_tools:
+      - name: read_file
+        required: true
+    allow_extra_tools: true
+    tags:
+      - file_limits
+      - binary
+
+  - name: edit_nonexistent_file
+    description: Test editing a file that doesn't exist
+    prompt: |
+      Use edit_file to add content to nonexistent_file.py.
+      Report how the error is handled.
+    expected_tools:
+      - name: edit_file
+        required: true
+    allow_extra_tools: true
+    tags:
+      - error_handling
+      - edit
+
+  - name: write_to_readonly_directory
+    description: Test writing to a directory without permissions
+    prompt: |
+      Use write_file to create /etc/test.txt.
+      Report how permission errors are handled.
+    expected_tools:
+      - name: write_file
+        required: true
+    allow_extra_tools: true
+    tags:
+      - error_handling
+      - permissions
+
+  # ============================================================================
+  # Search Limits
+  # ============================================================================
+
+  - name: search_no_matches
+    description: Test search with no results
+    prompt: |
+      Use search_code to find "xyznonexistent123" in the codebase.
+      Report how empty results are handled.
+    expected_tools:
+      - name: search_code
+        required: true
+    allow_extra_tools: true
+    response:
+      contains:
+        - "no"
+    tags:
+      - search
+      - empty_results
+
+  - name: search_very_common_term
+    description: Test search with too many matches
+    prompt: |
+      Use search_code to find "def" in all Python files.
+      How many results are returned? Is there pagination?
+    expected_tools:
+      - name: search_code
+        required: true
+    allow_extra_tools: true
+    tags:
+      - search
+      - many_results
+
+  - name: search_regex_pattern
+    description: Test search with complex regex
+    prompt: |
+      Use search_code with pattern "def\s+\w+\(.*\):" to find function definitions.
+      Does regex work correctly?
+    expected_tools:
+      - name: search_code
+        required: true
+    allow_extra_tools: true
+    tags:
+      - search
+      - regex
+
+  # ============================================================================
+  # Tool Chain Limits
+  # ============================================================================
+
+  - name: max_sequential_reads
+    description: Test reading many files in sequence
+    prompt: |
+      Read the following files one by one:
+      1. example.py
+      2. src/main.py
+      3. src/utils.py
+      4. tests/test_example.py
+      5. config.json
+
+      After reading all, summarize what you found.
+    expected_tools:
+      - name: read_file
+        required: true
+    allow_extra_tools: true
+    timeout: 120.0
+    tags:
+      - tool_chain
+      - multiple_reads
+
+  - name: read_edit_read_cycle
+    description: Test read-edit-read cycle (loop detection)
+    prompt: |
+      1. Use read_file to read example.py
+      2. Use edit_file to add a comment at the top
+      3. Use read_file again to verify the change
+
+      Note: The system may limit repeated operations.
+    expected_tools:
+      - name: read_file
+        required: true
+      - name: edit_file
+        required: true
+    allow_extra_tools: true
+    timeout: 120.0
+    tags:
+      - tool_chain
+      - loop_detection
+
+  - name: concurrent_tool_calls
+    description: Test if tools can be called in parallel
+    prompt: |
+      Read these files simultaneously:
+      - example.py
+      - config.json
+      - README.md
+
+      Report how many tool calls were made.
+    expected_tools:
+      - name: read_file
+        required: true
+    allow_extra_tools: true
+    tags:
+      - parallel
+      - optimization
+
+  # ============================================================================
+  # Parameter Validation
+  # ============================================================================
+
+  - name: invalid_file_path
+    description: Test with invalid file path characters
+    prompt: |
+      Use read_file to read "file<>:*?.py".
+      How are invalid path characters handled?
+    expected_tools:
+      - name: read_file
+        required: true
+    allow_extra_tools: true
+    tags:
+      - validation
+      - path
+
+  - name: empty_parameters
+    description: Test tool with missing required parameters
+    prompt: |
+      Use search_code without providing a query.
+      What error message is returned?
+    expected_tools:
+      - name: search_code
+        required: false  # May not be called if LLM catches the error
+    allow_extra_tools: true
+    tags:
+      - validation
+      - parameters
+
+  - name: very_long_content
+    description: Test writing very long content
+    prompt: |
+      Use write_file to create a file with 10000 lines of "Hello World".
+      Is there a content size limit?
+    expected_tools:
+      - name: write_file
+        required: true
+    allow_extra_tools: true
+    tags:
+      - limits
+      - content_size
+
+  # ============================================================================
+  # Multi-Tool Coordination
+  # ============================================================================
+
+  - name: github_then_local
+    description: Test GitHub tool followed by local tool
+    prompt: |
+      1. Use github_pr_details to get PR #1 from AI-Assist repo
+      2. Use read_file to read a local file mentioned in the PR
+
+      Note the difference between GitHub and local tools.
+    expected_tools:
+      - name: github_pr_details
+        required: true
+      - name: read_file
+        required: true
+    strict_order: true
+    allow_extra_tools: true
+    timeout: 120.0
+    tags:
+      - multi_source
+      - github_local
+
+  - name: search_then_modify
+    description: Test search result used for modification
+    prompt: |
+      1. Use search_code to find the "greet" function
+      2. Use read_file to read the file containing it
+      3. Use edit_file to add a docstring to the greet function
+    expected_tools:
+      - name: search_code
+        required: true
+      - name: read_file
+        required: true
+      - name: edit_file
+        required: true
+    strict_order: true
+    allow_extra_tools: true
+    timeout: 180.0
+    tags:
+      - workflow
+      - search_modify
+
+  # ============================================================================
+  # Context Window Limits
+  # ============================================================================
+
+  - name: accumulate_context
+    description: Test context accumulation across many operations
+    prompt: |
+      Perform these operations and track what you remember:
+      1. Read example.py - note the function names
+      2. Read config.json - note the version
+      3. Read README.md - note the project name
+      4. Search for "Calculator" - note how many matches
+      5. Summarize ALL the information you collected
+    expected_tools:
+      - name: read_file
+        required: true
+      - name: search_code
+        required: true
+    allow_extra_tools: true
+    timeout: 180.0
+    tags:
+      - context
+      - memory
+
+  - name: tool_result_truncation
+    description: Test how long tool results are handled
+    prompt: |
+      Use list_files to list ALL files in the repository recursively.
+      How many files are returned? Is the result truncated?
+    expected_tools:
+      - name: list_files
+        required: true
+    allow_extra_tools: true
+    tags:
+      - limits
+      - truncation
