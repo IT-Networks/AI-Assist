@@ -78,21 +78,43 @@ class ToolCallTracker:
                 # Find matching pending call
                 if name in pending_calls:
                     call = pending_calls[name]
-                    # Handle both boolean and string success indicators
+                    # Handle multiple success indicator formats
                     if isinstance(success, bool):
                         call.status = "success" if success else "error"
+                    elif isinstance(success, dict):
+                        # Nested success (e.g., {"success": True, "result": ...})
+                        call.status = "success" if success.get("success", False) else "error"
+                    elif success in ("success", "ok", True, "true", "True"):
+                        call.status = "success"
+                    elif success == "unknown" and result:
+                        # If status unknown but we have a result, consider it success
+                        # This handles sequential_thinking which may not report status
+                        call.status = "success"
                     else:
-                        call.status = "success" if success in ("success", "ok", True) else "error"
+                        call.status = "error"
                     call.result_preview = str(result)[:200] if result else ""
 
                     if call.status == "error":
-                        call.error_message = data.get("error", str(result)[:100])
+                        error_msg = data.get("error", "")
+                        # Only set error if there's an actual error message
+                        if error_msg:
+                            call.error_message = str(error_msg)[:100]
+                        else:
+                            call.error_message = ""
 
                     self._calls.append(call)
                     del pending_calls[name]
                 else:
                     # Tool result without start (shouldn't happen)
-                    tool_status = "success" if (success is True or success == "success") else "error"
+                    # Use same logic as above for status detection
+                    if isinstance(success, bool):
+                        tool_status = "success" if success else "error"
+                    elif success in ("success", "ok", True, "true", "True"):
+                        tool_status = "success"
+                    elif success == "unknown" and result:
+                        tool_status = "success"
+                    else:
+                        tool_status = "error"
                     self._calls.append(TrackedToolCall(
                         name=name,
                         arguments={},

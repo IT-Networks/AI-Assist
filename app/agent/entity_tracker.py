@@ -23,16 +23,65 @@ ENTITY_PATTERNS = [
     r'\b[a-z]+(?:\.[a-z]+){2,}\b',
 ]
 
-# Tool-Name → Quell-Typ Mapping
+# Tool-Name → Quell-Typ Mapping (Standard-Fallback)
+# Für Code-Tools wird die Sprache dynamisch erkannt
 TOOL_TO_SOURCE = {
-    "search_code": "java",
-    "read_file": "java",
-    "list_files": "java",
+    "search_code": "code",      # Dynamisch: java/python/sql basierend auf Kontext
+    "read_file": "code",        # Dynamisch: basierend auf Dateierweiterung
+    "list_files": "code",       # Dynamisch: basierend auf Dateierweiterungen
     "search_handbook": "handbuch",
     "get_service_info": "handbuch",
     "search_skills": "skill",
     "search_pdfs": "pdf",
 }
+
+# Dateierweiterung → Sprache Mapping
+EXTENSION_TO_LANGUAGE = {
+    ".java": "java",
+    ".py": "python",
+    ".sql": "sql",
+    ".sqlj": "java",
+    ".xml": "config",
+    ".yaml": "config",
+    ".yml": "config",
+    ".json": "config",
+    ".properties": "config",
+}
+
+
+def detect_language_from_path(path: str) -> str:
+    """
+    Erkennt die Programmiersprache basierend auf dem Dateipfad.
+
+    Args:
+        path: Dateipfad oder Query-String
+
+    Returns:
+        Erkannte Sprache: 'java', 'python', 'sql', 'config' oder 'code' (fallback)
+    """
+    if not path:
+        return "code"
+
+    path_lower = path.lower()
+
+    # Direkte Erweiterungsprüfung
+    for ext, lang in EXTENSION_TO_LANGUAGE.items():
+        if path_lower.endswith(ext):
+            return lang
+
+    # Pfad-basierte Erkennung
+    if "/python/" in path_lower or "\\python\\" in path_lower:
+        return "python"
+    if "/java/" in path_lower or "\\java\\" in path_lower or "/src/main/" in path_lower:
+        return "java"
+
+    # Pattern-basierte Erkennung im Query-String
+    if any(p in path_lower for p in [".py", "python", "def ", "class ", "__init__"]):
+        return "python"
+    if any(p in path_lower for p in [".java", "public class", "private ", "@autowired"]):
+        return "java"
+
+    return "code"
 
 # Entitäten die zu allgemein sind (ignorieren)
 IGNORE_ENTITIES = {
@@ -84,7 +133,17 @@ class EntityTracker:
         Returns:
             Liste neu gefundener Entitäten
         """
-        source_type = TOOL_TO_SOURCE.get(tool_name, "")
+        base_source_type = TOOL_TO_SOURCE.get(tool_name, "")
+
+        # Für Code-Tools: Dynamische Spracherkennung
+        if base_source_type == "code":
+            source_type = detect_language_from_path(source_path)
+            # Fallback: Auch im result_text nach Sprach-Hinweisen suchen
+            if source_type == "code" and result_text:
+                source_type = detect_language_from_path(result_text[:500])
+        else:
+            source_type = base_source_type
+
         new_entities = []
 
         for pattern in ENTITY_PATTERNS:
