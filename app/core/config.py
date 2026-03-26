@@ -224,7 +224,7 @@ class JavaConfig(BaseModel):
 class ConfluenceConfig(BaseModel):
     base_url: str = ""
     username: str = ""
-    api_token: str = ""   # Atlassian Cloud API Token (bevorzugt)
+    api_token: str = ""   # Bei leerem username: Bearer Token, sonst Basic Auth (username:api_token)
     password: str = ""    # Atlassian Server/DC Passwort (Fallback wenn api_token leer)
     default_space: str = ""
     verify_ssl: bool = True  # False für selbstsignierte Zertifikate

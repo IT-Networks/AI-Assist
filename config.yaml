@@ -111,6 +111,7 @@ tools:
   pytest: /root/.local/bin/pytest
 
 # Confluence-Verbindung
+# Auth-Logik: api_token ohne username = Bearer Auth, mit username = Basic Auth
 confluence:
   base_url: https://confluence.example.com
   username: ''
