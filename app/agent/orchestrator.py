@@ -536,6 +536,10 @@ class AgentOrchestrator:
         reset_progress_tracker(session_id)
         progress_tracker = get_progress_tracker(session_id)
 
+        # Confluence Session-Tracking setzen (für Loop-Prävention bei Seiten-Lesen)
+        from app.services.confluence_cache import set_current_session
+        set_current_session(session_id)
+
         # ── MCP Force-Capability Detection ────────────────────────────────────
         # Format: [MCP:capability_name] actual query
         forced_capability, user_message = parse_mcp_force_capability(user_message)

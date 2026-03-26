@@ -6,12 +6,17 @@ Cached werden:
 - Seiteninhalte (read_confluence_page)
 - PDF-Attachment-Listen (list_confluence_pdfs)
 
+Session-Tracking:
+- Welche Seiten wurden in der aktuellen Session bereits gelesen?
+- Verhindert Schleifen wo der Agent dieselbe Seite mehrfach liest
+
 Nicht gecached:
 - PDF-Downloads (zu groß, werden nur temporär verwendet)
 """
 
 import hashlib
 import logging
+from contextvars import ContextVar
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, Dict, List, Optional
@@ -19,6 +24,19 @@ from typing import Any, Dict, List, Optional
 from cachetools import TTLCache
 
 from app.core.config import settings
+
+# ContextVar für aktuelle Session-ID (threadsafe für async)
+_current_session_id: ContextVar[str] = ContextVar('confluence_session_id', default='')
+
+
+def set_current_session(session_id: str) -> None:
+    """Setzt die aktuelle Session-ID für Confluence-Tracking."""
+    _current_session_id.set(session_id)
+
+
+def get_current_session() -> str:
+    """Gibt die aktuelle Session-ID zurück."""
+    return _current_session_id.get()
 
 logger = logging.getLogger(__name__)
 
@@ -66,6 +84,10 @@ class ConfluenceCache:
         self._search_cache: TTLCache = TTLCache(maxsize=max_search, ttl=search_ttl)
         self._page_cache: TTLCache = TTLCache(maxsize=max_pages, ttl=page_ttl)
         self._attachment_cache: TTLCache = TTLCache(maxsize=max_attachments, ttl=attachment_ttl)
+
+        # Session-Tracking: Welche Seiten wurden in welcher Session bereits gelesen?
+        # Verhindert Schleifen wo der Agent immer wieder dieselbe Seite liest
+        self._session_read_pages: Dict[str, Dict[str, str]] = {}  # session_id -> {page_id: title}
 
         # Statistiken
         self._stats = CacheStats(max_size=max_search + max_pages + max_attachments)
@@ -157,6 +179,30 @@ class ConfluenceCache:
         self._attachment_cache[key] = attachments
         self._update_size()
         logger.debug(f"Cache SET: attachments page {page_id} ({len(attachments)} items)")
+
+    # ── Session Read Tracking ──
+    # Verhindert Schleifen wo der Agent immer wieder dieselbe Seite liest
+
+    def mark_page_read(self, session_id: str, page_id: str, title: str) -> None:
+        """Markiert eine Seite als in dieser Session gelesen."""
+        if session_id not in self._session_read_pages:
+            self._session_read_pages[session_id] = {}
+        self._session_read_pages[session_id][page_id] = title
+        logger.debug(f"Session {session_id[:8]}: Seite {page_id} als gelesen markiert")
+
+    def was_page_read(self, session_id: str, page_id: str) -> bool:
+        """Prüft ob eine Seite in dieser Session bereits gelesen wurde."""
+        return page_id in self._session_read_pages.get(session_id, {})
+
+    def get_read_pages(self, session_id: str) -> Dict[str, str]:
+        """Gibt alle in dieser Session gelesenen Seiten zurück (page_id -> title)."""
+        return self._session_read_pages.get(session_id, {}).copy()
+
+    def clear_session(self, session_id: str) -> None:
+        """Löscht das Session-Tracking für eine Session."""
+        if session_id in self._session_read_pages:
+            del self._session_read_pages[session_id]
+            logger.debug(f"Session {session_id[:8]}: Read-Tracking gelöscht")
 
     # ── Cache Management ──
 

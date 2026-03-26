@@ -181,10 +181,12 @@ class AgentState:
     compaction_count: int = 0
     last_compaction_savings: int = 0
     compaction_attempted_while_full: bool = False
-    # Loop-Praevention: Zaehlt wie oft eine Datei pro Request bearbeitet wurde
+    # Loop-Praevention: Zaehlt wie oft eine Datei/Seite pro Request bearbeitet wurde
     read_files_this_request: Dict[str, int] = field(default_factory=dict)
     edit_files_this_request: Dict[str, int] = field(default_factory=dict)
     write_files_this_request: Dict[str, int] = field(default_factory=dict)
+    # Confluence: Bereits gelesene Seiten tracken um Schleifen zu vermeiden
+    read_confluence_pages_this_session: Dict[str, str] = field(default_factory=dict)  # page_id -> title
     # Abbruch-Flag fuer laufende Anfragen
     cancelled: bool = False
     # Entity Tracker: Verfolgt gefundene Entitaeten und ihre Quellen

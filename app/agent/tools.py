@@ -2395,7 +2395,7 @@ async def search_confluence(query: str, space: str = "", limit: int = 10) -> Too
 async def read_confluence_page(page_id: str) -> ToolResult:
     """Liest den Inhalt einer Confluence-Seite."""
     from app.services.confluence_client import get_confluence_client
-    from app.services.confluence_cache import get_confluence_cache
+    from app.services.confluence_cache import get_confluence_cache, get_current_session
     from app.core.config import settings
 
     if not settings.confluence.base_url:
@@ -2403,6 +2403,20 @@ async def read_confluence_page(page_id: str) -> ToolResult:
 
     try:
         cache = get_confluence_cache()
+        session_id = get_current_session()
+
+        # Prüfen ob Seite bereits in dieser Session gelesen wurde
+        already_read_warning = ""
+        if session_id and cache.was_page_read(session_id, page_id):
+            read_pages = cache.get_read_pages(session_id)
+            already_read_warning = (
+                f"\n⚠️ HINWEIS: Diese Seite wurde bereits gelesen!\n"
+                f"Wenn du nach anderen Informationen suchst, nutze search_confluence mit anderen Suchbegriffen.\n"
+                f"Bereits gelesene Seiten in dieser Session:\n"
+            )
+            for pid, title in list(read_pages.items())[:5]:
+                already_read_warning += f"  - {title} (ID: {pid})\n"
+            already_read_warning += "\n---\n\n"
 
         # Cache-Check
         cached = cache.get_page(page_id)
@@ -2415,7 +2429,12 @@ async def read_confluence_page(page_id: str) -> ToolResult:
             cache.set_page(page_id, page)
             cache_info = ""
 
+        # Seite als gelesen markieren
+        if session_id:
+            cache.mark_page_read(session_id, page_id, page.get('title', 'Unbekannt'))
+
         output = f"=== Confluence-Seite{cache_info} ===\n"
+        output += already_read_warning
         output += f"Titel: {page['title']}\n"
         output += f"URL: {page['url']}\n"
         output += f"Space: {page['space']}\n"
