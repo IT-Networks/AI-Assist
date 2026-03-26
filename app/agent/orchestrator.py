@@ -2174,6 +2174,28 @@ class AgentOrchestrator:
                             "data": result.to_context()[:2000]  # Truncate für Frontend
                         })
 
+                        # TaskTracker: Tool-Ergebnis als Artifact hinzufügen
+                        # Zeigt sinnvolle Zusammenfassung im Zwischenergebnisbereich
+                        try:
+                            artifact_summary = self._create_tool_result_summary(
+                                tool_call.name, tool_call.arguments, result
+                            )
+                            if artifact_summary:
+                                await task_tracker.add_artifact(
+                                    processing_task_id,
+                                    TaskArtifact(
+                                        id=f"res_{tool_call.id[:8]}",
+                                        type="tool_result",
+                                        summary=artifact_summary,
+                                        data={
+                                            "tool": tool_call.name,
+                                            "success": result.success,
+                                        }
+                                    )
+                                )
+                        except Exception:
+                            pass  # Task-Tracking-Fehler nicht propagieren
+
                         # Workspace Events für spezifische Tools
                         if result.success:
                             if tool_call.name == "read_file":
@@ -2551,6 +2573,71 @@ class AgentOrchestrator:
                 logger.debug("[entity_enrichment] Fehler bei Anreicherung für {entity.name}: {e}")
 
         return enrichments
+
+    def _create_tool_result_summary(
+        self,
+        tool_name: str,
+        arguments: Dict[str, Any],
+        result: ToolResult
+    ) -> Optional[str]:
+        """
+        Erstellt eine kurze Zusammenfassung eines Tool-Ergebnisses für den Zwischenergebnisbereich.
+
+        Returns:
+            Zusammenfassung oder None wenn nicht sinnvoll
+        """
+        if not result.success:
+            return f"❌ {tool_name}: {result.error[:100] if result.error else 'Fehler'}"
+
+        content = result.to_context()
+        content_len = len(content)
+
+        # Such-Tools: Anzahl Treffer
+        if tool_name in ("search_code", "search_confluence", "search_jira", "search_handbook"):
+            # Versuche Trefferanzahl zu extrahieren
+            import re
+            match = re.search(r'(\d+)\s*(?:Treffer|Ergebnis|result)', content, re.IGNORECASE)
+            if match:
+                return f"🔍 {tool_name}: {match.group(1)} Treffer"
+            elif "keine" in content.lower() or "not found" in content.lower() or content_len < 50:
+                return f"🔍 {tool_name}: Keine Treffer"
+            else:
+                return f"🔍 {tool_name}: Ergebnisse gefunden"
+
+        # Datei-Operationen
+        if tool_name == "read_file":
+            path = arguments.get("path", "")
+            lines = content.count('\n')
+            return f"📄 {path.split('/')[-1]}: {lines} Zeilen"
+
+        if tool_name in ("write_file", "create_file"):
+            path = arguments.get("path", "")
+            return f"✏️ {path.split('/')[-1]}: Geschrieben"
+
+        if tool_name == "edit_file":
+            path = arguments.get("path", "")
+            return f"✏️ {path.split('/')[-1]}: Bearbeitet"
+
+        # Confluence/Jira: Zusammenfassung
+        if tool_name in ("read_confluence_page", "get_jira_issue"):
+            title = ""
+            import re
+            title_match = re.search(r'[Tt]itle[:\s]+([^\n]+)', content)
+            if title_match:
+                title = title_match.group(1)[:50]
+                return f"📋 {title}"
+
+        # Shell/Bash: Exit-Status
+        if tool_name in ("run_shell", "run_bash", "execute_command"):
+            if "error" in content.lower() or "failed" in content.lower():
+                return f"⚠️ {tool_name}: Mit Warnungen"
+            return f"✓ {tool_name}: Erfolgreich"
+
+        # Generischer Fallback für andere Tools
+        if content_len > 100:
+            return f"✓ {tool_name}: {content_len} Zeichen"
+
+        return None  # Keine Zusammenfassung für triviale Ergebnisse
 
     async def _execute_confirmed_operation(self, confirmation_data: Dict) -> ToolResult:
         """Führt eine bestätigte Operation aus."""

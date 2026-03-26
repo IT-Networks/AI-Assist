@@ -3648,6 +3648,10 @@ document.addEventListener('DOMContentLoaded', async () => {
   }
   updateModeIndicator();  // Modus-Anzeige sofort aktualisieren
 
+  // Task Progress Panel initialisieren BEVOR Chats geladen werden
+  // Damit die SSE-Verbindung beim Chat-Aktivieren funktioniert
+  taskProgressPanel.init();
+
   // KRITISCH: Nur Models und Chats blockieren - Rest im Hintergrund
   // Dies reduziert Initial Load von ~2s auf ~500ms
   await Promise.all([
@@ -17736,16 +17740,29 @@ const taskProgressPanel = {
       'search': '🔍',
       'file': '📁',
       'result': '✓',
+      'tool_start': '⚙️',
+      'tool_result': '✓',
+      'context': '📚',
     };
     const icon = typeIcons[artifact.type?.toLowerCase()] || '📋';
     const summary = artifact.summary || artifact.content || '';
     const truncated = summary.length > 150 ? summary.substring(0, 150) + '...' : summary;
 
+    // Nutzerfreundliche Type-Namen
+    const typeNames = {
+      'tool_start': 'Tool',
+      'tool_result': 'Ergebnis',
+      'context': 'Kontext',
+      'finding': 'Fund',
+      'search': 'Suche',
+    };
+    const typeName = typeNames[artifact.type?.toLowerCase()] || artifact.type || 'Result';
+
     return `
       <div class="task-artifact">
         <span class="artifact-icon">${icon}</span>
         <div class="artifact-body">
-          <span class="artifact-type">${escapeHtml(artifact.type || 'Result')}</span>
+          <span class="artifact-type">${escapeHtml(typeName)}</span>
           <span class="artifact-content">${escapeHtml(truncated)}</span>
         </div>
       </div>
@@ -17794,7 +17811,5 @@ const taskProgressPanel = {
   },
 };
 
-// Initialisiere Task-Panel beim Laden
-document.addEventListener('DOMContentLoaded', () => {
-  taskProgressPanel.init();
-});
+// HINWEIS: taskProgressPanel.init() wird jetzt im Haupt-DOMContentLoaded-Handler
+// aufgerufen (vor loadPersistedChats), damit die SSE-Verbindung korrekt funktioniert.
