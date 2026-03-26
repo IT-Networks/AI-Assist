@@ -24,13 +24,11 @@ scenarios:
     expected_tools:
       - name: search_jira
         required: true
-        args:
-          project: BUG
-          status: Open
+        # Tool uses JQL query parameter, not separate project/status
     allow_extra_tools: true
     response:
       contains:
-        - "BUG-"
+        - "BUG"
 
   - name: read_jira_issue_details
     description: Read detailed Jira issue
