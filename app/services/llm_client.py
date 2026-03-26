@@ -375,8 +375,9 @@ class LLMClient:
         model: str = None,
     ) -> str:
         model = model or self.default_model
+        is_mistral = _is_mistral_model(model)
         # Mistral-Kompatibilität
-        if _is_mistral_model(model):
+        if is_mistral:
             logger.info(f"[llm.chat] Mistral detected: {model}, sanitizing messages")
             messages = _sanitize_messages_for_mistral(messages)
         payload = {
@@ -386,6 +387,12 @@ class LLMClient:
             "max_tokens": self.max_tokens,
             "stream": False,
         }
+        # Mistral: continue_final_message wenn letzte Nachricht vom Assistant
+        if is_mistral and messages and messages[-1].get("role") == "assistant":
+            payload["extra_body"] = {
+                "add_generation_prompt": False,
+                "continue_final_message": True,
+            }
         last_exc = None
         for attempt, delay in enumerate([0] + _RETRY_DELAYS):
             if delay:
@@ -421,8 +428,9 @@ class LLMClient:
         model: str = None,
     ) -> AsyncGenerator[str, None]:
         model = model or self.default_model
+        is_mistral = _is_mistral_model(model)
         # Mistral-Kompatibilität
-        if _is_mistral_model(model):
+        if is_mistral:
             messages = _sanitize_messages_for_mistral(messages)
         payload = {
             "model": model,
@@ -431,6 +439,12 @@ class LLMClient:
             "max_tokens": self.max_tokens,
             "stream": True,
         }
+        # Mistral: continue_final_message wenn letzte Nachricht vom Assistant
+        if is_mistral and messages and messages[-1].get("role") == "assistant":
+            payload["extra_body"] = {
+                "add_generation_prompt": False,
+                "continue_final_message": True,
+            }
         last_exc = None
         for attempt, delay in enumerate([0] + _RETRY_DELAYS):
             if delay:
@@ -650,6 +664,19 @@ class LLMClient:
             "max_tokens": max_tokens,
             "stream": False,
         }
+
+        # Mistral/Devstral: Prüfe ob letzte Nachricht vom Assistant ist
+        # In diesem Fall muss continue_final_message=True gesetzt werden,
+        # da add_generation_prompt=True (vLLM default) sonst einen Fehler wirft:
+        # "cannot set add_generation_prompt to True when the last message is from the assistant"
+        if is_mistral and messages and messages[-1].get("role") == "assistant":
+            # vLLM/LiteLLM extra_body Parameter für Chat-Template-Steuerung
+            payload["extra_body"] = {
+                "add_generation_prompt": False,
+                "continue_final_message": True,
+            }
+            logger.info("[llm] Mistral: Last message is assistant, using continue_final_message=True")
+            print(f"[LLM DEBUG] Mistral: continue_final_message=True (last msg is assistant)")
 
         if tools:
             payload["tools"] = tools
