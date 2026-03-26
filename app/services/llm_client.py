@@ -1,7 +1,9 @@
 import asyncio
+import hashlib
 import json
 import logging
 import re
+import string
 from dataclasses import dataclass
 from typing import Any, AsyncGenerator, Dict, List, Optional
 
@@ -19,6 +21,40 @@ def _is_mistral_model(model: str) -> bool:
         return False
     model_lower = model.lower()
     return any(name in model_lower for name in ("mistral", "devstral", "codestral", "pixtral"))
+
+
+def _sanitize_tool_call_id_for_mistral(tool_call_id: str) -> str:
+    """
+    Konvertiert eine Tool-Call-ID ins Mistral-kompatible Format.
+
+    Mistral erfordert:
+    - Nur a-z, A-Z, 0-9 (keine Unterstriche oder Sonderzeichen)
+    - Exakt 9 Zeichen Länge
+
+    Args:
+        tool_call_id: Original Tool-Call-ID (z.B. "call_0", "call_abc12345")
+
+    Returns:
+        Mistral-kompatible ID (z.B. "tC4x8Km2p")
+    """
+    if not tool_call_id:
+        tool_call_id = "unknown"
+
+    # Bereits gültig? (9 alphanumerische Zeichen)
+    if len(tool_call_id) == 9 and tool_call_id.isalnum():
+        return tool_call_id
+
+    # Generiere deterministische ID basierend auf Original-ID
+    # Nutzt MD5-Hash für Konsistenz (gleiche Input-ID = gleiche Output-ID)
+    hash_bytes = hashlib.md5(tool_call_id.encode()).digest()
+
+    # Konvertiere zu alphanumerischen Zeichen (base62-ähnlich)
+    chars = string.ascii_letters + string.digits  # a-zA-Z0-9
+    result = []
+    for byte in hash_bytes[:9]:  # Nur erste 9 Bytes
+        result.append(chars[byte % len(chars)])
+
+    return ''.join(result)
 
 
 def _sanitize_messages_for_mistral(messages: List[Dict]) -> List[Dict]:
@@ -73,6 +109,11 @@ def _sanitize_messages_for_mistral(messages: List[Dict]) -> List[Dict]:
                 }
                 final_role = "user"
                 logger.debug(f"[llm] Mistral: Converted orphan tool to user (last_role={last_role}, had_tool_calls={last_had_tool_calls})")
+            else:
+                # Sanitize tool_call_id für Mistral (muss 9 alphanumerische Zeichen sein)
+                if "tool_call_id" in msg_copy:
+                    original_id = msg_copy["tool_call_id"]
+                    msg_copy["tool_call_id"] = _sanitize_tool_call_id_for_mistral(original_id)
             seen_non_system = True
 
         elif role == "assistant":
@@ -91,6 +132,16 @@ def _sanitize_messages_for_mistral(messages: List[Dict]) -> List[Dict]:
             # Ensure content is not None when no tool_calls (Mistral requirement)
             if not tool_calls and content is None:
                 msg_copy["content"] = ""
+
+            # Sanitize tool_call IDs für Mistral (müssen 9 alphanumerische Zeichen sein)
+            if tool_calls:
+                sanitized_tool_calls = []
+                for tc in tool_calls:
+                    tc_copy = dict(tc)
+                    if "id" in tc_copy:
+                        tc_copy["id"] = _sanitize_tool_call_id_for_mistral(tc_copy["id"])
+                    sanitized_tool_calls.append(tc_copy)
+                msg_copy["tool_calls"] = sanitized_tool_calls
 
             seen_non_system = True
 
