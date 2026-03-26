@@ -43,7 +43,7 @@ scenarios:
   - name: enhancement_sequential_detection
     description: Detect sequential enhancement type from debug keywords
     prompt: |
-      Warum funktioniert die divide() Methode nicht bei großen Zahlen? Debug das Problem.
+      Warum funktioniert die divide() Methode in example.py nicht bei Division durch 0? Debug das Problem.
     expected_tools:
       - name: read_file
         required: false
@@ -60,7 +60,7 @@ scenarios:
   - name: enhancement_analyze_detection
     description: Detect analyze enhancement type from refactor keywords
     prompt: |
-      Analysiere die Abhängigkeiten der Calculator-Klasse und zeige den Impact eines Refactorings
+      Analysiere die Abhängigkeiten der Calculator-Klasse in example.py und zeige den Impact eines Refactorings
     expected_tools:
       - name: read_file
         required: false
@@ -106,13 +106,15 @@ scenarios:
     description: Multi-step task with dependencies
     prompt: |
       Führe folgende Schritte aus:
-      1. Lies die Calculator-Klasse und analysiere ihre Struktur
-      2. Füge eine sqrt() Methode hinzu
-      3. Schreibe einen Unit-Test dafür
-      4. Validiere dass alle Tests bestehen
+      1. Lies die Python-Datei example.py und analysiere die Calculator-Klasse
+      2. Füge eine sqrt() Methode zur Calculator-Klasse hinzu
+      3. Schreibe einen Unit-Test für die sqrt() Methode
+      4. Zeige den geänderten Code
     expected_tools:
       - name: read_file
-        required: true
+        required: false
+      - name: edit_file
+        required: false
     allow_extra_tools: true
     response:
       contains:

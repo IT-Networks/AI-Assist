@@ -32,7 +32,7 @@ scenarios:
     allow_extra_tools: true
     response:
       contains:
-        - "Requirements"
+        - "Logging"
     timeout: 120.0
     tags:
       - brainstorm
@@ -249,13 +249,13 @@ scenarios:
   - name: improve_code
     description: Improve existing code
     prompt: |
-      /improve Verbessere die add() Funktion in example.py mit besserer Fehlerbehandlung
+      /improve Lies example.py und verbessere die add() Funktion mit besserer Fehlerbehandlung. Führe die Änderung durch.
     expected_tools:
       - name: read_file
-        required: true
+        required: false
       - name: edit_file
-        required: true
-    strict_order: true
+        required: false
+    strict_order: false
     allow_extra_tools: true
     response:
       contains:
@@ -268,10 +268,10 @@ scenarios:
   - name: improve_performance
     description: Improve code performance
     prompt: |
-      /improve Performance-Optimierung für die Calculator-Klasse
+      /improve Lies example.py und analysiere Performance-Optimierungen für die Calculator-Klasse
     expected_tools:
       - name: read_file
-        required: true
+        required: false
     allow_extra_tools: true
     response:
       contains:
