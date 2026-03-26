@@ -7,10 +7,22 @@ proxy:
   no_proxy: ''           # Kommagetrennte Liste ohne Proxy, z.B. "localhost,127.0.0.1,.intern"
   verify_ssl: true
 
+# ═══════════════════════════════════════════════════════════════════
 # LLM-Verbindung (OpenAI-kompatibler Endpunkt)
+# ═══════════════════════════════════════════════════════════════════
+# SETUP für LLM-Test-Proxy:
+#   1. LLM-Test-Proxy starten: cd ../LLM-Test-Proxy && uvicorn app.main:app --port 8080
+#   2. AI-Assist starten:      cd AI-Assist && uvicorn app.main:app --port 8000
+#   3. Dashboard:              http://localhost:8080/dashboard
+#
+# Der Proxy mappt AI-Assist Modelle auf OpenAI (siehe LLM-Test-Proxy/config.yaml):
+#   gptoss120b   → gpt-4o-mini
+#   mistral-678b → gpt-4o-mini
+#   qwen-7b      → gpt-4o-mini
+# ═══════════════════════════════════════════════════════════════════
 llm:
-  base_url: http://internal-llm-gateway/v1
-  api_key: none
+  base_url: http://localhost:8080/v1  # LLM-Test-Proxy (Port 8080) → OpenAI
+  api_key: none  # Proxy verwendet eigenen OpenAI Key aus .env
   default_model: gptoss120b
   timeout_seconds: 120
   max_tokens: 4096
@@ -75,11 +87,11 @@ java:
   - tmp
   max_file_size_kb: 500
 
-# Python-Repository
+# Python-Repository (E2E Test Workspace - außerhalb des Projekt-Git)
 python:
-  repo_path: ''
+  repo_path: 'C:/Users/marku/OneDrive/Dokumente/VisualCode/AI-Assist/e2e-test-workspace'
   repos: []
-  active_repo: ''
+  active_repo: 'e2e-test-workspace'
   exclude_dirs:
   - __pycache__
   - .venv
@@ -204,9 +216,10 @@ skills:
 
 # Datei-Operationen (Read/Write/Edit wie Claude Code)
 file_operations:
-  enabled: false
-  default_mode: read_only
-  allowed_paths: []
+  enabled: true
+  default_mode: read_write
+  allowed_paths:
+    - 'C:/Users/marku/OneDrive/Dokumente/VisualCode/AI-Assist/e2e-test-workspace'
   allowed_extensions:
   - .java
   - .sqlj
@@ -359,13 +372,14 @@ jenkins:
   require_build_confirmation: true
 
 # GitHub Enterprise Server (intern gehostet)
+# Für E2E Tests: Token aus Umgebungsvariable GITHUB_TOKEN setzen
 github:
-  enabled: false
-  base_url: ''
-  token: ''
-  verify_ssl: false
+  enabled: true
+  base_url: 'https://api.github.com'
+  token: ''  # Set via GITHUB_TOKEN env var
+  verify_ssl: true
   default_org: ''
-  default_repo: ''
+  default_repo: 'AI-Assist'
   timeout_seconds: 30
   max_items: 50
   pr_state_filter: open

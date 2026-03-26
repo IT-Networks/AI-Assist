@@ -77,6 +77,9 @@ class Tool:
                 "type": param.type,
                 "description": param.description,
             }
+            # OpenAI requires 'items' schema for array types
+            if param.type == "array":
+                prop["items"] = {"type": "string"}
             if param.enum:
                 prop["enum"] = param.enum
             if param.default is not None:

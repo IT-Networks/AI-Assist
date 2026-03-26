@@ -1,0 +1,139 @@
+# E2E Test Scenarios: GitHub Operations
+# Tests tool usage for GitHub PR and repository interactions
+# Tool names must match actual AI-Assist tool names:
+#   github_list_prs, github_pr_details, github_pr_diff,
+#   github_list_issues, github_list_branches, github_get_file, etc.
+
+name: GitHub Operations
+description: Tests for GitHub tool usage patterns including PRs, issues, and repository info
+model: gptoss120b
+tags:
+  - github
+  - pr_operations
+
+scenarios:
+  # ============================================================================
+  # PR Information
+  # ============================================================================
+
+  - name: get_pr_details
+    description: Fetch details of a specific PR
+    prompt: "Get the details of PR #1 in the AI-Assist repository"
+    expected_tools:
+      - name: github_pr_details
+        required: true
+    response:
+      not_contains:
+        - "error"
+    tags:
+      - pr
+      - read
+
+  - name: list_open_prs
+    description: List all open pull requests
+    prompt: "Show me all open pull requests in this repository"
+    expected_tools:
+      - name: github_list_prs
+        required: true
+    response:
+      not_contains:
+        - "error"
+    tags:
+      - pr
+      - list
+
+  - name: get_pr_diff
+    description: Get the diff of a pull request
+    prompt: "Show me the code changes in PR #1"
+    expected_tools:
+      - name: github_pr_diff
+        required: true
+    response:
+      not_contains:
+        - "error"
+    tags:
+      - pr
+      - diff
+
+  # ============================================================================
+  # PR Analysis
+  # ============================================================================
+
+  - name: analyze_pr_files
+    description: Analyze files changed in a PR
+    prompt: "What files were modified in PR #1 and summarize the changes"
+    expected_tools:
+      - name: github_pr_diff
+        required: true
+    response:
+      not_contains:
+        - "error"
+    strict_order: false
+    allow_extra_tools: true
+    tags:
+      - pr
+      - analysis
+
+  # ============================================================================
+  # Repository Information
+  # ============================================================================
+
+  - name: list_branches
+    description: List repository branches
+    prompt: "List all branches in this repository"
+    expected_tools:
+      - name: github_list_branches
+        required: true
+    response:
+      not_contains:
+        - "error"
+    tags:
+      - repo
+      - branches
+
+  # ============================================================================
+  # Issue Operations
+  # ============================================================================
+
+  - name: list_issues
+    description: List repository issues
+    prompt: "Show me the open issues in this repository"
+    expected_tools:
+      - name: github_list_issues
+        required: true
+    response:
+      not_contains:
+        - "error"
+    tags:
+      - issues
+      - list
+
+  # ============================================================================
+  # Combined Operations
+  # ============================================================================
+
+  - name: pr_and_code_review
+    description: Get PR and review related code
+    prompt: "Get PR #1 details and show me the main file that was changed"
+    expected_tools:
+      - name: github_pr_details
+        required: true
+    strict_order: false
+    allow_extra_tools: true
+    tags:
+      - pr
+      - combined
+      - multi_tool
+
+  - name: search_in_pr_context
+    description: Search code in context of PR changes
+    prompt: "In PR #1, find any functions that were added or modified"
+    expected_tools:
+      - name: github_pr_diff
+        required: true
+    strict_order: false
+    allow_extra_tools: true
+    tags:
+      - pr
+      - search
+      - multi_tool

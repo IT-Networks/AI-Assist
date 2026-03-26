@@ -1,0 +1,147 @@
+# E2E Test Scenarios: Local File Operations
+# Tests tool usage for reading, writing, and searching files
+# Tool names must match actual AI-Assist tool names:
+#   read_file, write_file, edit_file, list_files, search_code
+
+name: Local File Operations
+description: Tests for file system tool usage patterns
+model: gptoss120b
+tags:
+  - local_files
+  - file_operations
+
+scenarios:
+  # ============================================================================
+  # Read Operations
+  # ============================================================================
+
+  - name: read_single_file
+    description: Read contents of a single Python file
+    prompt: "Read the file example.py and tell me what functions are defined in it"
+    expected_tools:
+      - name: read_file
+        required: true
+    response:
+      contains:
+        - "greet"
+        - "add"
+      not_contains:
+        - "error"
+        - "not found"
+    strict_order: false
+    allow_extra_tools: true
+    tags:
+      - read
+      - basic
+
+  - name: read_json_config
+    description: Read and parse JSON configuration
+    prompt: "What is the project name and version in config.json?"
+    expected_tools:
+      - name: read_file
+        required: true
+    response:
+      contains:
+        - "test-project"
+        - "1.0.0"
+    tags:
+      - read
+      - json
+
+  # ============================================================================
+  # Search Operations
+  # ============================================================================
+
+  - name: search_function_definition
+    description: Search for a specific function in code
+    prompt: "Find where the function 'multiply' is defined"
+    expected_tools:
+      - name: search_code
+        required: true
+    response:
+      contains:
+        - "Calculator"
+        - "multiply"
+    strict_order: false
+    tags:
+      - search
+      - code
+
+  - name: list_python_files
+    description: List all Python files in directory
+    prompt: "List all Python files in the workspace"
+    expected_tools:
+      - name: list_files
+        required: true
+    response:
+      contains:
+        - ".py"
+    tags:
+      - list
+      - directory
+
+  # ============================================================================
+  # Write Operations
+  # ============================================================================
+
+  - name: write_new_file
+    description: Create a new file with content
+    prompt: "Create a new file called 'test_output.txt' with the content 'Hello from E2E test'"
+    expected_tools:
+      - name: write_file
+        required: true
+    response:
+      not_contains:
+        - "error"
+        - "failed"
+    tags:
+      - write
+      - create
+
+  - name: edit_existing_file
+    description: Modify an existing file
+    prompt: "Add a new function called 'subtract' to example.py that subtracts two numbers"
+    expected_tools:
+      - name: read_file
+        required: true
+      - name: edit_file
+        required: true
+    response:
+      contains:
+        - "subtract"
+    strict_order: true
+    tags:
+      - edit
+      - modify
+
+  # ============================================================================
+  # Multi-File Operations
+  # ============================================================================
+
+  - name: read_multiple_files
+    description: Read and compare multiple files
+    prompt: "Compare the imports in main.py with the functions defined in example.py"
+    expected_tools:
+      - name: read_file
+        required: true
+    response:
+      contains:
+        - "import"
+        - "greet"
+    allow_extra_tools: true
+    tags:
+      - read
+      - multi_file
+
+  - name: search_across_files
+    description: Search for pattern across multiple files
+    prompt: "Find all files that contain the word 'test'"
+    expected_tools:
+      - name: search_code
+        required: true
+    response:
+      contains:
+        - "test"
+    tags:
+      - search
+      - multi_file

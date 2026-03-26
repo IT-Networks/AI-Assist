@@ -1,0 +1,222 @@
+# E2E Test Scenarios: Multi-Tool Workflows
+# Tests complex scenarios requiring multiple tools in sequence
+# Tool names: read_file, write_file, edit_file, list_files, search_code
+
+name: Multi-Tool Workflows
+description: Tests for complex workflows involving multiple tools in specific sequences
+model: gptoss120b
+tags:
+  - multi_tool
+  - workflows
+  - complex
+
+scenarios:
+  # ============================================================================
+  # Code Understanding Workflows
+  # ============================================================================
+
+  - name: understand_codebase
+    description: List files, then read and analyze code structure
+    prompt: "Give me an overview of this project - list the files and explain what the main modules do"
+    expected_tools:
+      - name: list_files
+        required: true
+      - name: read_file
+        required: true
+    strict_order: true
+    allow_extra_tools: true
+    timeout: 180.0
+    tags:
+      - understanding
+      - overview
+
+  - name: find_and_explain_function
+    description: Search for function then explain it
+    prompt: "Find the 'greet' function and explain how it works"
+    expected_tools:
+      - name: search_code
+        required: true
+    strict_order: false
+    allow_extra_tools: true
+    response:
+      contains:
+        - "greet"
+    tags:
+      - search
+      - explain
+
+  # ============================================================================
+  # Code Modification Workflows
+  # ============================================================================
+
+  - name: read_modify_verify
+    description: Read file, modify it, then verify changes
+    prompt: "Add type hints to the 'add' function in example.py and show me the result"
+    expected_tools:
+      - name: read_file
+        required: true
+      - name: edit_file
+        required: true
+    strict_order: true
+    allow_extra_tools: true
+    response:
+      contains:
+        - "int"
+        - "add"
+    tags:
+      - modify
+      - verify
+
+  - name: create_test_for_function
+    description: Read function and create test file
+    prompt: "Read the Calculator class in example.py and create a test file for it"
+    expected_tools:
+      - name: read_file
+        required: true
+      - name: write_file
+        required: true
+    strict_order: true
+    allow_extra_tools: true
+    response:
+      contains:
+        - "test"
+    tags:
+      - testing
+      - create
+
+  # ============================================================================
+  # Search and Analysis Workflows
+  # ============================================================================
+
+  - name: find_all_usages
+    description: Find function definition and all its usages
+    prompt: "Find where 'greet' is defined and all places where it's called"
+    expected_tools:
+      - name: search_code
+        required: true
+    allow_extra_tools: true
+    response:
+      contains:
+        - "greet"
+    tags:
+      - search
+      - usage
+
+  - name: dependency_analysis
+    description: Analyze imports across files
+    prompt: "Show me all imports in main.py and verify those modules exist"
+    expected_tools:
+      - name: read_file
+        required: true
+    allow_extra_tools: true
+    response:
+      contains:
+        - "import"
+    tags:
+      - analysis
+      - imports
+
+  # ============================================================================
+  # Documentation Workflows
+  # ============================================================================
+
+  - name: document_module
+    description: Read code and update documentation
+    prompt: "Read example.py and update README.md to document its functions"
+    expected_tools:
+      - name: read_file
+        required: true
+      - name: edit_file
+        required: true
+    strict_order: true
+    allow_extra_tools: true
+    tags:
+      - documentation
+      - update
+
+  # ============================================================================
+  # Refactoring Workflows
+  # ============================================================================
+
+  - name: rename_function
+    description: Find function, read context, rename it
+    prompt: "Rename the function 'add' to 'sum_numbers' in example.py and update any calls to it"
+    expected_tools:
+      - name: read_file
+        required: true
+      - name: edit_file
+        required: true
+    strict_order: false
+    allow_extra_tools: true
+    response:
+      contains:
+        - "sum_numbers"
+    tags:
+      - refactor
+      - rename
+
+  - name: extract_class
+    description: Read code and extract into new class
+    prompt: "Read example.py and create a new MathOperations class that includes the add function"
+    expected_tools:
+      - name: read_file
+        required: true
+      - name: write_file
+        required: true
+    strict_order: true
+    allow_extra_tools: true
+    tags:
+      - refactor
+      - extract
+
+  # ============================================================================
+  # Error Handling Workflows
+  # ============================================================================
+
+  - name: handle_missing_file
+    description: Gracefully handle request for non-existent file
+    prompt: "Read the file 'nonexistent_file.py' and summarize its contents"
+    expected_tools:
+      - name: read_file
+        required: true
+    allow_extra_tools: true
+    tags:
+      - error_handling
+      - missing_file
+
+  # ============================================================================
+  # Complex Multi-Step Workflows
+  # ============================================================================
+
+  - name: full_feature_implementation
+    description: List files, read context, implement feature, verify
+    prompt: "Add a 'divide' function to example.py that handles division by zero gracefully"
+    expected_tools:
+      - name: read_file
+        required: true
+      - name: edit_file
+        required: true
+    strict_order: true
+    allow_extra_tools: true
+    timeout: 180.0
+    response:
+      contains:
+        - "divide"
+    tags:
+      - feature
+      - implementation
+      - complex
+
+  - name: code_review_workflow
+    description: List changes, read files, provide review
+    prompt: "Review the code in example.py and suggest improvements"
+    expected_tools:
+      - name: read_file
+        required: true
+    allow_extra_tools: true
+    response:
+      not_contains:
+        - "error"
+    tags:
+      - review
+      - suggestions

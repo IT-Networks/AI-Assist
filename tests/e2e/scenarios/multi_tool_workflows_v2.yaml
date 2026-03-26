@@ -1,0 +1,145 @@
+# E2E Test Scenarios: Multi-Tool Workflows v2
+# Improved scenarios with realistic expectations based on actual LLM behavior
+
+name: Multi-Tool Workflows v2
+description: Improved test scenarios with flexible tool expectations
+model: gptoss120b
+tags:
+  - multi_tool
+  - workflows
+  - improved
+
+scenarios:
+  # ============================================================================
+  # Code Understanding - Read-Only Operations (Higher Pass Rate Expected)
+  # ============================================================================
+
+  - name: understand_codebase
+    description: List files, then read and analyze code structure
+    prompt: "Give me an overview of this project - list the files and explain what the main modules do. Use the list_files and read_file tools to explore."
+    expected_tools:
+      - name: list_files
+        required: true
+      - name: read_file
+        required: false  # LLM may summarize from list_files alone
+    strict_order: false
+    allow_extra_tools: true
+    timeout: 180.0
+
+  - name: find_and_explain_function
+    description: Search for function then explain it
+    prompt: "Use the search_code tool to find the 'greet' function, then explain how it works"
+    expected_tools:
+      - name: search_code
+        required: true
+    strict_order: false
+    allow_extra_tools: true
+    response:
+      contains:
+        - "greet"
+
+  - name: code_review_workflow
+    description: Read file and provide review
+    prompt: "Use read_file to read the code in example.py and suggest improvements"
+    expected_tools:
+      - name: read_file
+        required: true
+    allow_extra_tools: true
+
+  # ============================================================================
+  # Search Operations
+  # ============================================================================
+
+  - name: find_all_usages
+    description: Find function definition and all its usages
+    prompt: "Use search_code to find where 'greet' is defined and all places where it's called"
+    expected_tools:
+      - name: search_code
+        required: true
+    allow_extra_tools: true
+    response:
+      contains:
+        - "greet"
+
+  - name: dependency_analysis
+    description: Analyze imports across files
+    prompt: "Use read_file to show me all imports in src/main.py and verify those modules exist"
+    expected_tools:
+      - name: read_file
+        required: true
+    allow_extra_tools: true
+    response:
+      contains:
+        - "import"
+
+  # ============================================================================
+  # Error Handling
+  # ============================================================================
+
+  - name: handle_missing_file
+    description: Gracefully handle request for non-existent file
+    prompt: "Use read_file to read the file 'nonexistent_file.py' and summarize its contents"
+    expected_tools:
+      - name: read_file
+        required: true
+    allow_extra_tools: true
+
+  # ============================================================================
+  # Modification Operations (Clear Instructions)
+  # ============================================================================
+
+  - name: add_docstring_explicit
+    description: Add docstring with explicit tool instruction
+    prompt: |
+      1. Use read_file to read example.py
+      2. Use edit_file to add a docstring to the 'multiply' function
+      Do both steps.
+    expected_tools:
+      - name: read_file
+        required: true
+      - name: edit_file
+        required: true
+    strict_order: true
+    allow_extra_tools: true
+
+  - name: create_new_file_explicit
+    description: Create new file with explicit tool instruction
+    prompt: |
+      1. Use read_file to read example.py
+      2. Use write_file to create a new file 'math_utils.py' with a 'power' function that calculates x^y
+      Do both steps.
+    expected_tools:
+      - name: read_file
+        required: true
+      - name: write_file
+        required: true
+    strict_order: true
+    allow_extra_tools: true
+
+  # ============================================================================
+  # Verification Tests (Check LLM Behavior)
+  # ============================================================================
+
+  - name: verify_no_modification_needed
+    description: Test that LLM recognizes when modification isn't needed
+    prompt: "Use read_file to check if the 'add' function in example.py has type hints. If not, add them with edit_file."
+    expected_tools:
+      - name: read_file
+        required: true
+      # edit_file not required because function already has type hints
+    allow_extra_tools: true
+    response:
+      contains:
+        - "int"  # Should mention the existing type hints
+
+  - name: verify_divide_exists
+    description: Test that LLM recognizes existing functionality
+    prompt: "Use read_file to check example.py. Does the Calculator class have a 'divide' method? If not, add it with edit_file."
+    expected_tools:
+      - name: read_file
+        required: true
+      # edit_file not required because divide method already exists
+    allow_extra_tools: true
+    response:
+      contains:
+        - "divide"
