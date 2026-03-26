@@ -1,0 +1,426 @@
+# E2E Test Scenarios: SuperClaude Command Tests
+# Tests for /brainstorm, /design, /implement, /analyze, etc.
+# Commands are invoked WITHOUT the sc: prefix (e.g., /brainstorm not /sc:brainstorm)
+#
+# These tests validate:
+# 1. Command parsing and skill activation
+# 2. Correct tool usage based on command type
+# 3. Response structure and content
+
+name: SuperClaude Command Tests
+description: E2E tests for slash commands (/brainstorm, /design, /implement, etc.)
+model: gptoss120b
+tags:
+  - sc_commands
+  - slash_commands
+  - skills
+
+scenarios:
+  # ============================================================================
+  # /brainstorm Command Tests
+  # ============================================================================
+
+  - name: brainstorm_basic
+    description: Basic brainstorm for a simple feature
+    prompt: |
+      /brainstorm Erstelle Requirements für eine Logging-Utility-Klasse
+    expected_tools:
+      - name: list_files
+        required: false
+      - name: read_file
+        required: false
+    allow_extra_tools: true
+    response:
+      contains:
+        - "Requirements"
+    timeout: 120.0
+    tags:
+      - brainstorm
+      - basic
+
+  - name: brainstorm_with_context
+    description: Brainstorm using existing codebase context
+    prompt: |
+      /brainstorm Erweitere die Calculator-Klasse um trigonometrische Funktionen
+    expected_tools:
+      - name: read_file
+        required: false
+      - name: search_code
+        required: false
+    allow_extra_tools: true
+    response:
+      contains:
+        - "Calculator"
+    timeout: 120.0
+    tags:
+      - brainstorm
+      - context
+
+  - name: brainstorm_with_depth_flag
+    description: Brainstorm with --depth deep flag
+    prompt: |
+      /brainstorm User Authentication System --depth deep
+    expected_tools:
+      - name: read_file
+        required: false
+    allow_extra_tools: true
+    response:
+      contains:
+        - "Auth"
+    timeout: 180.0
+    tags:
+      - brainstorm
+      - flags
+
+  # ============================================================================
+  # /design Command Tests
+  # ============================================================================
+
+  - name: design_api
+    description: Design a REST API
+    prompt: |
+      /design REST API für User-Management --type api
+    expected_tools:
+      - name: read_file
+        required: false
+      - name: search_code
+        required: false
+    allow_extra_tools: true
+    response:
+      contains:
+        - "API"
+    timeout: 120.0
+    tags:
+      - design
+      - api
+
+  - name: design_component
+    description: Design a component architecture
+    prompt: |
+      /design Logging-Service Komponente --type component
+    expected_tools:
+      - name: read_file
+        required: false
+    allow_extra_tools: true
+    response:
+      contains:
+        - "Log"
+    timeout: 120.0
+    tags:
+      - design
+      - component
+
+  - name: design_database
+    description: Design database schema
+    prompt: |
+      /design Datenbank-Schema für User-Verwaltung --type database
+    expected_tools:
+      - name: read_file
+        required: false
+    allow_extra_tools: true
+    response:
+      contains:
+        - "User"
+    timeout: 120.0
+    tags:
+      - design
+      - database
+
+  # ============================================================================
+  # /implement Command Tests
+  # ============================================================================
+
+  - name: implement_function
+    description: Implement a new function
+    prompt: |
+      /implement Füge eine power() Methode zur Calculator-Klasse in example.py hinzu. Implementiere sie direkt.
+    expected_tools:
+      - name: read_file
+        required: true
+      - name: edit_file
+        required: false  # LLM may choose write_file instead
+    strict_order: false
+    allow_extra_tools: true
+    response:
+      contains:
+        - "power"
+    timeout: 180.0
+    tags:
+      - implement
+      - function
+
+  - name: implement_with_tests
+    description: Implement feature with tests
+    prompt: |
+      /implement Erstelle eine StringUtils-Klasse mit reverse() Methode im Workspace. Schreibe die Datei. --with-tests
+    expected_tools:
+      - name: write_file
+        required: false  # May also use edit_file
+      - name: read_file
+        required: false
+    allow_extra_tools: true
+    response:
+      contains:
+        - "reverse"
+    timeout: 180.0
+    tags:
+      - implement
+      - tests
+
+  # ============================================================================
+  # /analyze Command Tests
+  # ============================================================================
+
+  - name: analyze_code_quality
+    description: Analyze code quality
+    prompt: |
+      /analyze Code-Qualität in example.py --focus quality
+    expected_tools:
+      - name: read_file
+        required: false
+      - name: search_code
+        required: false
+      - name: validate_file
+        required: false
+    allow_extra_tools: true
+    # Response validation relaxed - LLM may use different terms
+    timeout: 120.0
+    tags:
+      - analyze
+      - quality
+
+  - name: analyze_security
+    description: Analyze security issues
+    prompt: |
+      /analyze Sicherheitsprobleme im Code --focus security
+    expected_tools:
+      - name: read_file
+        required: false
+      - name: search_code
+        required: false
+    allow_extra_tools: true
+    timeout: 120.0
+    tags:
+      - analyze
+      - security
+
+  # ============================================================================
+  # /explain Command Tests
+  # ============================================================================
+
+  - name: explain_function
+    description: Explain a function
+    prompt: |
+      /explain Erkläre die greet() Funktion in example.py
+    expected_tools:
+      - name: read_file
+        required: true
+    allow_extra_tools: true
+    response:
+      contains:
+        - "greet"
+    timeout: 90.0
+    tags:
+      - explain
+      - function
+
+  - name: explain_class
+    description: Explain a class
+    prompt: |
+      /explain Wie funktioniert die Calculator-Klasse?
+    expected_tools:
+      - name: read_file
+        required: true
+      - name: search_code
+        required: false
+    allow_extra_tools: true
+    response:
+      contains:
+        - "Calculator"
+    timeout: 90.0
+    tags:
+      - explain
+      - class
+
+  # ============================================================================
+  # /improve Command Tests
+  # ============================================================================
+
+  - name: improve_code
+    description: Improve existing code
+    prompt: |
+      /improve Verbessere die add() Funktion in example.py mit besserer Fehlerbehandlung
+    expected_tools:
+      - name: read_file
+        required: true
+      - name: edit_file
+        required: true
+    strict_order: true
+    allow_extra_tools: true
+    response:
+      contains:
+        - "add"
+    timeout: 120.0
+    tags:
+      - improve
+      - code
+
+  - name: improve_performance
+    description: Improve code performance
+    prompt: |
+      /improve Performance-Optimierung für die Calculator-Klasse
+    expected_tools:
+      - name: read_file
+        required: true
+    allow_extra_tools: true
+    response:
+      contains:
+        - "Calculator"
+    timeout: 120.0
+    tags:
+      - improve
+      - performance
+
+  # ============================================================================
+  # /test Command Tests
+  # ============================================================================
+
+  - name: test_run_unit
+    description: Run unit tests
+    prompt: |
+      /test Führe die Unit-Tests aus --type unit
+    expected_tools:
+      - name: read_file
+        required: false
+    allow_extra_tools: true
+    timeout: 180.0
+    tags:
+      - test
+      - unit
+
+  - name: test_with_coverage
+    description: Run tests with coverage
+    prompt: |
+      /test Tests mit Coverage-Report --coverage
+    expected_tools:
+      - name: read_file
+        required: false
+    allow_extra_tools: true
+    timeout: 180.0
+    tags:
+      - test
+      - coverage
+
+  # ============================================================================
+  # /git Command Tests
+  # ============================================================================
+
+  - name: git_status
+    description: Show git status
+    prompt: |
+      /git Zeige den aktuellen Git-Status
+    expected_tools:
+      - name: read_file
+        required: false
+    allow_extra_tools: true
+    timeout: 60.0
+    tags:
+      - git
+      - status
+
+  # ============================================================================
+  # /troubleshoot Command Tests
+  # ============================================================================
+
+  - name: troubleshoot_error
+    description: Troubleshoot an error
+    prompt: |
+      /troubleshoot Die divide() Methode in example.py wirft einen Fehler bei Division durch 0. Analysiere den Code.
+    expected_tools:
+      - name: read_file
+        required: false
+      - name: search_code
+        required: false
+    allow_extra_tools: true
+    response:
+      contains:
+        - "divide"
+    timeout: 120.0
+    tags:
+      - troubleshoot
+      - error
+
+  - name: troubleshoot_with_fix
+    description: Troubleshoot and fix an issue
+    prompt: |
+      /troubleshoot Finde und behebe den Bug in der divide() Funktion --fix
+    expected_tools:
+      - name: read_file
+        required: true
+      - name: edit_file
+        required: false
+    allow_extra_tools: true
+    response:
+      contains:
+        - "divide"
+    timeout: 180.0
+    tags:
+      - troubleshoot
+      - fix
+
+  # ============================================================================
+  # Workflow Chain Tests (Multi-Step)
+  # ============================================================================
+
+  - name: workflow_brainstorm_to_implement
+    description: Full workflow from brainstorm to implementation
+    prompt: |
+      /brainstorm Erstelle Requirements für eine square() Methode in der Calculator-Klasse, dann /implement sie direkt
+    expected_tools:
+      - name: read_file
+        required: true
+      - name: edit_file
+        required: true
+    allow_extra_tools: true
+    response:
+      contains:
+        - "square"
+    timeout: 240.0
+    tags:
+      - workflow
+      - multi_step
+
+  # ============================================================================
+  # Flag Combination Tests
+  # ============================================================================
+
+  - name: command_with_multiple_flags
+    description: Command with multiple flags
+    prompt: |
+      /analyze Code in example.py --depth deep --focus quality --strict
+    expected_tools:
+      - name: read_file
+        required: true
+    allow_extra_tools: true
+    response:
+      contains:
+        - "example.py"
+    timeout: 120.0
+    tags:
+      - flags
+      - combination
+
+  - name: implement_safe_mode
+    description: Implement with safe mode
+    prompt: |
+      /implement Neue validate() Methode --safe --with-tests
+    expected_tools:
+      - name: read_file
+        required: false
+      - name: write_file
+        required: false
+    allow_extra_tools: true
+    timeout: 180.0
+    tags:
+      - implement
+      - safe_mode
