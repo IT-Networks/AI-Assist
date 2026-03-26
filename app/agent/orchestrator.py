@@ -2180,16 +2180,27 @@ class AgentOrchestrator:
                                 })
                             elif tool_call.name in ("write_file", "edit_file", "create_file"):
                                 # Code-Änderung für Workspace Panel
-                                file_path = tool_call.arguments.get("path", "")
-                                content = tool_call.arguments.get("content", "")
-                                yield AgentEvent(AgentEventType.WORKSPACE_CODE_CHANGE, {
-                                    "filePath": file_path,
-                                    "modifiedContent": content[:5000] if content else result.to_context()[:2000],
-                                    "toolCall": tool_call.name,
-                                    "description": f"{tool_call.name}: {file_path}",
-                                    "status": "applied",
-                                    "isNew": tool_call.name == "create_file"
-                                })
+                                # WICHTIG: Nur senden wenn KEINE Bestätigung nötig ist!
+                                # Bei requires_confirmation=True wurde das Tool noch nicht ausgeführt,
+                                # daher wäre der Workspace-Inhalt leer/falsch.
+                                if not result.requires_confirmation:
+                                    file_path = tool_call.arguments.get("path", "")
+                                    # edit_file hat kein "content", nur old_string/new_string
+                                    if tool_call.name == "edit_file":
+                                        # Für edit_file: Diff aus confirmation_data verwenden falls vorhanden
+                                        diff = result.confirmation_data.get("diff", "") if result.confirmation_data else ""
+                                        modified_content = diff if diff else result.to_context()[:2000]
+                                    else:
+                                        content = tool_call.arguments.get("content", "")
+                                        modified_content = content[:5000] if content else result.to_context()[:2000]
+                                    yield AgentEvent(AgentEventType.WORKSPACE_CODE_CHANGE, {
+                                        "filePath": file_path,
+                                        "modifiedContent": modified_content,
+                                        "toolCall": tool_call.name,
+                                        "description": f"{tool_call.name}: {file_path}",
+                                        "status": "applied",
+                                        "isNew": tool_call.name == "create_file"
+                                    })
                             elif tool_call.name in ("github_pr_details", "github_pr_diff"):
                                 # PR-Daten für Workspace Panel
                                 pr_number = tool_call.arguments.get("pr_number")
