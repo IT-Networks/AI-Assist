@@ -267,22 +267,6 @@ async def update_section_settings(
         current_dict = current_section.model_dump()
         current_dict.update(values)
 
-        # Confluence: ignore_env_override automatisch verwalten
-        # - True wenn alle Credentials leer → Umgebungsvariablen nach Restart ignorieren
-        # - False wenn Credentials gesetzt → Umgebungsvariablen erlauben
-        if section == "confluence":
-            new_username = values.get("username") if "username" in values else current_dict.get("username", "")
-            new_api_token = values.get("api_token") if "api_token" in values else current_dict.get("api_token", "")
-            new_password = values.get("password") if "password" in values else current_dict.get("password", "")
-
-            creds_cleared = (new_username == "" and new_api_token == "" and new_password == "")
-            creds_set = (new_api_token != "" or new_password != "")
-
-            if creds_cleared:
-                current_dict["ignore_env_override"] = True
-            elif creds_set:
-                current_dict["ignore_env_override"] = False
-
         # Neue Section-Instanz erstellen
         section_class = type(current_section)
         new_section = section_class(**current_dict)
