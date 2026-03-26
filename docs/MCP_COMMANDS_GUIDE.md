@@ -1,13 +1,16 @@
-# MCP Commands - Benutzerhandbuch
+# Skill Commands - Benutzerhandbuch
 
-**Version:** 1.0
-**Datum:** 2026-03-16
+**Version:** 2.0
+**Datum:** 2026-03-23
+
+> **Migration:** Die ehemaligen MCP-Commands wurden zu Skills migriert.
+> Diese arbeiten nun mit dem Skill-System zusammen für Enterprise-Erweiterungen.
 
 ---
 
 ## Übersicht
 
-Die MCP-Commands `/brainstorm` und `/design` wurden erweitert um:
+Die Skill-Commands `/brainstorm` und `/design` bieten:
 
 - **Multi-Source Research** - Automatische Recherche in Skills, Handbuch, Confluence und Web
 - **Enterprise-Kontext** - Firmeninterne Richtlinien und Standards werden automatisch einbezogen
@@ -124,7 +127,7 @@ Das System klassifiziert Anfragen automatisch:
 
 ### Command-getriggerte Skills
 
-Skills können automatisch für bestimmte MCP-Commands aktiviert werden.
+Skills können automatisch für bestimmte Commands aktiviert werden.
 
 **Konfiguration in der Skill-YAML:**
 
@@ -139,7 +142,7 @@ activation:
 ### UI-Verwaltung
 
 1. Öffne `/skills` im Browser
-2. Wechsle zum Tab "MCP Commands"
+2. Wechsle zum Tab "Commands"
 3. Hier siehst du:
    - Welche Commands welche Skills aktivieren
    - Research-Scope und Quellen-Konfiguration
@@ -147,7 +150,7 @@ activation:
 
 ### Research-Quellen umschalten
 
-Im "MCP Commands" Tab kannst du:
+Im "Commands" Tab kannst du:
 
 1. **Scope wählen** - Intern / Extern Safe / Alle
 2. **Quellen togglen** - Skills, Handbuch, Confluence, Web einzeln aktivieren/deaktivieren

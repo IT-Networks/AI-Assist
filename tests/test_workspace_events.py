@@ -284,7 +284,7 @@ class TestWorkspaceSqlResultEvent:
         mock_db_client.schema = "TESTSCHEMA"
 
         with patch("app.services.db_client.get_db_client", return_value=mock_db_client):
-            with patch("app.core.config.settings") as mock_settings:
+            with patch("app.agent.orchestrator.settings") as mock_settings:
                 mock_settings.database.database = "TESTDB"
                 mock_settings.database.max_rows = 100
 
@@ -325,7 +325,7 @@ class TestWorkspaceSqlResultEvent:
         mock_db_client.schema = "TESTSCHEMA"
 
         with patch("app.services.db_client.get_db_client", return_value=mock_db_client):
-            with patch("app.core.config.settings") as mock_settings:
+            with patch("app.agent.orchestrator.settings") as mock_settings:
                 mock_settings.database.database = "TESTDB"
                 mock_settings.database.max_rows = 100
 
@@ -371,7 +371,7 @@ class TestWorkspaceSqlResultEvent:
         mock_db_client.schema = "TEST"
 
         with patch("app.services.db_client.get_db_client", return_value=mock_db_client):
-            with patch("app.core.config.settings") as mock_settings:
+            with patch("app.agent.orchestrator.settings") as mock_settings:
                 mock_settings.database.database = "DB"
                 mock_settings.database.max_rows = 100
 
@@ -435,7 +435,7 @@ class TestEventPayloadStructure:
         mock_db_client.schema = "TEST"
 
         with patch("app.services.db_client.get_db_client", return_value=mock_db_client):
-            with patch("app.core.config.settings") as mock_settings:
+            with patch("app.agent.orchestrator.settings") as mock_settings:
                 mock_settings.database.database = "DB"
                 mock_settings.database.max_rows = 100
 
