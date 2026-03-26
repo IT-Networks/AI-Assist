@@ -769,6 +769,36 @@ access_logging:
   exclude_hosts: []
 
 # Analytics - Tool-Nutzung und KI-Entscheidungen loggen
+# ═══════════════════════════════════════════════════════════════════
+# Task-Decomposition Agent System
+# ═══════════════════════════════════════════════════════════════════
+# Zerlegt komplexe Anfragen in spezialisierte Tasks
+# Pipeline: PromptEnhancer → TaskPlanner → TaskExecutor
+task_agents:
+  enabled: true                        # Master-Switch für Task-Decomposition
+  # Model-Zuweisung pro Agent-Typ (leer = Fallback auf Standard-Modelle)
+  research_model: qwen-7b              # Für Research-Tasks
+  code_model: gptoss120b               # Für Code-Tasks
+  analyst_model: mistral-678b          # Für Analyse-Tasks
+  devops_model: qwen-7b                # Für DevOps-Tasks
+  docs_model: qwen-7b                  # Für Doku-Tasks
+  debug_model: mistral-678b            # Für Debug-Tasks
+  planning_model: mistral-678b         # Model für TaskPlanner
+  # Execution Settings
+  max_parallel_tasks: 3                # Max. parallele Tasks
+  task_timeout_seconds: 120            # Timeout pro Task
+  max_retries_per_task: 2              # Max. Retries pro Task
+  # Complexity Threshold
+  min_tasks_for_decomposition: 2       # Mindestens 2 Tasks für Zerlegung
+  # Phase Synthesis
+  enable_phase_synthesis: true         # Zwischen-Synthese aktivieren
+  synthesis_max_tokens: 500            # Max. Tokens für Synthese
+  planning_temperature: 0.1            # Temperature für Planung
+  # Enhancement Settings
+  enhancement_confirm_mode: none       # "all" | "none" | "write_only"
+  enhancement_always_confirm: []       # ["research", "sequential", "analyze"]
+  research_internal_first: true        # Interne Quellen bevorzugen
+
 analytics:
   enabled: true                    # Master-Switch für Analytics
   storage_path: ./data/analytics   # Speicherort für Logs

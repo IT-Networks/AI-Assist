@@ -1,0 +1,373 @@
+# E2E Test Scenarios: Task Decomposition & Prompt Enhancement
+# Tests for automatic task splitting and context enrichment
+#
+# Pipeline: PromptEnhancer → TaskPlanner → TaskExecutor
+# Config: task_agents.enabled must be true
+#
+# Enhancement Types:
+# - RESEARCH: Wiki/Docs keywords → suggest /research skill
+# - SEQUENTIAL: Debug/Error keywords → suggest /seq
+# - ANALYZE: Refactor/Impact keywords → suggest /analyze skill
+
+name: Task Decomposition Tests
+description: E2E tests for prompt enhancement and task splitting via LLM proxy
+model: gptoss120b
+tags:
+  - task_decomposition
+  - prompt_enhancement
+  - task_agents
+
+scenarios:
+  # ============================================================================
+  # Prompt Enhancement Detection Tests
+  # ============================================================================
+
+  - name: enhancement_research_detection
+    description: Detect research enhancement type from keywords
+    prompt: |
+      Erkläre mir gemäß der Dokumentation wie das Authentication-System funktioniert
+    expected_tools:
+      - name: read_file
+        required: false
+      - name: search_code
+        required: false
+    allow_extra_tools: true
+    response:
+      contains:
+        - "Auth"
+    timeout: 120.0
+    tags:
+      - enhancement
+      - research
+
+  - name: enhancement_sequential_detection
+    description: Detect sequential enhancement type from debug keywords
+    prompt: |
+      Warum funktioniert die divide() Methode nicht bei großen Zahlen? Debug das Problem.
+    expected_tools:
+      - name: read_file
+        required: false
+    allow_extra_tools: true
+    response:
+      contains:
+        - "divide"
+    timeout: 120.0
+    tags:
+      - enhancement
+      - sequential
+      - debug
+
+  - name: enhancement_analyze_detection
+    description: Detect analyze enhancement type from refactor keywords
+    prompt: |
+      Analysiere die Abhängigkeiten der Calculator-Klasse und zeige den Impact eines Refactorings
+    expected_tools:
+      - name: read_file
+        required: false
+      - name: search_code
+        required: false
+    allow_extra_tools: true
+    response:
+      contains:
+        - "Calculator"
+    timeout: 120.0
+    tags:
+      - enhancement
+      - analyze
+
+  # ============================================================================
+  # Task Decomposition Tests
+  # ============================================================================
+
+  - name: task_decomposition_complex_feature
+    description: Complex feature request triggers task decomposition
+    prompt: |
+      Implementiere ein vollständiges Logging-System mit:
+      1. Logger-Klasse mit verschiedenen Log-Levels (DEBUG, INFO, WARNING, ERROR)
+      2. File-Handler für Log-Ausgabe in Dateien
+      3. Console-Handler für Terminal-Ausgabe
+      4. Unit-Tests für alle Komponenten
+    expected_tools:
+      - name: read_file
+        required: false
+      - name: write_file
+        required: false
+    allow_extra_tools: true
+    response:
+      contains:
+        - "Logger"
+    timeout: 300.0
+    tags:
+      - task_decomposition
+      - complex
+      - feature
+
+  - name: task_decomposition_multi_step
+    description: Multi-step task with dependencies
+    prompt: |
+      Führe folgende Schritte aus:
+      1. Lies die Calculator-Klasse und analysiere ihre Struktur
+      2. Füge eine sqrt() Methode hinzu
+      3. Schreibe einen Unit-Test dafür
+      4. Validiere dass alle Tests bestehen
+    expected_tools:
+      - name: read_file
+        required: true
+    allow_extra_tools: true
+    response:
+      contains:
+        - "sqrt"
+    timeout: 240.0
+    tags:
+      - task_decomposition
+      - multi_step
+      - dependencies
+
+  - name: task_decomposition_research_and_implement
+    description: Research task followed by implementation
+    prompt: |
+      Recherchiere Best Practices für Python Error Handling gemäß der Dokumentation,
+      dann implementiere eine verbesserte Exception-Behandlung in der Calculator-Klasse
+    expected_tools:
+      - name: read_file
+        required: false
+      - name: search_code
+        required: false
+    allow_extra_tools: true
+    timeout: 240.0
+    tags:
+      - task_decomposition
+      - research
+      - implement
+
+  # ============================================================================
+  # Task Planning Tests
+  # ============================================================================
+
+  - name: task_planning_simple_bypass
+    description: Simple tasks should bypass decomposition
+    prompt: |
+      Zeige mir die greet() Funktion
+    expected_tools:
+      - name: read_file
+        required: false
+    allow_extra_tools: true
+    response:
+      contains:
+        - "greet"
+    timeout: 60.0
+    tags:
+      - task_planning
+      - simple
+      - bypass
+
+  - name: task_planning_threshold
+    description: Task count below threshold uses direct processing
+    prompt: |
+      Füge eine subtract() Methode zur Calculator-Klasse hinzu
+    expected_tools:
+      - name: read_file
+        required: false
+    allow_extra_tools: true
+    timeout: 120.0
+    tags:
+      - task_planning
+      - threshold
+
+  # ============================================================================
+  # Parallel Task Execution Tests
+  # ============================================================================
+
+  - name: parallel_task_execution
+    description: Independent tasks should run in parallel
+    prompt: |
+      Analysiere parallel:
+      1. Die Calculator-Klasse in example.py
+      2. Die greet() Funktion in example.py
+      3. Die Projektstruktur
+      Fasse die Ergebnisse zusammen.
+    expected_tools:
+      - name: read_file
+        required: true
+      - name: list_files
+        required: false
+    allow_extra_tools: true
+    response:
+      contains:
+        - "Calculator"
+    timeout: 180.0
+    tags:
+      - parallel
+      - execution
+
+  - name: sequential_task_execution
+    description: Dependent tasks should run sequentially
+    prompt: |
+      Schritt 1: Lies die Calculator-Klasse
+      Schritt 2: Basierend auf dem Ergebnis, füge eine power() Methode hinzu
+      Schritt 3: Teste die neue Methode
+    expected_tools:
+      - name: read_file
+        required: true
+    allow_extra_tools: true
+    response:
+      contains:
+        - "power"
+    timeout: 240.0
+    tags:
+      - sequential
+      - dependencies
+
+  # ============================================================================
+  # Enhancement with Task Decomposition Integration
+  # ============================================================================
+
+  - name: enhancement_then_decomposition
+    description: Enhancement enriches context before task planning
+    prompt: |
+      Basierend auf der bestehenden Architektur, erweitere das Projekt um:
+      1. Ein Validation-Modul für Input-Prüfung
+      2. Integration mit der Calculator-Klasse
+      3. Tests für die Validierung
+    expected_tools:
+      - name: read_file
+        required: false
+      - name: search_code
+        required: false
+    allow_extra_tools: true
+    timeout: 300.0
+    tags:
+      - enhancement
+      - decomposition
+      - integration
+
+  - name: ultrathink_with_decomposition
+    description: Ultrathink mode combined with task decomposition
+    prompt: |
+      /brainstorm Entwickle eine komplette API für User-Management mit Authentication --ultrathink
+    expected_tools:
+      - name: sequential_thinking
+        required: false
+      - name: read_file
+        required: false
+    allow_extra_tools: true
+    response:
+      contains:
+        - "User"
+    timeout: 300.0
+    tags:
+      - ultrathink
+      - decomposition
+      - brainstorm
+
+  # ============================================================================
+  # Phase Synthesis Tests
+  # ============================================================================
+
+  - name: phase_synthesis_enabled
+    description: Phase synthesis creates intermediate summaries
+    prompt: |
+      Führe eine vollständige Code-Review durch:
+      Phase 1: Lies und analysiere alle Python-Dateien
+      Phase 2: Identifiziere Code-Smells und Verbesserungen
+      Phase 3: Erstelle einen Zusammenfassungsbericht
+    expected_tools:
+      - name: read_file
+        required: true
+    allow_extra_tools: true
+    timeout: 300.0
+    tags:
+      - phase_synthesis
+      - multi_phase
+
+  # ============================================================================
+  # Error Handling and Retry Tests
+  # ============================================================================
+
+  - name: task_retry_on_failure
+    description: Failed task should retry according to config
+    prompt: |
+      Versuche die Datei nonexistent_file.py zu lesen und zu analysieren.
+      Falls nicht vorhanden, erstelle eine neue Datei mit einer Beispiel-Klasse.
+    expected_tools:
+      - name: read_file
+        required: false
+      - name: write_file
+        required: false
+    allow_extra_tools: true
+    timeout: 180.0
+    tags:
+      - error_handling
+      - retry
+
+  - name: task_timeout_handling
+    description: Task timeout should be handled gracefully
+    prompt: |
+      Analysiere den gesamten Projektcode sehr gründlich mit Deep-Analyse.
+      Falls Timeout: Zeige Teilergebnisse.
+    expected_tools:
+      - name: read_file
+        required: false
+    allow_extra_tools: true
+    timeout: 180.0
+    tags:
+      - timeout
+      - graceful
+
+  # ============================================================================
+  # Skip Markers Tests
+  # ============================================================================
+
+  - name: skip_decomposition_continue
+    description: Continue marker skips decomposition
+    prompt: |
+      [CONTINUE] Fahre mit der vorherigen Aufgabe fort
+    expected_tools: []
+    allow_extra_tools: true
+    timeout: 60.0
+    tags:
+      - skip_markers
+      - continue
+
+  - name: skip_decomposition_no_task
+    description: NO_TASK marker skips decomposition
+    prompt: |
+      [NO_TASK] Einfache Frage: Was ist 2+2?
+    expected_tools: []
+    allow_extra_tools: true
+    response:
+      contains:
+        - "4"
+    timeout: 60.0
+    tags:
+      - skip_markers
+      - no_task
+
+  # ============================================================================
+  # Model Routing Tests
+  # ============================================================================
+
+  - name: model_routing_research
+    description: Research tasks use research_model
+    prompt: |
+      [RESEARCH_TASK] Recherchiere die Best Practices für Python Testing
+    expected_tools: []
+    allow_extra_tools: true
+    timeout: 120.0
+    tags:
+      - model_routing
+      - research
+
+  - name: model_routing_code
+    description: Code tasks use code_model
+    prompt: |
+      Implementiere eine neue Klasse StringUtils mit Methoden für String-Manipulation
+    expected_tools:
+      - name: write_file
+        required: false
+    allow_extra_tools: true
+    timeout: 180.0
+    tags:
+      - model_routing
+      - code
+
