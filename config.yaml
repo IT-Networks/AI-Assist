@@ -120,6 +120,7 @@ confluence:
   default_space: ''
   verify_ssl: false
   api_path: ''
+  ignore_env_override: true  # Wenn true: CONFLUENCE_* Umgebungsvariablen werden ignoriert
 
 # Kontext-Limits
 context:

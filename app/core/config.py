@@ -231,6 +231,9 @@ class ConfluenceConfig(BaseModel):
     # API-Pfad: "wiki" für Cloud, "" für manche Server, oder custom
     # Beispiele: "" → /rest/api, "wiki" → /wiki/rest/api, "confluence" → /confluence/rest/api
     api_path: str = ""  # Leer = auto-detect, sonst z.B. "wiki" oder "confluence"
+    # Wenn True, werden Umgebungsvariablen (CONFLUENCE_*) ignoriert
+    # Setzen auf True wenn Credentials explizit gelöscht werden sollen
+    ignore_env_override: bool = False
 
 
 class PythonConfig(BaseModel):
@@ -1345,14 +1348,16 @@ class Settings(BaseModel):
             self.llm.api_key = os.getenv("LLM_API_KEY")
         if os.getenv("JAVA_REPO_PATH"):
             self.java.repo_path = os.getenv("JAVA_REPO_PATH")
-        if os.getenv("CONFLUENCE_BASE_URL"):
-            self.confluence.base_url = os.getenv("CONFLUENCE_BASE_URL")
-        if os.getenv("CONFLUENCE_USERNAME"):
-            self.confluence.username = os.getenv("CONFLUENCE_USERNAME")
-        if os.getenv("CONFLUENCE_API_TOKEN"):
-            self.confluence.api_token = os.getenv("CONFLUENCE_API_TOKEN")
-        if os.getenv("CONFLUENCE_PASSWORD"):
-            self.confluence.password = os.getenv("CONFLUENCE_PASSWORD")
+        # Confluence: Nur wenn ignore_env_override nicht gesetzt ist
+        if not self.confluence.ignore_env_override:
+            if os.getenv("CONFLUENCE_BASE_URL"):
+                self.confluence.base_url = os.getenv("CONFLUENCE_BASE_URL")
+            if os.getenv("CONFLUENCE_USERNAME"):
+                self.confluence.username = os.getenv("CONFLUENCE_USERNAME")
+            if os.getenv("CONFLUENCE_API_TOKEN"):
+                self.confluence.api_token = os.getenv("CONFLUENCE_API_TOKEN")
+            if os.getenv("CONFLUENCE_PASSWORD"):
+                self.confluence.password = os.getenv("CONFLUENCE_PASSWORD")
         if os.getenv("PYTHON_REPO_PATH"):
             self.python.repo_path = os.getenv("PYTHON_REPO_PATH")
         if os.getenv("HANDBOOK_PATH"):
