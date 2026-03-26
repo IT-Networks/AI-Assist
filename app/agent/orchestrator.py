@@ -2085,6 +2085,12 @@ class AgentOrchestrator:
                             exec_result = await self._execute_confirmed_operation(
                                 result.confirmation_data
                             )
+
+                            # WICHTIG: EventBridge drainten - _emit_workspace_code_change
+                            # verwendet emit() was Events in die Queue steckt, nicht yield
+                            async for workspace_event in self._drain_mcp_events():
+                                yield workspace_event
+
                             if exec_result.success:
                                 # Spezifische Meldung je nach Operation
                                 operation = result.confirmation_data.get("operation", "")
