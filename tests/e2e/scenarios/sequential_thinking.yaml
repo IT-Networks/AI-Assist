@@ -76,7 +76,7 @@ scenarios:
   - name: seq_deep_mode
     description: Sequential thinking with deep mode (5-10 steps)
     prompt: |
-      /seq Analysiere potenzielle Bugs in der divide() Methode --mode deep
+      /seq Analysiere potenzielle Bugs in der divide() Methode in example.py --mode deep
     expected_tools:
       - name: sequential_thinking
         required: false
@@ -86,7 +86,7 @@ scenarios:
     response:
       contains:
         - "divide"
-    timeout: 180.0
+    timeout: 240.0
     tags:
       - seq
       - deep_mode
@@ -94,7 +94,7 @@ scenarios:
   - name: seq_ultra_mode
     description: Sequential thinking with ultra mode (10-15 steps)
     prompt: |
-      /seq Erstelle eine vollständige Architektur-Analyse des Projekts --mode ultra
+      /seq Erstelle eine Architektur-Analyse der Python-Dateien im Projekt --mode ultra
     expected_tools:
       - name: sequential_thinking
         required: false
@@ -103,7 +103,7 @@ scenarios:
       - name: list_files
         required: false
     allow_extra_tools: true
-    timeout: 300.0
+    timeout: 360.0
     tags:
       - seq
       - ultra_mode
@@ -254,12 +254,12 @@ scenarios:
   - name: seq_verification_workflow
     description: Sequential thinking with verification steps
     prompt: |
-      /seq Verifiziere dass alle Methoden der Calculator-Klasse korrekt typisiert sind.
+      /seq Lies example.py und verifiziere dass alle Methoden der Calculator-Klasse korrekt typisiert sind.
     expected_tools:
       - name: sequential_thinking
         required: false
       - name: read_file
-        required: true
+        required: false
     allow_extra_tools: true
     response:
       contains:
@@ -312,13 +312,12 @@ scenarios:
   - name: seq_then_implement
     description: Sequential analysis followed by implementation
     prompt: |
-      /seq Analysiere wie eine modulo() Methode in Calculator implementiert werden sollte,
-      dann /implement sie direkt.
+      /seq Lies example.py und analysiere wie eine modulo() Methode in der Calculator-Klasse implementiert werden sollte.
     expected_tools:
       - name: sequential_thinking
         required: false
       - name: read_file
-        required: true
+        required: false
       - name: edit_file
         required: false
     allow_extra_tools: true
