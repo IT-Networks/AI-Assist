@@ -17480,18 +17480,23 @@ const taskProgressPanel = {
     });
 
     this.eventSource.addEventListener('task_started', (e) => {
-      const data = JSON.parse(e.data);
+      const event = JSON.parse(e.data);
+      // Event-Format: { type, timestamp, session_id, data: { task_id, title, ... } }
+      const task = event.data || event;
       log.info('[TaskProgress] task_started received', {
-        taskId: data.task_id,
-        title: data.title,
+        taskId: task.task_id,
+        title: task.title,
         session: sessionId
       });
-      this.tasks.set(data.task_id, data);
-      this.render();
+      if (task.task_id) {
+        this.tasks.set(task.task_id, task);
+        this.render();
+      }
     });
 
     this.eventSource.addEventListener('step_started', (e) => {
-      const data = JSON.parse(e.data);
+      const event = JSON.parse(e.data);
+      const data = event.data || event;
       this._updateTask(data.task_id, task => {
         if (data.step) {
           if (task.steps && task.steps[data.step_index]) {
@@ -17504,7 +17509,8 @@ const taskProgressPanel = {
     });
 
     this.eventSource.addEventListener('step_progress', (e) => {
-      const data = JSON.parse(e.data);
+      const event = JSON.parse(e.data);
+      const data = event.data || event;
       this._updateTask(data.task_id, task => {
         if (task.steps && task.steps[data.step_index]) {
           task.steps[data.step_index].progress = data.progress;
@@ -17515,7 +17521,8 @@ const taskProgressPanel = {
     });
 
     this.eventSource.addEventListener('step_completed', (e) => {
-      const data = JSON.parse(e.data);
+      const event = JSON.parse(e.data);
+      const data = event.data || event;
       this._updateTask(data.task_id, task => {
         if (data.step && task.steps && task.steps[data.step_index]) {
           task.steps[data.step_index] = data.step;
@@ -17527,7 +17534,8 @@ const taskProgressPanel = {
     });
 
     this.eventSource.addEventListener('step_failed', (e) => {
-      const data = JSON.parse(e.data);
+      const event = JSON.parse(e.data);
+      const data = event.data || event;
       this._updateTask(data.task_id, task => {
         if (task.steps && task.steps[data.step_index]) {
           task.steps[data.step_index] = data.step;
@@ -17536,7 +17544,8 @@ const taskProgressPanel = {
     });
 
     this.eventSource.addEventListener('task_artifact', (e) => {
-      const data = JSON.parse(e.data);
+      const event = JSON.parse(e.data);
+      const data = event.data || event;
       log.info('[TaskProgress] task_artifact received', {
         taskId: data.task_id,
         artifactType: data.artifact?.type,
@@ -17549,7 +17558,8 @@ const taskProgressPanel = {
     });
 
     this.eventSource.addEventListener('task_completed', (e) => {
-      const data = JSON.parse(e.data);
+      const event = JSON.parse(e.data);
+      const data = event.data || event;
       this.tasks.set(data.task_id, data);
       this.render();
       // Nach 5 Sekunden ausblenden
@@ -17560,13 +17570,15 @@ const taskProgressPanel = {
     });
 
     this.eventSource.addEventListener('task_failed', (e) => {
-      const data = JSON.parse(e.data);
+      const event = JSON.parse(e.data);
+      const data = event.data || event;
       this.tasks.set(data.task_id, data);
       this.render();
     });
 
     this.eventSource.addEventListener('task_cancelled', (e) => {
-      const data = JSON.parse(e.data);
+      const event = JSON.parse(e.data);
+      const data = event.data || event;
       this.tasks.delete(data.task_id);
       this.render();
     });
