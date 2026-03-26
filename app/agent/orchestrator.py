@@ -2081,27 +2081,61 @@ class AgentOrchestrator:
                     # ────────────────────────────────────────────────────────────
 
                     # Bestätigung benötigt?
-                    if result.requires_confirmation and state.mode == AgentMode.WRITE_WITH_CONFIRM:
-                        state.pending_confirmation = tool_call
+                    if result.requires_confirmation:
+                        # Modus bestimmt ob Bestätigung angefordert oder auto-ausgeführt wird
+                        should_auto_execute = (
+                            # PLAN_THEN_EXECUTE mit genehmigtem Plan
+                            (state.mode == AgentMode.PLAN_THEN_EXECUTE and state.plan_approved)
+                            # AUTONOMOUS Modus (ohne Bestätigung)
+                            or state.mode == AgentMode.AUTONOMOUS
+                        )
+                        confirmed = False  # Default: nicht bestätigt
+                        blocked_by_mode = False  # Unterscheidung: User-Ablehnung vs Mode-Block
 
-                        # Tool-Card auf "Wartet auf Bestätigung" setzen
-                        yield AgentEvent(AgentEventType.TOOL_RESULT, {
-                            "id": tool_call.id,
-                            "name": tool_call.name,
-                            "success": True,
-                            "data": f"⏳ Wartet auf Bestätigung: {result.confirmation_data.get('path', '')}"
-                        })
+                        if state.mode == AgentMode.WRITE_WITH_CONFIRM:
+                            # WRITE_WITH_CONFIRM: User-Bestätigung anfordern
+                            state.pending_confirmation = tool_call
 
-                        yield AgentEvent(AgentEventType.CONFIRM_REQUIRED, {
-                            "id": tool_call.id,
-                            "name": tool_call.name,
-                            "confirmation_data": result.confirmation_data
-                        })
+                            # Tool-Card auf "Wartet auf Bestätigung" setzen
+                            yield AgentEvent(AgentEventType.TOOL_RESULT, {
+                                "id": tool_call.id,
+                                "name": tool_call.name,
+                                "success": True,
+                                "data": f"⏳ Wartet auf Bestätigung: {result.confirmation_data.get('path', '')}"
+                            })
 
-                        # Warten auf Bestätigung
-                        confirmed = yield
-                        tool_call.confirmed = confirmed
+                            yield AgentEvent(AgentEventType.CONFIRM_REQUIRED, {
+                                "id": tool_call.id,
+                                "name": tool_call.name,
+                                "confirmation_data": result.confirmation_data
+                            })
 
+                            # Warten auf Bestätigung
+                            confirmed = yield
+                            tool_call.confirmed = confirmed
+                        elif should_auto_execute:
+                            # PLAN_THEN_EXECUTE mit genehmigtem Plan: Auto-Ausführung
+                            logger.info(f"[agent] Auto-executing {tool_call.name} (plan approved)")
+                            confirmed = True
+                            tool_call.confirmed = True
+                        else:
+                            # Anderer Modus (z.B. READ_ONLY): Nicht ausführen
+                            logger.warning(f"[agent] Write operation {tool_call.name} blocked in mode {state.mode}")
+                            blocked_by_mode = True
+                            result = ToolResult(
+                                success=False,
+                                error=f"Schreiboperation nicht erlaubt im Modus {state.mode.value}"
+                            )
+                            tool_call.result = result
+                            # TOOL_RESULT für blockierte Operation
+                            yield AgentEvent(AgentEventType.TOOL_RESULT, {
+                                "id": tool_call.id,
+                                "name": tool_call.name,
+                                "success": False,
+                                "error": result.error
+                            })
+
+                        # Nur wenn Bestätigung erteilt wurde (user oder auto), Operation ausführen
                         if confirmed:
                             # Operation ausführen
                             exec_result = await self._execute_confirmed_operation(
@@ -2166,7 +2200,8 @@ class AgentOrchestrator:
                                     "success": False,
                                     "data": f"❌ Fehler: {exec_result.error}"
                                 })
-                        else:
+                        elif not blocked_by_mode:
+                            # User hat abgelehnt (nicht blockiert durch Mode)
                             yield AgentEvent(AgentEventType.CANCELLED, {
                                 "id": tool_call.id,
                                 "message": "Operation abgebrochen"
@@ -2184,6 +2219,7 @@ class AgentOrchestrator:
                                 "success": False,
                                 "data": "⚠️ Operation abgebrochen"
                             })
+                        # blocked_by_mode: Wurde bereits oben behandelt
 
                         state.pending_confirmation = None
 
