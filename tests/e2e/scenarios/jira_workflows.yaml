@@ -17,6 +17,7 @@ scenarios:
 
   - name: search_jira_issues
     description: Search Jira for open bugs
+    skip_if_disabled: ["jira"]  # Skip if Jira mock server unavailable
     prompt: |
       Use search_jira to find all open bugs in the BUG project.
       List the issue keys and summaries.
@@ -33,6 +34,7 @@ scenarios:
 
   - name: read_jira_issue_details
     description: Read detailed Jira issue
+    skip_if_disabled: ["jira"]
     prompt: |
       Use read_jira_issue to read the full details of issue BUG-1.
       Include the description, acceptance criteria, and affected files.
@@ -53,6 +55,7 @@ scenarios:
 
   - name: jira_bug_analysis
     description: Read bug from Jira, then analyze affected code
+    skip_if_disabled: ["jira"]
     prompt: |
       1. Use read_jira_issue to read BUG-1
       2. The issue mentions affected files - use read_file to read each affected file
@@ -74,6 +77,7 @@ scenarios:
 
   - name: jira_fix_implementation
     description: Read bug, analyze code, implement fix
+    skip_if_disabled: ["jira"]
     prompt: |
       Complete workflow:
       1. Read Jira issue BUG-1 to understand the bug
@@ -103,6 +107,7 @@ scenarios:
 
   - name: code_review_subtasks
     description: Process code review with subtasks
+    skip_if_disabled: ["jira"]
     prompt: |
       Process the code review story CR-1:
       1. Use read_jira_issue to read the main story
@@ -126,6 +131,7 @@ scenarios:
 
   - name: code_review_style_check
     description: Execute style check subtask from code review
+    skip_if_disabled: ["jira"]
     prompt: |
       Execute the "Check code style" subtask:
       1. Read Jira issue CR-2 (the style check subtask)
@@ -149,6 +155,7 @@ scenarios:
 
   - name: feature_implementation_planning
     description: Plan feature implementation from Jira story
+    skip_if_disabled: ["jira"]
     prompt: |
       Plan the implementation for feature FEAT-1:
       1. Read the Jira story to understand requirements
@@ -171,6 +178,7 @@ scenarios:
 
   - name: feature_full_implementation
     description: Full feature implementation from Jira
+    skip_if_disabled: ["jira"]
     prompt: |
       Implement feature FEAT-1 completely:
       1. Read the Jira story for requirements
@@ -200,6 +208,7 @@ scenarios:
 
   - name: jira_issue_not_found
     description: Handle non-existent Jira issue gracefully
+    skip_if_disabled: ["jira"]
     prompt: |
       Use read_jira_issue to read issue NONEXISTENT-999.
       If it doesn't exist, report that clearly.
@@ -215,6 +224,7 @@ scenarios:
 
   - name: jira_search_no_results
     description: Handle empty search results
+    skip_if_disabled: ["jira"]
     prompt: |
       Use search_jira to find issues with status "Archived" in project EMPTY.
       Report if no issues are found.

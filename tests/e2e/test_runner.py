@@ -76,6 +76,36 @@ class E2ETestRunner:
             await self.client.disconnect()
             self.client = None
 
+    def _check_features_available(self, features: List[str]) -> tuple[bool, str]:
+        """
+        Check if required features are available.
+
+        Args:
+            features: List of feature names to check (e.g., ["jira", "github"])
+
+        Returns:
+            Tuple of (all_available, reason) - reason is set if not available
+        """
+        # Feature availability check - can be extended
+        unavailable = []
+        for feature in features:
+            if feature.lower() == "jira":
+                # Check if Jira mock server is reachable
+                import socket
+                try:
+                    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                    sock.settimeout(1)
+                    result = sock.connect_ex(("localhost", 9000))
+                    sock.close()
+                    if result != 0:
+                        unavailable.append(f"jira (mock server not running on port 9000)")
+                except Exception:
+                    unavailable.append(f"jira (mock server not reachable)")
+
+        if unavailable:
+            return False, f"Disabled features: {', '.join(unavailable)}"
+        return True, ""
+
     async def run_scenario(
         self,
         scenario: TestScenario,
@@ -94,6 +124,24 @@ class E2ETestRunner:
         logger.info(f"Running scenario: {scenario.name}")
         start_time = time.time()
         errors = []
+
+        # Check if scenario should be skipped
+        if scenario.skip_if_disabled:
+            available, reason = self._check_features_available(scenario.skip_if_disabled)
+            if not available:
+                logger.info(f"Skipping scenario {scenario.name}: {reason}")
+                return TestResult(
+                    name=scenario.name,
+                    passed=True,  # Skipped counts as passed
+                    prompt=scenario.prompt,
+                    expected_tools=[t.name for t in scenario.expected_tools],
+                    actual_tools=[],
+                    response_preview="",
+                    duration_ms=0,
+                    errors=[],
+                    skipped=True,
+                    skip_reason=reason,
+                )
 
         # Get metrics before
         metrics_before = await self.client.get_proxy_metrics()

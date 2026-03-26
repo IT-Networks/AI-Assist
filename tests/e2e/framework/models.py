@@ -74,6 +74,8 @@ class TestResult:
     proxy_metrics_before: Optional[ProxyMetrics] = None
     proxy_metrics_after: Optional[ProxyMetrics] = None
     timestamp: datetime = field(default_factory=datetime.now)
+    skipped: bool = False
+    skip_reason: str = ""
 
     @property
     def tool_names(self) -> List[str]:

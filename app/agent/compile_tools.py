@@ -377,7 +377,8 @@ def register_compile_tools(registry: ToolRegistry) -> int:
     registry.register(Tool(
         name="validate_file",
         description=(
-            "Validiert eine einzelne Datei und gibt detaillierte Ergebnisse zurück. "
+            "NUR LESEN/PRÜFEN - Validiert eine Datei auf Syntax-Fehler OHNE sie zu ändern. "
+            "NICHT zum Schreiben/Ändern verwenden! Für Änderungen: edit_file oder write_file nutzen. "
             "Unterstützt Python, Java, SQL, SQLJ, XML und Config-Dateien."
         ),
         category=ToolCategory.ANALYSIS,

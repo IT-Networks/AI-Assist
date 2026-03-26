@@ -45,6 +45,7 @@ class TestScenario:
     tags: List[str] = field(default_factory=list)
     setup: Optional[Dict[str, Any]] = None
     teardown: Optional[Dict[str, Any]] = None
+    skip_if_disabled: List[str] = field(default_factory=list)  # Features required for test
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "TestScenario":
@@ -83,6 +84,7 @@ class TestScenario:
             tags=data.get("tags", []),
             setup=data.get("setup"),
             teardown=data.get("teardown"),
+            skip_if_disabled=data.get("skip_if_disabled", []),
         )
 
 

@@ -199,12 +199,14 @@ database:
   jdbc_driver_class: com.ibm.db2.jcc.DB2Driver
 
 jira:
-  enabled: false
-  base_url: https://jira.example.com
-  username: ''
-  api_token: ''
+  # E2E Test Mode: enabled=true so tools attempt execution
+  # In production, configure real Jira credentials
+  enabled: true
+  base_url: http://localhost:9000  # Mock Jira server for E2E tests
+  username: 'test-user'
+  api_token: 'test-token'
   password: ''
-  default_project: ''
+  default_project: 'BUG'
   verify_ssl: false
 
 # Skill-System
