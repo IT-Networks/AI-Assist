@@ -211,6 +211,10 @@ class ToolRegistry:
             name: Name des Tools
             **kwargs: Parameter für das Tool
         """
+        # Entferne 'name' aus kwargs falls vorhanden (verhindert "multiple values" Fehler
+        # wenn Text-Parser 'name' fälschlicherweise in arguments einfügt)
+        kwargs.pop("name", None)
+
         tool = self._tools.get(name)
         if not tool:
             return ToolResult(success=False, error=f"Unbekanntes Tool: {name}")
