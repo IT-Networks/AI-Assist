@@ -549,17 +549,23 @@ class ALMClient:
         self._check_configured()
 
         # ALM Query-Syntax bauen
+        # Syntax: {field[operator'value']} oder {field[value]} fuer numerisch
+        # Contains: name[*pattern*] (Wildcard-Syntax, nicht ~'pattern')
         query_parts = []
         if query:
-            # Escape special characters
-            escaped = query.replace("'", "''")
-            query_parts.append(f"name[~'{escaped}']")
+            # ALM verwendet *pattern* fuer Contains-Suche (Wildcards)
+            # Single quotes werden NICHT verwendet bei Wildcard-Suche
+            # Escape: * -> \*, ' -> ''
+            escaped = query.replace("*", "\\*").replace("'", "''")
+            query_parts.append(f"name[*{escaped}*]")
         if folder_id is not None:
             query_parts.append(f"parent-id[{folder_id}]")
 
         params = {"page-size": str(limit)}
         if query_parts:
             params["query"] = "{" + ";".join(query_parts) + "}"
+
+        logger.debug(f"ALM search_tests query: {params.get('query', 'none')}")
 
         root = await self._request("GET", "/tests", params=params)
 
@@ -1016,16 +1022,19 @@ class ALMClient:
 
         query_parts = []
         if query:
-            escaped = query.replace("'", "''")
-            query_parts.append(f"test-config-name[~'{escaped}']")
+            # ALM verwendet *pattern* fuer Contains-Suche (Wildcards)
+            escaped = query.replace("*", "\\*").replace("'", "''")
+            query_parts.append(f"test-config-name[*{escaped}*]")
         if test_set_id is not None:
             query_parts.append(f"cycle-id[{test_set_id}]")
         if status:
-            query_parts.append(f"status['{status}']")
+            query_parts.append(f"status[{status}]")
 
         params = {"page-size": str(limit)}
         if query_parts:
             params["query"] = "{" + ";".join(query_parts) + "}"
+
+        logger.debug(f"ALM search_test_instances query: {params.get('query', 'none')}")
 
         root = await self._request("GET", "/test-instances", params=params)
 
