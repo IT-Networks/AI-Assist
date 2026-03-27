@@ -50,6 +50,17 @@ def _get_http_client() -> httpx.AsyncClient:
     return _http_client
 
 
+async def _reset_http_client():
+    """Setzt den HTTP-Client zurueck (loescht Cookie-Jar)."""
+    global _http_client
+    if _http_client is not None:
+        try:
+            await _http_client.aclose()
+        except Exception:
+            pass
+        _http_client = None
+
+
 async def close_alm_client():
     """Schliesst den HTTP-Client (fuer Shutdown)."""
     global _http_client
@@ -449,7 +460,7 @@ class ALMClient:
         return self._session
 
     async def logout(self) -> None:
-        """Beendet ALM Session."""
+        """Beendet ALM Session und setzt HTTP-Client zurueck."""
         if not self._session:
             return
 
@@ -463,7 +474,12 @@ class ALMClient:
             logger.warning(f"ALM Logout fehlgeschlagen: {e}")
 
         self._session = None
-        logger.info("ALM: Session beendet")
+
+        # WICHTIG: HTTP-Client zuruecksetzen um Cookie-Jar zu leeren!
+        # Sonst werden alte Cookies beim naechsten Login gemerged.
+        await _reset_http_client()
+
+        logger.info("ALM: Session und HTTP-Client zurueckgesetzt")
 
     async def test_connection(self, verify_project: bool = False) -> Dict[str, Any]:
         """
