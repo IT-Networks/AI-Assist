@@ -404,8 +404,8 @@ class ALMClient:
 
         logger.info(f"ALM: Site-Session erstellt fuer User {session_cookies['alm_user'] or self.username}")
 
-        # Step 3: Project Session erstellen (wichtig fuer Projekt-Zugriff!)
-        await self._create_project_session()
+        # Note: Project Session wird bei Bedarf erstellt (nicht hier!)
+        # Siehe _create_project_session() - wird nur bei verify_project=True aufgerufen
 
         return self._session
 
@@ -413,36 +413,34 @@ class ALMClient:
         """
         Erstellt eine Projekt-Session fuer das aktuelle Projekt.
 
-        Dies ist erforderlich nach der Site-Session um auf projekt-spezifische
-        Ressourcen zugreifen zu koennen.
+        Dies ist optional und wird nur bei manchen ALM-Versionen benoetigt.
+        Fehler werden ignoriert, da nicht alle ALM-Server diesen Endpoint haben.
         """
         if not self._session:
             return
 
-        client = _get_http_client()
-        # Manche ALM-Versionen erwarten /session am Ende
-        project_session_url = f"{self.base_url}/rest/domains/{self.domain}/projects/{self.project}/session"
-
-        logger.debug(f"ALM: Erstelle Projekt-Session fuer {self.domain}/{self.project}")
-
         try:
+            client = _get_http_client()
+            # Manche ALM-Versionen erwarten /session am Ende
+            project_session_url = f"{self.base_url}/rest/domains/{self.domain}/projects/{self.project}/session"
+
+            logger.debug(f"ALM: Versuche Projekt-Session fuer {self.domain}/{self.project}")
+
             resp = await client.post(
                 project_session_url,
                 headers=self._session_headers(),
                 cookies=self._session_cookies(),
                 content="",
             )
-            # 200 oder 201 sind OK, andere Status-Codes loggen wir nur
+            # 200 oder 201 sind OK
             if resp.status_code in (200, 201):
                 logger.info(f"ALM: Projekt-Session erstellt fuer {self.domain}/{self.project}")
             else:
                 # Nicht fatal - manche ALM-Versionen brauchen das nicht
-                logger.debug(f"ALM: Projekt-Session Status {resp.status_code} (wird ignoriert)")
-        except httpx.HTTPStatusError as e:
-            # Nicht fatal - nur loggen
-            logger.warning(f"ALM: Projekt-Session fehlgeschlagen ({e.response.status_code}), fahre fort...")
-        except httpx.RequestError as e:
-            logger.warning(f"ALM: Projekt-Session Verbindungsfehler: {e}")
+                logger.debug(f"ALM: Projekt-Session Status {resp.status_code} (optional, wird ignoriert)")
+        except Exception as e:
+            # Komplett ignorieren - dieser Endpoint ist optional
+            logger.debug(f"ALM: Projekt-Session nicht verfuegbar: {e}")
 
     async def ensure_session(self) -> ALMSession:
         """Stellt sicher dass eine gueltige Session existiert."""
@@ -486,7 +484,9 @@ class ALMClient:
             if verify_project:
                 logger.debug(f"ALM: Pruefe Projekt-Existenz via /tests Endpoint")
                 try:
-                    # Verwende _request() fuer korrektes Session-Handling
+                    # Erst Projekt-Session erstellen (manche ALM-Versionen benoetigen das)
+                    await self._create_project_session()
+                    # Dann testen ob Projekt erreichbar
                     await self._request("GET", "/tests", None, {"page-size": "1"})
                     logger.info(f"ALM: Projekt {self.domain}/{self.project} verifiziert")
                 except ALMError as e:
