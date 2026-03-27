@@ -10119,6 +10119,11 @@ function renderSettingsSection() {
     return;
   }
 
+  if (section === 'iq_server') {
+    renderIQServerSection();
+    return;
+  }
+
   if (section === 'alm') {
     renderALMSection();
     return;
@@ -11562,6 +11567,39 @@ async function saveCurrentSection() {
       if (!res.ok) throw new Error(data.detail || 'Fehler');
       settingsState.settings.sub_agents = data.values;
       updateSettingsStatus('Sub-Agenten-Einstellungen angewendet', 'success');
+    } catch (err) {
+      updateSettingsStatus('Fehler: ' + err.message, 'error');
+    }
+    return;
+  }
+
+  // Sonatype IQ Server hat eigene Felder inkl. credential_ref
+  if (section === 'iq_server') {
+    const credRef = document.getElementById('iq-credential-ref')?.value || '';
+    const values = {
+      enabled: document.getElementById('iq-enabled')?.checked || false,
+      base_url: document.getElementById('iq-base-url')?.value?.trim() || '',
+      credential_ref: credRef,
+      username: credRef ? '' : (document.getElementById('iq-username')?.value?.trim() || ''),
+      api_token: credRef ? '' : (document.getElementById('iq-token')?.value || ''),
+      verify_ssl: document.getElementById('iq-verify-ssl')?.checked || false,
+      default_app: document.getElementById('iq-default-app')?.value?.trim() || '',
+      default_org_id: document.getElementById('iq-default-org')?.value?.trim() || '',
+      timeout_seconds: parseInt(document.getElementById('iq-timeout')?.value) || 30,
+      default_waiver_days: parseInt(document.getElementById('iq-waiver-days')?.value) || 90,
+      default_matcher_strategy: document.getElementById('iq-matcher-strategy')?.value || 'EXACT_COMPONENT',
+      require_waiver_confirmation: document.getElementById('iq-confirm-waiver')?.checked !== false,
+    };
+    try {
+      const res = await fetch('/api/settings/section/iq_server', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(values),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.detail || 'Fehler');
+      settingsState.settings.iq_server = data.values;
+      updateSettingsStatus('IQ Server-Einstellungen angewendet', 'success');
     } catch (err) {
       updateSettingsStatus('Fehler: ' + err.message, 'error');
     }
@@ -15448,6 +15486,186 @@ function collectJenkinsSettings() {
     timeout_seconds: parseInt(document.getElementById('jenkins-timeout')?.value) || 30,
     require_build_confirmation: document.getElementById('jenkins-confirm-build')?.checked !== false,
   };
+}
+
+// ── Sonatype IQ Server Settings Section ──────────────────────────────────────
+
+async function renderIQServerSection() {
+  const cfg = settingsState.settings.iq_server || {};
+
+  const form = document.getElementById('settings-form');
+  form.innerHTML = `
+    <div class="settings-section">
+      <h3 class="settings-section-title">SONATYPE IQ SERVER</h3>
+      <p class="settings-section-desc">
+        Sonatype IQ Server (Lifecycle) Integration fuer Policy-Violations (Findings) und Waiver-Management.
+        Der Agent kann Findings analysieren, kommentieren und Waivers anlegen.
+      </p>
+    </div>
+
+    <div class="settings-field">
+      <label for="iq-enabled">Aktiviert</label>
+      <label class="checkbox-label">
+        <input type="checkbox" id="iq-enabled" ${cfg.enabled ? 'checked' : ''} onchange="markSettingsModified()">
+        ${cfg.enabled ? 'Aktiviert' : 'Deaktiviert'}
+      </label>
+    </div>
+
+    <div class="settings-field">
+      <label for="iq-base-url">Base URL</label>
+      <input type="text" id="iq-base-url" value="${escapeHtml(cfg.base_url || '')}"
+        placeholder="https://iq.intern:8070" onchange="markSettingsModified()" style="font-family:var(--font-mono)">
+      <small class="field-hint">Die Basis-URL zum IQ Server</small>
+    </div>
+
+    <div class="settings-field">
+      <label for="iq-credential-ref">Zentrale Credentials verwenden</label>
+      <select id="iq-credential-ref" onchange="markSettingsModified(); iqCredentialChanged()">
+        <option value="">(Keine - direkte Eingabe unten)</option>
+      </select>
+      <small class="field-hint">Verwende zentrale Credentials (Basic Auth: User-Code + Passcode)</small>
+    </div>
+
+    <div id="iq-direct-credentials">
+      <div class="settings-field">
+        <label for="iq-username">User-Code / Benutzername</label>
+        <input type="text" id="iq-username" value="${escapeHtml(cfg.username || '')}"
+          placeholder="User-Code" onchange="markSettingsModified()">
+      </div>
+
+      <div class="settings-field">
+        <label for="iq-token">Passcode / API-Token</label>
+        <input type="password" id="iq-token" value="${escapeHtml(cfg.api_token || '')}"
+          placeholder="Passcode" onchange="markSettingsModified()" autocomplete="off">
+      </div>
+    </div>
+
+    <div class="settings-field">
+      <label for="iq-verify-ssl">SSL-Zertifikat pruefen</label>
+      <label class="checkbox-label">
+        <input type="checkbox" id="iq-verify-ssl" ${cfg.verify_ssl ? 'checked' : ''} onchange="markSettingsModified()">
+        ${cfg.verify_ssl ? 'Ja' : 'Nein (fuer Self-Signed Certs)'}
+      </label>
+    </div>
+
+    <div class="settings-section" style="margin-top:20px">
+      <h3 class="settings-section-title">DEFAULTS</h3>
+    </div>
+
+    <div class="settings-field">
+      <label for="iq-default-app">Default Application (publicId)</label>
+      <input type="text" id="iq-default-app" value="${escapeHtml(cfg.default_app || '')}"
+        placeholder="my-application" onchange="markSettingsModified()">
+      <small class="field-hint">Wird verwendet wenn der Agent keine App angibt</small>
+    </div>
+
+    <div class="settings-field">
+      <label for="iq-default-org">Default Organisation-ID</label>
+      <input type="text" id="iq-default-org" value="${escapeHtml(cfg.default_org_id || '')}"
+        placeholder="Organisation-UUID" onchange="markSettingsModified()" style="font-family:var(--font-mono)">
+      <small class="field-hint">Organisations-ID fuer Org-Level-Waivers</small>
+    </div>
+
+    <div class="settings-field">
+      <label for="iq-timeout">Timeout (Sekunden)</label>
+      <input type="number" id="iq-timeout" value="${cfg.timeout_seconds || 30}"
+        min="5" max="300" onchange="markSettingsModified()">
+    </div>
+
+    <div class="settings-section" style="margin-top:20px">
+      <h3 class="settings-section-title">WAIVER-EINSTELLUNGEN</h3>
+    </div>
+
+    <div class="settings-field">
+      <label for="iq-waiver-days">Standard-Ablauf (Tage)</label>
+      <input type="number" id="iq-waiver-days" value="${cfg.default_waiver_days || 90}"
+        min="1" max="365" onchange="markSettingsModified()">
+      <small class="field-hint">Anzahl Tage bis ein neuer Waiver ablaeuft</small>
+    </div>
+
+    <div class="settings-field">
+      <label for="iq-matcher-strategy">Standard Matching-Strategie</label>
+      <select id="iq-matcher-strategy" onchange="markSettingsModified()">
+        <option value="EXACT_COMPONENT" ${(cfg.default_matcher_strategy || 'EXACT_COMPONENT') === 'EXACT_COMPONENT' ? 'selected' : ''}>EXACT_COMPONENT (exakte Version)</option>
+        <option value="ALL_VERSIONS" ${cfg.default_matcher_strategy === 'ALL_VERSIONS' ? 'selected' : ''}>ALL_VERSIONS (alle Versionen)</option>
+        <option value="ALL_COMPONENTS" ${cfg.default_matcher_strategy === 'ALL_COMPONENTS' ? 'selected' : ''}>ALL_COMPONENTS (alle Komponenten)</option>
+      </select>
+      <small class="field-hint">EXACT_COMPONENT = nur exakte Version waiven (empfohlen)</small>
+    </div>
+
+    <div class="settings-field">
+      <label for="iq-confirm-waiver">Waiver-Bestaetigung erforderlich</label>
+      <label class="checkbox-label">
+        <input type="checkbox" id="iq-confirm-waiver" ${cfg.require_waiver_confirmation !== false ? 'checked' : ''} onchange="markSettingsModified()">
+        Waivers muessen bestaetigt werden (empfohlen)
+      </label>
+    </div>
+
+    <div class="settings-actions-section" style="margin-top:20px">
+      <button class="btn btn-secondary" onclick="iqTestConnection()">
+        Verbindung testen
+      </button>
+      <span id="iq-test-result" class="test-result"></span>
+    </div>
+  `;
+
+  // Load credentials into dropdown
+  loadCredentialsDropdown('iq-credential-ref', cfg.credential_ref || '');
+}
+
+function iqCredentialChanged() {
+  const credRef = document.getElementById('iq-credential-ref').value;
+  const directCredentials = document.getElementById('iq-direct-credentials');
+  if (directCredentials) {
+    directCredentials.style.display = credRef ? 'none' : 'block';
+  }
+}
+
+async function iqTestConnection() {
+  const resultEl = document.getElementById('iq-test-result');
+  resultEl.textContent = 'Teste Verbindung...';
+  resultEl.className = 'test-result testing';
+
+  // Erst die aktuellen Werte speichern
+  const credRef = document.getElementById('iq-credential-ref')?.value || '';
+  const cfg = {
+    enabled: true,
+    base_url: document.getElementById('iq-base-url').value.trim(),
+    credential_ref: credRef,
+    username: credRef ? '' : (document.getElementById('iq-username').value.trim()),
+    api_token: credRef ? '' : (document.getElementById('iq-token').value),
+    verify_ssl: document.getElementById('iq-verify-ssl').checked,
+    timeout_seconds: parseInt(document.getElementById('iq-timeout').value) || 30,
+  };
+
+  if (!cfg.base_url) {
+    resultEl.textContent = 'Base URL fehlt';
+    resultEl.className = 'test-result error';
+    return;
+  }
+
+  try {
+    // Temporaer speichern fuer den Test
+    await fetch('/api/settings/section/iq_server', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(cfg)
+    });
+
+    const res = await fetch('/api/iq/test', { method: 'POST' });
+    const data = await res.json();
+
+    if (data.success) {
+      resultEl.textContent = `${data.message || 'Verbindung erfolgreich'}`;
+      resultEl.className = 'test-result success';
+    } else {
+      resultEl.textContent = `${data.error || 'Verbindung fehlgeschlagen'}`;
+      resultEl.className = 'test-result error';
+    }
+  } catch (e) {
+    resultEl.textContent = `Fehler: ${e.message}`;
+    resultEl.className = 'test-result error';
+  }
 }
 
 // ── Search Settings Section ────────────────────────────────────────────────────
