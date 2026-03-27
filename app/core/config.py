@@ -498,8 +498,9 @@ class SoapInstitut(BaseModel):
     """Ein Institut mit eigenen Credentials und Session."""
     institut_nr: str = ""             # z.B. "001", "002", "100"
     name: str = ""                    # z.B. "Sparkasse Musterstadt"
-    user: str = ""                    # Login-User für dieses Institut
-    password: str = ""                # Passwort (oder {{env:INST_001_PW}})
+    credential_ref: str = ""          # Referenz auf zentrale Credentials (bevorzugt)
+    user: str = ""                    # Login-User (Fallback wenn credential_ref leer)
+    password: str = ""                # Passwort (oder {{env:INST_001_PW}}, Fallback)
     enabled: bool = True
 
 

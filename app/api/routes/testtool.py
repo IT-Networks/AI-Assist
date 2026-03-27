@@ -64,6 +64,7 @@ class ConfigRequest(BaseModel):
 class InstitutRequest(BaseModel):
     institut_nr: str
     name: str = ""
+    credential_ref: str = ""
     user: str = ""
     password: str = ""
     enabled: bool = True
@@ -189,6 +190,7 @@ async def list_institute() -> Dict[str, Any]:
             {
                 "institut_nr": i.institut_nr,
                 "name": i.name,
+                "credential_ref": i.credential_ref,
                 "user": i.user,
                 "password": "********" if i.password else "",
                 "enabled": i.enabled,
@@ -212,6 +214,7 @@ async def add_institut(req: InstitutRequest) -> Dict[str, Any]:
     institut = SoapInstitut(
         institut_nr=req.institut_nr,
         name=req.name,
+        credential_ref=req.credential_ref,
         user=req.user,
         password=req.password,
         enabled=req.enabled,
@@ -232,8 +235,9 @@ async def update_institut(institut_nr: str, req: InstitutRequest) -> Dict[str, A
             settings.test_tool.institute[i] = SoapInstitut(
                 institut_nr=institut_nr,
                 name=req.name,
-                user=req.user,
-                password=password,
+                credential_ref=req.credential_ref,
+                user=req.user if not req.credential_ref else "",
+                password=password if not req.credential_ref else "",
                 enabled=req.enabled,
             )
             return {"updated": {"institut_nr": institut_nr, "name": req.name}}

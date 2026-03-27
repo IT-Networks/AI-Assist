@@ -10395,6 +10395,21 @@ function almCredentialChanged() {
   }
 }
 
+function genericCredentialChanged(section) {
+  // Generische Credential-Dropdown-Logik: blendet direkte Credential-Felder ein/aus
+  const credRef = document.getElementById(`setting-${section}-credential_ref`)?.value || '';
+  const credFieldKeys = ['username', 'password', 'api_token', 'api_key'];
+  for (const key of credFieldKeys) {
+    const fieldEl = document.getElementById(`setting-${section}-${key}`);
+    if (fieldEl) {
+      const fieldContainer = fieldEl.closest('.settings-field');
+      if (fieldContainer) {
+        fieldContainer.style.display = credRef ? 'none' : '';
+      }
+    }
+  }
+}
+
 function updateALMCheckboxLabels() {
   const enabledEl = document.getElementById('alm-enabled');
   const enabledLabel = document.getElementById('alm-enabled-label');
@@ -10752,6 +10767,17 @@ function renderSettingsFields(section, values) {
           <option value="ibm_db" ${value === 'ibm_db' ? 'selected' : ''}>ibm_db - Native Driver</option>
         </select>
       `;
+    } else if (key === 'credential_ref') {
+      // Credential-Dropdown: Zeigt zentrale Credentials als Auswahl
+      html += `
+        <select id="${fieldId}" data-section="${section}" data-key="${key}"
+          onchange="markSettingsModified(); genericCredentialChanged('${section}')">
+          <option value="">(Keine - direkte Eingabe unten)</option>
+        </select>
+        <small class="field-hint">Verwende zentrale Credentials oder gib unten direkt ein</small>
+      `;
+      // Wird nach dem Rendern per loadCredentialsDropdown befuellt
+      setTimeout(() => loadCredentialsDropdown(fieldId, value || ''), 0);
     } else {
       html += `
         <input type="text" id="${fieldId}" data-section="${section}" data-key="${key}"
@@ -12435,16 +12461,24 @@ async function renderTestToolSection() {
       <p class="settings-hint">Jedes Institut hat eigene Zugangsdaten. Passwörter können Umgebungsvariablen referenzieren: <code>{{env:VAR_NAME}}</code></p>
       <div id="soap-institute-list"><div class="spinner-inline"></div></div>
       <div class="settings-add-form">
-        <h5 style="margin:0 0 8px">Institut hinzufügen</h5>
+        <h5 style="margin:0 0 8px">Institut hinzufuegen</h5>
         <div class="settings-field-row">
           <input id="soap-inst-nr" type="text" class="settings-input" placeholder="Institut-Nr (z.B. 001)" style="max-width:120px">
           <input id="soap-inst-name" type="text" class="settings-input" placeholder="Name (z.B. Hauptfiliale)">
         </div>
-        <div class="settings-field-row" style="margin-top:4px">
-          <input id="soap-inst-user" type="text" class="settings-input" placeholder="Benutzername">
-          <input id="soap-inst-pass" type="password" class="settings-input" placeholder="Passwort oder {{env:VAR}}">
+        <div class="settings-field" style="margin-top:4px">
+          <label style="font-size:11px;color:var(--text-muted)">Zentrale Credentials</label>
+          <select id="soap-inst-cred" class="settings-input" onchange="soapAddCredChanged()">
+            <option value="">(Keine - direkte Eingabe unten)</option>
+          </select>
         </div>
-        <button class="btn btn-primary" onclick="soapAddInstitut()">+ Institut</button>
+        <div id="soap-inst-direct-creds">
+          <div class="settings-field-row" style="margin-top:4px">
+            <input id="soap-inst-user" type="text" class="settings-input" placeholder="Benutzername">
+            <input id="soap-inst-pass" type="password" class="settings-input" placeholder="Passwort oder {{env:VAR}}">
+          </div>
+        </div>
+        <button class="btn btn-primary" onclick="soapAddInstitut()" style="margin-top:8px">+ Institut</button>
       </div>
     </div>
 
@@ -12714,6 +12748,9 @@ async function soapLoadAll() {
 
   // Konfigurations-Status aktualisieren
   soapUpdateConfigStatus(configData, instituteData, servicesData);
+
+  // Credentials-Dropdown fuer Institut-Hinzufuegen laden
+  loadCredentialsDropdown('soap-inst-cred', '');
 }
 
 function soapUpdateConfigStatus(config, institutes, services) {
@@ -12806,9 +12843,12 @@ async function soapLoadInstitute() {
           </div>
         </div>
         <div class="ds-item-details">
-          <span class="ds-detail-label">User:</span> ${escapeHtml(inst.user)}
-          <span class="ds-detail-label" style="margin-left:12px">Passwort:</span> ${inst.password ? '••••••••' : '(leer)'}
+          ${inst.credential_ref
+            ? `<span class="ds-detail-label">Credentials:</span> <span class="badge">${escapeHtml(inst.credential_ref)}</span>`
+            : `<span class="ds-detail-label">User:</span> ${escapeHtml(inst.user)} <span class="ds-detail-label" style="margin-left:12px">Passwort:</span> ${inst.password ? '••••••••' : '(leer)'}`
+          }
         </div>
+        <div id="soap-edit-form-${escapeHtml(inst.institut_nr)}" style="display:none"></div>
         <div id="soap-login-status-${escapeHtml(inst.institut_nr)}" class="ds-item-status" style="margin-top:4px;font-size:11px"></div>
       </div>
     `).join('');
@@ -12818,11 +12858,20 @@ async function soapLoadInstitute() {
   return data;
 }
 
+function soapAddCredChanged() {
+  const credRef = document.getElementById('soap-inst-cred')?.value || '';
+  const directEl = document.getElementById('soap-inst-direct-creds');
+  if (directEl) {
+    directEl.style.display = credRef ? 'none' : 'block';
+  }
+}
+
 async function soapAddInstitut() {
   const nr = document.getElementById('soap-inst-nr').value.trim();
   const name = document.getElementById('soap-inst-name').value.trim();
-  const user = document.getElementById('soap-inst-user').value.trim();
-  const pass = document.getElementById('soap-inst-pass').value;
+  const credRef = document.getElementById('soap-inst-cred')?.value || '';
+  const user = credRef ? '' : document.getElementById('soap-inst-user').value.trim();
+  const pass = credRef ? '' : document.getElementById('soap-inst-pass').value;
 
   if (!nr) {
     updateSettingsStatus('Institut-Nr ist erforderlich', 'error');
@@ -12835,6 +12884,7 @@ async function soapAddInstitut() {
     body: JSON.stringify({
       institut_nr: nr,
       name: name || nr,
+      credential_ref: credRef,
       user: user,
       password: pass,
       enabled: true
@@ -12855,33 +12905,99 @@ async function soapAddInstitut() {
 }
 
 async function soapEditInstitut(nr) {
-  const name = prompt('Neuer Name (leer = behalten):');
-  if (name === null) return;
-
-  const user = prompt('Neuer Benutzername (leer = behalten):');
-  if (user === null) return;
-
-  const pass = prompt('Neues Passwort (leer = behalten):');
-  if (pass === null) return;
-
   // Aktuelle Daten laden
   const res = await fetch('/api/testtool/institute');
   const data = await res.json();
   const inst = data.institute?.find(i => i.institut_nr === nr);
   if (!inst) return;
 
-  await fetch(`/api/testtool/institute/${encodeURIComponent(nr)}`, {
-    method: 'PUT',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      institut_nr: nr,
-      name: name || inst.name,
-      user: user || inst.user,
-      password: pass || '********',
-      enabled: inst.enabled
-    })
-  });
-  await soapLoadInstitute();
+  const formEl = document.getElementById(`soap-edit-form-${nr}`);
+  if (!formEl) return;
+
+  // Toggle: wenn bereits offen, schliessen
+  if (formEl.style.display === 'block') {
+    formEl.style.display = 'none';
+    formEl.innerHTML = '';
+    return;
+  }
+
+  formEl.style.display = 'block';
+  formEl.innerHTML = `
+    <div style="padding:12px;margin-top:8px;background:var(--bg-secondary);border-radius:6px;border:1px solid var(--border-color)">
+      <div class="settings-field-row" style="margin-bottom:8px">
+        <div style="flex:1">
+          <label style="font-size:11px;color:var(--text-muted)">Name</label>
+          <input type="text" id="soap-edit-name-${nr}" class="settings-input" value="${escapeHtml(inst.name || '')}" placeholder="Name">
+        </div>
+        <div style="flex:0 0 80px">
+          <label style="font-size:11px;color:var(--text-muted)">Aktiv</label>
+          <label class="checkbox-label"><input type="checkbox" id="soap-edit-enabled-${nr}" ${inst.enabled ? 'checked' : ''}> ${inst.enabled ? 'Ja' : 'Nein'}</label>
+        </div>
+      </div>
+      <div class="settings-field" style="margin-bottom:8px">
+        <label style="font-size:11px;color:var(--text-muted)">Zentrale Credentials</label>
+        <select id="soap-edit-cred-${nr}" class="settings-input" onchange="soapEditCredChanged('${nr}')">
+          <option value="">(Keine - direkte Eingabe unten)</option>
+        </select>
+      </div>
+      <div id="soap-edit-direct-${nr}" style="display:${inst.credential_ref ? 'none' : 'block'}">
+        <div class="settings-field-row" style="margin-bottom:8px">
+          <div style="flex:1">
+            <label style="font-size:11px;color:var(--text-muted)">Benutzername</label>
+            <input type="text" id="soap-edit-user-${nr}" class="settings-input" value="${escapeHtml(inst.user || '')}" placeholder="Benutzername">
+          </div>
+          <div style="flex:1">
+            <label style="font-size:11px;color:var(--text-muted)">Passwort</label>
+            <input type="password" id="soap-edit-pass-${nr}" class="settings-input" value="" placeholder="(leer = behalten)" autocomplete="off">
+          </div>
+        </div>
+      </div>
+      <div style="display:flex;gap:8px">
+        <button class="btn btn-primary btn-sm" onclick="soapSaveEditInstitut('${nr}')">Speichern</button>
+        <button class="btn btn-secondary btn-sm" onclick="document.getElementById('soap-edit-form-${nr}').style.display='none'">Abbrechen</button>
+      </div>
+    </div>
+  `;
+
+  // Credentials-Dropdown befuellen
+  loadCredentialsDropdown(`soap-edit-cred-${nr}`, inst.credential_ref || '');
+}
+
+function soapEditCredChanged(nr) {
+  const credRef = document.getElementById(`soap-edit-cred-${nr}`)?.value || '';
+  const directEl = document.getElementById(`soap-edit-direct-${nr}`);
+  if (directEl) {
+    directEl.style.display = credRef ? 'none' : 'block';
+  }
+}
+
+async function soapSaveEditInstitut(nr) {
+  const credRef = document.getElementById(`soap-edit-cred-${nr}`)?.value || '';
+  const body = {
+    institut_nr: nr,
+    name: document.getElementById(`soap-edit-name-${nr}`)?.value?.trim() || nr,
+    credential_ref: credRef,
+    user: credRef ? '' : (document.getElementById(`soap-edit-user-${nr}`)?.value?.trim() || ''),
+    password: credRef ? '' : (document.getElementById(`soap-edit-pass-${nr}`)?.value || '********'),
+    enabled: document.getElementById(`soap-edit-enabled-${nr}`)?.checked ?? true,
+  };
+
+  try {
+    const res = await fetch(`/api/testtool/institute/${encodeURIComponent(nr)}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body)
+    });
+    if (res.ok) {
+      updateSettingsStatus('Institut aktualisiert', 'success');
+      await soapLoadInstitute();
+    } else {
+      const err = await res.json().catch(() => ({}));
+      updateSettingsStatus(err.detail || 'Fehler', 'error');
+    }
+  } catch (e) {
+    updateSettingsStatus('Fehler: ' + e.message, 'error');
+  }
 }
 
 async function soapDeleteInstitut(nr) {
@@ -17527,9 +17643,11 @@ async function loadCredentialsList() {
           <li><strong>Confluence</strong>: credential_ref in Confluence-Settings</li>
           <li><strong>Jenkins</strong>: credential_ref in Jenkins-Settings</li>
           <li><strong>GitHub</strong>: credential_ref in GitHub-Settings</li>
+          <li><strong>Sonatype IQ</strong>: credential_ref in IQ Server-Settings</li>
           <li><strong>ServiceNow</strong>: credential_ref in ServiceNow-Settings</li>
           <li><strong>Database</strong>: credential_ref in Database-Settings</li>
           <li><strong>Internal Fetch</strong>: credential_ref in Internal-Fetch-Settings</li>
+          <li><strong>Test-Tool</strong>: credential_ref je Institut</li>
         </ul>
       </div>
     `;
