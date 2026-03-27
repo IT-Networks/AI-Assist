@@ -15,7 +15,10 @@ Test Pool Module (Testfall-Definitionen, eigene Ordnerstruktur):
 
 Test Lab Module (Testausfuehrung, eigene Ordnerstruktur):
 - alm_list_test_lab_folders: Test Lab Ordnerstruktur auflisten (NICHT Test Pool!)
+- alm_create_test_lab_folder: Neuen Folder im Test Lab erstellen
 - alm_list_test_sets: Test-Sets im Test Lab auflisten
+- alm_create_test_set: Neues Test-Set im Test Lab erstellen
+- alm_add_test_to_test_set: Testfall aus Test Pool einem Test-Set zuordnen
 - alm_search_test_instances: Test-Instances suchen (Tester, Datum, Status)
 - alm_get_run_history: Run-Historie einer Test-Instance anzeigen
 - alm_create_run: Test-Run erstellen (mit Bestaetigung)
@@ -994,6 +997,259 @@ def register_alm_tools(registry: ToolRegistry) -> int:
             ),
         ],
         handler=alm_create_run,
+    ))
+    count += 1
+
+    # ══════════════════════════════════════════════════════════════════════════
+    # alm_create_test_set - Test-Set im Test Lab erstellen
+    # ══════════════════════════════════════════════════════════════════════════
+
+    async def alm_create_test_set(**kwargs: Any) -> ToolResult:
+        """Erstellt ein neues Test-Set im Test Lab."""
+        if not settings.alm.enabled:
+            return ToolResult(success=False, error="HP ALM ist nicht aktiviert")
+
+        name: str = kwargs.get("name", "")
+        folder_id: int = kwargs.get("folder_id", 0)
+        description: str = kwargs.get("description", "")
+        confirmed: bool = kwargs.get("_confirmed", False)
+
+        if not name:
+            return ToolResult(success=False, error="name ist erforderlich")
+        if not folder_id:
+            return ToolResult(success=False, error="folder_id ist erforderlich (verwende alm_list_test_lab_folders fuer Test Lab Folder-IDs)")
+
+        # Bestaetigung erforderlich?
+        if settings.alm.require_confirmation and not confirmed:
+            try:
+                client = get_alm_client()
+                folder_path = await client.get_test_lab_folder_path(folder_id)
+            except Exception:
+                folder_path = f"Folder-{folder_id}"
+
+            preview = f"## Neues Test-Set im Test Lab\n\n"
+            preview += f"**Name:** {name}\n"
+            preview += f"**Test Lab Pfad:** {folder_path}/{name}\n"
+            if description:
+                preview += f"**Beschreibung:** {description}\n"
+
+            return ToolResult(
+                success=True,
+                requires_confirmation=True,
+                confirmation_data={
+                    "action": "alm_create_test_set",
+                    "description": f"Test-Set '{name}' im Test Lab erstellen",
+                    "preview": preview,
+                    "params": kwargs,
+                },
+            )
+
+        try:
+            client = get_alm_client()
+            test_set = await client.create_test_set(
+                name=name,
+                folder_id=folder_id,
+                description=description,
+            )
+
+            # Vollen Pfad laden
+            folder_path = await client.get_test_lab_folder_path(test_set.folder_id)
+            full_path = f"{folder_path}/{test_set.name}"
+
+            result = f"Test-Set erfolgreich erstellt!\n\n"
+            result += f"- **ID:** {test_set.id}\n"
+            result += f"- **Name:** {test_set.name}\n"
+            result += f"- **Voller Pfad:** {full_path}\n"
+            result += f"\nVerwende alm_add_test_to_test_set um Testfaelle aus dem Test Pool zuzuordnen."
+            return ToolResult(success=True, data=result)
+
+        except ALMError as e:
+            return ToolResult(success=False, error=str(e))
+        except Exception as e:
+            logger.exception("ALM Create Test-Set Error")
+            return ToolResult(success=False, error=f"Unerwarteter Fehler: {e}")
+
+    registry.register(Tool(
+        name="alm_create_test_set",
+        description=(
+            "Erstellt ein neues Test-Set im TEST LAB von HP ALM. "
+            "WICHTIG: Test-Sets liegen im Test Lab (NICHT im Test Pool!). "
+            "Die folder_id muss eine Test Lab Folder-ID sein (aus alm_list_test_lab_folders). "
+            "Nach dem Erstellen koennen Testfaelle mit alm_add_test_to_test_set zugeordnet werden. "
+            "Erfordert Bestaetigung durch den User."
+        ),
+        category=ToolCategory.DEVOPS,
+        is_write_operation=True,
+        parameters=[
+            ToolParameter(
+                name="name",
+                type="string",
+                description="Name des Test-Sets",
+                required=True,
+            ),
+            ToolParameter(
+                name="folder_id",
+                type="integer",
+                description="Ziel-Folder-ID im Test Lab (aus alm_list_test_lab_folders, NICHT aus alm_list_folders!)",
+                required=True,
+            ),
+            ToolParameter(
+                name="description",
+                type="string",
+                description="Optionale Beschreibung des Test-Sets",
+                required=False,
+            ),
+        ],
+        handler=alm_create_test_set,
+    ))
+    count += 1
+
+    # ══════════════════════════════════════════════════════════════════════════
+    # alm_add_test_to_test_set - Testfall einem Test-Set zuordnen
+    # ══════════════════════════════════════════════════════════════════════════
+
+    async def alm_add_test_to_test_set(**kwargs: Any) -> ToolResult:
+        """Fuegt einen Testfall aus dem Test Pool einem Test-Set im Test Lab hinzu."""
+        if not settings.alm.enabled:
+            return ToolResult(success=False, error="HP ALM ist nicht aktiviert")
+
+        test_id: int = kwargs.get("test_id", 0)
+        test_set_id: int = kwargs.get("test_set_id", 0)
+        confirmed: bool = kwargs.get("_confirmed", False)
+
+        if not test_id:
+            return ToolResult(success=False, error="test_id ist erforderlich (ID des Testfalls aus dem Test Pool)")
+        if not test_set_id:
+            return ToolResult(success=False, error="test_set_id ist erforderlich (ID des Test-Sets aus dem Test Lab)")
+
+        if settings.alm.require_confirmation and not confirmed:
+            preview = f"## Testfall zu Test-Set zuordnen\n\n"
+            preview += f"**Test-ID:** {test_id} (aus Test Pool)\n"
+            preview += f"**Test-Set-ID:** {test_set_id} (im Test Lab)\n"
+
+            return ToolResult(
+                success=True,
+                requires_confirmation=True,
+                confirmation_data={
+                    "action": "alm_add_test_to_test_set",
+                    "description": f"Test {test_id} zu Test-Set {test_set_id} hinzufuegen",
+                    "preview": preview,
+                    "params": kwargs,
+                },
+            )
+
+        try:
+            client = get_alm_client()
+            instance = await client.add_test_to_test_set(
+                test_id=test_id,
+                test_set_id=test_set_id,
+            )
+
+            result = f"Testfall erfolgreich zum Test-Set hinzugefuegt!\n\n"
+            result += f"- **Test-Instance-ID:** {instance.id}\n"
+            result += f"- **Test-ID:** {instance.test_id} (Test Pool)\n"
+            result += f"- **Test-Set-ID:** {instance.test_set_id} (Test Lab)\n"
+            result += f"- **Status:** {instance.status}\n"
+            return ToolResult(success=True, data=result)
+
+        except ALMError as e:
+            return ToolResult(success=False, error=str(e))
+        except Exception as e:
+            logger.exception("ALM Add Test to Test-Set Error")
+            return ToolResult(success=False, error=f"Unerwarteter Fehler: {e}")
+
+    registry.register(Tool(
+        name="alm_add_test_to_test_set",
+        description=(
+            "Fuegt einen Testfall aus dem Test Pool einem Test-Set im Test Lab hinzu. "
+            "Erstellt eine Test-Instance die dann im Test Lab ausgefuehrt werden kann. "
+            "test_id = Testfall-ID aus dem Test Pool (alm_search_tests). "
+            "test_set_id = Test-Set-ID aus dem Test Lab (alm_list_test_sets). "
+            "Erfordert Bestaetigung durch den User."
+        ),
+        category=ToolCategory.DEVOPS,
+        is_write_operation=True,
+        parameters=[
+            ToolParameter(
+                name="test_id",
+                type="integer",
+                description="Test-ID des Testfalls aus dem Test Pool",
+                required=True,
+            ),
+            ToolParameter(
+                name="test_set_id",
+                type="integer",
+                description="Test-Set-ID im Test Lab (aus alm_list_test_sets)",
+                required=True,
+            ),
+        ],
+        handler=alm_add_test_to_test_set,
+    ))
+    count += 1
+
+    # ══════════════════════════════════════════════════════════════════════════
+    # alm_create_test_lab_folder - Test Lab Folder erstellen
+    # ══════════════════════════════════════════════════════════════════════════
+
+    async def alm_create_test_lab_folder(**kwargs: Any) -> ToolResult:
+        """Erstellt einen neuen Folder im Test Lab."""
+        if not settings.alm.enabled:
+            return ToolResult(success=False, error="HP ALM ist nicht aktiviert")
+
+        name: str = kwargs.get("name", "")
+        parent_id: int = kwargs.get("parent_id", 0)
+
+        if not name:
+            return ToolResult(success=False, error="name ist erforderlich")
+
+        try:
+            client = get_alm_client()
+            folder = await client.create_test_lab_folder(name, parent_id)
+
+            # Pfad laden
+            folder.path = await client.get_test_lab_folder_path(folder.id)
+
+            return ToolResult(
+                success=True,
+                data=(
+                    f"## Test Lab Folder erstellt\n\n"
+                    f"**ID:** {folder.id}\n"
+                    f"**Name:** {folder.name}\n"
+                    f"**Pfad:** {folder.path}"
+                )
+            )
+
+        except ALMError as e:
+            return ToolResult(success=False, error=str(e))
+        except Exception as e:
+            logger.exception("ALM Create Test Lab Folder Error")
+            return ToolResult(success=False, error=f"Unerwarteter Fehler: {e}")
+
+    registry.register(Tool(
+        name="alm_create_test_lab_folder",
+        description=(
+            "Erstellt einen neuen Folder im TEST LAB (NICHT im Test Pool!). "
+            "Verwende dies um die Ordnerstruktur im Test Lab zu erweitern. "
+            "Gib parent_id an um einen Unterordner zu erstellen (IDs aus alm_list_test_lab_folders)."
+        ),
+        category=ToolCategory.DEVOPS,
+        is_write_operation=True,
+        parameters=[
+            ToolParameter(
+                name="name",
+                type="string",
+                description="Name des neuen Test Lab Folders",
+                required=True,
+            ),
+            ToolParameter(
+                name="parent_id",
+                type="integer",
+                description="Parent-Folder-ID im Test Lab (0 = Root, IDs aus alm_list_test_lab_folders)",
+                required=False,
+                default=0,
+            ),
+        ],
+        handler=alm_create_test_lab_folder,
     ))
     count += 1
 

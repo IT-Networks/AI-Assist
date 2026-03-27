@@ -1336,6 +1336,116 @@ class ALMClient:
 
         return test_sets
 
+    async def create_test_set(
+        self,
+        name: str,
+        folder_id: int,
+        description: str = "",
+    ) -> ALMTestSet:
+        """
+        Erstellt ein neues Test-Set im Test Lab.
+
+        Args:
+            name: Name des Test-Sets
+            folder_id: Test Lab Folder-ID (aus alm_list_test_lab_folders)
+            description: Optionale Beschreibung
+
+        Returns:
+            Erstelltes ALMTestSet
+        """
+        self._check_configured()
+
+        fields = {
+            "name": name,
+            "parent-id": str(folder_id),
+            "subtype-id": "hp.qc.test-set.default",
+        }
+        if description:
+            fields["description"] = description
+
+        xml = self._build_entity_xml("test-set", fields)
+        root = await self._request("POST", "/test-sets", body=xml)
+        data = self._parse_entity(root)
+
+        test_set = ALMTestSet(
+            id=int(data.get("id", 0)),
+            name=data.get("name", name),
+            folder_id=int(data.get("parent-id", folder_id)),
+            status=data.get("status", ""),
+            description=description,
+        )
+
+        logger.info(f"ALM: Test-Set erstellt: ID={test_set.id}, Name={test_set.name}")
+        return test_set
+
+    async def create_test_lab_folder(self, name: str, parent_id: int = 0) -> ALMTestSetFolder:
+        """
+        Erstellt einen neuen Folder im Test Lab.
+
+        Args:
+            name: Name des neuen Folders
+            parent_id: Parent-Folder-ID im Test Lab (0 = Root)
+
+        Returns:
+            Der erstellte ALMTestSetFolder
+        """
+        self._check_configured()
+
+        fields = {"name": name}
+        if parent_id > 0:
+            fields["parent-id"] = str(parent_id)
+
+        xml = self._build_entity_xml("test-set-folder", fields)
+        root = await self._request("POST", "/test-set-folders", body=xml)
+        data = self._parse_entity(root)
+
+        folder = ALMTestSetFolder(
+            id=int(data.get("id", 0)),
+            name=data.get("name", name),
+            parent_id=int(data.get("parent-id", parent_id)),
+        )
+
+        # Cache invalidieren
+        self._test_lab_folder_cache.clear()
+        self._test_lab_folder_cache_time = None
+
+        logger.info(f"ALM: Test Lab Folder erstellt: ID={folder.id}, Name={folder.name}")
+        return folder
+
+    async def add_test_to_test_set(self, test_id: int, test_set_id: int) -> ALMTestInstance:
+        """
+        Fuegt einen Testfall (aus dem Test Pool) einem Test-Set (im Test Lab) hinzu.
+
+        Args:
+            test_id: Test-ID aus dem Test Pool
+            test_set_id: Test-Set-ID im Test Lab
+
+        Returns:
+            Erstellte ALMTestInstance
+        """
+        self._check_configured()
+
+        fields = {
+            "test-id": str(test_id),
+            "cycle-id": str(test_set_id),
+            "subtype-id": "hp.qc.test-instance.MANUAL",
+        }
+
+        xml = self._build_entity_xml("test-instance", fields)
+        root = await self._request("POST", "/test-instances", body=xml)
+        data = self._parse_entity(root)
+
+        instance = ALMTestInstance(
+            id=int(data.get("id", 0)),
+            test_id=test_id,
+            test_name=data.get("test-config-name", ""),
+            test_set_id=test_set_id,
+            status=data.get("status", "No Run"),
+        )
+
+        logger.info(f"ALM: Test {test_id} zu Test-Set {test_set_id} hinzugefuegt (Instance-ID: {instance.id})")
+        return instance
+
     async def get_test_instances(self, test_set_id: int) -> List[ALMTestInstance]:
         """
         Laedt Test-Instances eines Test-Sets.
