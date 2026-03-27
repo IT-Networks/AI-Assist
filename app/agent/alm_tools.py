@@ -388,26 +388,18 @@ def register_alm_tools(registry: ToolRegistry) -> int:
                     data=f"Keine Design-Steps fuer Testfall {test_id} gefunden"
                 )
 
-            # Formatierte Ausgabe mit HTML-Bereinigung
+            # Formatierte Tabelle mit HTML-Bereinigung
             lines = [f"## Design-Steps fuer Test {test_id}\n"]
+            lines.append("| # | Name | Beschreibung | Erwartetes Ergebnis |")
+            lines.append("|---|------|--------------|---------------------|")
 
             for step in steps:
-                step_name = step.name or f"Schritt {step.step_order}"
-                lines.append(f"### {step.step_order}. {step_name}\n")
+                step_name = (step.name or "-").replace("|", "\\|").replace("\n", " ")
+                desc = _strip_html(step.description).replace("|", "\\|").replace("\n", " ")
+                expected = _strip_html(step.expected_result).replace("|", "\\|").replace("\n", " ")
+                lines.append(f"| {step.step_order} | {step_name} | {desc} | {expected} |")
 
-                # Beschreibung - HTML entfernen und formatieren
-                desc = _strip_html(step.description)
-                if desc:
-                    lines.append(f"**Beschreibung:**\n{desc}\n")
-
-                # Erwartetes Ergebnis - HTML entfernen und formatieren
-                expected = _strip_html(step.expected_result)
-                if expected:
-                    lines.append(f"**Erwartetes Ergebnis:**\n{expected}\n")
-
-                lines.append("---\n")
-
-            lines.append(f"*{len(steps)} Steps gefunden*")
+            lines.append(f"\n*{len(steps)} Steps gefunden*")
             return ToolResult(success=True, data="\n".join(lines))
 
         except ALMError as e:

@@ -177,19 +177,13 @@ class ALMTest:
 
         if self.steps:
             md += "### Test-Schritte\n\n"
+            md += "| # | Name | Beschreibung | Erwartetes Ergebnis |\n"
+            md += "|---|------|--------------|---------------------|\n"
             for step in self.steps:
-                step_name = step.name or f"Schritt {step.step_order}"
-                md += f"#### {step.step_order}. {step_name}\n\n"
-
-                desc = _strip_html(step.description)
-                if desc:
-                    md += f"**Beschreibung:**\n{desc}\n\n"
-
-                expected = _strip_html(step.expected_result)
-                if expected:
-                    md += f"**Erwartetes Ergebnis:**\n{expected}\n\n"
-
-                md += "---\n\n"
+                step_name = (step.name or "-").replace("|", "\\|").replace("\n", " ")
+                desc = _strip_html(step.description).replace("|", "\\|").replace("\n", " ")
+                expected = _strip_html(step.expected_result).replace("|", "\\|").replace("\n", " ")
+                md += f"| {step.step_order} | {step_name} | {desc} | {expected} |\n"
 
         return md
 
