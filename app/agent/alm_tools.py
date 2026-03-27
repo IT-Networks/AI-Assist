@@ -8,6 +8,7 @@ Test Plan Module (Testfall-Definitionen):
 - alm_test_connection: Verbindung pruefen und Login testen
 - alm_search_tests: Testfaelle im Test Plan suchen
 - alm_read_test: Testfall mit Details und Steps laden
+- alm_get_test_steps: Design-Steps eines Testfalls separat laden
 - alm_create_test: Neuen Testfall erstellen (mit Bestaetigung)
 - alm_update_test: Testfall aktualisieren (mit Bestaetigung)
 - alm_list_folders: Test-Plan Folder auflisten
@@ -219,6 +220,69 @@ def register_alm_tools(registry: ToolRegistry) -> int:
             ),
         ],
         handler=alm_read_test,
+    ))
+    count += 1
+
+    # ══════════════════════════════════════════════════════════════════════════
+    # alm_get_test_steps - Test-Schritte separat laden
+    # ══════════════════════════════════════════════════════════════════════════
+
+    async def alm_get_test_steps(**kwargs: Any) -> ToolResult:
+        """Laedt die Design-Steps eines Testfalls."""
+        if not settings.alm.enabled:
+            return ToolResult(success=False, error="HP ALM ist nicht aktiviert")
+
+        test_id: int = kwargs.get("test_id", 0)
+        if not test_id:
+            return ToolResult(success=False, error="test_id ist erforderlich")
+
+        try:
+            client = get_alm_client()
+            steps = await client.get_test_steps(test_id)
+
+            if not steps:
+                return ToolResult(
+                    success=True,
+                    data=f"Keine Design-Steps fuer Testfall {test_id} gefunden"
+                )
+
+            lines = [f"## Design-Steps fuer Test {test_id}\n"]
+            lines.append("| # | Name | Beschreibung | Erwartetes Ergebnis |")
+            lines.append("|---|------|--------------|---------------------|")
+
+            for step in steps:
+                desc = (step.description[:50] + "...") if len(step.description) > 50 else step.description
+                desc = desc.replace("\n", " ").replace("|", "\\|")
+                expected = (step.expected_result[:50] + "...") if len(step.expected_result) > 50 else step.expected_result
+                expected = expected.replace("\n", " ").replace("|", "\\|")
+                lines.append(f"| {step.step_order} | {step.name} | {desc} | {expected} |")
+
+            lines.append(f"\n*{len(steps)} Steps gefunden*")
+            return ToolResult(success=True, data="\n".join(lines))
+
+        except ALMError as e:
+            return ToolResult(success=False, error=str(e))
+        except Exception as e:
+            logger.exception("ALM Get Steps Error")
+            return ToolResult(success=False, error=f"Unerwarteter Fehler: {e}")
+
+    registry.register(Tool(
+        name="alm_get_test_steps",
+        description=(
+            "Laedt die Design-Steps (Testschritte) eines Testfalls aus HP ALM. "
+            "Zeigt alle Schritte mit Beschreibung und erwartetem Ergebnis. "
+            "Verwende dies wenn alm_read_test keine Steps anzeigt."
+        ),
+        category=ToolCategory.KNOWLEDGE,
+        parameters=[
+            ToolParameter(
+                name="test_id",
+                type="integer",
+                description="Die Test-ID",
+                required=True,
+            ),
+        ],
+        handler=alm_get_test_steps,
     ))
     count += 1
 

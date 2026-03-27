@@ -344,9 +344,9 @@ class TestALMTools:
         registry = ToolRegistry()
         count = register_alm_tools(registry)
 
-        # Test Plan: test_connection, search, read, create, update, folders (6)
+        # Test Plan: test_connection, search, read, get_steps, create, update, folders (7)
         # Test Lab: test_lab_folders, test-sets, search_instances, run_history, create_run (5)
-        assert count == 11
+        assert count == 12
 
     def test_tool_names(self):
         """Prueft Tool-Namen."""
@@ -361,6 +361,7 @@ class TestALMTools:
         assert "alm_test_connection" in tool_names
         assert "alm_search_tests" in tool_names
         assert "alm_read_test" in tool_names
+        assert "alm_get_test_steps" in tool_names
         assert "alm_create_test" in tool_names
         assert "alm_update_test" in tool_names
         assert "alm_list_folders" in tool_names
@@ -394,7 +395,7 @@ class TestALMTools:
         register_alm_tools(registry)
 
         read_tools = [
-            "alm_test_connection", "alm_search_tests", "alm_read_test",
+            "alm_test_connection", "alm_search_tests", "alm_read_test", "alm_get_test_steps",
             "alm_list_folders", "alm_list_test_sets",
             "alm_list_test_lab_folders", "alm_search_test_instances", "alm_get_run_history"
         ]

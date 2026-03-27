@@ -636,24 +636,45 @@ class ALMClient:
         Returns:
             Liste von ALMTestStep
         """
-        params = {"query": f"{{parent-id[{test_id}]}}"}
-        root = await self._request("GET", "/design-steps", params=params)
+        try:
+            params = {"query": f"{{parent-id[{test_id}]}}"}
+            logger.debug(f"ALM: Loading design-steps for test {test_id}")
+            root = await self._request("GET", "/design-steps", params=params)
 
-        steps = []
-        entities = root.find("Entities") or root
-        for entity in entities.findall("Entity"):
-            data = self._parse_entity(entity)
-            steps.append(ALMTestStep(
-                id=int(data.get("id", 0)),
-                step_order=int(data.get("step-order", 0)),
-                name=data.get("name", ""),
-                description=data.get("description", ""),
-                expected_result=data.get("expected", ""),
-            ))
+            steps = []
+            entities = root.find("Entities") or root
+            for entity in entities.findall("Entity"):
+                data = self._parse_entity(entity)
+                logger.debug(f"ALM: Step data: {data}")
 
-        # Nach step_order sortieren
-        steps.sort(key=lambda s: s.step_order)
-        return steps
+                # Sichere int-Konvertierung
+                step_id = 0
+                step_order = 0
+                try:
+                    step_id = int(data.get("id", 0) or 0)
+                    step_order = int(data.get("step-order", 0) or 0)
+                except (ValueError, TypeError):
+                    pass
+
+                steps.append(ALMTestStep(
+                    id=step_id,
+                    step_order=step_order,
+                    name=data.get("name", ""),
+                    description=data.get("description", ""),
+                    expected_result=data.get("expected", ""),
+                ))
+
+            # Nach step_order sortieren
+            steps.sort(key=lambda s: s.step_order)
+            logger.info(f"ALM: {len(steps)} Design-Steps fuer Test {test_id} geladen")
+            return steps
+
+        except ALMError as e:
+            logger.warning(f"ALM: Fehler beim Laden der Design-Steps: {e}")
+            return []
+        except Exception as e:
+            logger.exception(f"ALM: Unerwarteter Fehler bei Design-Steps: {e}")
+            return []
 
     async def create_test(
         self,
