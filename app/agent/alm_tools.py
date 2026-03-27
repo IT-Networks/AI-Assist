@@ -856,7 +856,7 @@ def register_alm_tools(registry: ToolRegistry) -> int:
 
             # Folder-Pfade fuer Test-Sets laden
             lines = ["## Test-Sets (Test Lab)\n"]
-            lines.append("| ID | Name | Status | Test Lab Pfad |")
+            lines.append("| ID | Test-Set Name | Status | Voller Pfad im Test Lab |")
             lines.append("|---|---|---|---|")
 
             for ts in test_sets:
@@ -866,7 +866,10 @@ def register_alm_tools(registry: ToolRegistry) -> int:
                         folder_path = await client.get_test_lab_folder_path(ts.folder_id)
                     except Exception:
                         folder_path = f"Folder-{ts.folder_id}"
-                lines.append(f"| {ts.id} | {ts.name} | {ts.status or '-'} | {folder_path} |")
+                # Voller Pfad = Folder-Pfad / Test-Set-Name (so wie in QC angezeigt)
+                full_path = f"{folder_path}/{ts.name}" if folder_path else ts.name
+                lines.append(f"| {ts.id} | {ts.name} | {ts.status or '-'} | {full_path} |")
+                logger.debug(f"ALM TestSet: ID={ts.id}, name='{ts.name}', folder_id={ts.folder_id}, resolved_path='{folder_path}'")
 
             lines.append(f"\n*HINWEIS: Diese Ordner sind im Test Lab, nicht im Test Pool.*")
             return ToolResult(success=True, data="\n".join(lines))
@@ -881,8 +884,9 @@ def register_alm_tools(registry: ToolRegistry) -> int:
         name="alm_list_test_sets",
         description=(
             "Listet Test-Sets aus dem TEST LAB in HP ALM auf. "
+            "Die Ausgabe enthaelt den VOLLSTAENDIGEN PFAD jedes Test-Sets im Test Lab "
+            "(z.B. '2026/Inttest/Projekt1/Testset_1') - gib diesen Pfad direkt an den Benutzer weiter! "
             "WICHTIG: Test-Sets liegen im Test Lab (NICHT im Test Pool!). "
-            "Test-Sets enthalten Test-Instances (zugeordnete Testfaelle) fuer die Ausfuehrung. "
             "Verwende alm_list_test_lab_folders um die folder_id im Test Lab zu ermitteln."
         ),
         category=ToolCategory.KNOWLEDGE,

@@ -1268,6 +1268,10 @@ class ALMClient:
             self._test_lab_folder_cache_time = datetime.now()
             logger.info(f"ALM: {len(all_folders)} Test Lab Folder gecached (1 API-Call)")
 
+            # Debug: Alle Folder mit Pfaden loggen
+            for fid, f in all_folders.items():
+                logger.debug(f"ALM TestLabFolder: ID={fid}, name='{f.name}', parent={f.parent_id}, path='{f.path}'")
+
         except ALMError as e:
             logger.warning(f"ALM: Bulk-Load Test Lab Folders fehlgeschlagen: {e}")
 
