@@ -2102,11 +2102,16 @@ class AgentOrchestrator:
                             state.pending_confirmation = tool_call
 
                             # Tool-Card auf "Wartet auf Bestätigung" setzen
+                            confirm_hint = (
+                                result.confirmation_data.get('path')
+                                or result.confirmation_data.get('description')
+                                or result.confirmation_data.get('action', '')
+                            )
                             yield AgentEvent(AgentEventType.TOOL_RESULT, {
                                 "id": tool_call.id,
                                 "name": tool_call.name,
                                 "success": True,
-                                "data": f"⏳ Wartet auf Bestätigung: {result.confirmation_data.get('path', '')}"
+                                "data": f"⏳ Wartet auf Bestätigung: {confirm_hint}"
                             })
 
                             yield AgentEvent(AgentEventType.CONFIRM_REQUIRED, {
@@ -2162,6 +2167,12 @@ class AgentOrchestrator:
                                     confirm_msg = f"✓ {len(files)} Dateien geschrieben"
                                     result_msg = exec_result.data  # Enthält bereits die Details
                                     context_msg = f"[{tool_call.name}] {len(files)} Dateien erstellt: {', '.join(file_paths[:5])}" + ("..." if len(file_paths) > 5 else "")
+                                elif result.confirmation_data.get("action"):
+                                    # Generische Tool-Operation (ALM, IQ Server, etc.)
+                                    action_desc = result.confirmation_data.get('description', result.confirmation_data.get('action', ''))
+                                    confirm_msg = f"✓ {action_desc}"
+                                    result_msg = exec_result.data if isinstance(exec_result.data, str) else str(exec_result.data)
+                                    context_msg = f"[{tool_call.name}] {action_desc}"
                                 else:
                                     # Einzelne Datei
                                     path = result.confirmation_data.get('path', '')
@@ -2868,6 +2879,22 @@ class AgentOrchestrator:
             return result
 
         else:
+            # Generische Bestaetigungs-Ausfuehrung: Tool-Handler nochmal aufrufen mit _confirmed=True
+            # Wird fuer ALM-Tools, IQ-Server-Tools und andere nicht-Datei-basierte Write-Ops verwendet
+            action = confirmation_data.get("action", operation)
+            params = confirmation_data.get("params", {})
+
+            if action and params:
+                logger.info(f"[agent] Executing confirmed action: {action}")
+                try:
+                    from app.agent.tools import get_tool_registry
+                    registry = get_tool_registry()
+                    params["_confirmed"] = True
+                    return await registry.execute(action, **params)
+                except Exception as e:
+                    logger.exception(f"[agent] Confirmed action {action} failed: {e}")
+                    return ToolResult(success=False, error=f"Operation fehlgeschlagen: {e}")
+
             return ToolResult(success=False, error=f"Unbekannte Operation: {operation}")
 
     # Note: _build_agent_instructions is now imported from context_builder module

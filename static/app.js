@@ -6239,16 +6239,26 @@ function showConfirmationPanel(data) {
   document.getElementById('pending-confirmation').style.display = 'block';
   document.getElementById('pending-count').style.display = 'inline';
 
-  document.getElementById('confirm-operation').textContent = data.name || data.confirmation_data?.operation || '-';
-  document.getElementById('confirm-path').textContent = data.confirmation_data?.path || '-';
+  const cd = data.confirmation_data || {};
 
-  // Show diff
+  // Operation: name > action > description > operation
+  document.getElementById('confirm-operation').textContent =
+    data.name || cd.action || cd.description || cd.operation || '-';
+
+  // Pfad: path > description > preview (erste Zeile)
+  const pathText = cd.path || cd.description || '';
+  document.getElementById('confirm-path').textContent = pathText || '-';
+
+  // Show diff or preview
   const diffContent = document.getElementById('diff-content');
-  if (data.confirmation_data?.diff) {
-    diffContent.textContent = data.confirmation_data.diff;
+  if (cd.diff) {
+    diffContent.textContent = cd.diff;
     hljs.highlightElement(diffContent);
+  } else if (cd.preview) {
+    // ALM/IQ Tools: Zeige Preview mit Details (was wird wo angelegt)
+    diffContent.textContent = cd.preview;
   } else {
-    diffContent.textContent = 'Keine Diff-Vorschau verfügbar';
+    diffContent.textContent = 'Keine Vorschau verfuegbar';
   }
 }
 
