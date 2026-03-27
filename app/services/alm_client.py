@@ -449,6 +449,134 @@ class ALMClient:
         except Exception as e:
             return {"success": False, "error": f"Unerwarteter Fehler: {e}"}
 
+    async def list_domains(self) -> List[str]:
+        """
+        Listet verfuegbare Domains.
+
+        Returns:
+            Liste von Domain-Namen
+        """
+        if not self.base_url:
+            raise ALMError("ALM base_url ist nicht konfiguriert")
+
+        await self.ensure_session()
+        client = _get_http_client()
+
+        url = f"{self.base_url}/rest/domains"
+        try:
+            resp = await client.get(
+                url,
+                headers=self._session_headers(),
+                cookies=self._session_cookies(),
+            )
+            resp.raise_for_status()
+        except httpx.HTTPStatusError as e:
+            raise ALMError(f"Fehler beim Laden der Domains: {e.response.status_code}") from e
+
+        domains = []
+        try:
+            root = ET.fromstring(resp.content)
+            for domain in root.findall(".//Domain"):
+                name = domain.get("Name", "")
+                if name:
+                    domains.append(name)
+        except ET.ParseError:
+            logger.warning("Konnte Domain-XML nicht parsen")
+
+        return domains
+
+    async def list_projects(self, domain: Optional[str] = None) -> List[Dict[str, str]]:
+        """
+        Listet verfuegbare Projekte in einer Domain.
+
+        Args:
+            domain: Optional - Domain (default: aktuelle Domain)
+
+        Returns:
+            Liste von {"name": ..., "domain": ...}
+        """
+        if not self.base_url:
+            raise ALMError("ALM base_url ist nicht konfiguriert")
+
+        target_domain = domain or self.domain
+        if not target_domain:
+            raise ALMError("Keine Domain angegeben")
+
+        await self.ensure_session()
+        client = _get_http_client()
+
+        url = f"{self.base_url}/rest/domains/{target_domain}/projects"
+        try:
+            resp = await client.get(
+                url,
+                headers=self._session_headers(),
+                cookies=self._session_cookies(),
+            )
+            resp.raise_for_status()
+        except httpx.HTTPStatusError as e:
+            raise ALMError(f"Fehler beim Laden der Projekte: {e.response.status_code}") from e
+
+        projects = []
+        try:
+            root = ET.fromstring(resp.content)
+            for project in root.findall(".//Project"):
+                name = project.get("Name", "")
+                if name:
+                    projects.append({"name": name, "domain": target_domain})
+        except ET.ParseError:
+            logger.warning("Konnte Project-XML nicht parsen")
+
+        logger.info(f"ALM: {len(projects)} Projekte in Domain {target_domain} gefunden")
+        return projects
+
+    def switch_project(self, project: str, domain: Optional[str] = None) -> Dict[str, Any]:
+        """
+        Wechselt das aktive Projekt zur Laufzeit.
+
+        Args:
+            project: Neuer Projekt-Name
+            domain: Optional - Neue Domain
+
+        Returns:
+            {"success": True, "domain": ..., "project": ...}
+        """
+        old_domain = self.domain
+        old_project = self.project
+
+        if domain:
+            self.domain = domain
+        self.project = project
+
+        # Session invalidieren fuer neues Projekt
+        self._session = None
+        self._folder_cache.clear()
+        self._folder_cache_time = None
+
+        logger.info(f"ALM: Projekt gewechselt von {old_domain}/{old_project} zu {self.domain}/{self.project}")
+
+        return {
+            "success": True,
+            "domain": self.domain,
+            "project": self.project,
+            "previous_domain": old_domain,
+            "previous_project": old_project,
+        }
+
+    def get_current_context(self) -> Dict[str, Any]:
+        """
+        Gibt den aktuellen Kontext (Domain/Projekt) zurueck.
+
+        Returns:
+            {"domain": ..., "project": ..., "base_url": ..., "user": ...}
+        """
+        return {
+            "domain": self.domain,
+            "project": self.project,
+            "base_url": self.base_url,
+            "user": self.username,
+            "has_session": self._session is not None and self._session.is_valid(),
+        }
+
     # ═══════════════════════════════════════════════════════════════════════
     # Helper Methods
     # ═══════════════════════════════════════════════════════════════════════
@@ -536,14 +664,24 @@ class ALMClient:
         self,
         query: str = "",
         folder_id: Optional[int] = None,
+        owner: Optional[str] = None,
+        created_after: Optional[str] = None,
+        created_before: Optional[str] = None,
+        status: Optional[str] = None,
+        test_type: Optional[str] = None,
         limit: int = 50,
     ) -> List[ALMTest]:
         """
-        Sucht Testfaelle.
+        Sucht Testfaelle mit erweiterten Filtern.
 
         Args:
             query: Suchbegriff (wird in Name gesucht)
             folder_id: Optional - nur in diesem Folder suchen
+            owner: Optional - Testfall-Autor (Benutzername)
+            created_after: Optional - Erstellt nach Datum (YYYY-MM-DD)
+            created_before: Optional - Erstellt vor Datum (YYYY-MM-DD)
+            status: Optional - Status (z.B. Ready, Design)
+            test_type: Optional - MANUAL oder AUTOMATED
             limit: Max. Anzahl Ergebnisse
 
         Returns:
@@ -554,13 +692,31 @@ class ALMClient:
         # ALM Query-Syntax bauen
         # Syntax mit Leerzeichen: field['*pattern*'] (Quotes erforderlich!)
         query_parts = []
+
         if query:
-            # Escape single quotes by doubling them
             escaped = query.replace("'", "''")
-            # Quotes um Wildcard-Pattern fuer Leerzeichen-Support
             query_parts.append(f"name['*{escaped}*']")
+
         if folder_id is not None:
             query_parts.append(f"parent-id[{folder_id}]")
+
+        if owner:
+            escaped_owner = owner.replace("'", "''")
+            query_parts.append(f"owner['*{escaped_owner}*']")
+
+        if created_after:
+            # Datum-Filter: creation-date[>='2024-01-01']
+            query_parts.append(f"creation-date[>='{created_after}']")
+
+        if created_before:
+            query_parts.append(f"creation-date[<='{created_before}']")
+
+        if status:
+            query_parts.append(f"status['{status}']")
+
+        if test_type:
+            # subtype-id: MANUAL oder AUTOMATED
+            query_parts.append(f"subtype-id['{test_type}']")
 
         params = {"page-size": str(limit)}
         if query_parts:
@@ -1029,15 +1185,21 @@ class ALMClient:
         query: str = "",
         test_set_id: Optional[int] = None,
         status: Optional[str] = None,
+        tester: Optional[str] = None,
+        executed_after: Optional[str] = None,
+        executed_before: Optional[str] = None,
         limit: int = 50,
     ) -> List[ALMTestInstance]:
         """
-        Sucht Test-Instances im Test Lab.
+        Sucht Test-Instances im Test Lab mit erweiterten Filtern.
 
         Args:
             query: Suchbegriff (im Test-Namen)
             test_set_id: Optional - nur in diesem Test-Set
             status: Optional - nur mit diesem Status
+            tester: Optional - Ausgefuehrt von diesem Tester
+            executed_after: Optional - Ausgefuehrt nach Datum (YYYY-MM-DD)
+            executed_before: Optional - Ausgefuehrt vor Datum (YYYY-MM-DD)
             limit: Max. Anzahl Ergebnisse
 
         Returns:
@@ -1048,13 +1210,24 @@ class ALMClient:
         query_parts = []
         if query:
             # ALM test-instances: Cross-Filter auf test.name fuer Testfall-Namen
-            # Syntax mit Leerzeichen: test.name['*pattern*'] (Quotes erforderlich!)
             escaped = query.replace("'", "''")
             query_parts.append(f"test.name['*{escaped}*']")
+
         if test_set_id is not None:
             query_parts.append(f"cycle-id[{test_set_id}]")
+
         if status:
             query_parts.append(f"status['{status}']")
+
+        if tester:
+            escaped_tester = tester.replace("'", "''")
+            query_parts.append(f"actual-tester['*{escaped_tester}*']")
+
+        if executed_after:
+            query_parts.append(f"exec-date[>='{executed_after}']")
+
+        if executed_before:
+            query_parts.append(f"exec-date[<='{executed_before}']")
 
         params = {"page-size": str(limit)}
         if query_parts:

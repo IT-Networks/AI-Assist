@@ -6,7 +6,7 @@ Fuer andere Test-Integrationen (SOAP, JUnit, etc.) gibt es separate Tools.
 
 Test Plan Module (Testfall-Definitionen):
 - alm_test_connection: Verbindung pruefen und Login testen
-- alm_search_tests: Testfaelle im Test Plan suchen
+- alm_search_tests: Testfaelle suchen (Name, Autor, Datum, Status, Typ)
 - alm_read_test: Testfall mit Details und Steps laden
 - alm_get_test_steps: Design-Steps eines Testfalls separat laden
 - alm_create_test: Neuen Testfall erstellen (mit Bestaetigung)
@@ -16,9 +16,14 @@ Test Plan Module (Testfall-Definitionen):
 Test Lab Module (Testausfuehrung):
 - alm_list_test_lab_folders: Test Lab Ordnerstruktur auflisten
 - alm_list_test_sets: Test-Sets im Test Lab auflisten
-- alm_search_test_instances: Test-Instances suchen (Ausfuehrungen)
+- alm_search_test_instances: Test-Instances suchen (Tester, Datum, Status)
 - alm_get_run_history: Run-Historie einer Test-Instance anzeigen
 - alm_create_run: Test-Run erstellen (mit Bestaetigung)
+
+Project Management:
+- alm_list_projects: Verfuegbare Projekte in Domain auflisten
+- alm_switch_project: Projekt zur Laufzeit wechseln
+- alm_get_context: Aktuellen Kontext (Domain/Projekt) anzeigen
 
 Authentifizierung erfolgt automatisch bei Verwendung der Tools.
 Die Zugangsdaten werden aus den Settings geladen (alm.username, alm.password).
@@ -105,37 +110,59 @@ def register_alm_tools(registry: ToolRegistry) -> int:
     count += 1
 
     # ══════════════════════════════════════════════════════════════════════════
-    # alm_search_tests - Testfaelle suchen
+    # alm_search_tests - Testfaelle suchen (erweitert)
     # ══════════════════════════════════════════════════════════════════════════
 
     async def alm_search_tests(**kwargs: Any) -> ToolResult:
-        """Sucht Testfaelle in HP ALM."""
+        """Sucht Testfaelle in HP ALM mit erweiterten Filtern."""
         if not settings.alm.enabled:
             return ToolResult(success=False, error="HP ALM ist nicht aktiviert (alm.enabled=false)")
 
         query: str = kwargs.get("query", "")
         folder_id: Optional[int] = kwargs.get("folder_id")
+        owner: Optional[str] = kwargs.get("owner")
+        created_after: Optional[str] = kwargs.get("created_after")
+        created_before: Optional[str] = kwargs.get("created_before")
+        status: Optional[str] = kwargs.get("status")
+        test_type: Optional[str] = kwargs.get("test_type")
         limit: int = kwargs.get("limit", 20)
 
         try:
             client = get_alm_client()
-            tests = await client.search_tests(query=query, folder_id=folder_id, limit=limit)
+            tests = await client.search_tests(
+                query=query,
+                folder_id=folder_id,
+                owner=owner,
+                created_after=created_after,
+                created_before=created_before,
+                status=status,
+                test_type=test_type,
+                limit=limit,
+            )
 
             if not tests:
+                filters = []
+                if query:
+                    filters.append(f"Name: '{query}'")
+                if owner:
+                    filters.append(f"Autor: '{owner}'")
+                if created_after:
+                    filters.append(f"Nach: {created_after}")
+                filter_str = ", ".join(filters) if filters else "keine"
                 return ToolResult(
                     success=True,
-                    data=f"Keine Testfaelle gefunden fuer '{query}'"
+                    data=f"Keine Testfaelle gefunden (Filter: {filter_str})"
                 )
 
             # Formatierte Ausgabe
             lines = [f"## {len(tests)} Testfaelle gefunden\n"]
-            lines.append("| ID | Name | Typ | Status | Owner |")
-            lines.append("|---|---|---|---|---|")
+            lines.append("| ID | Name | Typ | Status | Owner | Erstellt |")
+            lines.append("|---|---|---|---|---|---|")
 
             for test in tests:
                 lines.append(
                     f"| {test.id} | {test.name} | {test.test_type} | "
-                    f"{test.status or '-'} | {test.owner or '-'} |"
+                    f"{test.status or '-'} | {test.owner or '-'} | {test.creation_date or '-'} |"
                 )
 
             return ToolResult(success=True, data="\n".join(lines))
@@ -149,9 +176,9 @@ def register_alm_tools(registry: ToolRegistry) -> int:
     registry.register(Tool(
         name="alm_search_tests",
         description=(
-            "Sucht Testfaelle in HP ALM/Quality Center. "
-            "Durchsucht den Test Plan nach Name. "
-            "Verwende dies um Testfaelle zu finden bevor du Details abrufst."
+            "Sucht Testfaelle in HP ALM/Quality Center mit erweiterten Filtern. "
+            "Kann nach Name, Autor, Erstelldatum, Status und Typ filtern. "
+            "Beispiel: 'Zeige alle Tests von user123 aus dem letzten Monat'"
         ),
         category=ToolCategory.KNOWLEDGE,
         parameters=[
@@ -164,8 +191,39 @@ def register_alm_tools(registry: ToolRegistry) -> int:
             ToolParameter(
                 name="folder_id",
                 type="integer",
-                description="Optional: Nur in diesem Test-Plan-Folder suchen",
+                description="Nur in diesem Test-Plan-Folder suchen",
                 required=False,
+            ),
+            ToolParameter(
+                name="owner",
+                type="string",
+                description="Testfall-Autor (Benutzername, Teilsuche moeglich)",
+                required=False,
+            ),
+            ToolParameter(
+                name="created_after",
+                type="string",
+                description="Erstellt nach Datum (Format: YYYY-MM-DD)",
+                required=False,
+            ),
+            ToolParameter(
+                name="created_before",
+                type="string",
+                description="Erstellt vor Datum (Format: YYYY-MM-DD)",
+                required=False,
+            ),
+            ToolParameter(
+                name="status",
+                type="string",
+                description="Testfall-Status (z.B. Ready, Design, Imported)",
+                required=False,
+            ),
+            ToolParameter(
+                name="test_type",
+                type="string",
+                description="Testtyp: MANUAL oder AUTOMATED",
+                required=False,
+                enum=["MANUAL", "AUTOMATED"],
             ),
             ToolParameter(
                 name="limit",
@@ -809,17 +867,20 @@ def register_alm_tools(registry: ToolRegistry) -> int:
     count += 1
 
     # ══════════════════════════════════════════════════════════════════════════
-    # alm_search_test_instances - Test-Instances suchen
+    # alm_search_test_instances - Test-Instances suchen (erweitert)
     # ══════════════════════════════════════════════════════════════════════════
 
     async def alm_search_test_instances(**kwargs: Any) -> ToolResult:
-        """Sucht Test-Instances im Test Lab."""
+        """Sucht Test-Instances im Test Lab mit erweiterten Filtern."""
         if not settings.alm.enabled:
             return ToolResult(success=False, error="HP ALM ist nicht aktiviert")
 
         query: str = kwargs.get("query", "")
         test_set_id: Optional[int] = kwargs.get("test_set_id")
         status: Optional[str] = kwargs.get("status")
+        tester: Optional[str] = kwargs.get("tester")
+        executed_after: Optional[str] = kwargs.get("executed_after")
+        executed_before: Optional[str] = kwargs.get("executed_before")
         limit: int = kwargs.get("limit", 50)
 
         try:
@@ -828,13 +889,24 @@ def register_alm_tools(registry: ToolRegistry) -> int:
                 query=query,
                 test_set_id=test_set_id,
                 status=status,
+                tester=tester,
+                executed_after=executed_after,
+                executed_before=executed_before,
                 limit=limit,
             )
 
             if not instances:
+                filters = []
+                if tester:
+                    filters.append(f"Tester: '{tester}'")
+                if executed_after:
+                    filters.append(f"Nach: {executed_after}")
+                if status:
+                    filters.append(f"Status: {status}")
+                filter_str = ", ".join(filters) if filters else "keine"
                 return ToolResult(
                     success=True,
-                    data="Keine Test-Instances gefunden"
+                    data=f"Keine Test-Instances gefunden (Filter: {filter_str})"
                 )
 
             lines = ["## Test-Instances (Test Lab)\n"]
@@ -859,9 +931,9 @@ def register_alm_tools(registry: ToolRegistry) -> int:
     registry.register(Tool(
         name="alm_search_test_instances",
         description=(
-            "Sucht Test-Instances im Test Lab von HP ALM. "
-            "Test-Instances sind Testfall-Ausfuehrungen in Test-Sets. "
-            "Kann nach Name, Test-Set oder Status filtern."
+            "Sucht Test-Instances im Test Lab von HP ALM mit erweiterten Filtern. "
+            "Kann nach Name, Tester, Ausfuehrungsdatum und Status filtern. "
+            "Beispiel: 'Zeige alle fehlgeschlagenen Tests von user123 diese Woche'"
         ),
         category=ToolCategory.KNOWLEDGE,
         parameters=[
@@ -874,15 +946,33 @@ def register_alm_tools(registry: ToolRegistry) -> int:
             ToolParameter(
                 name="test_set_id",
                 type="integer",
-                description="Optional: Nur in diesem Test-Set suchen",
+                description="Nur in diesem Test-Set suchen",
                 required=False,
             ),
             ToolParameter(
                 name="status",
                 type="string",
-                description="Optional: Nur mit diesem Status",
+                description="Nur mit diesem Status",
                 required=False,
                 enum=["Passed", "Failed", "No Run", "Not Completed", "Blocked"],
+            ),
+            ToolParameter(
+                name="tester",
+                type="string",
+                description="Ausgefuehrt von diesem Tester (Benutzername)",
+                required=False,
+            ),
+            ToolParameter(
+                name="executed_after",
+                type="string",
+                description="Ausgefuehrt nach Datum (Format: YYYY-MM-DD)",
+                required=False,
+            ),
+            ToolParameter(
+                name="executed_before",
+                type="string",
+                description="Ausgefuehrt vor Datum (Format: YYYY-MM-DD)",
+                required=False,
             ),
             ToolParameter(
                 name="limit",
@@ -893,6 +983,186 @@ def register_alm_tools(registry: ToolRegistry) -> int:
             ),
         ],
         handler=alm_search_test_instances,
+    ))
+    count += 1
+
+    # ══════════════════════════════════════════════════════════════════════════
+    # alm_list_projects - Verfuegbare Projekte auflisten
+    # ══════════════════════════════════════════════════════════════════════════
+
+    async def alm_list_projects(**kwargs: Any) -> ToolResult:
+        """Listet verfuegbare Projekte in der aktuellen oder angegebenen Domain."""
+        if not settings.alm.enabled:
+            return ToolResult(success=False, error="HP ALM ist nicht aktiviert")
+
+        domain: Optional[str] = kwargs.get("domain")
+
+        try:
+            client = get_alm_client()
+
+            # Aktuellen Kontext anzeigen
+            context = client.get_current_context()
+            projects = await client.list_projects(domain)
+
+            if not projects:
+                return ToolResult(
+                    success=True,
+                    data=f"Keine Projekte in Domain '{domain or context['domain']}' gefunden"
+                )
+
+            lines = [f"## Projekte in Domain: {domain or context['domain']}\n"]
+            lines.append(f"**Aktuelles Projekt:** {context['project']}\n")
+            lines.append("| Projekt | Domain |")
+            lines.append("|---------|--------|")
+
+            for proj in projects:
+                marker = " **(aktiv)**" if proj["name"] == context["project"] else ""
+                lines.append(f"| {proj['name']}{marker} | {proj['domain']} |")
+
+            lines.append(f"\n*{len(projects)} Projekte gefunden*")
+            lines.append("\n**Tipp:** Verwende `alm_switch_project` um das Projekt zu wechseln.")
+            return ToolResult(success=True, data="\n".join(lines))
+
+        except ALMError as e:
+            return ToolResult(success=False, error=str(e))
+        except Exception as e:
+            logger.exception("ALM List Projects Error")
+            return ToolResult(success=False, error=f"Unerwarteter Fehler: {e}")
+
+    registry.register(Tool(
+        name="alm_list_projects",
+        description=(
+            "Listet alle verfuegbaren Projekte in HP ALM auf. "
+            "Zeigt auch das aktuell aktive Projekt an. "
+            "Optional kann eine andere Domain angegeben werden."
+        ),
+        category=ToolCategory.KNOWLEDGE,
+        parameters=[
+            ToolParameter(
+                name="domain",
+                type="string",
+                description="Optional: Domain (default: aktuelle Domain aus Settings)",
+                required=False,
+            ),
+        ],
+        handler=alm_list_projects,
+    ))
+    count += 1
+
+    # ══════════════════════════════════════════════════════════════════════════
+    # alm_switch_project - Projekt wechseln
+    # ══════════════════════════════════════════════════════════════════════════
+
+    async def alm_switch_project(**kwargs: Any) -> ToolResult:
+        """Wechselt das aktive ALM-Projekt zur Laufzeit."""
+        if not settings.alm.enabled:
+            return ToolResult(success=False, error="HP ALM ist nicht aktiviert")
+
+        project: str = kwargs.get("project", "")
+        domain: Optional[str] = kwargs.get("domain")
+
+        if not project:
+            return ToolResult(success=False, error="project ist erforderlich")
+
+        try:
+            client = get_alm_client()
+            result = client.switch_project(project, domain)
+
+            if result["success"]:
+                # Verbindung testen
+                test_result = await client.test_connection()
+
+                if test_result.get("success"):
+                    return ToolResult(
+                        success=True,
+                        data=(
+                            f"## Projekt gewechselt!\n\n"
+                            f"**Von:** {result['previous_domain']}/{result['previous_project']}\n"
+                            f"**Nach:** {result['domain']}/{result['project']}\n\n"
+                            f"Verbindung erfolgreich getestet."
+                        )
+                    )
+                else:
+                    # Zurueck wechseln bei Fehler
+                    client.switch_project(result['previous_project'], result['previous_domain'])
+                    return ToolResult(
+                        success=False,
+                        error=f"Projekt existiert nicht oder keine Berechtigung: {test_result.get('error')}"
+                    )
+
+            return ToolResult(success=False, error="Projektwechsel fehlgeschlagen")
+
+        except ALMError as e:
+            return ToolResult(success=False, error=str(e))
+        except Exception as e:
+            logger.exception("ALM Switch Project Error")
+            return ToolResult(success=False, error=f"Unerwarteter Fehler: {e}")
+
+    registry.register(Tool(
+        name="alm_switch_project",
+        description=(
+            "Wechselt das aktive HP ALM Projekt zur Laufzeit. "
+            "Verwende alm_list_projects um verfuegbare Projekte zu sehen. "
+            "Der Wechsel ist temporaer und aendert nicht die Settings."
+        ),
+        category=ToolCategory.DEVOPS,
+        is_write_operation=True,
+        parameters=[
+            ToolParameter(
+                name="project",
+                type="string",
+                description="Name des Zielprojekts",
+                required=True,
+            ),
+            ToolParameter(
+                name="domain",
+                type="string",
+                description="Optional: Domain wechseln (default: aktuelle Domain)",
+                required=False,
+            ),
+        ],
+        handler=alm_switch_project,
+    ))
+    count += 1
+
+    # ══════════════════════════════════════════════════════════════════════════
+    # alm_get_context - Aktuellen Kontext anzeigen
+    # ══════════════════════════════════════════════════════════════════════════
+
+    async def alm_get_context(**kwargs: Any) -> ToolResult:
+        """Zeigt den aktuellen ALM-Kontext (Domain/Projekt)."""
+        if not settings.alm.enabled:
+            return ToolResult(success=False, error="HP ALM ist nicht aktiviert")
+
+        try:
+            client = get_alm_client()
+            context = client.get_current_context()
+
+            status = "Aktiv" if context["has_session"] else "Nicht verbunden"
+
+            return ToolResult(
+                success=True,
+                data=(
+                    f"## Aktueller ALM-Kontext\n\n"
+                    f"**Server:** {context['base_url']}\n"
+                    f"**Domain:** {context['domain']}\n"
+                    f"**Projekt:** {context['project']}\n"
+                    f"**Benutzer:** {context['user']}\n"
+                    f"**Session:** {status}"
+                )
+            )
+
+        except Exception as e:
+            return ToolResult(success=False, error=f"Fehler: {e}")
+
+    registry.register(Tool(
+        name="alm_get_context",
+        description=(
+            "Zeigt den aktuellen HP ALM Kontext: Server, Domain, Projekt, Benutzer und Session-Status."
+        ),
+        category=ToolCategory.KNOWLEDGE,
+        parameters=[],
+        handler=alm_get_context,
     ))
     count += 1
 

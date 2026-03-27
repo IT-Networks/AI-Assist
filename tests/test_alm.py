@@ -346,7 +346,8 @@ class TestALMTools:
 
         # Test Plan: test_connection, search, read, get_steps, create, update, folders (7)
         # Test Lab: test_lab_folders, test-sets, search_instances, run_history, create_run (5)
-        assert count == 12
+        # Project: list_projects, switch_project, get_context (3)
+        assert count == 15
 
     def test_tool_names(self):
         """Prueft Tool-Namen."""
@@ -371,6 +372,10 @@ class TestALMTools:
         assert "alm_search_test_instances" in tool_names
         assert "alm_get_run_history" in tool_names
         assert "alm_create_run" in tool_names
+        # Project Management Tools
+        assert "alm_list_projects" in tool_names
+        assert "alm_switch_project" in tool_names
+        assert "alm_get_context" in tool_names
 
     def test_write_tools_marked(self):
         """Prueft ob Schreib-Tools als is_write_operation markiert sind."""
@@ -380,7 +385,7 @@ class TestALMTools:
         registry = ToolRegistry()
         register_alm_tools(registry)
 
-        write_tools = ["alm_create_test", "alm_update_test", "alm_create_run"]
+        write_tools = ["alm_create_test", "alm_update_test", "alm_create_run", "alm_switch_project"]
         for tool_name in write_tools:
             tool = registry.get(tool_name)
             assert tool is not None, f"Tool {tool_name} nicht gefunden"
@@ -397,7 +402,8 @@ class TestALMTools:
         read_tools = [
             "alm_test_connection", "alm_search_tests", "alm_read_test", "alm_get_test_steps",
             "alm_list_folders", "alm_list_test_sets",
-            "alm_list_test_lab_folders", "alm_search_test_instances", "alm_get_run_history"
+            "alm_list_test_lab_folders", "alm_search_test_instances", "alm_get_run_history",
+            "alm_list_projects", "alm_get_context"
         ]
         for tool_name in read_tools:
             tool = registry.get(tool_name)
