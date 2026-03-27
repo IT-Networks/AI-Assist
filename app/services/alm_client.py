@@ -151,7 +151,7 @@ class ALMTestStep:
 
 @dataclass
 class ALMTest:
-    """Testfall aus dem Test Plan."""
+    """Testfall aus dem Test Pool (Testfall-Definitionen)."""
     id: int
     name: str
     description: str = ""
@@ -190,7 +190,7 @@ class ALMTest:
 
 @dataclass
 class ALMFolder:
-    """Test-Plan Folder."""
+    """Test Pool Folder (Ordnerstruktur fuer Testfall-Definitionen)."""
     id: int
     name: str
     parent_id: int
@@ -1084,7 +1084,7 @@ class ALMClient:
 
     async def list_folders(self, parent_id: int = 0) -> List[ALMFolder]:
         """
-        Listet Test-Plan-Folders.
+        Listet Test Pool Folders (Ordnerstruktur fuer Testfall-Definitionen).
 
         Args:
             parent_id: Parent-Folder-ID (0 = Root)
@@ -1157,7 +1157,7 @@ class ALMClient:
 
     async def create_folder(self, name: str, parent_id: int = 0) -> ALMFolder:
         """
-        Erstellt einen neuen Test-Plan-Folder.
+        Erstellt einen neuen Test Pool Folder.
 
         Args:
             name: Name des neuen Folders

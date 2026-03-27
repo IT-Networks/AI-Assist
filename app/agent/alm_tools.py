@@ -4,21 +4,25 @@ Agent-Tools fuer HP ALM/Quality Center Testfall-Management.
 WICHTIG: Diese Tools sind NUR fuer HP ALM/Quality Center (QC).
 Fuer andere Test-Integrationen (SOAP, JUnit, etc.) gibt es separate Tools.
 
-Test Plan Module (Testfall-Definitionen):
+Test Pool Module (Testfall-Definitionen, eigene Ordnerstruktur):
 - alm_test_connection: Verbindung pruefen und Login testen
-- alm_search_tests: Testfaelle suchen (Name, Autor, Datum, Status, Typ)
+- alm_search_tests: Testfaelle im Test Pool suchen (Name, Autor, Datum, Status, Typ)
 - alm_read_test: Testfall mit Details und Steps laden
 - alm_get_test_steps: Design-Steps eines Testfalls separat laden
-- alm_create_test: Neuen Testfall erstellen (mit Bestaetigung)
+- alm_create_test: Neuen Testfall im Test Pool erstellen (mit Bestaetigung)
 - alm_update_test: Testfall aktualisieren (mit Bestaetigung)
-- alm_list_folders: Test-Plan Folder auflisten
+- alm_list_folders: Test Pool Folder auflisten (NICHT Test Lab!)
 
-Test Lab Module (Testausfuehrung):
-- alm_list_test_lab_folders: Test Lab Ordnerstruktur auflisten
+Test Lab Module (Testausfuehrung, eigene Ordnerstruktur):
+- alm_list_test_lab_folders: Test Lab Ordnerstruktur auflisten (NICHT Test Pool!)
 - alm_list_test_sets: Test-Sets im Test Lab auflisten
 - alm_search_test_instances: Test-Instances suchen (Tester, Datum, Status)
 - alm_get_run_history: Run-Historie einer Test-Instance anzeigen
 - alm_create_run: Test-Run erstellen (mit Bestaetigung)
+
+WICHTIG: Test Pool und Test Lab haben GETRENNTE Ordnerstrukturen!
+- Test Pool: Hier werden Testfaelle definiert und verwaltet (alm_list_folders)
+- Test Lab: Hier werden Test-Sets mit zugeordneten Testfaellen ausgefuehrt (alm_list_test_lab_folders)
 
 Project Management:
 - alm_list_projects: Verfuegbare Projekte in Domain auflisten
@@ -182,9 +186,10 @@ def register_alm_tools(registry: ToolRegistry) -> int:
     registry.register(Tool(
         name="alm_search_tests",
         description=(
-            "Sucht Testfaelle in HP ALM/Quality Center mit erweiterten Filtern. "
+            "Sucht Testfaelle im TEST POOL von HP ALM/Quality Center mit erweiterten Filtern. "
+            "WICHTIG: Dies durchsucht den Test Pool (Testfall-Definitionen), NICHT das Test Lab (Testausfuehrung). "
             "Kann nach Name, Autor, Erstelldatum, Status und Typ filtern. "
-            "Beispiel: 'Zeige alle Tests von user123 aus dem letzten Monat'"
+            "Fuer Test Lab Ordner verwende alm_list_test_lab_folders, fuer Test-Sets verwende alm_list_test_sets."
         ),
         category=ToolCategory.KNOWLEDGE,
         parameters=[
@@ -197,7 +202,7 @@ def register_alm_tools(registry: ToolRegistry) -> int:
             ToolParameter(
                 name="folder_id",
                 type="integer",
-                description="Nur in diesem Test-Plan-Folder suchen",
+                description="Nur in diesem Test Pool Folder suchen (NICHT Test Lab! Fuer Test Lab verwende alm_list_test_lab_folders)",
                 required=False,
             ),
             ToolParameter(
@@ -512,7 +517,7 @@ def register_alm_tools(registry: ToolRegistry) -> int:
             ToolParameter(
                 name="folder_id",
                 type="integer",
-                description="Ziel-Folder-ID im Test Plan (verwende alm_list_folders)",
+                description="Ziel-Folder-ID im Test Pool (verwende alm_list_folders fuer Test Pool Ordner)",
                 required=True,
             ),
             ToolParameter(
@@ -617,11 +622,11 @@ def register_alm_tools(registry: ToolRegistry) -> int:
     count += 1
 
     # ══════════════════════════════════════════════════════════════════════════
-    # alm_list_folders - Test-Plan Folder auflisten
+    # alm_list_folders - Test Pool Folder auflisten
     # ══════════════════════════════════════════════════════════════════════════
 
     async def alm_list_folders(**kwargs: Any) -> ToolResult:
-        """Listet Test-Plan Folder auf."""
+        """Listet Test Pool Folder auf (Ordnerstruktur fuer Testfall-Definitionen)."""
         if not settings.alm.enabled:
             return ToolResult(success=False, error="HP ALM ist nicht aktiviert")
 
@@ -641,7 +646,7 @@ def register_alm_tools(registry: ToolRegistry) -> int:
             for folder in folders:
                 folder.path = await client.get_folder_path(folder.id)
 
-            lines = ["## Test-Plan Folder\n"]
+            lines = ["## Test Pool Folder (Testfall-Definitionen)\n"]
             lines.append("| ID | Name | Pfad |")
             lines.append("|---|---|---|")
 
@@ -660,8 +665,10 @@ def register_alm_tools(registry: ToolRegistry) -> int:
     registry.register(Tool(
         name="alm_list_folders",
         description=(
-            "Listet Test-Plan Folder in HP ALM mit vollstaendigem Pfad auf. "
-            "Verwende dies um die folder_id und Pfade fuer Tests zu ermitteln. "
+            "Listet Test Pool Folder in HP ALM mit vollstaendigem Pfad auf. "
+            "WICHTIG: Dies zeigt die Ordnerstruktur im TEST POOL (wo Testfaelle definiert werden), "
+            "NICHT die Ordnerstruktur im Test Lab (wo Test-Sets ausgefuehrt werden)! "
+            "Fuer Test Lab Ordner verwende stattdessen alm_list_test_lab_folders. "
             "Ohne parent_id werden Root-Folder angezeigt."
         ),
         category=ToolCategory.KNOWLEDGE,
@@ -669,7 +676,7 @@ def register_alm_tools(registry: ToolRegistry) -> int:
             ToolParameter(
                 name="parent_id",
                 type="integer",
-                description="Parent-Folder-ID (0 oder leer = Root-Folder)",
+                description="Parent-Folder-ID im Test Pool (0 oder leer = Root-Folder)",
                 required=False,
                 default=0,
             ),
@@ -688,7 +695,7 @@ def register_alm_tools(registry: ToolRegistry) -> int:
             return ToolResult(success=False, error="HP ALM ist nicht aktiviert")
 
         folder_id: int = kwargs.get("folder_id", 0)
-        folder_type: str = kwargs.get("folder_type", "test-plan")
+        folder_type: str = kwargs.get("folder_type", "test-pool")
 
         if not folder_id:
             return ToolResult(success=False, error="folder_id ist erforderlich")
@@ -697,13 +704,13 @@ def register_alm_tools(registry: ToolRegistry) -> int:
             client = get_alm_client()
 
             if folder_type == "test-lab":
-                # Test Lab Folder
+                # Test Lab Folder (Ordnerstruktur fuer Test-Sets/Ausfuehrung)
                 path = await client.get_test_lab_folder_path(folder_id)
                 children = await client.list_test_set_folders(folder_id)
                 for child in children:
                     child.path = await client.get_test_lab_folder_path(child.id)
             else:
-                # Test Plan Folder (default)
+                # Test Pool Folder (Ordnerstruktur fuer Testfall-Definitionen)
                 path = await client.get_folder_path(folder_id)
                 children = await client.list_folders(folder_id)
                 for child in children:
@@ -735,7 +742,9 @@ def register_alm_tools(registry: ToolRegistry) -> int:
         name="alm_get_folder",
         description=(
             "Laedt Details eines Folders inkl. vollstaendigem Pfad und Unterordnern. "
-            "Verwende folder_type='test-lab' fuer Test Lab Folder, sonst Test Plan Folder."
+            "WICHTIG: Test Pool und Test Lab haben GETRENNTE Ordnerstrukturen! "
+            "Verwende folder_type='test-pool' (default) fuer Test Pool Folder (Testfall-Definitionen) "
+            "oder folder_type='test-lab' fuer Test Lab Folder (Test-Sets/Ausfuehrung)."
         ),
         category=ToolCategory.KNOWLEDGE,
         parameters=[
@@ -748,9 +757,10 @@ def register_alm_tools(registry: ToolRegistry) -> int:
             ToolParameter(
                 name="folder_type",
                 type="string",
-                description="Folder-Typ: 'test-plan' (default) oder 'test-lab'",
+                description="Folder-Typ: 'test-pool' (default, Testfall-Definitionen) oder 'test-lab' (Test-Sets/Ausfuehrung)",
                 required=False,
-                default="test-plan",
+                default="test-pool",
+                enum=["test-pool", "test-lab"],
             ),
         ],
         handler=alm_get_folder,
@@ -762,7 +772,7 @@ def register_alm_tools(registry: ToolRegistry) -> int:
     # ══════════════════════════════════════════════════════════════════════════
 
     async def alm_create_folder(**kwargs: Any) -> ToolResult:
-        """Erstellt einen neuen Folder im Test Plan."""
+        """Erstellt einen neuen Folder im Test Pool (Testfall-Definitionen)."""
         if not settings.alm.enabled:
             return ToolResult(success=False, error="HP ALM ist nicht aktiviert")
 
@@ -798,8 +808,8 @@ def register_alm_tools(registry: ToolRegistry) -> int:
     registry.register(Tool(
         name="alm_create_folder",
         description=(
-            "Erstellt einen neuen Folder im Test Plan. "
-            "Gib parent_id an um einen Unterordner zu erstellen."
+            "Erstellt einen neuen Folder im Test Pool (Testfall-Definitionen). "
+            "NICHT fuer Test Lab Folder! Gib parent_id an um einen Unterordner zu erstellen."
         ),
         category=ToolCategory.DEVOPS,
         parameters=[
@@ -837,15 +847,23 @@ def register_alm_tools(registry: ToolRegistry) -> int:
             test_sets = await client.list_test_sets(folder_id)
 
             if not test_sets:
-                return ToolResult(success=True, data="Keine Test-Sets gefunden")
+                return ToolResult(success=True, data="Keine Test-Sets im Test Lab gefunden" + (f" (Folder-ID: {folder_id})" if folder_id else ""))
 
+            # Folder-Pfade fuer Test-Sets laden
             lines = ["## Test-Sets (Test Lab)\n"]
-            lines.append("| ID | Name | Status |")
-            lines.append("|---|---|---|")
+            lines.append("| ID | Name | Status | Test Lab Pfad |")
+            lines.append("|---|---|---|---|")
 
             for ts in test_sets:
-                lines.append(f"| {ts.id} | {ts.name} | {ts.status or '-'} |")
+                folder_path = ""
+                if ts.folder_id:
+                    try:
+                        folder_path = await client.get_test_lab_folder_path(ts.folder_id)
+                    except Exception:
+                        folder_path = f"Folder-{ts.folder_id}"
+                lines.append(f"| {ts.id} | {ts.name} | {ts.status or '-'} | {folder_path} |")
 
+            lines.append(f"\n*HINWEIS: Diese Ordner sind im Test Lab, nicht im Test Pool.*")
             return ToolResult(success=True, data="\n".join(lines))
 
         except ALMError as e:
@@ -857,15 +875,17 @@ def register_alm_tools(registry: ToolRegistry) -> int:
     registry.register(Tool(
         name="alm_list_test_sets",
         description=(
-            "Listet Test-Sets aus dem Test Lab in HP ALM auf. "
-            "Test-Sets enthalten Test-Instances fuer die Ausfuehrung."
+            "Listet Test-Sets aus dem TEST LAB in HP ALM auf. "
+            "WICHTIG: Test-Sets liegen im Test Lab (NICHT im Test Pool!). "
+            "Test-Sets enthalten Test-Instances (zugeordnete Testfaelle) fuer die Ausfuehrung. "
+            "Verwende alm_list_test_lab_folders um die folder_id im Test Lab zu ermitteln."
         ),
         category=ToolCategory.KNOWLEDGE,
         parameters=[
             ToolParameter(
                 name="folder_id",
                 type="integer",
-                description="Optional: Nur Test-Sets in diesem Test Lab Folder",
+                description="Optional: Nur Test-Sets in diesem Test Lab Folder (ID aus alm_list_test_lab_folders, NICHT aus alm_list_folders!)",
                 required=False,
             ),
         ],
@@ -993,14 +1013,14 @@ def register_alm_tools(registry: ToolRegistry) -> int:
             for folder in folders:
                 folder.path = await client.get_test_lab_folder_path(folder.id)
 
-            lines = ["## Test Lab Folder\n"]
+            lines = ["## Test Lab Folder (Test-Sets/Ausfuehrung)\n"]
             lines.append("| ID | Name | Pfad |")
             lines.append("|---|---|---|")
 
             for folder in folders:
                 lines.append(f"| {folder.id} | {folder.name} | {folder.path} |")
 
-            lines.append(f"\n*{len(folders)} Folder gefunden*")
+            lines.append(f"\n*{len(folders)} Test Lab Folder gefunden (NICHT Test Pool!)*")
             return ToolResult(success=True, data="\n".join(lines))
 
         except ALMError as e:
@@ -1013,8 +1033,10 @@ def register_alm_tools(registry: ToolRegistry) -> int:
         name="alm_list_test_lab_folders",
         description=(
             "Listet Test Lab Folder in HP ALM mit vollstaendigem Pfad auf. "
-            "Dies ist die Ordnerstruktur im Test Lab (nicht Test Plan!). "
-            "Verwende dies um Test-Set-Folder-IDs und Pfade zu ermitteln."
+            "WICHTIG: Dies zeigt die Ordnerstruktur im TEST LAB (wo Test-Sets ausgefuehrt werden), "
+            "NICHT die Ordnerstruktur im Test Pool (wo Testfaelle definiert werden)! "
+            "Fuer Test Pool Ordner verwende stattdessen alm_list_folders. "
+            "Verwende die Folder-IDs hier fuer alm_list_test_sets."
         ),
         category=ToolCategory.KNOWLEDGE,
         parameters=[
