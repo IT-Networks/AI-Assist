@@ -344,7 +344,7 @@ class TestALMTools:
         registry = ToolRegistry()
         count = register_alm_tools(registry)
 
-        assert count == 7  # search, read, create, update, folders, test-sets, run
+        assert count == 8  # test_connection, search, read, create, update, folders, test-sets, run
 
     def test_tool_names(self):
         """Prueft Tool-Namen."""
@@ -355,6 +355,7 @@ class TestALMTools:
         register_alm_tools(registry)
 
         tool_names = [t.name for t in registry.list_tools()]
+        assert "alm_test_connection" in tool_names
         assert "alm_search_tests" in tool_names
         assert "alm_read_test" in tool_names
         assert "alm_create_test" in tool_names
@@ -385,7 +386,7 @@ class TestALMTools:
         registry = ToolRegistry()
         register_alm_tools(registry)
 
-        read_tools = ["alm_search_tests", "alm_read_test", "alm_list_folders", "alm_list_test_sets"]
+        read_tools = ["alm_test_connection", "alm_search_tests", "alm_read_test", "alm_list_folders", "alm_list_test_sets"]
         for tool_name in read_tools:
             tool = registry.get(tool_name)
             assert tool is not None, f"Tool {tool_name} nicht gefunden"

@@ -1,7 +1,11 @@
 """
 Agent-Tools fuer HP ALM/Quality Center Testfall-Management.
 
+WICHTIG: Diese Tools sind NUR fuer HP ALM/Quality Center (QC).
+Fuer andere Test-Integrationen (SOAP, JUnit, etc.) gibt es separate Tools.
+
 Tools:
+- alm_test_connection: Verbindung pruefen und Login testen
 - alm_search_tests: Testfaelle suchen (nach Name oder Folder)
 - alm_read_test: Testfall mit Details und Steps laden
 - alm_create_test: Neuen Testfall erstellen (mit Bestaetigung)
@@ -9,6 +13,9 @@ Tools:
 - alm_list_folders: Test-Plan Folder auflisten
 - alm_list_test_sets: Test-Sets im Test Lab auflisten
 - alm_create_run: Test-Run erstellen (mit Bestaetigung)
+
+Authentifizierung erfolgt automatisch bei Verwendung der Tools.
+Die Zugangsdaten werden aus den Settings geladen (alm.username, alm.password).
 """
 
 import logging
@@ -37,6 +44,59 @@ def register_alm_tools(registry: ToolRegistry) -> int:
     from app.services.alm_client import get_alm_client
 
     count = 0
+
+    # ══════════════════════════════════════════════════════════════════════════
+    # alm_test_connection - Verbindung pruefen und Login testen
+    # ══════════════════════════════════════════════════════════════════════════
+
+    async def alm_test_connection(**kwargs: Any) -> ToolResult:
+        """Testet die Verbindung zu HP ALM/Quality Center."""
+        if not settings.alm.enabled:
+            return ToolResult(
+                success=False,
+                error="HP ALM/Quality Center ist nicht aktiviert. Bitte in den Einstellungen aktivieren."
+            )
+
+        try:
+            client = get_alm_client()
+            result = await client.test_connection()
+
+            if result.get("success"):
+                return ToolResult(
+                    success=True,
+                    data=(
+                        f"ALM Verbindung erfolgreich!\n"
+                        f"- Server: {settings.alm.base_url}\n"
+                        f"- Domain: {result.get('domain', settings.alm.domain)}\n"
+                        f"- Project: {result.get('project', settings.alm.project)}\n"
+                        f"- User: {result.get('user', settings.alm.username)}"
+                    )
+                )
+            else:
+                return ToolResult(
+                    success=False,
+                    error=f"ALM Verbindung fehlgeschlagen: {result.get('error', 'Unbekannter Fehler')}"
+                )
+
+        except ALMError as e:
+            return ToolResult(success=False, error=f"ALM Fehler: {e}")
+        except Exception as e:
+            logger.exception("ALM Connection Test Error")
+            return ToolResult(success=False, error=f"Verbindungsfehler: {e}")
+
+    registry.register(Tool(
+        name="alm_test_connection",
+        description=(
+            "Testet die Verbindung zu HP ALM/Quality Center und fuehrt einen Login durch. "
+            "Verwende dieses Tool um zu pruefen ob ALM erreichbar ist und die Zugangsdaten korrekt sind. "
+            "WICHTIG: Dies ist fuer HP ALM/Quality Center, NICHT fuer andere Test-Tools wie SOAP-Tests."
+        ),
+        category=ToolCategory.KNOWLEDGE,
+        parameters=[],
+        is_write_operation=False,
+        handler=alm_test_connection,
+    ))
+    count += 1
 
     # ══════════════════════════════════════════════════════════════════════════
     # alm_search_tests - Testfaelle suchen

@@ -364,7 +364,12 @@ Wenn der User nach "Tests erstellen", "Testfall anlegen", "Test lesen" oder aehn
 
 3. **Verwende dann das passende Tool:**
    - JUnit -> generate_junit_tests Tool
-   - ALM -> alm_create_test oder alm_read_test Tools
+   - ALM -> alm_* Tools (alm_test_connection, alm_search_tests, alm_read_test, alm_create_test, etc.)
+
+4. **WICHTIG - Login/Verbindung:**
+   - Fuer ALM/QC Login: `alm_test_connection` (NICHT test_login!)
+   - Das Tool `test_login` ist fuer SOAP-Test-Services, NICHT fuer Quality Center!
+   - ALM-Authentifizierung erfolgt automatisch bei allen alm_* Tools
 
 **Wichtig:** Frage nur einmal nach. Wenn der User im Chat bereits geklaert hat was er meint,
 merke dir das fuer den Rest der Konversation.
