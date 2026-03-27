@@ -12,7 +12,7 @@ from pathlib import Path
 if sys.platform == 'win32':
     asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())
 
-from app.api.routes import chat, java, logs, pdf, confluence, models, python_routes, handbook, skills, agent, settings, database, datasources, mq, log_servers, wlp, maven, search, jenkins, github, internal_fetch, docker_sandbox, access_logs, servicenow, testtool, analytics, patterns, tokens, healing, agents, reviews, arena, files, research, output, designs, llm_diagnostics, update, tasks, graph, tests, scripts
+from app.api.routes import chat, java, logs, pdf, confluence, models, python_routes, handbook, skills, agent, settings, database, datasources, mq, log_servers, wlp, maven, search, jenkins, alm, github, internal_fetch, docker_sandbox, access_logs, servicenow, testtool, analytics, patterns, tokens, healing, agents, reviews, arena, files, research, output, designs, llm_diagnostics, update, tasks, graph, tests, scripts
 
 
 @asynccontextmanager
@@ -282,7 +282,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="AI Code Assistant",
     description="Lokaler AI-Assistent für Java/Python-Entwicklung mit Handbuch-, WLP-Log-, PDF- und Confluence-Unterstützung",
-    version="2.11.0",
+    version="2.12.0",
     lifespan=lifespan,
 )
 
@@ -307,6 +307,7 @@ app.include_router(wlp.router)
 app.include_router(maven.router)
 app.include_router(search.router)
 app.include_router(jenkins.router)
+app.include_router(alm.router)
 app.include_router(github.router)
 app.include_router(internal_fetch.router)
 app.include_router(docker_sandbox.router)

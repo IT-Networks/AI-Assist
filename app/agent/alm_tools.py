@@ -1,0 +1,554 @@
+"""
+Agent-Tools fuer HP ALM/Quality Center Testfall-Management.
+
+Tools:
+- alm_search_tests: Testfaelle suchen (nach Name oder Folder)
+- alm_read_test: Testfall mit Details und Steps laden
+- alm_create_test: Neuen Testfall erstellen (mit Bestaetigung)
+- alm_update_test: Testfall aktualisieren (mit Bestaetigung)
+- alm_list_folders: Test-Plan Folder auflisten
+- alm_list_test_sets: Test-Sets im Test Lab auflisten
+- alm_create_run: Test-Run erstellen (mit Bestaetigung)
+"""
+
+import logging
+from typing import Any, Dict, List, Optional
+
+from app.agent.tools import Tool, ToolCategory, ToolParameter, ToolResult, ToolRegistry
+from app.core.exceptions import ALMError
+
+logger = logging.getLogger(__name__)
+
+# Pending Operations fuer Bestaetigung
+_pending_operations: Dict[str, Dict[str, Any]] = {}
+
+
+def register_alm_tools(registry: ToolRegistry) -> int:
+    """
+    Registriert alle ALM-Tools.
+
+    Args:
+        registry: Tool-Registry
+
+    Returns:
+        Anzahl registrierter Tools
+    """
+    from app.core.config import settings
+    from app.services.alm_client import get_alm_client
+
+    count = 0
+
+    # ══════════════════════════════════════════════════════════════════════════
+    # alm_search_tests - Testfaelle suchen
+    # ══════════════════════════════════════════════════════════════════════════
+
+    async def alm_search_tests(**kwargs: Any) -> ToolResult:
+        """Sucht Testfaelle in HP ALM."""
+        if not settings.alm.enabled:
+            return ToolResult(success=False, error="HP ALM ist nicht aktiviert (alm.enabled=false)")
+
+        query: str = kwargs.get("query", "")
+        folder_id: Optional[int] = kwargs.get("folder_id")
+        limit: int = kwargs.get("limit", 20)
+
+        try:
+            client = get_alm_client()
+            tests = await client.search_tests(query=query, folder_id=folder_id, limit=limit)
+
+            if not tests:
+                return ToolResult(
+                    success=True,
+                    data=f"Keine Testfaelle gefunden fuer '{query}'"
+                )
+
+            # Formatierte Ausgabe
+            lines = [f"## {len(tests)} Testfaelle gefunden\n"]
+            lines.append("| ID | Name | Typ | Status | Owner |")
+            lines.append("|---|---|---|---|---|")
+
+            for test in tests:
+                lines.append(
+                    f"| {test.id} | {test.name} | {test.test_type} | "
+                    f"{test.status or '-'} | {test.owner or '-'} |"
+                )
+
+            return ToolResult(success=True, data="\n".join(lines))
+
+        except ALMError as e:
+            return ToolResult(success=False, error=str(e))
+        except Exception as e:
+            logger.exception("ALM Search Error")
+            return ToolResult(success=False, error=f"Unerwarteter Fehler: {e}")
+
+    registry.register(Tool(
+        name="alm_search_tests",
+        description=(
+            "Sucht Testfaelle in HP ALM/Quality Center. "
+            "Durchsucht den Test Plan nach Name. "
+            "Verwende dies um Testfaelle zu finden bevor du Details abrufst."
+        ),
+        category=ToolCategory.KNOWLEDGE,
+        parameters=[
+            ToolParameter(
+                name="query",
+                type="string",
+                description="Suchbegriff (wird im Testfall-Namen gesucht)",
+                required=False,
+            ),
+            ToolParameter(
+                name="folder_id",
+                type="integer",
+                description="Optional: Nur in diesem Test-Plan-Folder suchen",
+                required=False,
+            ),
+            ToolParameter(
+                name="limit",
+                type="integer",
+                description="Max. Anzahl Ergebnisse (default: 20)",
+                required=False,
+                default=20,
+            ),
+        ],
+        handler=alm_search_tests,
+    ))
+    count += 1
+
+    # ══════════════════════════════════════════════════════════════════════════
+    # alm_read_test - Testfall mit Details laden
+    # ══════════════════════════════════════════════════════════════════════════
+
+    async def alm_read_test(**kwargs: Any) -> ToolResult:
+        """Liest einen Testfall mit allen Details."""
+        if not settings.alm.enabled:
+            return ToolResult(success=False, error="HP ALM ist nicht aktiviert")
+
+        test_id: int = kwargs.get("test_id", 0)
+        if not test_id:
+            return ToolResult(success=False, error="test_id ist erforderlich")
+
+        try:
+            client = get_alm_client()
+            test = await client.get_test(test_id, include_steps=True)
+            return ToolResult(success=True, data=test.to_markdown())
+
+        except ALMError as e:
+            return ToolResult(success=False, error=str(e))
+        except Exception as e:
+            logger.exception("ALM Read Error")
+            return ToolResult(success=False, error=f"Unerwarteter Fehler: {e}")
+
+    registry.register(Tool(
+        name="alm_read_test",
+        description=(
+            "Liest einen Testfall aus HP ALM mit allen Details: "
+            "Name, Beschreibung, Folder-Pfad, Status und alle Test-Schritte "
+            "mit erwarteten Ergebnissen. Verwende die Test-ID aus alm_search_tests."
+        ),
+        category=ToolCategory.KNOWLEDGE,
+        parameters=[
+            ToolParameter(
+                name="test_id",
+                type="integer",
+                description="Die Test-ID (aus alm_search_tests)",
+                required=True,
+            ),
+        ],
+        handler=alm_read_test,
+    ))
+    count += 1
+
+    # ══════════════════════════════════════════════════════════════════════════
+    # alm_create_test - Testfall erstellen (mit Bestaetigung)
+    # ══════════════════════════════════════════════════════════════════════════
+
+    async def alm_create_test(**kwargs: Any) -> ToolResult:
+        """Erstellt einen neuen Testfall in HP ALM."""
+        if not settings.alm.enabled:
+            return ToolResult(success=False, error="HP ALM ist nicht aktiviert")
+
+        name: str = kwargs.get("name", "")
+        folder_id: int = kwargs.get("folder_id", 0)
+        description: str = kwargs.get("description", "")
+        test_type: str = kwargs.get("test_type", settings.alm.default_test_type)
+        steps: List[Dict] = kwargs.get("steps", [])
+        confirmed: bool = kwargs.get("_confirmed", False)
+
+        if not name:
+            return ToolResult(success=False, error="name ist erforderlich")
+        if not folder_id:
+            return ToolResult(success=False, error="folder_id ist erforderlich")
+
+        # Bestaetigung erforderlich?
+        if settings.alm.require_confirmation and not confirmed:
+            preview = f"## Neuer Testfall\n\n"
+            preview += f"**Name:** {name}\n"
+            preview += f"**Folder-ID:** {folder_id}\n"
+            preview += f"**Typ:** {test_type}\n"
+            if description:
+                preview += f"**Beschreibung:** {description}\n"
+            if steps:
+                preview += f"\n**{len(steps)} Test-Schritte:**\n"
+                for i, step in enumerate(steps, 1):
+                    preview += f"  {i}. {step.get('description', 'Schritt')}\n"
+
+            return ToolResult(
+                success=True,
+                requires_confirmation=True,
+                confirmation_data={
+                    "action": "alm_create_test",
+                    "description": f"Testfall '{name}' in ALM erstellen",
+                    "preview": preview,
+                    "params": kwargs,
+                },
+            )
+
+        try:
+            client = get_alm_client()
+            test = await client.create_test(
+                name=name,
+                folder_id=folder_id,
+                description=description,
+                test_type=test_type,
+                steps=steps,
+            )
+
+            result = f"Testfall erfolgreich erstellt!\n\n"
+            result += test.to_markdown()
+            return ToolResult(success=True, data=result)
+
+        except ALMError as e:
+            return ToolResult(success=False, error=str(e))
+        except Exception as e:
+            logger.exception("ALM Create Error")
+            return ToolResult(success=False, error=f"Unerwarteter Fehler: {e}")
+
+    registry.register(Tool(
+        name="alm_create_test",
+        description=(
+            "Erstellt einen neuen Testfall in HP ALM/Quality Center. "
+            "Erfordert Bestaetigung durch den User. "
+            "Verwende alm_list_folders um die folder_id zu ermitteln."
+        ),
+        category=ToolCategory.KNOWLEDGE,
+        is_write_operation=True,
+        parameters=[
+            ToolParameter(
+                name="name",
+                type="string",
+                description="Name des Testfalls",
+                required=True,
+            ),
+            ToolParameter(
+                name="folder_id",
+                type="integer",
+                description="Ziel-Folder-ID im Test Plan (verwende alm_list_folders)",
+                required=True,
+            ),
+            ToolParameter(
+                name="description",
+                type="string",
+                description="Beschreibung des Testfalls",
+                required=False,
+            ),
+            ToolParameter(
+                name="test_type",
+                type="string",
+                description="Testtyp: MANUAL oder AUTOMATED",
+                required=False,
+                enum=["MANUAL", "AUTOMATED"],
+                default="MANUAL",
+            ),
+            ToolParameter(
+                name="steps",
+                type="array",
+                description="Test-Schritte als Array von {description, expected_result}",
+                required=False,
+            ),
+        ],
+        handler=alm_create_test,
+    ))
+    count += 1
+
+    # ══════════════════════════════════════════════════════════════════════════
+    # alm_update_test - Testfall aktualisieren (mit Bestaetigung)
+    # ══════════════════════════════════════════════════════════════════════════
+
+    async def alm_update_test(**kwargs: Any) -> ToolResult:
+        """Aktualisiert einen bestehenden Testfall."""
+        if not settings.alm.enabled:
+            return ToolResult(success=False, error="HP ALM ist nicht aktiviert")
+
+        test_id: int = kwargs.get("test_id", 0)
+        fields: Dict[str, Any] = kwargs.get("fields", {})
+        confirmed: bool = kwargs.get("_confirmed", False)
+
+        if not test_id:
+            return ToolResult(success=False, error="test_id ist erforderlich")
+        if not fields:
+            return ToolResult(success=False, error="fields ist erforderlich")
+
+        # Bestaetigung erforderlich?
+        if settings.alm.require_confirmation and not confirmed:
+            preview = f"## Testfall {test_id} aktualisieren\n\n"
+            preview += "**Aenderungen:**\n"
+            for key, value in fields.items():
+                preview += f"- **{key}:** {value}\n"
+
+            return ToolResult(
+                success=True,
+                requires_confirmation=True,
+                confirmation_data={
+                    "action": "alm_update_test",
+                    "description": f"Testfall {test_id} in ALM aktualisieren",
+                    "preview": preview,
+                    "params": kwargs,
+                },
+            )
+
+        try:
+            client = get_alm_client()
+            test = await client.update_test(test_id, fields)
+
+            result = f"Testfall erfolgreich aktualisiert!\n\n"
+            result += test.to_markdown()
+            return ToolResult(success=True, data=result)
+
+        except ALMError as e:
+            return ToolResult(success=False, error=str(e))
+        except Exception as e:
+            logger.exception("ALM Update Error")
+            return ToolResult(success=False, error=f"Unerwarteter Fehler: {e}")
+
+    registry.register(Tool(
+        name="alm_update_test",
+        description=(
+            "Aktualisiert einen bestehenden Testfall in HP ALM. "
+            "Erfordert Bestaetigung durch den User."
+        ),
+        category=ToolCategory.KNOWLEDGE,
+        is_write_operation=True,
+        parameters=[
+            ToolParameter(
+                name="test_id",
+                type="integer",
+                description="Test-ID des zu aktualisierenden Testfalls",
+                required=True,
+            ),
+            ToolParameter(
+                name="fields",
+                type="object",
+                description="Zu aendernde Felder als Object {name: ..., description: ..., status: ...}",
+                required=True,
+            ),
+        ],
+        handler=alm_update_test,
+    ))
+    count += 1
+
+    # ══════════════════════════════════════════════════════════════════════════
+    # alm_list_folders - Test-Plan Folder auflisten
+    # ══════════════════════════════════════════════════════════════════════════
+
+    async def alm_list_folders(**kwargs: Any) -> ToolResult:
+        """Listet Test-Plan Folder auf."""
+        if not settings.alm.enabled:
+            return ToolResult(success=False, error="HP ALM ist nicht aktiviert")
+
+        parent_id: int = kwargs.get("parent_id", 0)
+
+        try:
+            client = get_alm_client()
+            folders = await client.list_folders(parent_id)
+
+            if not folders:
+                return ToolResult(
+                    success=True,
+                    data="Keine Folder gefunden" + (f" unter Parent-ID {parent_id}" if parent_id else "")
+                )
+
+            lines = ["## Test-Plan Folder\n"]
+            lines.append("| ID | Name | Parent-ID |")
+            lines.append("|---|---|---|")
+
+            for folder in folders:
+                lines.append(f"| {folder.id} | {folder.name} | {folder.parent_id} |")
+
+            lines.append(f"\n*{len(folders)} Folder gefunden*")
+            return ToolResult(success=True, data="\n".join(lines))
+
+        except ALMError as e:
+            return ToolResult(success=False, error=str(e))
+        except Exception as e:
+            logger.exception("ALM Folders Error")
+            return ToolResult(success=False, error=f"Unerwarteter Fehler: {e}")
+
+    registry.register(Tool(
+        name="alm_list_folders",
+        description=(
+            "Listet Test-Plan Folder in HP ALM auf. "
+            "Verwende dies um die folder_id fuer alm_create_test zu ermitteln. "
+            "Ohne parent_id werden Root-Folder angezeigt."
+        ),
+        category=ToolCategory.KNOWLEDGE,
+        parameters=[
+            ToolParameter(
+                name="parent_id",
+                type="integer",
+                description="Parent-Folder-ID (0 oder leer = Root-Folder)",
+                required=False,
+                default=0,
+            ),
+        ],
+        handler=alm_list_folders,
+    ))
+    count += 1
+
+    # ══════════════════════════════════════════════════════════════════════════
+    # alm_list_test_sets - Test-Sets auflisten
+    # ══════════════════════════════════════════════════════════════════════════
+
+    async def alm_list_test_sets(**kwargs: Any) -> ToolResult:
+        """Listet Test-Sets aus dem Test Lab auf."""
+        if not settings.alm.enabled:
+            return ToolResult(success=False, error="HP ALM ist nicht aktiviert")
+
+        folder_id: Optional[int] = kwargs.get("folder_id")
+
+        try:
+            client = get_alm_client()
+            test_sets = await client.list_test_sets(folder_id)
+
+            if not test_sets:
+                return ToolResult(success=True, data="Keine Test-Sets gefunden")
+
+            lines = ["## Test-Sets (Test Lab)\n"]
+            lines.append("| ID | Name | Status |")
+            lines.append("|---|---|---|")
+
+            for ts in test_sets:
+                lines.append(f"| {ts.id} | {ts.name} | {ts.status or '-'} |")
+
+            return ToolResult(success=True, data="\n".join(lines))
+
+        except ALMError as e:
+            return ToolResult(success=False, error=str(e))
+        except Exception as e:
+            logger.exception("ALM Test-Sets Error")
+            return ToolResult(success=False, error=f"Unerwarteter Fehler: {e}")
+
+    registry.register(Tool(
+        name="alm_list_test_sets",
+        description=(
+            "Listet Test-Sets aus dem Test Lab in HP ALM auf. "
+            "Test-Sets enthalten Test-Instances fuer die Ausfuehrung."
+        ),
+        category=ToolCategory.KNOWLEDGE,
+        parameters=[
+            ToolParameter(
+                name="folder_id",
+                type="integer",
+                description="Optional: Nur Test-Sets in diesem Test Lab Folder",
+                required=False,
+            ),
+        ],
+        handler=alm_list_test_sets,
+    ))
+    count += 1
+
+    # ══════════════════════════════════════════════════════════════════════════
+    # alm_create_run - Test-Run erstellen (mit Bestaetigung)
+    # ══════════════════════════════════════════════════════════════════════════
+
+    async def alm_create_run(**kwargs: Any) -> ToolResult:
+        """Erstellt einen Test-Run in HP ALM."""
+        if not settings.alm.enabled:
+            return ToolResult(success=False, error="HP ALM ist nicht aktiviert")
+
+        test_instance_id: int = kwargs.get("test_instance_id", 0)
+        status: str = kwargs.get("status", "")
+        comment: str = kwargs.get("comment", "")
+        confirmed: bool = kwargs.get("_confirmed", False)
+
+        if not test_instance_id:
+            return ToolResult(success=False, error="test_instance_id ist erforderlich")
+        if not status:
+            return ToolResult(success=False, error="status ist erforderlich (Passed/Failed/Not Completed/Blocked)")
+
+        # Bestaetigung erforderlich?
+        if settings.alm.require_confirmation and not confirmed:
+            preview = f"## Test-Run erstellen\n\n"
+            preview += f"**Test-Instance-ID:** {test_instance_id}\n"
+            preview += f"**Status:** {status}\n"
+            if comment:
+                preview += f"**Kommentar:** {comment}\n"
+
+            return ToolResult(
+                success=True,
+                requires_confirmation=True,
+                confirmation_data={
+                    "action": "alm_create_run",
+                    "description": f"Test-Run mit Status '{status}' in ALM erstellen",
+                    "preview": preview,
+                    "params": kwargs,
+                },
+            )
+
+        try:
+            client = get_alm_client()
+            run = await client.create_run(
+                test_instance_id=test_instance_id,
+                status=status,
+                comment=comment,
+            )
+
+            result = f"Test-Run erfolgreich erstellt!\n\n"
+            result += f"- **Run-ID:** {run.id}\n"
+            result += f"- **Status:** {run.status}\n"
+            result += f"- **Ausgefuehrt von:** {run.executor}\n"
+            if run.execution_date:
+                result += f"- **Datum:** {run.execution_date}\n"
+
+            return ToolResult(success=True, data=result)
+
+        except ALMError as e:
+            return ToolResult(success=False, error=str(e))
+        except Exception as e:
+            logger.exception("ALM Create Run Error")
+            return ToolResult(success=False, error=f"Unerwarteter Fehler: {e}")
+
+    registry.register(Tool(
+        name="alm_create_run",
+        description=(
+            "Erstellt einen Test-Run in HP ALM um ein Testergebnis zu dokumentieren. "
+            "Aktualisiert automatisch den Status der Test-Instance. "
+            "Erfordert Bestaetigung durch den User."
+        ),
+        category=ToolCategory.DEVOPS,
+        is_write_operation=True,
+        parameters=[
+            ToolParameter(
+                name="test_instance_id",
+                type="integer",
+                description="Test-Instance-ID aus dem Test Lab",
+                required=True,
+            ),
+            ToolParameter(
+                name="status",
+                type="string",
+                description="Testergebnis-Status",
+                required=True,
+                enum=["Passed", "Failed", "Not Completed", "Blocked"],
+            ),
+            ToolParameter(
+                name="comment",
+                type="string",
+                description="Kommentar zum Testergebnis",
+                required=False,
+            ),
+        ],
+        handler=alm_create_run,
+    ))
+    count += 1
+
+    logger.info(f"ALM Tools registriert: {count} Tools")
+    return count

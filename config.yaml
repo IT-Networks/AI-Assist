@@ -210,6 +210,29 @@ jira:
   default_project: 'BUG'
   verify_ssl: false
 
+# ═══════════════════════════════════════════════════════════════════
+# HP ALM/Quality Center Integration (Testfall-Management)
+# ═══════════════════════════════════════════════════════════════════
+# Ermoeglicht das Lesen, Erstellen und Aktualisieren von Testfaellen
+# direkt aus dem Chat. Verbindet sich ueber die ALM REST API.
+alm:
+  enabled: false                         # Aktivieren wenn ALM verfuegbar
+  base_url: ''                           # z.B. https://alm.company.com/qcbin
+  username: ''
+  password: ''                           # Wird maskiert angezeigt
+  domain: ''                             # ALM Domain (z.B. "DEFAULT")
+  project: ''                            # ALM Project Name
+  verify_ssl: true                       # False fuer selbstsignierte Zertifikate
+  timeout_seconds: 30
+  # Session-Management
+  session_cache_ttl: 3600                # Session-Cookie TTL in Sekunden (1 Stunde)
+  auto_reconnect: true                   # Auto Re-Auth bei Session-Timeout
+  # Verhalten
+  require_confirmation: true             # Bestaetigung fuer Create/Update-Operationen
+  default_test_type: 'MANUAL'            # MANUAL | AUTOMATED
+  # API-Format (fuer neuere ALM-Versionen 16+)
+  prefer_json: false                     # True = JSON statt XML (nur ALM 16+)
+
 # Skill-System
 skills:
   enabled: true

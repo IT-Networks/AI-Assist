@@ -10119,6 +10119,11 @@ function renderSettingsSection() {
     return;
   }
 
+  if (section === 'alm') {
+    renderALMSection();
+    return;
+  }
+
   if (section === 'servicenow') {
     renderServiceNowSection();
     return;
@@ -10238,6 +10243,158 @@ async function testDatabaseConnection() {
   } catch (e) {
     resultEl.textContent = `✗ Fehler: ${e.message}`;
     resultEl.className = 'test-result error';
+  }
+}
+
+// ============================================================================
+// HP ALM/Quality Center Section
+// ============================================================================
+
+function renderALMSection() {
+  const cfg = settingsState.settings.alm || {};
+
+  const form = document.getElementById('settings-form');
+  form.innerHTML = `
+    <div class="settings-section">
+      <h3 class="settings-section-title">HP ALM / QUALITY CENTER</h3>
+      <p class="settings-section-desc">
+        HP ALM/Quality Center Integration fuer Testfall-Management.
+        Ermoeglicht das Lesen, Erstellen und Aktualisieren von Testfaellen direkt aus dem Chat.
+      </p>
+    </div>
+
+    <div class="settings-field">
+      <label for="alm-enabled">Aktiviert</label>
+      <label class="checkbox-label">
+        <input type="checkbox" id="alm-enabled" ${cfg.enabled ? 'checked' : ''} onchange="markSettingsModified()">
+        ${cfg.enabled ? 'Aktiviert' : 'Deaktiviert'}
+      </label>
+    </div>
+
+    <div class="settings-field">
+      <label for="alm-base-url">Base URL</label>
+      <input type="text" id="alm-base-url" value="${escapeHtml(cfg.base_url || '')}"
+        placeholder="https://alm.company.com/qcbin" onchange="markSettingsModified()" style="font-family:var(--font-mono)">
+      <small class="field-hint">Die Basis-URL zum ALM-Server (inkl. /qcbin)</small>
+    </div>
+
+    <div class="settings-field">
+      <label for="alm-domain">Domain</label>
+      <input type="text" id="alm-domain" value="${escapeHtml(cfg.domain || '')}"
+        placeholder="DEFAULT" onchange="markSettingsModified()">
+      <small class="field-hint">ALM Domain Name</small>
+    </div>
+
+    <div class="settings-field">
+      <label for="alm-project">Project</label>
+      <input type="text" id="alm-project" value="${escapeHtml(cfg.project || '')}"
+        placeholder="MyProject" onchange="markSettingsModified()">
+      <small class="field-hint">ALM Project Name</small>
+    </div>
+
+    <div class="settings-field">
+      <label for="alm-username">Benutzername</label>
+      <input type="text" id="alm-username" value="${escapeHtml(cfg.username || '')}"
+        placeholder="ALM Benutzername" onchange="markSettingsModified()">
+    </div>
+
+    <div class="settings-field">
+      <label for="alm-password">Passwort</label>
+      <input type="password" id="alm-password" value="${escapeHtml(cfg.password || '')}"
+        placeholder="ALM Passwort" onchange="markSettingsModified()" autocomplete="off">
+    </div>
+
+    <div class="settings-field">
+      <label for="alm-verify-ssl">SSL-Zertifikat pruefen</label>
+      <label class="checkbox-label">
+        <input type="checkbox" id="alm-verify-ssl" ${cfg.verify_ssl !== false ? 'checked' : ''} onchange="markSettingsModified()">
+        ${cfg.verify_ssl !== false ? 'Ja' : 'Nein (fuer Self-Signed Certs)'}
+      </label>
+    </div>
+
+    <div class="settings-field">
+      <label for="alm-require-confirmation">Bestaetigung fuer Schreiboperationen</label>
+      <label class="checkbox-label">
+        <input type="checkbox" id="alm-require-confirmation" ${cfg.require_confirmation !== false ? 'checked' : ''} onchange="markSettingsModified()">
+        ${cfg.require_confirmation !== false ? 'Ja (empfohlen)' : 'Nein'}
+      </label>
+      <small class="field-hint">Bei aktiviert muss jede Testfall-Erstellung/Aenderung bestaetigt werden</small>
+    </div>
+
+    <div class="settings-field">
+      <label for="alm-timeout">Timeout (Sekunden)</label>
+      <input type="number" id="alm-timeout" value="${cfg.timeout_seconds || 30}" min="5" max="120"
+        onchange="markSettingsModified()">
+    </div>
+
+    <div class="settings-actions" style="margin-top:20px">
+      <button class="btn btn-secondary" onclick="testALMConnection()">
+        Verbindung testen
+      </button>
+    </div>
+    <div id="alm-test-result" class="test-result" style="margin-top:10px"></div>
+  `;
+}
+
+async function testALMConnection() {
+  const resultEl = document.getElementById('alm-test-result');
+  resultEl.textContent = 'Teste Verbindung...';
+  resultEl.className = 'test-result loading';
+
+  // Aktuelle Werte aus dem Formular sammeln
+  const testData = {
+    base_url: document.getElementById('alm-base-url').value,
+    domain: document.getElementById('alm-domain').value,
+    project: document.getElementById('alm-project').value,
+    username: document.getElementById('alm-username').value,
+    password: document.getElementById('alm-password').value,
+    verify_ssl: document.getElementById('alm-verify-ssl').checked,
+  };
+
+  try {
+    const res = await fetch('/api/alm/test-connection', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(testData)
+    });
+    const data = await res.json();
+
+    if (data.success) {
+      resultEl.innerHTML = `✓ Verbunden als <strong>${escapeHtml(data.user)}</strong> (${escapeHtml(data.domain)}/${escapeHtml(data.project)})`;
+      resultEl.className = 'test-result success';
+    } else {
+      resultEl.textContent = `✗ ${data.error || 'Verbindung fehlgeschlagen'}`;
+      resultEl.className = 'test-result error';
+    }
+  } catch (e) {
+    resultEl.textContent = `✗ Fehler: ${e.message}`;
+    resultEl.className = 'test-result error';
+  }
+}
+
+async function saveALMSettings() {
+  const values = {
+    enabled: document.getElementById('alm-enabled').checked,
+    base_url: document.getElementById('alm-base-url').value,
+    domain: document.getElementById('alm-domain').value,
+    project: document.getElementById('alm-project').value,
+    username: document.getElementById('alm-username').value,
+    password: document.getElementById('alm-password').value,
+    verify_ssl: document.getElementById('alm-verify-ssl').checked,
+    require_confirmation: document.getElementById('alm-require-confirmation').checked,
+    timeout_seconds: parseInt(document.getElementById('alm-timeout').value) || 30,
+  };
+
+  try {
+    await fetch('/api/settings/alm', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(values)
+    });
+    settingsState.settings.alm = values;
+    updateSettingsStatus('ALM Settings gespeichert', 'success');
+  } catch (e) {
+    updateSettingsStatus('Fehler beim Speichern', 'error');
   }
 }
 
@@ -17489,6 +17646,9 @@ const taskProgressPanel = {
         session: sessionId
       });
       if (task.task_id) {
+        // Bei neuem Task: alte Tasks entfernen um Überlappung zu vermeiden
+        // Completed tasks haben keine Funktion für die KI
+        this._clearCompletedTasks();
         this.tasks.set(task.task_id, task);
         this.render();
       }
@@ -17562,11 +17722,12 @@ const taskProgressPanel = {
       const data = event.data || event;
       this.tasks.set(data.task_id, data);
       this.render();
-      // Nach 5 Sekunden ausblenden
+      // Nach 2 Sekunden ausblenden (kürzer, da bei neuem Task sowieso gelöscht)
       setTimeout(() => {
         this.tasks.delete(data.task_id);
+        this.expanded.delete(data.task_id);
         this.render();
-      }, 5000);
+      }, 2000);
     });
 
     this.eventSource.addEventListener('task_failed', (e) => {
@@ -17621,6 +17782,26 @@ const taskProgressPanel = {
   },
 
   /**
+   * Entfernt abgeschlossene Tasks um Überlappung zu vermeiden
+   * Completed/failed/cancelled tasks haben keine Funktion für die KI
+   */
+  _clearCompletedTasks() {
+    const toRemove = [];
+    for (const [taskId, task] of this.tasks) {
+      if (task.status === 'completed' || task.status === 'failed' || task.status === 'cancelled') {
+        toRemove.push(taskId);
+      }
+    }
+    for (const taskId of toRemove) {
+      this.tasks.delete(taskId);
+      this.expanded.delete(taskId);
+    }
+    if (toRemove.length > 0) {
+      log.debug('[TaskProgress] Cleared completed tasks', { removed: toRemove });
+    }
+  },
+
+  /**
    * Rendert alle aktiven Tasks
    */
   render() {
@@ -17643,9 +17824,15 @@ const taskProgressPanel = {
     });
     this.container.style.display = 'block';
 
-    const tasksHtml = Array.from(this.tasks.values())
-      .map(task => this._renderTask(task))
-      .join('');
+    // Nur den neuesten Task zeigen um Überlappung zu vermeiden
+    // Priorität: running > andere Status
+    const allTasks = Array.from(this.tasks.values());
+    const runningTasks = allTasks.filter(t => t.status === 'running');
+    const displayTask = runningTasks.length > 0
+      ? runningTasks[runningTasks.length - 1]  // Neuester running Task
+      : allTasks[allTasks.length - 1];          // Oder neuester überhaupt
+
+    const tasksHtml = displayTask ? this._renderTask(displayTask) : '';
 
     this.container.innerHTML = tasksHtml;
 

@@ -344,6 +344,26 @@ class JiraConfig(BaseModel):
     verify_ssl: bool = True  # False für selbstsignierte Zertifikate
 
 
+class ALMConfig(BaseModel):
+    """HP ALM/Quality Center Konfiguration für Testfall-Management."""
+    enabled: bool = False
+    base_url: str = ""                    # z.B. https://alm.company.com/qcbin
+    username: str = ""
+    password: str = ""                    # SENSITIVE - wird maskiert
+    domain: str = ""                      # ALM Domain (z.B. "DEFAULT")
+    project: str = ""                     # ALM Project Name
+    verify_ssl: bool = True
+    timeout_seconds: int = 30
+    # Session-Management
+    session_cache_ttl: int = 3600         # Session-Cookie TTL in Sekunden (1 Stunde)
+    auto_reconnect: bool = True           # Auto Re-Auth bei Session-Timeout
+    # Verhalten
+    require_confirmation: bool = True     # Bestätigung für Create/Update-Operationen
+    default_test_type: str = "MANUAL"     # MANUAL | AUTOMATED
+    # API-Format (für neuere ALM-Versionen 16+)
+    prefer_json: bool = False             # True = JSON statt XML (nur ALM 16+)
+
+
 class ContextConfig(BaseModel):
     max_tokens: int = 32000
     max_file_context_kb: int = 100
@@ -1312,6 +1332,7 @@ class Settings(BaseModel):
     handbook: HandbookConfig = HandbookConfig()
     database: DatabaseConfig = DatabaseConfig()
     jira: JiraConfig = JiraConfig()
+    alm: ALMConfig = ALMConfig()  # HP ALM/Quality Center
     skills: SkillsConfig = SkillsConfig()
     file_operations: FileOperationsConfig = FileOperationsConfig()
     data_sources: DataSourcesConfig = Field(default_factory=DataSourcesConfig)

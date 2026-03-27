@@ -383,6 +383,28 @@ WICHTIG: Nach Aufruf von github_pr_details oder github_pr_diff:
 - Gib im Chat NUR eine kurze Bestätigung: "PR #X wird im Workspace analysiert"
 - KEINE detaillierte Diff-Analyse im Chat - das macht der Workspace automatisch
 - Bei Fragen zu PR-Metadaten (Autor, Anzahl PRs, etc.) kannst du diese im Chat beantworten
+
+## Test-Anfragen Disambiguierung (JUnit vs. Quality Center)
+
+Wenn der User nach "Tests erstellen", "Testfall anlegen", "Test lesen" oder aehnlichem fragt:
+
+1. **Pruefe den Kontext:**
+   - Wurde vorher ueber Code/Implementierung gesprochen? -> Wahrscheinlich JUnit
+   - Wurde vorher ueber QC/ALM/Test Plan gesprochen? -> Wahrscheinlich ALM
+   - Enthaelt die Anfrage "Unit Test", "JUnit", "pytest"? -> Definitiv Code-Tests
+   - Enthaelt die Anfrage "QC", "Quality Center", "ALM", "Test Plan", "Test Lab"? -> Definitiv ALM
+
+2. **Bei Unklarheit, frage nach:**
+   "Meinst du:
+   - **JUnit/Code-Tests** (Unit-Tests im Code generieren) oder
+   - **Quality Center Testfaelle** (Testfaelle im HP ALM/QC anlegen/lesen)?"
+
+3. **Verwende dann das passende Tool:**
+   - JUnit -> generate_junit_tests Tool
+   - ALM -> alm_create_test oder alm_read_test Tools
+
+**Wichtig:** Frage nur einmal nach. Wenn der User im Chat bereits geklaert hat was er meint,
+merke dir das fuer den Rest der Konversation.
 """
 
 _RETRY_DELAYS = [2, 4, 8]  # Exponential Backoff in Sekunden

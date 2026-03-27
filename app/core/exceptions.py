@@ -33,6 +33,11 @@ class JiraError(AIAssistError):
     pass
 
 
+class ALMError(AIAssistError):
+    """Raised when HP ALM/Quality Center API call fails."""
+    pass
+
+
 class LogParserError(AIAssistError):
     """Raised when log parsing fails."""
     pass
