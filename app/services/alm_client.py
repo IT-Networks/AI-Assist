@@ -266,15 +266,11 @@ class ALMClient:
         except httpx.RequestError as e:
             raise ALMError(f"ALM Verbindungsfehler: {e}") from e
 
-        # LWSSO Cookie extrahieren
-        lwsso_cookie = ""
-        for cookie in resp.cookies:
-            if cookie.name == "LWSSO_COOKIE_KEY":
-                lwsso_cookie = cookie.value
-                break
+        # LWSSO Cookie extrahieren (httpx Cookies: iterieren gibt Namen als Strings)
+        lwsso_cookie = resp.cookies.get("LWSSO_COOKIE_KEY", "")
 
         if not lwsso_cookie:
-            # Versuche aus Set-Cookie Header
+            # Fallback: Aus Set-Cookie Header
             set_cookie = resp.headers.get("Set-Cookie", "")
             match = re.search(r"LWSSO_COOKIE_KEY=([^;]+)", set_cookie)
             if match:
@@ -298,18 +294,10 @@ class ALMClient:
         except httpx.HTTPStatusError as e:
             raise ALMError(f"ALM Session-Erstellung fehlgeschlagen: {e.response.status_code}") from e
 
-        # Session-Cookies extrahieren
-        qc_session = ""
-        alm_user = ""
-        xsrf_token = ""
-
-        for cookie in resp.cookies:
-            if cookie.name == "QCSession":
-                qc_session = cookie.value
-            elif cookie.name == "ALM_USER":
-                alm_user = cookie.value
-            elif cookie.name == "XSRF-TOKEN":
-                xsrf_token = cookie.value
+        # Session-Cookies extrahieren (httpx Cookies: .get() fuer direkten Zugriff)
+        qc_session = resp.cookies.get("QCSession", "")
+        alm_user = resp.cookies.get("ALM_USER", "")
+        xsrf_token = resp.cookies.get("XSRF-TOKEN", "")
 
         # Fallback: Aus Set-Cookie Header
         set_cookies = resp.headers.get_list("Set-Cookie")
