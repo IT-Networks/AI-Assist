@@ -402,8 +402,46 @@ class ALMClient:
             ttl_seconds=settings.alm.session_cache_ttl,
         )
 
-        logger.info(f"ALM: Session erstellt fuer User {session_cookies['alm_user'] or self.username}")
+        logger.info(f"ALM: Site-Session erstellt fuer User {session_cookies['alm_user'] or self.username}")
+
+        # Step 3: Project Session erstellen (wichtig fuer Projekt-Zugriff!)
+        await self._create_project_session()
+
         return self._session
+
+    async def _create_project_session(self) -> None:
+        """
+        Erstellt eine Projekt-Session fuer das aktuelle Projekt.
+
+        Dies ist erforderlich nach der Site-Session um auf projekt-spezifische
+        Ressourcen zugreifen zu koennen.
+        """
+        if not self._session:
+            return
+
+        client = _get_http_client()
+        project_session_url = f"{self.base_url}/rest/domains/{self.domain}/projects/{self.project}"
+
+        logger.debug(f"ALM: Erstelle Projekt-Session fuer {self.domain}/{self.project}")
+
+        try:
+            resp = await client.post(
+                project_session_url,
+                headers=self._session_headers(),
+                cookies=self._session_cookies(),
+                content="",
+            )
+            # 200 oder 201 sind OK, andere Status-Codes loggen wir nur
+            if resp.status_code in (200, 201):
+                logger.info(f"ALM: Projekt-Session erstellt fuer {self.domain}/{self.project}")
+            else:
+                # Nicht fatal - manche ALM-Versionen brauchen das nicht
+                logger.debug(f"ALM: Projekt-Session Status {resp.status_code} (wird ignoriert)")
+        except httpx.HTTPStatusError as e:
+            # Nicht fatal - nur loggen
+            logger.warning(f"ALM: Projekt-Session fehlgeschlagen ({e.response.status_code}), fahre fort...")
+        except httpx.RequestError as e:
+            logger.warning(f"ALM: Projekt-Session Verbindungsfehler: {e}")
 
     async def ensure_session(self) -> ALMSession:
         """Stellt sicher dass eine gueltige Session existiert."""
