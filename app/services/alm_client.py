@@ -442,16 +442,18 @@ class ALMClient:
         try:
             session = await self.authenticate()
 
-            # Zusaetzlich Projekt-Existenz pruefen
+            # Zusaetzlich Projekt-Existenz pruefen mit echtem API-Aufruf
             if verify_project:
                 client = _get_http_client()
-                # Versuche eine einfache Anfrage ans Projekt zu machen
-                project_url = f"{self.base_url}/rest/domains/{self.domain}/projects/{self.project}"
+                # Rufe einen echten Endpoint im Projekt auf (tests mit limit 1)
+                project_url = self._rest_url("/tests")
+                params = {"page-size": "1"}
                 logger.debug(f"ALM: Pruefe Projekt-Existenz via {project_url}")
 
                 try:
                     resp = await client.get(
                         project_url,
+                        params=params,
                         headers=self._session_headers(),
                         cookies=self._session_cookies(),
                     )
@@ -461,6 +463,7 @@ class ALMClient:
                             "error": f"Projekt '{self.project}' existiert nicht in Domain '{self.domain}'"
                         }
                     resp.raise_for_status()
+                    logger.info(f"ALM: Projekt {self.domain}/{self.project} verifiziert")
                 except httpx.HTTPStatusError as e:
                     if e.response.status_code == 404:
                         return {
@@ -472,7 +475,7 @@ class ALMClient:
                             "success": False,
                             "error": f"Keine Berechtigung fuer Projekt '{self.project}'"
                         }
-                    logger.warning(f"ALM Projekt-Check Fehler: {e.response.status_code}")
+                    logger.warning(f"ALM Projekt-Check Fehler: {e.response.status_code} - {e.response.text[:200]}")
 
             return {
                 "success": True,
@@ -741,11 +744,11 @@ class ALMClient:
             query_parts.append(f"owner['*{escaped_owner}*']")
 
         if created_after:
-            # Datum-Filter: creation-date[>='2024-01-01']
-            query_parts.append(f"creation-date[>='{created_after}']")
+            # Datum-Filter: creation-time (nicht creation-date!)
+            query_parts.append(f"creation-time[>='{created_after}']")
 
         if created_before:
-            query_parts.append(f"creation-date[<='{created_before}']")
+            query_parts.append(f"creation-time[<='{created_before}']")
 
         if status:
             query_parts.append(f"status['{status}']")

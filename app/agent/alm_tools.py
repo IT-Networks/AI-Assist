@@ -246,12 +246,46 @@ def register_alm_tools(registry: ToolRegistry) -> int:
         if not settings.alm.enabled:
             return ToolResult(success=False, error="HP ALM ist nicht aktiviert")
 
-        test_id: int = kwargs.get("test_id", 0)
-        if not test_id:
-            return ToolResult(success=False, error="test_id ist erforderlich")
+        # Akzeptiere test_id (int) ODER test_identifier (string)
+        test_id: Optional[int] = kwargs.get("test_id")
+        test_identifier: Optional[str] = kwargs.get("test_identifier")
+
+        # Wenn test_id als String uebergeben wurde (z.B. "123"), konvertieren
+        if test_id is None and test_identifier is None:
+            return ToolResult(
+                success=False,
+                error="test_id (numerisch) oder test_identifier (Name/Key) ist erforderlich"
+            )
 
         try:
             client = get_alm_client()
+
+            # Wenn nur test_identifier gegeben, suche den Test
+            if test_id is None and test_identifier:
+                # Versuche erst als Zahl zu parsen
+                try:
+                    test_id = int(test_identifier)
+                except ValueError:
+                    # Kein Integer - suche nach Name
+                    logger.info(f"ALM: Suche Test mit Identifier '{test_identifier}'")
+                    tests = await client.search_tests(query=test_identifier, limit=5)
+
+                    if not tests:
+                        return ToolResult(
+                            success=False,
+                            error=f"Kein Test mit Name/Key '{test_identifier}' gefunden"
+                        )
+
+                    if len(tests) == 1:
+                        test_id = tests[0].id
+                    else:
+                        # Mehrere Treffer - zeige Liste
+                        lines = [f"Mehrere Tests gefunden fuer '{test_identifier}':\n"]
+                        for t in tests:
+                            lines.append(f"- **ID {t.id}**: {t.name}")
+                        lines.append("\nBitte gib die eindeutige test_id an.")
+                        return ToolResult(success=True, data="\n".join(lines))
+
             test = await client.get_test(test_id, include_steps=True)
             return ToolResult(success=True, data=test.to_markdown())
 
@@ -265,16 +299,22 @@ def register_alm_tools(registry: ToolRegistry) -> int:
         name="alm_read_test",
         description=(
             "Liest einen Testfall aus HP ALM mit allen Details: "
-            "Name, Beschreibung, Folder-Pfad, Status und alle Test-Schritte "
-            "mit erwarteten Ergebnissen. Verwende die Test-ID aus alm_search_tests."
+            "Name, Beschreibung, Folder-Pfad, Status und alle Test-Schritte. "
+            "Akzeptiert entweder die numerische Test-ID oder einen Test-Namen/Key zur Suche."
         ),
         category=ToolCategory.KNOWLEDGE,
         parameters=[
             ToolParameter(
                 name="test_id",
                 type="integer",
-                description="Die Test-ID (aus alm_search_tests)",
-                required=True,
+                description="Die numerische Test-ID (aus alm_search_tests)",
+                required=False,
+            ),
+            ToolParameter(
+                name="test_identifier",
+                type="string",
+                description="Alternativ: Test-Name oder Key zur Suche (z.B. 'TC001' oder 'Login Test')",
+                required=False,
             ),
         ],
         handler=alm_read_test,
