@@ -1058,19 +1058,24 @@ def register_alm_tools(registry: ToolRegistry) -> int:
         if not settings.alm.enabled:
             return ToolResult(success=False, error="HP ALM ist nicht aktiviert")
 
-        project: str = kwargs.get("project", "")
+        project: str = kwargs.get("project", "").strip()
         domain: Optional[str] = kwargs.get("domain")
+        if domain:
+            domain = domain.strip()
 
         if not project:
             return ToolResult(success=False, error="project ist erforderlich")
+
+        logger.info(f"ALM Switch: Wechsle zu Projekt '{project}' (Domain: {domain or 'unveraendert'})")
 
         try:
             client = get_alm_client()
             result = client.switch_project(project, domain)
 
             if result["success"]:
-                # Verbindung testen
-                test_result = await client.test_connection()
+                # Verbindung testen mit Projekt-Validierung
+                logger.info(f"ALM Switch: Teste Verbindung zu {result['domain']}/{result['project']}")
+                test_result = await client.test_connection(verify_project=True)
 
                 if test_result.get("success"):
                     return ToolResult(
@@ -1084,10 +1089,24 @@ def register_alm_tools(registry: ToolRegistry) -> int:
                     )
                 else:
                     # Zurueck wechseln bei Fehler
+                    logger.warning(f"ALM Switch: Projekt nicht gefunden, wechsle zurueck")
                     client.switch_project(result['previous_project'], result['previous_domain'])
+
+                    # Verfuegbare Projekte laden fuer bessere Fehlermeldung
+                    available_hint = ""
+                    try:
+                        projects = await client.list_projects(result['domain'])
+                        if projects:
+                            project_names = [p['name'] for p in projects[:5]]
+                            available_hint = f"\n\nVerfuegbare Projekte in '{result['domain']}': {', '.join(project_names)}"
+                            if len(projects) > 5:
+                                available_hint += f" (und {len(projects) - 5} weitere)"
+                    except Exception:
+                        pass
+
                     return ToolResult(
                         success=False,
-                        error=f"Projekt existiert nicht oder keine Berechtigung: {test_result.get('error')}"
+                        error=f"Projekt existiert nicht oder keine Berechtigung: {test_result.get('error')}{available_hint}"
                     )
 
             return ToolResult(success=False, error="Projektwechsel fehlgeschlagen")

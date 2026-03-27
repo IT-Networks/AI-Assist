@@ -428,9 +428,12 @@ class ALMClient:
         self._session = None
         logger.info("ALM: Session beendet")
 
-    async def test_connection(self) -> Dict[str, Any]:
+    async def test_connection(self, verify_project: bool = True) -> Dict[str, Any]:
         """
-        Testet die ALM-Verbindung.
+        Testet die ALM-Verbindung und optional ob das Projekt existiert.
+
+        Args:
+            verify_project: Wenn True, wird geprueft ob das Projekt existiert
 
         Returns:
             {"success": True, "user": "...", "domain": "...", "project": "..."}
@@ -438,6 +441,39 @@ class ALMClient:
         """
         try:
             session = await self.authenticate()
+
+            # Zusaetzlich Projekt-Existenz pruefen
+            if verify_project:
+                client = _get_http_client()
+                # Versuche eine einfache Anfrage ans Projekt zu machen
+                project_url = f"{self.base_url}/rest/domains/{self.domain}/projects/{self.project}"
+                logger.debug(f"ALM: Pruefe Projekt-Existenz via {project_url}")
+
+                try:
+                    resp = await client.get(
+                        project_url,
+                        headers=self._session_headers(),
+                        cookies=self._session_cookies(),
+                    )
+                    if resp.status_code == 404:
+                        return {
+                            "success": False,
+                            "error": f"Projekt '{self.project}' existiert nicht in Domain '{self.domain}'"
+                        }
+                    resp.raise_for_status()
+                except httpx.HTTPStatusError as e:
+                    if e.response.status_code == 404:
+                        return {
+                            "success": False,
+                            "error": f"Projekt '{self.project}' nicht gefunden in Domain '{self.domain}'"
+                        }
+                    elif e.response.status_code == 401:
+                        return {
+                            "success": False,
+                            "error": f"Keine Berechtigung fuer Projekt '{self.project}'"
+                        }
+                    logger.warning(f"ALM Projekt-Check Fehler: {e.response.status_code}")
+
             return {
                 "success": True,
                 "user": session.alm_user or self.username,
