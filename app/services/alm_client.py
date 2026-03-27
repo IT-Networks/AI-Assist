@@ -5,10 +5,14 @@ Unterstützt Session-basierte Authentifizierung (LWSSO) und CRUD-Operationen
 fuer Testfaelle, Test-Sets und Test-Runs.
 
 Auth-Flow:
-1. POST /authentication-point/alm-authenticate (Basic Auth Header)
-2. Extrahiere LWSSO_COOKIE_KEY
+1. POST /authentication-point/alm-authenticate
+   - Versucht zuerst JSON-Body: {"alm-authentication": {"user": ..., "password": ...}}
+   - Fallback auf Basic Auth Header wenn JSON-Auth fehlschlaegt
+2. Extrahiere LWSSO_COOKIE_KEY aus Response-Cookies oder Set-Cookie Headers
 3. POST /rest/site-session mit LWSSO Cookie
 4. Extrahiere QCSession, ALM_USER, XSRF-TOKEN
+
+Die Authentifizierung erfolgt automatisch bei jedem ALM-Tool-Aufruf.
 """
 
 import base64
@@ -232,6 +236,67 @@ class ALMClient:
             return self._session.get_cookies()
         return {}
 
+    def _extract_lwsso_cookie(self, resp: httpx.Response) -> str:
+        """
+        Extrahiert LWSSO_COOKIE_KEY aus einer HTTP-Response.
+
+        Prueft zuerst resp.cookies, dann alle Set-Cookie Header.
+        """
+        # Methode 1: Direkt aus httpx Cookies
+        lwsso = resp.cookies.get("LWSSO_COOKIE_KEY", "")
+        if lwsso:
+            logger.debug("ALM: LWSSO aus resp.cookies extrahiert")
+            return lwsso
+
+        # Methode 2: Aus allen Set-Cookie Headers
+        set_cookies = resp.headers.get_list("Set-Cookie")
+        for sc in set_cookies:
+            if "LWSSO_COOKIE_KEY=" in sc:
+                match = re.search(r"LWSSO_COOKIE_KEY=([^;]+)", sc)
+                if match:
+                    logger.debug("ALM: LWSSO aus Set-Cookie Header extrahiert")
+                    return match.group(1)
+
+        # Debug: Logge was wir bekommen haben
+        logger.warning(
+            f"ALM: LWSSO_COOKIE_KEY nicht gefunden. "
+            f"Response-Status: {resp.status_code}, "
+            f"Cookies: {list(resp.cookies.keys())}, "
+            f"Set-Cookie Headers: {len(set_cookies)}"
+        )
+        return ""
+
+    def _extract_session_cookies(self, resp: httpx.Response) -> Dict[str, str]:
+        """
+        Extrahiert alle Session-Cookies aus einer HTTP-Response.
+
+        Returns:
+            Dict mit QCSession, ALM_USER, XSRF-TOKEN
+        """
+        result = {
+            "qc_session": resp.cookies.get("QCSession", ""),
+            "alm_user": resp.cookies.get("ALM_USER", ""),
+            "xsrf_token": resp.cookies.get("XSRF-TOKEN", ""),
+        }
+
+        # Fallback: Aus Set-Cookie Headers
+        set_cookies = resp.headers.get_list("Set-Cookie")
+        for sc in set_cookies:
+            if "QCSession=" in sc and not result["qc_session"]:
+                match = re.search(r"QCSession=([^;]+)", sc)
+                if match:
+                    result["qc_session"] = match.group(1)
+            if "XSRF-TOKEN=" in sc and not result["xsrf_token"]:
+                match = re.search(r"XSRF-TOKEN=([^;]+)", sc)
+                if match:
+                    result["xsrf_token"] = match.group(1)
+            if "ALM_USER=" in sc and not result["alm_user"]:
+                match = re.search(r"ALM_USER=([^;]+)", sc)
+                if match:
+                    result["alm_user"] = match.group(1)
+
+        return result
+
     # ═══════════════════════════════════════════════════════════════════════
     # Session Management
     # ═══════════════════════════════════════════════════════════════════════
@@ -244,6 +309,8 @@ class ALMClient:
         POST /authentication-point/alm-authenticate
         Body: {"alm-authentication": {"user": "...", "password": "..."}}
 
+        Falls JSON-Auth fehlschlaegt, wird Basic Auth als Fallback versucht.
+
         Returns:
             ALMSession mit allen Cookies
         """
@@ -254,30 +321,47 @@ class ALMClient:
         auth_url = f"{self.base_url}/authentication-point/alm-authenticate"
         logger.info(f"ALM: Authentifiziere gegen {auth_url}")
 
+        lwsso_cookie = ""
+
+        # Versuch 1: JSON-Auth
         try:
             resp = await client.post(
                 auth_url,
                 headers=self._auth_headers(),
-                json=self._auth_body(),  # JSON-Body statt Basic Auth
+                json=self._auth_body(),
             )
             resp.raise_for_status()
+            lwsso_cookie = self._extract_lwsso_cookie(resp)
         except httpx.HTTPStatusError as e:
-            raise ALMError(f"ALM Authentifizierung fehlgeschlagen: {e.response.status_code}") from e
+            logger.warning(f"ALM JSON-Auth fehlgeschlagen ({e.response.status_code}), versuche Basic Auth...")
         except httpx.RequestError as e:
             raise ALMError(f"ALM Verbindungsfehler: {e}") from e
 
-        # LWSSO Cookie extrahieren (httpx Cookies: iterieren gibt Namen als Strings)
-        lwsso_cookie = resp.cookies.get("LWSSO_COOKIE_KEY", "")
+        # Versuch 2: Basic Auth als Fallback
+        if not lwsso_cookie:
+            try:
+                credentials = base64.b64encode(
+                    f"{self.username}:{self.password}".encode()
+                ).decode()
+                resp = await client.post(
+                    auth_url,
+                    headers={
+                        "Authorization": f"Basic {credentials}",
+                        "Accept": "application/json",
+                    },
+                )
+                resp.raise_for_status()
+                lwsso_cookie = self._extract_lwsso_cookie(resp)
+            except httpx.HTTPStatusError as e:
+                raise ALMError(f"ALM Authentifizierung fehlgeschlagen: {e.response.status_code}") from e
+            except httpx.RequestError as e:
+                raise ALMError(f"ALM Verbindungsfehler: {e}") from e
 
         if not lwsso_cookie:
-            # Fallback: Aus Set-Cookie Header
-            set_cookie = resp.headers.get("Set-Cookie", "")
-            match = re.search(r"LWSSO_COOKIE_KEY=([^;]+)", set_cookie)
-            if match:
-                lwsso_cookie = match.group(1)
-
-        if not lwsso_cookie:
-            raise ALMError("ALM Authentifizierung: LWSSO_COOKIE_KEY nicht erhalten")
+            raise ALMError(
+                "ALM Authentifizierung: LWSSO_COOKIE_KEY nicht erhalten. "
+                "Bitte pruefen Sie Benutzername/Passwort und Server-URL."
+            )
 
         logger.debug("ALM: LWSSO Cookie erhalten")
 
@@ -294,33 +378,19 @@ class ALMClient:
         except httpx.HTTPStatusError as e:
             raise ALMError(f"ALM Session-Erstellung fehlgeschlagen: {e.response.status_code}") from e
 
-        # Session-Cookies extrahieren (httpx Cookies: .get() fuer direkten Zugriff)
-        qc_session = resp.cookies.get("QCSession", "")
-        alm_user = resp.cookies.get("ALM_USER", "")
-        xsrf_token = resp.cookies.get("XSRF-TOKEN", "")
-
-        # Fallback: Aus Set-Cookie Header
-        set_cookies = resp.headers.get_list("Set-Cookie")
-        for sc in set_cookies:
-            if "QCSession=" in sc and not qc_session:
-                match = re.search(r"QCSession=([^;]+)", sc)
-                if match:
-                    qc_session = match.group(1)
-            if "XSRF-TOKEN=" in sc and not xsrf_token:
-                match = re.search(r"XSRF-TOKEN=([^;]+)", sc)
-                if match:
-                    xsrf_token = match.group(1)
+        # Session-Cookies extrahieren
+        session_cookies = self._extract_session_cookies(resp)
 
         self._session = ALMSession(
             lwsso_cookie=lwsso_cookie,
-            qc_session=qc_session,
-            alm_user=alm_user,
-            xsrf_token=xsrf_token,
+            qc_session=session_cookies["qc_session"],
+            alm_user=session_cookies["alm_user"],
+            xsrf_token=session_cookies["xsrf_token"],
             created_at=datetime.now(),
             ttl_seconds=settings.alm.session_cache_ttl,
         )
 
-        logger.info(f"ALM: Session erstellt fuer User {alm_user or self.username}")
+        logger.info(f"ALM: Session erstellt fuer User {session_cookies['alm_user'] or self.username}")
         return self._session
 
     async def ensure_session(self) -> ALMSession:
