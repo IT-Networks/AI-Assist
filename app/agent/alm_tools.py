@@ -1123,16 +1123,32 @@ def register_alm_tools(registry: ToolRegistry) -> int:
             return ToolResult(success=False, error="test_set_id ist erforderlich (ID des Test-Sets aus dem Test Lab)")
 
         if settings.alm.require_confirmation and not confirmed:
+            # Details aufloesen fuer bessere Bestaetigung
+            test_name = f"Test-ID {test_id}"
+            test_set_name = f"Test-Set-ID {test_set_id}"
+            try:
+                client = get_alm_client()
+                test_obj = await client.get_test(test_id, include_steps=False)
+                test_name = f"{test_obj.name} (ID: {test_id})"
+                test_sets = await client.list_test_sets()
+                for ts in test_sets:
+                    if ts.id == test_set_id:
+                        folder_path = await client.get_test_lab_folder_path(ts.folder_id)
+                        test_set_name = f"{ts.name} (Pfad: {folder_path}/{ts.name})"
+                        break
+            except Exception:
+                pass
+
             preview = f"## Testfall zu Test-Set zuordnen\n\n"
-            preview += f"**Test-ID:** {test_id} (aus Test Pool)\n"
-            preview += f"**Test-Set-ID:** {test_set_id} (im Test Lab)\n"
+            preview += f"**Testfall (Test Pool):** {test_name}\n"
+            preview += f"**Test-Set (Test Lab):** {test_set_name}\n"
 
             return ToolResult(
                 success=True,
                 requires_confirmation=True,
                 confirmation_data={
                     "action": "alm_add_test_to_test_set",
-                    "description": f"Test {test_id} zu Test-Set {test_set_id} hinzufuegen",
+                    "description": f"Test '{test_name}' zu Test-Set '{test_set_name}' hinzufuegen",
                     "preview": preview,
                     "params": kwargs,
                 },
@@ -1198,9 +1214,36 @@ def register_alm_tools(registry: ToolRegistry) -> int:
 
         name: str = kwargs.get("name", "")
         parent_id: int = kwargs.get("parent_id", 0)
+        confirmed: bool = kwargs.get("_confirmed", False)
 
         if not name:
             return ToolResult(success=False, error="name ist erforderlich")
+
+        # Bestaetigung erforderlich?
+        if settings.alm.require_confirmation and not confirmed:
+            parent_info = "Root (oberste Ebene)"
+            if parent_id > 0:
+                try:
+                    client = get_alm_client()
+                    parent_info = await client.get_test_lab_folder_path(parent_id)
+                except Exception:
+                    parent_info = f"Folder-ID {parent_id}"
+
+            preview = f"## Neuer Folder im Test Lab\n\n"
+            preview += f"**Name:** {name}\n"
+            preview += f"**Uebergeordneter Folder:** {parent_info}\n"
+            preview += f"**Voller Pfad:** {parent_info}/{name}\n"
+
+            return ToolResult(
+                success=True,
+                requires_confirmation=True,
+                confirmation_data={
+                    "action": "alm_create_test_lab_folder",
+                    "description": f"Test Lab Folder '{name}' erstellen unter {parent_info}",
+                    "preview": preview,
+                    "params": kwargs,
+                },
+            )
 
         try:
             client = get_alm_client()

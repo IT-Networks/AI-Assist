@@ -247,17 +247,15 @@ class ToolRegistry:
 
         return schemas
 
-    async def execute(self, name: str, **kwargs) -> ToolResult:
+    async def execute(self, tool_name: str, **kwargs) -> ToolResult:
         """
         Führt ein Tool aus.
 
         Args:
-            name: Name des Tools
+            tool_name: Name des Tools
             **kwargs: Parameter für das Tool
         """
-        # Entferne 'name' aus kwargs falls vorhanden (verhindert "multiple values" Fehler
-        # wenn Text-Parser 'name' fälschlicherweise in arguments einfügt)
-        kwargs.pop("name", None)
+        name = tool_name
 
         # Prüfe auf JSON-Parse-Fehler (vom Orchestrator gesetzt)
         if "__parse_error__" in kwargs:
