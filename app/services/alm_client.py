@@ -428,12 +428,13 @@ class ALMClient:
         self._session = None
         logger.info("ALM: Session beendet")
 
-    async def test_connection(self, verify_project: bool = True) -> Dict[str, Any]:
+    async def test_connection(self, verify_project: bool = False) -> Dict[str, Any]:
         """
         Testet die ALM-Verbindung und optional ob das Projekt existiert.
 
         Args:
             verify_project: Wenn True, wird geprueft ob das Projekt existiert
+                           (default: False fuer schnellen Connection-Test)
 
         Returns:
             {"success": True, "user": "...", "domain": "...", "project": "..."}
@@ -444,38 +445,28 @@ class ALMClient:
 
             # Zusaetzlich Projekt-Existenz pruefen mit echtem API-Aufruf
             if verify_project:
-                client = _get_http_client()
-                # Rufe einen echten Endpoint im Projekt auf (tests mit limit 1)
-                project_url = self._rest_url("/tests")
-                params = {"page-size": "1"}
-                logger.debug(f"ALM: Pruefe Projekt-Existenz via {project_url}")
-
+                logger.debug(f"ALM: Pruefe Projekt-Existenz via /tests Endpoint")
                 try:
-                    resp = await client.get(
-                        project_url,
-                        params=params,
-                        headers=self._session_headers(),
-                        cookies=self._session_cookies(),
-                    )
-                    if resp.status_code == 404:
-                        return {
-                            "success": False,
-                            "error": f"Projekt '{self.project}' existiert nicht in Domain '{self.domain}'"
-                        }
-                    resp.raise_for_status()
+                    # Verwende _request() fuer korrektes Session-Handling
+                    await self._request("GET", "/tests", None, {"page-size": "1"})
                     logger.info(f"ALM: Projekt {self.domain}/{self.project} verifiziert")
-                except httpx.HTTPStatusError as e:
-                    if e.response.status_code == 404:
+                except ALMError as e:
+                    error_msg = str(e).lower()
+                    if "404" in error_msg:
                         return {
                             "success": False,
                             "error": f"Projekt '{self.project}' nicht gefunden in Domain '{self.domain}'"
                         }
-                    elif e.response.status_code == 401:
+                    elif "401" in error_msg:
                         return {
                             "success": False,
                             "error": f"Keine Berechtigung fuer Projekt '{self.project}'"
                         }
-                    logger.warning(f"ALM Projekt-Check Fehler: {e.response.status_code} - {e.response.text[:200]}")
+                    # Anderer Fehler - trotzdem als Projekt-Problem melden
+                    return {
+                        "success": False,
+                        "error": f"Projekt '{self.project}' nicht erreichbar: {e}"
+                    }
 
             return {
                 "success": True,
