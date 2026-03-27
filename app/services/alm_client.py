@@ -501,7 +501,10 @@ class ALMClient:
         try:
             return ET.fromstring(resp.content)
         except ET.ParseError as e:
-            raise ALMError(f"ALM Response XML Parse Error: {e}") from e
+            # Log response content for debugging
+            content_preview = resp.content[:200] if resp.content else b"(empty)"
+            logger.error(f"ALM XML Parse Error. Response preview: {content_preview}")
+            raise ALMError(f"ALM Response Parse Error: {e}. Content starts with: {content_preview[:50]}") from e
 
     def _parse_entity(self, entity: ET.Element) -> Dict[str, str]:
         """Parsed ein ALM Entity XML zu Dict."""
@@ -549,15 +552,13 @@ class ALMClient:
         self._check_configured()
 
         # ALM Query-Syntax bauen
-        # Syntax: {field[operator'value']} oder {field[value]} fuer numerisch
-        # Contains: name[*pattern*] (Wildcard-Syntax, nicht ~'pattern')
+        # Syntax mit Leerzeichen: field['*pattern*'] (Quotes erforderlich!)
         query_parts = []
         if query:
-            # ALM verwendet *pattern* fuer Contains-Suche (Wildcards)
-            # Single quotes werden NICHT verwendet bei Wildcard-Suche
-            # Escape: * -> \*, ' -> ''
-            escaped = query.replace("*", "\\*").replace("'", "''")
-            query_parts.append(f"name[*{escaped}*]")
+            # Escape single quotes by doubling them
+            escaped = query.replace("'", "''")
+            # Quotes um Wildcard-Pattern fuer Leerzeichen-Support
+            query_parts.append(f"name['*{escaped}*']")
         if folder_id is not None:
             query_parts.append(f"parent-id[{folder_id}]")
 
@@ -868,13 +869,14 @@ class ALMClient:
             data = self._parse_entity(entity)
             # test-config-name oder name als Fallback
             test_name = data.get("test-config-name") or data.get("name", "")
+            # last-modified ist Timestamp, nicht Run-ID
             instances.append(ALMTestInstance(
-                id=int(data.get("id", 0)),
-                test_id=int(data.get("test-id", 0)),
+                id=int(data.get("id", 0) or 0),
+                test_id=int(data.get("test-id", 0) or 0),
                 test_name=test_name,
                 test_set_id=test_set_id,
                 status=data.get("status", "No Run"),
-                last_run_id=int(data.get("last-modified", 0)) if data.get("last-modified") else None,
+                last_run_id=None,
                 exec_date=data.get("exec-date"),
                 tester=data.get("actual-tester", ""),
             ))
@@ -1025,13 +1027,13 @@ class ALMClient:
         query_parts = []
         if query:
             # ALM test-instances: Cross-Filter auf test.name fuer Testfall-Namen
-            # Syntax: test.name[*pattern*]
-            escaped = query.replace("*", "\\*").replace("'", "''")
-            query_parts.append(f"test.name[*{escaped}*]")
+            # Syntax mit Leerzeichen: test.name['*pattern*'] (Quotes erforderlich!)
+            escaped = query.replace("'", "''")
+            query_parts.append(f"test.name['*{escaped}*']")
         if test_set_id is not None:
             query_parts.append(f"cycle-id[{test_set_id}]")
         if status:
-            query_parts.append(f"status[{status}]")
+            query_parts.append(f"status['{status}']")
 
         params = {"page-size": str(limit)}
         if query_parts:
@@ -1047,13 +1049,14 @@ class ALMClient:
             data = self._parse_entity(entity)
             # test-config-name oder name als Fallback
             test_name = data.get("test-config-name") or data.get("name", "")
+            # last-modified ist Timestamp, nicht Run-ID - ignorieren
             instances.append(ALMTestInstance(
-                id=int(data.get("id", 0)),
-                test_id=int(data.get("test-id", 0)),
+                id=int(data.get("id", 0) or 0),
+                test_id=int(data.get("test-id", 0) or 0),
                 test_name=test_name,
-                test_set_id=int(data.get("cycle-id", 0)),
+                test_set_id=int(data.get("cycle-id", 0) or 0),
                 status=data.get("status", "No Run"),
-                last_run_id=int(data.get("last-modified", 0)) if data.get("last-modified") else None,
+                last_run_id=None,  # Wird nicht zuverlaessig geliefert
                 exec_date=data.get("exec-date"),
                 tester=data.get("actual-tester", ""),
             ))
