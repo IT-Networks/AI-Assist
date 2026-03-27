@@ -1113,6 +1113,17 @@ def register_alm_tools(registry: ToolRegistry) -> int:
             result = await client.switch_project(project, domain)
 
             if result["success"]:
+                # Bereits im Zielprojekt? Dann nur bestaetigen, keine Validierung noetig
+                if result.get("already_active"):
+                    return ToolResult(
+                        success=True,
+                        data=(
+                            f"## Bereits im Projekt!\n\n"
+                            f"**Aktuelles Projekt:** {result['domain']}/{result['project']}\n\n"
+                            f"Kein Wechsel erforderlich."
+                        )
+                    )
+
                 # Verbindung testen mit Projekt-Validierung
                 logger.info(f"ALM Switch: Teste Verbindung zu {result['domain']}/{result['project']}")
                 test_result = await client.test_connection(verify_project=True)

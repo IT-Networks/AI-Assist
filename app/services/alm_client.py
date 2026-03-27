@@ -603,24 +603,37 @@ class ALMClient:
         Wechselt das aktive Projekt zur Laufzeit.
 
         Fuehrt einen sauberen Logout durch bevor zum neuen Projekt gewechselt wird.
+        Wenn bereits im Zielprojekt, wird nichts geaendert.
 
         Args:
             project: Neuer Projekt-Name
             domain: Optional - Neue Domain
 
         Returns:
-            {"success": True, "domain": ..., "project": ...}
+            {"success": True, "domain": ..., "project": ..., "already_active": bool}
         """
         old_domain = self.domain
         old_project = self.project
+        target_domain = domain or self.domain
+
+        # Pruefen ob bereits im Zielprojekt - dann nichts tun!
+        if project == old_project and target_domain == old_domain:
+            logger.info(f"ALM: Bereits im Projekt {old_domain}/{old_project}, kein Wechsel noetig")
+            return {
+                "success": True,
+                "domain": self.domain,
+                "project": self.project,
+                "previous_domain": old_domain,
+                "previous_project": old_project,
+                "already_active": True,
+            }
 
         # Wichtig: Erst Logout der alten Session durchfuehren!
         if self._session:
             logger.info(f"ALM: Logout aus {old_domain}/{old_project} vor Projektwechsel")
             await self.logout()
 
-        if domain:
-            self.domain = domain
+        self.domain = target_domain
         self.project = project
 
         # Session und Cache zuruecksetzen
@@ -636,6 +649,7 @@ class ALMClient:
             "project": self.project,
             "previous_domain": old_domain,
             "previous_project": old_project,
+            "already_active": False,
         }
 
     def get_current_context(self) -> Dict[str, Any]:
