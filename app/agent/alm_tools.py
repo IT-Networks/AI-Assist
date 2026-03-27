@@ -665,11 +665,13 @@ def register_alm_tools(registry: ToolRegistry) -> int:
     registry.register(Tool(
         name="alm_list_folders",
         description=(
-            "Listet Test Pool Folder in HP ALM mit vollstaendigem Pfad auf. "
+            "Listet Test Pool Folder in HP ALM auf. Die Ausgabe enthaelt bereits den VOLLSTAENDIGEN PFAD "
+            "jedes Folders (z.B. 'Root/Modul/Submodul') - kein weiterer Aufruf noetig fuer Pfade! "
             "WICHTIG: Dies zeigt die Ordnerstruktur im TEST POOL (wo Testfaelle definiert werden), "
             "NICHT die Ordnerstruktur im Test Lab (wo Test-Sets ausgefuehrt werden)! "
             "Fuer Test Lab Ordner verwende stattdessen alm_list_test_lab_folders. "
-            "Ohne parent_id werden Root-Folder angezeigt."
+            "Ohne parent_id werden Root-Folder angezeigt. "
+            "Gib dem Benutzer direkt den Pfad aus dieser Ausgabe - NICHT alm_get_folder aufrufen um den Pfad nochmal zu holen."
         ),
         category=ToolCategory.KNOWLEDGE,
         parameters=[
@@ -743,11 +745,12 @@ def register_alm_tools(registry: ToolRegistry) -> int:
     registry.register(Tool(
         name="alm_get_folder",
         description=(
-            "Laedt Details eines Folders inkl. vollstaendigem Pfad und Unterordnern. "
-            "WICHTIG: Du MUSST folder_type angeben! Test Pool und Test Lab haben GETRENNTE Ordnerstrukturen! "
-            "folder_type='test-pool' = Testfall-Definitionen (IDs aus alm_list_folders). "
-            "folder_type='test-lab' = Test-Sets/Ausfuehrung (IDs aus alm_list_test_lab_folders). "
-            "Wenn du vorher alm_list_test_lab_folders verwendet hast, MUSS folder_type='test-lab' sein!"
+            "Laedt Unterordner eines Folders (Navigation in die Tiefe). "
+            "NICHT verwenden um den Pfad eines Folders zu ermitteln - der Pfad ist bereits in der Ausgabe "
+            "von alm_list_folders (Test Pool) bzw. alm_list_test_lab_folders (Test Lab) enthalten! "
+            "Verwende dieses Tool NUR um die Unterordner eines bekannten Folders zu sehen. "
+            "Du MUSST folder_type angeben: "
+            "'test-pool' = Testfall-Definitionen, 'test-lab' = Test-Sets/Ausfuehrung."
         ),
         category=ToolCategory.KNOWLEDGE,
         parameters=[
@@ -1034,11 +1037,13 @@ def register_alm_tools(registry: ToolRegistry) -> int:
     registry.register(Tool(
         name="alm_list_test_lab_folders",
         description=(
-            "Listet Test Lab Folder in HP ALM mit vollstaendigem Pfad auf. "
+            "Listet Test Lab Folder in HP ALM auf. Die Ausgabe enthaelt bereits den VOLLSTAENDIGEN PFAD "
+            "jedes Folders (z.B. 'Root/Regression/Sprint-1') - kein weiterer Aufruf noetig fuer Pfade! "
             "WICHTIG: Dies zeigt die Ordnerstruktur im TEST LAB (wo Test-Sets ausgefuehrt werden), "
             "NICHT die Ordnerstruktur im Test Pool (wo Testfaelle definiert werden)! "
             "Fuer Test Pool Ordner verwende stattdessen alm_list_folders. "
-            "Verwende die Folder-IDs hier fuer alm_list_test_sets."
+            "Verwende die Folder-IDs hier fuer alm_list_test_sets. "
+            "Gib dem Benutzer direkt den Pfad aus dieser Ausgabe - NICHT alm_get_folder aufrufen um den Pfad nochmal zu holen."
         ),
         category=ToolCategory.KNOWLEDGE,
         parameters=[
