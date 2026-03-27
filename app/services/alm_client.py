@@ -145,12 +145,22 @@ class ALMFolder:
 
 
 @dataclass
+class ALMTestSetFolder:
+    """Test Lab Folder (fuer Test-Sets)."""
+    id: int
+    name: str
+    parent_id: int
+    path: str = ""
+
+
+@dataclass
 class ALMTestSet:
     """Test-Set aus dem Test Lab."""
     id: int
     name: str
     folder_id: int
     status: str = ""
+    description: str = ""
 
 
 @dataclass
@@ -162,6 +172,8 @@ class ALMTestInstance:
     test_set_id: int
     status: str = "No Run"
     last_run_id: Optional[int] = None
+    exec_date: Optional[str] = None
+    tester: str = ""
 
 
 @dataclass
@@ -855,6 +867,8 @@ class ALMClient:
                 test_set_id=test_set_id,
                 status=data.get("status", "No Run"),
                 last_run_id=int(data.get("last-modified", 0)) if data.get("last-modified") else None,
+                exec_date=data.get("exec-date"),
+                tester=data.get("actual-tester", ""),
             ))
 
         return instances
@@ -907,6 +921,131 @@ class ALMClient:
 
         logger.info(f"ALM: Test-Run erstellt: ID={run.id}, Status={status}")
         return run
+
+    async def list_test_set_folders(self, parent_id: int = 0) -> List[ALMTestSetFolder]:
+        """
+        Listet Test Lab Folders (Ordnerstruktur fuer Test-Sets).
+
+        Args:
+            parent_id: Parent-Folder-ID (0 = Root)
+
+        Returns:
+            Liste von ALMTestSetFolder
+        """
+        self._check_configured()
+
+        params = {}
+        if parent_id > 0:
+            params["query"] = f"{{parent-id[{parent_id}]}}"
+
+        root = await self._request("GET", "/test-set-folders", params=params)
+
+        folders = []
+        entities = root.find("Entities") or root
+        for entity in entities.findall("Entity"):
+            data = self._parse_entity(entity)
+            folders.append(ALMTestSetFolder(
+                id=int(data.get("id", 0)),
+                name=data.get("name", ""),
+                parent_id=int(data.get("parent-id", 0)),
+            ))
+
+        return folders
+
+    async def get_run_history(
+        self,
+        test_instance_id: int,
+        limit: int = 20
+    ) -> List[ALMRun]:
+        """
+        Laedt die Run-Historie einer Test-Instance.
+
+        Args:
+            test_instance_id: Test-Instance-ID
+            limit: Max. Anzahl Ergebnisse
+
+        Returns:
+            Liste von ALMRun (neueste zuerst)
+        """
+        self._check_configured()
+
+        params = {
+            "query": f"{{test-instance[{test_instance_id}]}}",
+            "page-size": str(limit),
+            "order-by": "{execution-date[DESC]}",
+        }
+
+        root = await self._request("GET", "/runs", params=params)
+
+        runs = []
+        entities = root.find("Entities") or root
+        for entity in entities.findall("Entity"):
+            data = self._parse_entity(entity)
+            runs.append(ALMRun(
+                id=int(data.get("id", 0)),
+                test_instance_id=test_instance_id,
+                status=data.get("status", ""),
+                comment=data.get("comments", ""),
+                execution_date=data.get("execution-date"),
+                executor=data.get("owner", ""),
+            ))
+
+        logger.info(f"ALM: {len(runs)} Runs fuer Test-Instance {test_instance_id} gefunden")
+        return runs
+
+    async def search_test_instances(
+        self,
+        query: str = "",
+        test_set_id: Optional[int] = None,
+        status: Optional[str] = None,
+        limit: int = 50,
+    ) -> List[ALMTestInstance]:
+        """
+        Sucht Test-Instances im Test Lab.
+
+        Args:
+            query: Suchbegriff (im Test-Namen)
+            test_set_id: Optional - nur in diesem Test-Set
+            status: Optional - nur mit diesem Status
+            limit: Max. Anzahl Ergebnisse
+
+        Returns:
+            Liste von ALMTestInstance
+        """
+        self._check_configured()
+
+        query_parts = []
+        if query:
+            escaped = query.replace("'", "''")
+            query_parts.append(f"test-config-name[~'{escaped}']")
+        if test_set_id is not None:
+            query_parts.append(f"cycle-id[{test_set_id}]")
+        if status:
+            query_parts.append(f"status['{status}']")
+
+        params = {"page-size": str(limit)}
+        if query_parts:
+            params["query"] = "{" + ";".join(query_parts) + "}"
+
+        root = await self._request("GET", "/test-instances", params=params)
+
+        instances = []
+        entities = root.find("Entities") or root
+        for entity in entities.findall("Entity"):
+            data = self._parse_entity(entity)
+            instances.append(ALMTestInstance(
+                id=int(data.get("id", 0)),
+                test_id=int(data.get("test-id", 0)),
+                test_name=data.get("test-config-name", ""),
+                test_set_id=int(data.get("cycle-id", 0)),
+                status=data.get("status", "No Run"),
+                last_run_id=int(data.get("last-modified", 0)) if data.get("last-modified") else None,
+                exec_date=data.get("exec-date"),
+                tester=data.get("actual-tester", ""),
+            ))
+
+        logger.info(f"ALM: {len(instances)} Test-Instances gefunden")
+        return instances
 
 
 # ══════════════════════════════════════════════════════════════════════════════

@@ -364,9 +364,25 @@ Wenn der User nach "Tests erstellen", "Testfall anlegen", "Test lesen" oder aehn
 
 3. **Verwende dann das passende Tool:**
    - JUnit -> generate_junit_tests Tool
-   - ALM -> alm_* Tools (alm_test_connection, alm_search_tests, alm_read_test, alm_create_test, etc.)
+   - ALM -> alm_* Tools
 
-4. **WICHTIG - Login/Verbindung:**
+4. **ALM Tools nach Modul:**
+   **Test Plan (Testfall-Definitionen):**
+   - `alm_test_connection` - Verbindung pruefen, Login testen
+   - `alm_search_tests` - Testfaelle im Test Plan suchen
+   - `alm_read_test` - Testfall mit Steps lesen
+   - `alm_create_test` - Neuen Testfall erstellen
+   - `alm_update_test` - Testfall aktualisieren
+   - `alm_list_folders` - Test Plan Ordner auflisten
+
+   **Test Lab (Testausfuehrung):**
+   - `alm_list_test_lab_folders` - Test Lab Ordnerstruktur
+   - `alm_list_test_sets` - Test-Sets auflisten
+   - `alm_search_test_instances` - Test-Instances suchen
+   - `alm_get_run_history` - Ausfuehrungshistorie anzeigen
+   - `alm_create_run` - Testergebnis dokumentieren
+
+5. **WICHTIG - Login/Verbindung:**
    - Fuer ALM/QC Login: `alm_test_connection` (NICHT test_login!)
    - Das Tool `test_login` ist fuer SOAP-Test-Services, NICHT fuer Quality Center!
    - ALM-Authentifizierung erfolgt automatisch bei allen alm_* Tools
