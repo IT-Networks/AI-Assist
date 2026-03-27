@@ -866,10 +866,12 @@ class ALMClient:
         entities = root.find("Entities") or root
         for entity in entities.findall("Entity"):
             data = self._parse_entity(entity)
+            # test-config-name oder name als Fallback
+            test_name = data.get("test-config-name") or data.get("name", "")
             instances.append(ALMTestInstance(
                 id=int(data.get("id", 0)),
                 test_id=int(data.get("test-id", 0)),
-                test_name=data.get("test-config-name", ""),
+                test_name=test_name,
                 test_set_id=test_set_id,
                 status=data.get("status", "No Run"),
                 last_run_id=int(data.get("last-modified", 0)) if data.get("last-modified") else None,
@@ -1022,9 +1024,10 @@ class ALMClient:
 
         query_parts = []
         if query:
-            # ALM verwendet *pattern* fuer Contains-Suche (Wildcards)
+            # ALM test-instances: Cross-Filter auf test.name fuer Testfall-Namen
+            # Syntax: test.name[*pattern*]
             escaped = query.replace("*", "\\*").replace("'", "''")
-            query_parts.append(f"test-config-name[*{escaped}*]")
+            query_parts.append(f"test.name[*{escaped}*]")
         if test_set_id is not None:
             query_parts.append(f"cycle-id[{test_set_id}]")
         if status:
@@ -1042,10 +1045,12 @@ class ALMClient:
         entities = root.find("Entities") or root
         for entity in entities.findall("Entity"):
             data = self._parse_entity(entity)
+            # test-config-name oder name als Fallback
+            test_name = data.get("test-config-name") or data.get("name", "")
             instances.append(ALMTestInstance(
                 id=int(data.get("id", 0)),
                 test_id=int(data.get("test-id", 0)),
-                test_name=data.get("test-config-name", ""),
+                test_name=test_name,
                 test_set_id=int(data.get("cycle-id", 0)),
                 status=data.get("status", "No Run"),
                 last_run_id=int(data.get("last-modified", 0)) if data.get("last-modified") else None,
