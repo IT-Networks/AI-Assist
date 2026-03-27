@@ -34,6 +34,7 @@ from typing import Any, Dict, List, Optional
 
 from app.agent.tools import Tool, ToolCategory, ToolParameter, ToolResult, ToolRegistry
 from app.core.exceptions import ALMError
+from app.services.alm_client import _strip_html
 
 logger = logging.getLogger(__name__)
 
@@ -387,18 +388,26 @@ def register_alm_tools(registry: ToolRegistry) -> int:
                     data=f"Keine Design-Steps fuer Testfall {test_id} gefunden"
                 )
 
+            # Formatierte Ausgabe mit HTML-Bereinigung
             lines = [f"## Design-Steps fuer Test {test_id}\n"]
-            lines.append("| # | Name | Beschreibung | Erwartetes Ergebnis |")
-            lines.append("|---|------|--------------|---------------------|")
 
             for step in steps:
-                desc = (step.description[:50] + "...") if len(step.description) > 50 else step.description
-                desc = desc.replace("\n", " ").replace("|", "\\|")
-                expected = (step.expected_result[:50] + "...") if len(step.expected_result) > 50 else step.expected_result
-                expected = expected.replace("\n", " ").replace("|", "\\|")
-                lines.append(f"| {step.step_order} | {step.name} | {desc} | {expected} |")
+                step_name = step.name or f"Schritt {step.step_order}"
+                lines.append(f"### {step.step_order}. {step_name}\n")
 
-            lines.append(f"\n*{len(steps)} Steps gefunden*")
+                # Beschreibung - HTML entfernen und formatieren
+                desc = _strip_html(step.description)
+                if desc:
+                    lines.append(f"**Beschreibung:**\n{desc}\n")
+
+                # Erwartetes Ergebnis - HTML entfernen und formatieren
+                expected = _strip_html(step.expected_result)
+                if expected:
+                    lines.append(f"**Erwartetes Ergebnis:**\n{expected}\n")
+
+                lines.append("---\n")
+
+            lines.append(f"*{len(steps)} Steps gefunden*")
             return ToolResult(success=True, data="\n".join(lines))
 
         except ALMError as e:

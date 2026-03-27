@@ -30,6 +30,46 @@ from app.core.exceptions import ALMError
 
 logger = logging.getLogger(__name__)
 
+
+def _strip_html(html: str) -> str:
+    """
+    Konvertiert HTML zu lesbarem Plain-Text.
+
+    - Ersetzt <br>, <br/>, </p>, </div> durch Newlines
+    - Entfernt alle anderen HTML-Tags
+    - Dekodiert HTML-Entities (&nbsp;, &lt;, etc.)
+    - Bereinigt mehrfache Leerzeilen
+    """
+    if not html:
+        return ""
+
+    import html as html_module
+
+    text = html
+
+    # Block-Elemente durch Newlines ersetzen
+    text = re.sub(r'<br\s*/?>', '\n', text, flags=re.IGNORECASE)
+    text = re.sub(r'</p>', '\n', text, flags=re.IGNORECASE)
+    text = re.sub(r'</div>', '\n', text, flags=re.IGNORECASE)
+    text = re.sub(r'</li>', '\n', text, flags=re.IGNORECASE)
+    text = re.sub(r'</tr>', '\n', text, flags=re.IGNORECASE)
+
+    # Listen-Bullets hinzufuegen
+    text = re.sub(r'<li[^>]*>', '• ', text, flags=re.IGNORECASE)
+
+    # Alle verbleibenden Tags entfernen
+    text = re.sub(r'<[^>]+>', '', text)
+
+    # HTML-Entities dekodieren
+    text = html_module.unescape(text)
+
+    # Mehrfache Leerzeichen/Newlines bereinigen
+    text = re.sub(r'[ \t]+', ' ', text)
+    text = re.sub(r'\n\s*\n', '\n\n', text)
+    text = text.strip()
+
+    return text
+
 # Shared HTTP Client fuer Connection-Pooling
 _http_client: Optional[httpx.AsyncClient] = None
 
@@ -132,16 +172,24 @@ class ALMTest:
         md += f"**Owner:** {self.owner}\n\n"
 
         if self.description:
-            md += f"### Beschreibung\n{self.description}\n\n"
+            clean_desc = _strip_html(self.description)
+            md += f"### Beschreibung\n{clean_desc}\n\n"
 
         if self.steps:
             md += "### Test-Schritte\n\n"
-            md += "| # | Schritt | Erwartetes Ergebnis |\n"
-            md += "|---|---------|--------------------|\n"
             for step in self.steps:
-                desc = step.description.replace("\n", " ").replace("|", "\\|")
-                expected = step.expected_result.replace("\n", " ").replace("|", "\\|")
-                md += f"| {step.step_order} | {desc} | {expected} |\n"
+                step_name = step.name or f"Schritt {step.step_order}"
+                md += f"#### {step.step_order}. {step_name}\n\n"
+
+                desc = _strip_html(step.description)
+                if desc:
+                    md += f"**Beschreibung:**\n{desc}\n\n"
+
+                expected = _strip_html(step.expected_result)
+                if expected:
+                    md += f"**Erwartetes Ergebnis:**\n{expected}\n\n"
+
+                md += "---\n\n"
 
         return md
 
