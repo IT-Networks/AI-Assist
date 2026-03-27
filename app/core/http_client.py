@@ -399,6 +399,11 @@ def get_jenkins_client(verify_ssl: bool = False, timeout: int = 30) -> httpx.Asy
     return HttpClientPool.get("jenkins", verify_ssl=verify_ssl, timeout=timeout)
 
 
+def get_iq_client(verify_ssl: bool = False, timeout: int = 30) -> httpx.AsyncClient:
+    """Sonatype IQ Server HTTP-Client."""
+    return HttpClientPool.get("iq_server", verify_ssl=verify_ssl, timeout=timeout)
+
+
 def get_mq_client(verify_ssl: bool = False, timeout: int = 30) -> httpx.AsyncClient:
     """MQ-Series HTTP-Client."""
     return HttpClientPool.get("mq", verify_ssl=verify_ssl, timeout=timeout)

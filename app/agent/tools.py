@@ -3045,6 +3045,10 @@ def create_default_registry() -> ToolRegistry:
     from app.agent.jenkins_tools import register_jenkins_tools
     register_jenkins_tools(registry)
 
+    # Sonatype IQ Server Tools (Findings & Waivers)
+    from app.agent.iq_tools import register_iq_tools
+    register_iq_tools(registry)
+
     # HP ALM/Quality Center Tools
     from app.agent.alm_tools import register_alm_tools
     register_alm_tools(registry)

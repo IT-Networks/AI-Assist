@@ -71,6 +71,60 @@ def build_proxy_url(
 # Globale Proxy-Konfiguration (wird von allen Services verwendet)
 # ══════════════════════════════════════════════════════════════════════════════
 
+# ══════════════════════════════════════════════════════════════════════════════
+# Zentrale Credentials-Verwaltung
+# ══════════════════════════════════════════════════════════════════════════════
+
+class CredentialEntry(BaseModel):
+    """
+    Ein benanntes Credential-Set für zentrale Verwaltung.
+
+    Kann von mehreren Services referenziert werden.
+    """
+    name: str = ""                   # Eindeutiger Name (z.B. "alm-prod", "jira-cloud")
+    type: str = "basic"              # basic | bearer | api_key
+    username: str = ""               # Für basic auth
+    password: str = ""               # Für basic auth (SENSITIVE)
+    token: str = ""                  # Für bearer/api_key (SENSITIVE)
+    description: str = ""            # Optionale Beschreibung
+
+
+class CredentialsConfig(BaseModel):
+    """
+    Zentrale Credentials-Verwaltung.
+
+    Alle Services können auf diese Credentials per Name verweisen,
+    statt eigene Username/Password-Felder zu verwenden.
+    """
+    credentials: List[CredentialEntry] = []
+
+    def get(self, name: str) -> Optional[CredentialEntry]:
+        """Gibt ein Credential-Entry nach Name zurück."""
+        for cred in self.credentials:
+            if cred.name == name:
+                return cred
+        return None
+
+    def get_auth(self, name: str) -> tuple:
+        """
+        Gibt (username, password/token) für ein Credential zurück.
+
+        Returns:
+            (username, secret) oder ("", "") wenn nicht gefunden
+        """
+        cred = self.get(name)
+        if not cred:
+            return ("", "")
+
+        if cred.type == "basic":
+            return (cred.username, cred.password)
+        elif cred.type == "bearer":
+            return ("", cred.token)
+        elif cred.type == "api_key":
+            return ("", cred.token)
+        return ("", "")
+
+
 class ProxyConfig(BaseModel):
     """
     Zentrale Proxy-Konfiguration für alle externen HTTP-Verbindungen.
@@ -81,6 +135,7 @@ class ProxyConfig(BaseModel):
     url: str = ""                    # z.B. http://proxy.intern:8080
     username: str = ""               # Proxy-Benutzername (optional)
     password: str = ""               # Proxy-Passwort (optional)
+    credential_ref: str = ""         # Referenz auf credentials.credentials[name="..."]
     no_proxy: str = ""               # Kommagetrennte Liste ohne Proxy (z.B. "localhost,127.0.0.1,.intern")
     verify_ssl: bool = True          # SSL-Zertifikate prüfen
 
@@ -223,7 +278,8 @@ class JavaConfig(BaseModel):
 
 class ConfluenceConfig(BaseModel):
     base_url: str = ""
-    username: str = ""
+    credential_ref: str = ""  # Referenz auf zentrale Credentials (bevorzugt)
+    username: str = ""        # Direkt (Fallback wenn credential_ref leer)
     api_token: str = ""   # Bei leerem username: Bearer Token, sonst Basic Auth (username:api_token)
     password: str = ""    # Atlassian Server/DC Passwort (Fallback wenn api_token leer)
     default_space: str = ""
@@ -321,7 +377,8 @@ class DatabaseConfig(BaseModel):
     port: int = 50000
     database: str = ""
     db_schema: str = ""  # Renamed from 'schema' to avoid Pydantic conflict
-    username: str = ""
+    credential_ref: str = ""  # Referenz auf zentrale Credentials (bevorzugt)
+    username: str = ""        # Direkt (Fallback wenn credential_ref leer)
     password: str = ""
     # Sicherheit
     require_confirmation: bool = True  # Bestätigung vor jeder Query
@@ -337,7 +394,8 @@ class JiraConfig(BaseModel):
     """Konfiguration für Jira-Anbindung."""
     enabled: bool = False
     base_url: str = ""  # z.B. https://jira.example.com
-    username: str = ""
+    credential_ref: str = ""  # Referenz auf zentrale Credentials (bevorzugt)
+    username: str = ""        # Direkt (Fallback wenn credential_ref leer)
     api_token: str = ""   # Bei leerem username: Bearer Token, sonst Basic Auth (username:api_token)
     password: str = ""    # Server/DC Passwort (Fallback)
     default_project: str = ""  # Standard-Projektschlüssel (z.B. "PROJ")
@@ -348,7 +406,8 @@ class ALMConfig(BaseModel):
     """HP ALM/Quality Center Konfiguration für Testfall-Management."""
     enabled: bool = False
     base_url: str = ""                    # z.B. https://alm.company.com/qcbin
-    username: str = ""
+    credential_ref: str = ""              # Referenz auf zentrale Credentials (bevorzugt)
+    username: str = ""                    # Direkt (Fallback wenn credential_ref leer)
     password: str = ""                    # SENSITIVE - wird maskiert
     domain: str = ""                      # ALM Domain (z.B. "DEFAULT")
     project: str = ""                     # ALM Project Name
@@ -955,12 +1014,14 @@ class InternalFetchConfig(BaseModel):
     timeout_seconds: int = 30        # Timeout für HTTP-Requests
     # Authentifizierung
     auth_type: str = "none"          # "none", "basic", "bearer"
-    auth_username: str = ""          # Benutzername für Basic Auth
+    credential_ref: str = ""         # Referenz auf zentrale Credentials (bevorzugt)
+    auth_username: str = ""          # Direkt (Fallback wenn credential_ref leer)
     auth_password: str = ""          # Passwort für Basic Auth
     auth_token: str = ""             # Bearer Token
     # Proxy-Konfiguration
     proxy_url: str = ""              # Proxy für interne Requests (optional)
-    proxy_username: str = ""         # Proxy-Benutzername (optional)
+    proxy_credential_ref: str = ""   # Referenz auf zentrale Credentials für Proxy
+    proxy_username: str = ""         # Direkt (Fallback)
     proxy_password: str = ""         # Proxy-Passwort (optional)
     # HTML Processing
     html_processing: HtmlProcessingConfig = Field(default_factory=HtmlProcessingConfig)
@@ -984,7 +1045,8 @@ class JenkinsConfig(BaseModel):
     """Jenkins CI/CD Server Konfiguration (intern gehostet)."""
     enabled: bool = False
     base_url: str = ""              # z.B. http://jenkins.intern:8080
-    username: str = ""              # Jenkins-Benutzername
+    credential_ref: str = ""        # Referenz auf zentrale Credentials (bevorzugt)
+    username: str = ""              # Direkt (Fallback wenn credential_ref leer)
     api_token: str = ""             # Jenkins API-Token (statt Passwort)
     verify_ssl: bool = False        # False für interne Server mit Self-Signed Certs
     # Job-Pfade (Ordner-Struktur in Jenkins)
@@ -994,6 +1056,27 @@ class JenkinsConfig(BaseModel):
     timeout_seconds: int = 30       # Timeout für API-Calls
     # Sicherheit: Build-Trigger benötigt Bestätigung
     require_build_confirmation: bool = True
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Sonatype IQ Server (Lifecycle) - Vulnerability/Policy Management
+# ══════════════════════════════════════════════════════════════════════════════
+
+class IQServerConfig(BaseModel):
+    """Sonatype IQ Server (Lifecycle) Konfiguration für Findings und Waivers."""
+    enabled: bool = False
+    base_url: str = ""                  # z.B. https://iq.intern:8070
+    credential_ref: str = ""            # Referenz auf zentrale Credentials (bevorzugt)
+    username: str = ""                  # User-Code (Fallback wenn credential_ref leer)
+    api_token: str = ""                 # Passcode (Fallback wenn credential_ref leer)
+    verify_ssl: bool = False            # False für interne Server mit Self-Signed Certs
+    default_app: str = ""               # Default Application publicId
+    default_org_id: str = ""            # Default Organisation-ID (für Org-Level-Waivers)
+    timeout_seconds: int = 30           # Timeout für API-Calls
+    # Waiver-Defaults
+    default_waiver_days: int = 90       # Standard-Ablauf für Waivers (Tage)
+    default_matcher_strategy: str = "EXACT_COMPONENT"  # EXACT_COMPONENT | ALL_VERSIONS | ALL_COMPONENTS
+    require_waiver_confirmation: bool = True  # Bestätigung vor Waiver-Anlage
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -1144,7 +1227,8 @@ class GitHubConfig(BaseModel):
     """GitHub Enterprise Server Konfiguration (intern gehostet)."""
     enabled: bool = False
     base_url: str = ""              # z.B. https://github.intern.example.com
-    token: str = ""                 # Personal Access Token
+    credential_ref: str = ""        # Referenz auf zentrale Credentials (bevorzugt, type=bearer)
+    token: str = ""                 # Personal Access Token (Fallback wenn credential_ref leer)
     verify_ssl: bool = False        # False für interne Server mit Self-Signed Certs
     default_org: str = ""           # Standard-Organisation für Repo-Listen
     default_repo: str = ""          # Standard-Repository (Format: org/repo)
@@ -1178,7 +1262,8 @@ class ServiceNowConfig(BaseModel):
 
     # Authentifizierung
     auth_type: str = "basic"           # "basic" oder "oauth2"
-    username: str = ""
+    credential_ref: str = ""           # Referenz auf zentrale Credentials (bevorzugt)
+    username: str = ""                 # Direkt (Fallback wenn credential_ref leer)
     password: str = ""
     # OAuth2 (optional)
     client_id: str = ""
@@ -1314,6 +1399,7 @@ class TaskAgentConfig(BaseModel):
 
 class Settings(BaseModel):
     # Globale Einstellungen
+    credentials: CredentialsConfig = Field(default_factory=CredentialsConfig)  # Zentrale Credentials
     proxy: ProxyConfig = Field(default_factory=ProxyConfig)  # Zentrale Proxy-Konfiguration
 
     # LLM und Modelle
@@ -1345,6 +1431,7 @@ class Settings(BaseModel):
     maven: MavenConfig = Field(default_factory=MavenConfig)
     search: WebSearchConfig = Field(default_factory=WebSearchConfig)
     jenkins: JenkinsConfig = Field(default_factory=JenkinsConfig)
+    iq_server: IQServerConfig = Field(default_factory=IQServerConfig)
     github: GitHubConfig = Field(default_factory=GitHubConfig)
     internal_fetch: InternalFetchConfig = Field(default_factory=InternalFetchConfig)
     docker_sandbox: DockerSandboxConfig = Field(default_factory=DockerSandboxConfig)

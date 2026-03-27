@@ -397,6 +397,22 @@ jenkins:
   timeout_seconds: 30
   require_build_confirmation: true
 
+# ═══════════════════════════════════════════════════════════════════
+# Sonatype IQ Server (Lifecycle) - Findings & Waivers
+iq_server:
+  enabled: false
+  base_url: ''                          # z.B. https://iq.intern:8070
+  credential_ref: ''                    # Referenz auf zentrale Credentials (bevorzugt)
+  username: ''                          # User-Code (Fallback)
+  api_token: ''                         # Passcode (Fallback)
+  verify_ssl: false
+  default_app: ''                       # Default Application publicId
+  default_org_id: ''                    # Default Organisation-ID
+  timeout_seconds: 30
+  default_waiver_days: 90
+  default_matcher_strategy: 'EXACT_COMPONENT'
+  require_waiver_confirmation: true
+
 # GitHub Enterprise Server (intern gehostet)
 # Für E2E Tests: Token aus Umgebungsvariable GITHUB_TOKEN setzen
 github:
