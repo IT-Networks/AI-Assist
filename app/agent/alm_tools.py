@@ -129,6 +129,10 @@ def register_alm_tools(registry: ToolRegistry) -> int:
 
         try:
             client = get_alm_client()
+            # Aktuelles Projekt merken fuer Ausgabe
+            context = client.get_current_context()
+            current_project = f"{context['domain']}/{context['project']}"
+
             tests = await client.search_tests(
                 query=query,
                 folder_id=folder_id,
@@ -151,11 +155,11 @@ def register_alm_tools(registry: ToolRegistry) -> int:
                 filter_str = ", ".join(filters) if filters else "keine"
                 return ToolResult(
                     success=True,
-                    data=f"Keine Testfaelle gefunden (Filter: {filter_str})"
+                    data=f"Keine Testfaelle in **{current_project}** gefunden (Filter: {filter_str})"
                 )
 
-            # Formatierte Ausgabe
-            lines = [f"## {len(tests)} Testfaelle gefunden\n"]
+            # Formatierte Ausgabe MIT Projekt-Info
+            lines = [f"## {len(tests)} Testfaelle in **{current_project}**\n"]
             lines.append("| ID | Name | Typ | Status | Owner | Erstellt |")
             lines.append("|---|---|---|---|---|---|")
 
@@ -165,6 +169,7 @@ def register_alm_tools(registry: ToolRegistry) -> int:
                     f"{test.status or '-'} | {test.owner or '-'} | {test.creation_date or '-'} |"
                 )
 
+            lines.append(f"\n*Projekt: {current_project}*")
             return ToolResult(success=True, data="\n".join(lines))
 
         except ALMError as e:
@@ -249,6 +254,9 @@ def register_alm_tools(registry: ToolRegistry) -> int:
         # Akzeptiere test_id (int) ODER test_identifier (string)
         test_id: Optional[int] = kwargs.get("test_id")
         test_identifier: Optional[str] = kwargs.get("test_identifier")
+        # Optional: Projekt-Kontext (wenn Test aus anderem Projekt stammt)
+        project: Optional[str] = kwargs.get("project")
+        domain: Optional[str] = kwargs.get("domain")
 
         # Wenn test_id als String uebergeben wurde (z.B. "123"), konvertieren
         if test_id is None and test_identifier is None:
@@ -259,6 +267,22 @@ def register_alm_tools(registry: ToolRegistry) -> int:
 
         try:
             client = get_alm_client()
+
+            # Wenn Projekt angegeben, erst dorthin wechseln
+            if project:
+                current = client.get_current_context()
+                target_domain = domain or current['domain']
+                if project != current['project'] or target_domain != current['domain']:
+                    logger.info(f"ALM: Wechsle zu Projekt {target_domain}/{project} fuer Test-Zugriff")
+                    switch_result = await client.switch_project(project, target_domain)
+                    if not switch_result.get("already_active"):
+                        # Validiere neues Projekt
+                        test_conn = await client.test_connection(verify_project=True)
+                        if not test_conn.get("success"):
+                            return ToolResult(
+                                success=False,
+                                error=f"Projektwechsel fehlgeschlagen: {test_conn.get('error')}"
+                            )
 
             # Wenn nur test_identifier gegeben, suche den Test
             if test_id is None and test_identifier:
@@ -271,23 +295,29 @@ def register_alm_tools(registry: ToolRegistry) -> int:
                     tests = await client.search_tests(query=test_identifier, limit=5)
 
                     if not tests:
+                        context = client.get_current_context()
                         return ToolResult(
                             success=False,
-                            error=f"Kein Test mit Name/Key '{test_identifier}' gefunden"
+                            error=f"Kein Test mit Name/Key '{test_identifier}' in {context['domain']}/{context['project']} gefunden"
                         )
 
                     if len(tests) == 1:
                         test_id = tests[0].id
                     else:
                         # Mehrere Treffer - zeige Liste
-                        lines = [f"Mehrere Tests gefunden fuer '{test_identifier}':\n"]
+                        context = client.get_current_context()
+                        lines = [f"Mehrere Tests gefunden fuer '{test_identifier}' in {context['domain']}/{context['project']}:\n"]
                         for t in tests:
                             lines.append(f"- **ID {t.id}**: {t.name}")
                         lines.append("\nBitte gib die eindeutige test_id an.")
                         return ToolResult(success=True, data="\n".join(lines))
 
             test = await client.get_test(test_id, include_steps=True)
-            return ToolResult(success=True, data=test.to_markdown())
+            # Projekt-Info im Ergebnis
+            context = client.get_current_context()
+            result = test.to_markdown()
+            result += f"\n\n*Projekt: {context['domain']}/{context['project']}*"
+            return ToolResult(success=True, data=result)
 
         except ALMError as e:
             return ToolResult(success=False, error=str(e))
@@ -300,7 +330,8 @@ def register_alm_tools(registry: ToolRegistry) -> int:
         description=(
             "Liest einen Testfall aus HP ALM mit allen Details: "
             "Name, Beschreibung, Folder-Pfad, Status und alle Test-Schritte. "
-            "Akzeptiert entweder die numerische Test-ID oder einen Test-Namen/Key zur Suche."
+            "Akzeptiert entweder die numerische Test-ID oder einen Test-Namen/Key zur Suche. "
+            "WICHTIG: Wenn der Test aus einem anderen Projekt stammt, gib project (und optional domain) an!"
         ),
         category=ToolCategory.KNOWLEDGE,
         parameters=[
@@ -314,6 +345,18 @@ def register_alm_tools(registry: ToolRegistry) -> int:
                 name="test_identifier",
                 type="string",
                 description="Alternativ: Test-Name oder Key zur Suche (z.B. 'TC001' oder 'Login Test')",
+                required=False,
+            ),
+            ToolParameter(
+                name="project",
+                type="string",
+                description="Optional: Projekt-Name wenn Test aus anderem Projekt stammt (wechselt automatisch)",
+                required=False,
+            ),
+            ToolParameter(
+                name="domain",
+                type="string",
+                description="Optional: Domain wenn Test aus anderer Domain stammt",
                 required=False,
             ),
         ],
