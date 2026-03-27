@@ -67,6 +67,8 @@ def _sanitize_messages_for_mistral(messages: List[Dict]) -> List[Dict]:
     3. Rollen müssen alternieren: user/assistant/user/assistant
     4. Nach User/System darf KEIN Tool kommen!
 
+    Performance: Single-pass Algorithmus (O(n) statt O(3n)).
+
     Args:
         messages: Original-Nachrichten
 
@@ -76,150 +78,111 @@ def _sanitize_messages_for_mistral(messages: List[Dict]) -> List[Dict]:
     if not messages:
         return messages
 
-    result = []
-    seen_non_system = False
-    last_role = None
-    last_had_tool_calls = False  # Track if last assistant had tool_calls
+    # === SINGLE-PASS ALGORITHM ===
+    # Phase 1: Separate leading system messages (collected for consolidation)
+    # Phase 2: Process all other messages with inline validation
 
-    for msg in messages:
-        msg_copy = dict(msg)
-        role = msg_copy.get("role", "")
-        final_role = role
-
-        if role == "system":
-            if seen_non_system:
-                # System-Message nach anderen Rollen → konvertiere zu User
-                content = msg_copy.get("content", "")
-                msg_copy = {
-                    "role": "user",
-                    "content": f"[System Hinweis]\n{content}"
-                }
-                final_role = "user"
-                logger.debug("[llm] Mistral: Converted late system to user")
-
-        elif role == "tool":
-            # Tool-Messages sind NUR nach Assistant MIT tool_calls erlaubt!
-            # Nach user, system, oder assistant OHNE tool_calls → konvertieren
-            if last_role != "assistant" or not last_had_tool_calls:
-                content = msg_copy.get("content", "")
-                tool_call_id = msg_copy.get("tool_call_id", "unknown")
-                msg_copy = {
-                    "role": "user",
-                    "content": f"[Tool-Ergebnis ({tool_call_id})]\n{content}"
-                }
-                final_role = "user"
-                logger.debug(f"[llm] Mistral: Converted orphan tool to user (last_role={last_role}, had_tool_calls={last_had_tool_calls})")
-            else:
-                # Sanitize tool_call_id für Mistral (muss 9 alphanumerische Zeichen sein)
-                if "tool_call_id" in msg_copy:
-                    original_id = msg_copy["tool_call_id"]
-                    msg_copy["tool_call_id"] = _sanitize_tool_call_id_for_mistral(original_id)
-            seen_non_system = True
-
-        elif role == "assistant":
-            # Check if this assistant has tool_calls
-            tool_calls = msg_copy.get("tool_calls")
-            content = msg_copy.get("content")
-            last_had_tool_calls = bool(tool_calls)
-
-            # Mistral: Assistant muss entweder content ODER tool_calls haben
-            # Leere Assistant-Messages sind ungültig!
-            if not content and not tool_calls:
-                # Skip empty assistant messages entirely
-                logger.debug("[llm] Mistral: Skipping empty assistant message (no content, no tool_calls)")
-                continue
-
-            # Ensure content is not None when no tool_calls (Mistral requirement)
-            if not tool_calls and content is None:
-                msg_copy["content"] = ""
-
-            # Sanitize tool_call IDs für Mistral (müssen 9 alphanumerische Zeichen sein)
-            if tool_calls:
-                sanitized_tool_calls = []
-                for tc in tool_calls:
-                    tc_copy = dict(tc)
-                    if "id" in tc_copy:
-                        tc_copy["id"] = _sanitize_tool_call_id_for_mistral(tc_copy["id"])
-                    sanitized_tool_calls.append(tc_copy)
-                msg_copy["tool_calls"] = sanitized_tool_calls
-
-            seen_non_system = True
-
-        else:  # user
-            seen_non_system = True
-            last_had_tool_calls = False  # Reset after user message
-
-        result.append(msg_copy)
-        last_role = final_role
-
-    # Consolidate multiple system messages at the start
-    consolidated = []
-    system_contents = []
+    result: List[Dict] = []
+    system_contents: List[str] = []
     in_system_block = True
 
-    for msg in result:
-        role = msg.get("role", "")
-        if role == "system" and in_system_block:
-            system_contents.append(msg.get("content", ""))
-        else:
-            in_system_block = False
-            consolidated.append(msg)
-
-    # Add single consolidated system message at start if any
-    if system_contents:
-        consolidated.insert(0, {
-            "role": "system",
-            "content": "\n\n".join(system_contents)
-        })
-
-    # Final validation pass - ensure valid sequence
-    # Mistral rules:
-    # 1. tool can only follow assistant with tool_calls
-    # 2. user cannot directly follow tool (must have assistant in between)
-    # 3. Consecutive same roles (except tool) should be merged
-    validated = []
-    prev_role = None
+    # State tracking (combined from all original passes)
+    prev_role: Optional[str] = None
     prev_had_tool_calls = False
 
-    for msg in consolidated:
+    for msg in messages:
         role = msg.get("role", "")
 
-        # Tool can only follow assistant with tool_calls
-        if role == "tool" and (prev_role != "assistant" or not prev_had_tool_calls):
-            content = msg.get("content", "")
-            tool_call_id = msg.get("tool_call_id", "unknown")
-            msg = {
-                "role": "user",
-                "content": f"[Tool-Ergebnis ({tool_call_id})]\n{content}"
-            }
-            logger.warning(f"[llm] Mistral final validation: tool after {prev_role} → user")
-            role = "user"
+        # === SYSTEM MESSAGE HANDLING ===
+        if role == "system":
+            if in_system_block:
+                # Collect for consolidation
+                system_contents.append(msg.get("content", ""))
+                continue
+            else:
+                # Late system → convert to user
+                content = msg.get("content", "")
+                msg = {"role": "user", "content": f"[System Hinweis]\n{content}"}
+                role = "user"
+                logger.debug("[llm] Mistral: Converted late system to user")
+        else:
+            in_system_block = False
 
-        # User cannot directly follow tool - insert empty assistant
-        if role == "user" and prev_role == "tool":
-            validated.append({
-                "role": "assistant",
-                "content": ""  # Empty assistant to bridge tool → user
-            })
-            logger.warning("[llm] Mistral: Inserted empty assistant between tool and user")
-
-        # Merge consecutive user messages (can happen after tool→user conversions)
-        if role == "user" and prev_role == "user" and validated:
-            # Append to previous user message
-            prev_content = validated[-1].get("content", "")
-            new_content = msg.get("content", "")
-            validated[-1]["content"] = f"{prev_content}\n\n{new_content}"
-            logger.debug("[llm] Mistral: Merged consecutive user messages")
-            continue  # Don't append, we merged
-
-        validated.append(msg)
-        prev_role = role
+        # === ASSISTANT MESSAGE HANDLING ===
         if role == "assistant":
-            prev_had_tool_calls = bool(msg.get("tool_calls"))
-        elif role != "tool":
+            tool_calls = msg.get("tool_calls")
+            content = msg.get("content")
+
+            # Skip empty assistant messages
+            if not content and not tool_calls:
+                logger.debug("[llm] Mistral: Skipping empty assistant message")
+                continue
+
+            # Build sanitized message
+            msg_out = {"role": "assistant"}
+            if tool_calls:
+                # Sanitize tool_call IDs inline
+                msg_out["tool_calls"] = [
+                    {**tc, "id": _sanitize_tool_call_id_for_mistral(tc.get("id", ""))}
+                    if "id" in tc else tc
+                    for tc in tool_calls
+                ]
+                prev_had_tool_calls = True
+            else:
+                msg_out["content"] = content if content is not None else ""
+                prev_had_tool_calls = False
+
+            if content and tool_calls:
+                msg_out["content"] = content
+
+            result.append(msg_out)
+            prev_role = "assistant"
+            continue
+
+        # === TOOL MESSAGE HANDLING ===
+        if role == "tool":
+            # Tool can only follow assistant with tool_calls
+            if prev_role != "assistant" or not prev_had_tool_calls:
+                content = msg.get("content", "")
+                tool_call_id = msg.get("tool_call_id", "unknown")
+                msg = {"role": "user", "content": f"[Tool-Ergebnis ({tool_call_id})]\n{content}"}
+                role = "user"
+                logger.debug("[llm] Mistral: Converted orphan tool to user")
+            else:
+                # Valid tool message - sanitize ID
+                result.append({
+                    "role": "tool",
+                    "content": msg.get("content", ""),
+                    "tool_call_id": _sanitize_tool_call_id_for_mistral(msg.get("tool_call_id", "unknown"))
+                })
+                prev_role = "tool"
+                continue
+
+        # === USER MESSAGE HANDLING (including converted messages) ===
+        if role == "user":
+            content = msg.get("content", "")
+
+            # Insert bridge assistant if needed (tool → user transition)
+            if prev_role == "tool":
+                result.append({"role": "assistant", "content": ""})
+                logger.debug("[llm] Mistral: Inserted bridge assistant between tool and user")
+
+            # Merge consecutive user messages
+            if prev_role == "user" and result:
+                prev_content = result[-1].get("content", "")
+                result[-1]["content"] = f"{prev_content}\n\n{content}"
+                logger.debug("[llm] Mistral: Merged consecutive user messages")
+                continue
+
+            result.append({"role": "user", "content": content})
+            prev_role = "user"
             prev_had_tool_calls = False
 
-    return validated
+    # === PREPEND CONSOLIDATED SYSTEM MESSAGE ===
+    if system_contents:
+        result.insert(0, {"role": "system", "content": "\n\n".join(system_contents)})
+
+    return result
 
 
 def _parse_tool_calls_from_content(content: str) -> tuple[str, List[Dict]]:

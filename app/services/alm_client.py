@@ -850,3 +850,12 @@ def get_alm_client() -> ALMClient:
     if _alm_client is None:
         _alm_client = ALMClient()
     return _alm_client
+
+
+def reset_alm_client() -> None:
+    """Setzt den ALM Client zurueck (bei Config-Aenderung)."""
+    global _alm_client
+    if _alm_client is not None:
+        # Session invalidieren
+        _alm_client._session = None
+    _alm_client = None

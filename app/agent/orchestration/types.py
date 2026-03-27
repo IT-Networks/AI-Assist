@@ -181,6 +181,10 @@ class AgentState:
     compaction_count: int = 0
     last_compaction_savings: int = 0
     compaction_attempted_while_full: bool = False
+    # Performance: Incremental Token Tracking
+    # Vermeidet wiederholte estimate_messages_tokens() Aufrufe
+    cached_message_tokens: int = 0  # Akkumulierte Tokens in messages_history
+    _last_message_count: int = 0    # Fuer Invalidierung bei History-Aenderung
     # Loop-Praevention: Zaehlt wie oft eine Datei/Seite pro Request bearbeitet wurde
     read_files_this_request: Dict[str, int] = field(default_factory=dict)
     edit_files_this_request: Dict[str, int] = field(default_factory=dict)
@@ -216,3 +220,29 @@ class AgentState:
         if self.entity_tracker is None:
             from app.agent.entity_tracker import EntityTracker
             self.entity_tracker = EntityTracker()
+
+    def add_message_tokens(self, tokens: int) -> None:
+        """
+        Addiert Tokens zum Cache (für inkrementelles Tracking).
+
+        Performance: Vermeidet wiederholte estimate_messages_tokens() Aufrufe.
+        """
+        self.cached_message_tokens += tokens
+        self._last_message_count = len(self.messages_history)
+
+    def get_cached_message_tokens(self) -> int:
+        """
+        Gibt gecachte Token-Anzahl zurück, oder 0 wenn Cache invalidiert.
+
+        Cache wird invalidiert wenn messages_history sich geändert hat
+        (z.B. durch Summarizer-Kompression).
+        """
+        if len(self.messages_history) != self._last_message_count:
+            # Cache invalidiert - History wurde modifiziert
+            return 0
+        return self.cached_message_tokens
+
+    def invalidate_token_cache(self) -> None:
+        """Invalidiert den Token-Cache (z.B. nach Kompression)."""
+        self.cached_message_tokens = 0
+        self._last_message_count = 0

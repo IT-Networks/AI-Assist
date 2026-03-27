@@ -10266,8 +10266,8 @@ function renderALMSection() {
     <div class="settings-field">
       <label for="alm-enabled">Aktiviert</label>
       <label class="checkbox-label">
-        <input type="checkbox" id="alm-enabled" ${cfg.enabled ? 'checked' : ''} onchange="markSettingsModified()">
-        ${cfg.enabled ? 'Aktiviert' : 'Deaktiviert'}
+        <input type="checkbox" id="alm-enabled" ${cfg.enabled ? 'checked' : ''} onchange="markSettingsModified(); updateALMCheckboxLabels()">
+        <span id="alm-enabled-label">${cfg.enabled ? 'Aktiviert' : 'Deaktiviert'}</span>
       </label>
     </div>
 
@@ -10307,16 +10307,16 @@ function renderALMSection() {
     <div class="settings-field">
       <label for="alm-verify-ssl">SSL-Zertifikat pruefen</label>
       <label class="checkbox-label">
-        <input type="checkbox" id="alm-verify-ssl" ${cfg.verify_ssl !== false ? 'checked' : ''} onchange="markSettingsModified()">
-        ${cfg.verify_ssl !== false ? 'Ja' : 'Nein (fuer Self-Signed Certs)'}
+        <input type="checkbox" id="alm-verify-ssl" ${cfg.verify_ssl !== false ? 'checked' : ''} onchange="markSettingsModified(); updateALMCheckboxLabels()">
+        <span id="alm-verify-ssl-label">${cfg.verify_ssl !== false ? 'Ja' : 'Nein (fuer Self-Signed Certs)'}</span>
       </label>
     </div>
 
     <div class="settings-field">
       <label for="alm-require-confirmation">Bestaetigung fuer Schreiboperationen</label>
       <label class="checkbox-label">
-        <input type="checkbox" id="alm-require-confirmation" ${cfg.require_confirmation !== false ? 'checked' : ''} onchange="markSettingsModified()">
-        ${cfg.require_confirmation !== false ? 'Ja (empfohlen)' : 'Nein'}
+        <input type="checkbox" id="alm-require-confirmation" ${cfg.require_confirmation !== false ? 'checked' : ''} onchange="markSettingsModified(); updateALMCheckboxLabels()">
+        <span id="alm-require-confirmation-label">${cfg.require_confirmation !== false ? 'Ja (empfohlen)' : 'Nein'}</span>
       </label>
       <small class="field-hint">Bei aktiviert muss jede Testfall-Erstellung/Aenderung bestaetigt werden</small>
     </div>
@@ -10334,6 +10334,26 @@ function renderALMSection() {
     </div>
     <div id="alm-test-result" class="test-result" style="margin-top:10px"></div>
   `;
+}
+
+function updateALMCheckboxLabels() {
+  const enabledEl = document.getElementById('alm-enabled');
+  const enabledLabel = document.getElementById('alm-enabled-label');
+  if (enabledEl && enabledLabel) {
+    enabledLabel.textContent = enabledEl.checked ? 'Aktiviert' : 'Deaktiviert';
+  }
+
+  const sslEl = document.getElementById('alm-verify-ssl');
+  const sslLabel = document.getElementById('alm-verify-ssl-label');
+  if (sslEl && sslLabel) {
+    sslLabel.textContent = sslEl.checked ? 'Ja' : 'Nein (fuer Self-Signed Certs)';
+  }
+
+  const confirmEl = document.getElementById('alm-require-confirmation');
+  const confirmLabel = document.getElementById('alm-require-confirmation-label');
+  if (confirmEl && confirmLabel) {
+    confirmLabel.textContent = confirmEl.checked ? 'Ja (empfohlen)' : 'Nein';
+  }
 }
 
 async function testALMConnection() {
@@ -11540,6 +11560,35 @@ async function saveCurrentSection() {
       if (!res.ok) throw new Error(data.detail || 'Fehler');
       settingsState.settings.docker_sandbox = data.config;
       updateSettingsStatus('Container-Sandbox-Einstellungen angewendet', 'success');
+    } catch (err) {
+      updateSettingsStatus('Fehler: ' + err.message, 'error');
+    }
+    return;
+  }
+
+  // ALM/Quality Center hat eigene Felder
+  if (section === 'alm') {
+    const values = {
+      enabled: document.getElementById('alm-enabled')?.checked || false,
+      base_url: document.getElementById('alm-base-url')?.value || '',
+      domain: document.getElementById('alm-domain')?.value || '',
+      project: document.getElementById('alm-project')?.value || '',
+      username: document.getElementById('alm-username')?.value || '',
+      password: document.getElementById('alm-password')?.value || '',
+      verify_ssl: document.getElementById('alm-verify-ssl')?.checked !== false,
+      require_confirmation: document.getElementById('alm-require-confirmation')?.checked !== false,
+      timeout_seconds: parseInt(document.getElementById('alm-timeout')?.value) || 30,
+    };
+    try {
+      const res = await fetch('/api/settings/section/alm', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(values),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.detail || 'Fehler');
+      settingsState.settings.alm = data.values;
+      updateSettingsStatus('ALM-Einstellungen angewendet', 'success');
     } catch (err) {
       updateSettingsStatus('Fehler: ' + err.message, 'error');
     }

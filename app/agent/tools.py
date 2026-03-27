@@ -59,6 +59,8 @@ class ToolResult:
 class Tool:
     """
     Definition eines Tools das vom LLM aufgerufen werden kann.
+
+    Performance: Schema wird lazy generiert und gecached.
     """
     name: str
     description: str
@@ -66,9 +68,19 @@ class Tool:
     parameters: List[ToolParameter] = field(default_factory=list)
     is_write_operation: bool = False  # Benötigt User-Bestätigung
     handler: Optional[Callable[..., Awaitable[ToolResult]]] = None
+    # Performance: Cached schema to avoid regeneration on every LLM call
+    _cached_schema: Optional[Dict] = field(default=None, repr=False, compare=False)
 
     def to_openai_schema(self) -> Dict:
-        """Konvertiert das Tool in das OpenAI Function-Calling Schema."""
+        """
+        Konvertiert das Tool in das OpenAI Function-Calling Schema.
+
+        Performance: Schema wird beim ersten Aufruf generiert und gecached.
+        Spätere Aufrufe geben das gecachte Schema zurück (O(1) statt O(n)).
+        """
+        if self._cached_schema is not None:
+            return self._cached_schema
+
         properties = {}
         required = []
 
@@ -90,7 +102,7 @@ class Tool:
             if param.required:
                 required.append(param.name)
 
-        return {
+        self._cached_schema = {
             "type": "function",
             "function": {
                 "name": self.name,
@@ -102,6 +114,11 @@ class Tool:
                 }
             }
         }
+        return self._cached_schema
+
+    def invalidate_schema_cache(self) -> None:
+        """Invalidiert den Schema-Cache (für dynamische Tool-Änderungen)."""
+        self._cached_schema = None
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -162,10 +179,15 @@ class ToolRegistry:
     """
     Registry für alle verfügbaren Tools.
     Verwaltet Tool-Definitionen und deren Ausführung.
+
+    Performance: Cached aggregierte Schemas für schnellen Zugriff.
     """
 
     def __init__(self):
         self._tools: Dict[str, Tool] = {}
+        # Performance: Cached schema lists (invalidated on register)
+        self._cached_schemas_read_only: Optional[List[Dict]] = None
+        self._cached_schemas_all: Optional[List[Dict]] = None
 
     @property
     def tools(self) -> Dict[str, Tool]:
@@ -177,6 +199,9 @@ class ToolRegistry:
         if isinstance(tool, ToolDefinition):
             tool = tool.to_tool()
         self._tools[tool.name] = tool
+        # Invalidate cached schemas on registration
+        self._cached_schemas_read_only = None
+        self._cached_schemas_all = None
 
     def get(self, name: str) -> Optional[Tool]:
         """Gibt ein Tool zurück."""
@@ -193,14 +218,33 @@ class ToolRegistry:
         """
         Gibt alle Tool-Definitionen im OpenAI-Format zurück.
 
+        Performance: Schemas werden gecached und bei Bedarf regeneriert.
+        Reduziert O(n×m) auf O(1) bei wiederholten Aufrufen.
+
         Args:
             include_write_ops: Wenn False, werden Schreib-Tools ausgeschlossen
         """
+        # Check cache first
+        if include_write_ops:
+            if self._cached_schemas_all is not None:
+                return self._cached_schemas_all
+        else:
+            if self._cached_schemas_read_only is not None:
+                return self._cached_schemas_read_only
+
+        # Generate schemas (each Tool also caches its own schema)
         schemas = []
         for tool in self._tools.values():
             if not include_write_ops and tool.is_write_operation:
                 continue
             schemas.append(tool.to_openai_schema())
+
+        # Cache the result
+        if include_write_ops:
+            self._cached_schemas_all = schemas
+        else:
+            self._cached_schemas_read_only = schemas
+
         return schemas
 
     async def execute(self, name: str, **kwargs) -> ToolResult:

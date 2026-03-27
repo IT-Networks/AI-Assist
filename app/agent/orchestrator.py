@@ -363,13 +363,18 @@ class AgentOrchestrator:
         """
         Liefert alle wartenden MCP Events aus einer bestehenden Queue.
         Verwendet für persistente Subscriptions während Tool-Ausführung.
+
+        Performance: Verwendet get_nowait() statt wait_for() mit Timeout.
+        Reduziert CPU-Overhead und Latenz bei Event-Draining.
         """
-        while True:
+        # Drain all immediately available events without blocking
+        while not queue.empty():
             try:
-                event = await asyncio.wait_for(queue.get(), timeout=timeout)
+                event = queue.get_nowait()
                 event_type_enum = MCP_EVENT_TYPE_MAPPING.get(event.event_type, AgentEventType.MCP_STEP)
                 yield AgentEvent(event_type_enum, event.data)
-            except asyncio.TimeoutError:
+            except asyncio.QueueEmpty:
+                # Race condition: queue.empty() was False but get_nowait() found nothing
                 break
 
     # Note: _extract_conversation_context is now imported from context_builder module

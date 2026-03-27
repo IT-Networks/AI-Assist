@@ -98,6 +98,7 @@ def get_section_schema(section: str) -> Dict[str, Any]:
         "docker_sandbox": "DockerSandboxConfig",
         "servicenow": "ServiceNowConfig",
         "test_tool": "TestToolConfig",
+        "alm": "ALMConfig",
     }
 
     if section not in section_classes:
@@ -205,6 +206,7 @@ def _get_section_description(section: str) -> str:
         "github": "GitHub Enterprise Server (intern gehostet)",
         "internal_fetch": "Intranet-URLs abrufen (internes HTTP-Fetch-Tool)",
         "docker_sandbox": "Container-Sandbox für sichere Code-Ausführung (Docker/Podman)",
+        "alm": "HP ALM/Quality Center Testmanagement-Integration",
     }
     return descriptions.get(section, "")
 
@@ -282,6 +284,9 @@ async def update_section_settings(
         elif section == "servicenow":
             from app.services.servicenow_client import reset_servicenow_client
             reset_servicenow_client()
+        elif section == "alm":
+            from app.services.alm_client import reset_alm_client
+            reset_alm_client()
 
     except Exception as e:
         raise HTTPException(
