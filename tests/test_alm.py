@@ -265,17 +265,30 @@ class TestALMClient:
         assert url == "https://alm.example.com/qcbin/rest/domains/PROD/projects/TestProj/tests/123"
 
     def test_client_auth_headers(self):
-        """Prueft Auth Header Generation."""
+        """Prueft Auth Header Generation (JSON-basiert)."""
         from app.services.alm_client import ALMClient
-        import base64
 
         client = ALMClient()
         client.username = "testuser"
         client.password = "testpass"
 
         headers = client._auth_headers()
-        expected = base64.b64encode(b"testuser:testpass").decode()
-        assert headers["Authorization"] == f"Basic {expected}"
+        assert headers["Accept"] == "application/json"
+        assert headers["Content-Type"] == "application/json"
+        assert headers["cache-control"] == "no-cache"
+
+    def test_client_auth_body(self):
+        """Prueft Auth Body Generation."""
+        from app.services.alm_client import ALMClient
+
+        client = ALMClient()
+        client.username = "testuser"
+        client.password = "testpass"
+
+        body = client._auth_body()
+        assert "alm-authentication" in body
+        assert body["alm-authentication"]["user"] == "testuser"
+        assert body["alm-authentication"]["password"] == "testpass"
 
     def test_client_session_headers(self):
         """Prueft Session Header Generation."""

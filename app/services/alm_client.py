@@ -200,11 +200,21 @@ class ALMClient:
         return f"{self.base_url}/rest/domains/{self.domain}/projects/{self.project}{path}"
 
     def _auth_headers(self) -> Dict[str, str]:
-        """Erstellt Basic Auth Header fuer initiale Authentifizierung."""
-        if self.username and self.password:
-            creds = base64.b64encode(f"{self.username}:{self.password}".encode()).decode()
-            return {"Authorization": f"Basic {creds}"}
-        return {}
+        """Erstellt Header fuer initiale Authentifizierung (JSON-basiert)."""
+        return {
+            "cache-control": "no-cache",
+            "Accept": "application/json",
+            "Content-Type": "application/json",
+        }
+
+    def _auth_body(self) -> Dict[str, Any]:
+        """Erstellt JSON-Body fuer ALM-Authentifizierung."""
+        return {
+            "alm-authentication": {
+                "user": self.username,
+                "password": self.password
+            }
+        }
 
     def _session_headers(self) -> Dict[str, str]:
         """Erstellt Header mit XSRF-Token fuer authentifizierte Requests."""
@@ -230,13 +240,17 @@ class ALMClient:
         """
         Authentifiziert gegen ALM und erstellt Session.
 
+        Nutzt JSON-basierte Authentifizierung:
+        POST /authentication-point/alm-authenticate
+        Body: {"alm-authentication": {"user": "...", "password": "..."}}
+
         Returns:
             ALMSession mit allen Cookies
         """
         self._check_configured()
         client = _get_http_client()
 
-        # Step 1: Initial Authentication
+        # Step 1: Initial Authentication (JSON-basiert)
         auth_url = f"{self.base_url}/authentication-point/alm-authenticate"
         logger.info(f"ALM: Authentifiziere gegen {auth_url}")
 
@@ -244,7 +258,7 @@ class ALMClient:
             resp = await client.post(
                 auth_url,
                 headers=self._auth_headers(),
-                content="",  # Leerer Body
+                json=self._auth_body(),  # JSON-Body statt Basic Auth
             )
             resp.raise_for_status()
         except httpx.HTTPStatusError as e:
