@@ -420,7 +420,8 @@ class ALMClient:
             return
 
         client = _get_http_client()
-        project_session_url = f"{self.base_url}/rest/domains/{self.domain}/projects/{self.project}"
+        # Manche ALM-Versionen erwarten /session am Ende
+        project_session_url = f"{self.base_url}/rest/domains/{self.domain}/projects/{self.project}/session"
 
         logger.debug(f"ALM: Erstelle Projekt-Session fuer {self.domain}/{self.project}")
 
@@ -597,9 +598,11 @@ class ALMClient:
         logger.info(f"ALM: {len(projects)} Projekte in Domain {target_domain} gefunden")
         return projects
 
-    def switch_project(self, project: str, domain: Optional[str] = None) -> Dict[str, Any]:
+    async def switch_project(self, project: str, domain: Optional[str] = None) -> Dict[str, Any]:
         """
         Wechselt das aktive Projekt zur Laufzeit.
+
+        Fuehrt einen sauberen Logout durch bevor zum neuen Projekt gewechselt wird.
 
         Args:
             project: Neuer Projekt-Name
@@ -611,11 +614,16 @@ class ALMClient:
         old_domain = self.domain
         old_project = self.project
 
+        # Wichtig: Erst Logout der alten Session durchfuehren!
+        if self._session:
+            logger.info(f"ALM: Logout aus {old_domain}/{old_project} vor Projektwechsel")
+            await self.logout()
+
         if domain:
             self.domain = domain
         self.project = project
 
-        # Session invalidieren fuer neues Projekt
+        # Session und Cache zuruecksetzen
         self._session = None
         self._folder_cache.clear()
         self._folder_cache_time = None

@@ -1110,7 +1110,7 @@ def register_alm_tools(registry: ToolRegistry) -> int:
 
         try:
             client = get_alm_client()
-            result = client.switch_project(project, domain)
+            result = await client.switch_project(project, domain)
 
             if result["success"]:
                 # Verbindung testen mit Projekt-Validierung
@@ -1130,7 +1130,7 @@ def register_alm_tools(registry: ToolRegistry) -> int:
                 else:
                     # Zurueck wechseln bei Fehler
                     logger.warning(f"ALM Switch: Projekt nicht gefunden, wechsle zurueck")
-                    client.switch_project(result['previous_project'], result['previous_domain'])
+                    await client.switch_project(result['previous_project'], result['previous_domain'])
 
                     # Verfuegbare Projekte laden fuer bessere Fehlermeldung
                     available_hint = ""
