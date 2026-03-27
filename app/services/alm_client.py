@@ -403,19 +403,22 @@ class ALMClient:
 
         lwsso_cookie = ""
 
-        # Versuch 1: JSON-Auth
+        # Versuch 1: JSON-Auth (mit kurzem Timeout - Fallback soll schnell greifen)
         try:
             resp = await client.post(
                 auth_url,
                 headers=self._auth_headers(),
                 json=self._auth_body(),
+                timeout=10.0,  # Kurzer Timeout fuer JSON-Auth-Versuch
             )
             resp.raise_for_status()
             lwsso_cookie = self._extract_lwsso_cookie(resp)
+            if lwsso_cookie:
+                logger.info("ALM: JSON-Auth erfolgreich")
         except httpx.HTTPStatusError as e:
             logger.warning(f"ALM JSON-Auth fehlgeschlagen ({e.response.status_code}), versuche Basic Auth...")
-        except httpx.RequestError as e:
-            raise ALMError(f"ALM Verbindungsfehler: {e}") from e
+        except (httpx.RequestError, httpx.TimeoutException) as e:
+            logger.warning(f"ALM JSON-Auth Timeout/Fehler ({type(e).__name__}), versuche Basic Auth...")
 
         # Versuch 2: Basic Auth als Fallback
         if not lwsso_cookie:
@@ -432,6 +435,8 @@ class ALMClient:
                 )
                 resp.raise_for_status()
                 lwsso_cookie = self._extract_lwsso_cookie(resp)
+                if lwsso_cookie:
+                    logger.info("ALM: Basic-Auth erfolgreich")
             except httpx.HTTPStatusError as e:
                 raise ALMError(f"ALM Authentifizierung fehlgeschlagen: {e.response.status_code}") from e
             except httpx.RequestError as e:
@@ -1112,46 +1117,73 @@ class ALMClient:
 
         return folders
 
+    async def _ensure_folder_cache(self) -> None:
+        """
+        Laedt ALLE Test Pool Folder in einem einzigen API-Call und baut Pfade lokal.
+
+        Performance: Ein API-Call statt N rekursive Calls pro Folder.
+        """
+        if (self._folder_cache
+                and self._folder_cache_time
+                and datetime.now() - self._folder_cache_time < timedelta(minutes=5)):
+            return
+
+        self._folder_cache.clear()
+
+        try:
+            root = await self._request("GET", "/test-folders", params={"page-size": "5000"})
+
+            all_folders: Dict[int, ALMFolder] = {}
+            entities = root.find("Entities") or root
+            for entity in entities.findall("Entity"):
+                data = self._parse_entity(entity)
+                fid = int(data.get("id", 0))
+                all_folders[fid] = ALMFolder(
+                    id=fid,
+                    name=data.get("name", ""),
+                    parent_id=int(data.get("parent-id", 0)),
+                )
+
+            def build_path(fid: int) -> str:
+                if fid not in all_folders:
+                    return ""
+                f = all_folders[fid]
+                if f.path:
+                    return f.path
+                if f.parent_id and f.parent_id > 0 and f.parent_id in all_folders:
+                    parent_path = build_path(f.parent_id)
+                    f.path = f"{parent_path}/{f.name}" if parent_path else f.name
+                else:
+                    f.path = f.name
+                return f.path
+
+            for fid in all_folders:
+                build_path(fid)
+
+            self._folder_cache = all_folders
+            self._folder_cache_time = datetime.now()
+            logger.info(f"ALM: {len(all_folders)} Test Pool Folder gecached (1 API-Call)")
+
+        except ALMError as e:
+            logger.warning(f"ALM: Bulk-Load Test Pool Folders fehlgeschlagen: {e}")
+
     async def get_folder_path(self, folder_id: int) -> str:
         """
-        Gibt den vollen Pfad eines Folders zurueck.
+        Gibt den vollen Pfad eines Test Pool Folders zurueck.
 
-        Args:
-            folder_id: Folder-ID
-
-        Returns:
-            Pfad wie "Root/Module/SubModule"
+        Performance: Laedt beim ersten Aufruf ALLE Folder in einem API-Call
+        und berechnet Pfade lokal (statt N rekursive API-Calls).
         """
-        # Cache pruefen (5 Minuten TTL)
-        if self._folder_cache_time and datetime.now() - self._folder_cache_time > timedelta(minutes=5):
-            self._folder_cache.clear()
-            self._folder_cache_time = None
+        await self._ensure_folder_cache()
 
         if folder_id in self._folder_cache:
             return self._folder_cache[folder_id].path
 
-        # Folder laden
+        # Fallback: Einzelner API-Call wenn nicht im Cache
         try:
             root = await self._request("GET", f"/test-folders/{folder_id}")
             data = self._parse_entity(root)
-
-            folder = ALMFolder(
-                id=folder_id,
-                name=data.get("name", ""),
-                parent_id=int(data.get("parent-id", 0)),
-            )
-
-            # Pfad rekursiv bauen
-            if folder.parent_id and folder.parent_id > 0:
-                parent_path = await self.get_folder_path(folder.parent_id)
-                folder.path = f"{parent_path}/{folder.name}"
-            else:
-                folder.path = folder.name
-
-            self._folder_cache[folder_id] = folder
-            self._folder_cache_time = datetime.now()
-
-            return folder.path
+            return data.get("name", f"Folder-{folder_id}")
         except ALMError:
             return f"Folder-{folder_id}"
 
@@ -1185,9 +1217,66 @@ class ALMClient:
         logger.info(f"ALM: Folder erstellt: ID={folder.id}, Name={folder.name}")
         return folder
 
+    async def _ensure_test_lab_folder_cache(self) -> None:
+        """
+        Laedt ALLE Test Lab Folder in einem einzigen API-Call und baut Pfade lokal.
+
+        Performance: Ein API-Call statt N rekursive Calls pro Folder.
+        """
+        # Cache noch gueltig?
+        if (self._test_lab_folder_cache
+                and self._test_lab_folder_cache_time
+                and datetime.now() - self._test_lab_folder_cache_time < timedelta(minutes=5)):
+            return
+
+        self._test_lab_folder_cache.clear()
+
+        try:
+            # Alle Folder auf einmal laden (kein Filter = alle)
+            root = await self._request("GET", "/test-set-folders", params={"page-size": "5000"})
+
+            # Alle Folder parsen
+            all_folders: Dict[int, ALMTestSetFolder] = {}
+            entities = root.find("Entities") or root
+            for entity in entities.findall("Entity"):
+                data = self._parse_entity(entity)
+                fid = int(data.get("id", 0))
+                all_folders[fid] = ALMTestSetFolder(
+                    id=fid,
+                    name=data.get("name", ""),
+                    parent_id=int(data.get("parent-id", 0)),
+                )
+
+            # Pfade lokal berechnen (keine weiteren API-Calls)
+            def build_path(fid: int) -> str:
+                if fid not in all_folders:
+                    return ""
+                f = all_folders[fid]
+                if f.path:
+                    return f.path
+                if f.parent_id and f.parent_id > 0 and f.parent_id in all_folders:
+                    parent_path = build_path(f.parent_id)
+                    f.path = f"{parent_path}/{f.name}" if parent_path else f.name
+                else:
+                    f.path = f.name
+                return f.path
+
+            for fid in all_folders:
+                build_path(fid)
+
+            self._test_lab_folder_cache = all_folders
+            self._test_lab_folder_cache_time = datetime.now()
+            logger.info(f"ALM: {len(all_folders)} Test Lab Folder gecached (1 API-Call)")
+
+        except ALMError as e:
+            logger.warning(f"ALM: Bulk-Load Test Lab Folders fehlgeschlagen: {e}")
+
     async def get_test_lab_folder_path(self, folder_id: int) -> str:
         """
         Gibt den vollen Pfad eines Test Lab Folders zurueck.
+
+        Performance: Laedt beim ersten Aufruf ALLE Folder in einem API-Call
+        und berechnet Pfade lokal (statt N rekursive API-Calls).
 
         Args:
             folder_id: Folder-ID
@@ -1195,36 +1284,16 @@ class ALMClient:
         Returns:
             Pfad wie "Root/Regression/Sprint-1"
         """
-        # Cache pruefen (5 Minuten TTL)
-        if self._test_lab_folder_cache_time and datetime.now() - self._test_lab_folder_cache_time > timedelta(minutes=5):
-            self._test_lab_folder_cache.clear()
-            self._test_lab_folder_cache_time = None
+        await self._ensure_test_lab_folder_cache()
 
         if folder_id in self._test_lab_folder_cache:
             return self._test_lab_folder_cache[folder_id].path
 
-        # Folder laden
+        # Fallback: Einzelner API-Call wenn nicht im Cache
         try:
             root = await self._request("GET", f"/test-set-folders/{folder_id}")
             data = self._parse_entity(root)
-
-            folder = ALMTestSetFolder(
-                id=folder_id,
-                name=data.get("name", ""),
-                parent_id=int(data.get("parent-id", 0)),
-            )
-
-            # Pfad rekursiv bauen
-            if folder.parent_id and folder.parent_id > 0:
-                parent_path = await self.get_test_lab_folder_path(folder.parent_id)
-                folder.path = f"{parent_path}/{folder.name}"
-            else:
-                folder.path = folder.name
-
-            self._test_lab_folder_cache[folder_id] = folder
-            self._test_lab_folder_cache_time = datetime.now()
-
-            return folder.path
+            return data.get("name", f"TestLabFolder-{folder_id}")
         except ALMError:
             return f"TestLabFolder-{folder_id}"
 
