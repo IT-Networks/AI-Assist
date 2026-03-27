@@ -695,10 +695,12 @@ def register_alm_tools(registry: ToolRegistry) -> int:
             return ToolResult(success=False, error="HP ALM ist nicht aktiviert")
 
         folder_id: int = kwargs.get("folder_id", 0)
-        folder_type: str = kwargs.get("folder_type", "test-pool")
+        folder_type: str = kwargs.get("folder_type", "")
 
         if not folder_id:
             return ToolResult(success=False, error="folder_id ist erforderlich")
+        if not folder_type:
+            return ToolResult(success=False, error="folder_type ist erforderlich: 'test-pool' (Testfall-Definitionen) oder 'test-lab' (Test-Sets/Ausfuehrung)")
 
         try:
             client = get_alm_client()
@@ -742,9 +744,10 @@ def register_alm_tools(registry: ToolRegistry) -> int:
         name="alm_get_folder",
         description=(
             "Laedt Details eines Folders inkl. vollstaendigem Pfad und Unterordnern. "
-            "WICHTIG: Test Pool und Test Lab haben GETRENNTE Ordnerstrukturen! "
-            "Verwende folder_type='test-pool' (default) fuer Test Pool Folder (Testfall-Definitionen) "
-            "oder folder_type='test-lab' fuer Test Lab Folder (Test-Sets/Ausfuehrung)."
+            "WICHTIG: Du MUSST folder_type angeben! Test Pool und Test Lab haben GETRENNTE Ordnerstrukturen! "
+            "folder_type='test-pool' = Testfall-Definitionen (IDs aus alm_list_folders). "
+            "folder_type='test-lab' = Test-Sets/Ausfuehrung (IDs aus alm_list_test_lab_folders). "
+            "Wenn du vorher alm_list_test_lab_folders verwendet hast, MUSS folder_type='test-lab' sein!"
         ),
         category=ToolCategory.KNOWLEDGE,
         parameters=[
@@ -757,9 +760,8 @@ def register_alm_tools(registry: ToolRegistry) -> int:
             ToolParameter(
                 name="folder_type",
                 type="string",
-                description="Folder-Typ: 'test-pool' (default, Testfall-Definitionen) oder 'test-lab' (Test-Sets/Ausfuehrung)",
-                required=False,
-                default="test-pool",
+                description="PFLICHT: 'test-pool' (Testfall-Definitionen, IDs aus alm_list_folders) oder 'test-lab' (Test-Sets/Ausfuehrung, IDs aus alm_list_test_lab_folders)",
+                required=True,
                 enum=["test-pool", "test-lab"],
             ),
         ],
