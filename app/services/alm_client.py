@@ -249,13 +249,28 @@ class ALMClient:
 
     def __init__(self):
         self.base_url = settings.alm.base_url.rstrip("/")
-        self.username = settings.alm.username
-        self.password = settings.alm.password
         self.domain = settings.alm.domain
         self.project = settings.alm.project
+
+        # Credentials: Zentrale Referenz oder direkte Werte
+        if settings.alm.credential_ref:
+            cred = settings.credentials.get(settings.alm.credential_ref)
+            if cred:
+                self.username = cred.username
+                self.password = cred.password or cred.token
+            else:
+                # Fallback wenn credential_ref ungueltig
+                self.username = settings.alm.username
+                self.password = settings.alm.password
+        else:
+            self.username = settings.alm.username
+            self.password = settings.alm.password
+
         self._session: Optional[ALMSession] = None
         self._folder_cache: Dict[int, ALMFolder] = {}
         self._folder_cache_time: Optional[datetime] = None
+        self._test_lab_folder_cache: Dict[int, ALMTestSetFolder] = {}
+        self._test_lab_folder_cache_time: Optional[datetime] = None
 
     def _check_configured(self):
         """Prueft ob ALM konfiguriert ist."""
@@ -698,6 +713,8 @@ class ALMClient:
         self._session = None
         self._folder_cache.clear()
         self._folder_cache_time = None
+        self._test_lab_folder_cache.clear()
+        self._test_lab_folder_cache_time = None
 
         logger.info(f"ALM: Projekt gewechselt von {old_domain}/{old_project} zu {self.domain}/{self.project}")
 
@@ -1137,6 +1154,79 @@ class ALMClient:
             return folder.path
         except ALMError:
             return f"Folder-{folder_id}"
+
+    async def create_folder(self, name: str, parent_id: int = 0) -> ALMFolder:
+        """
+        Erstellt einen neuen Test-Plan-Folder.
+
+        Args:
+            name: Name des neuen Folders
+            parent_id: Parent-Folder-ID (0 = Root)
+
+        Returns:
+            Der erstellte ALMFolder
+        """
+        self._check_configured()
+
+        fields = {"name": name}
+        if parent_id > 0:
+            fields["parent-id"] = str(parent_id)
+
+        xml = self._build_entity_xml("test-folder", fields)
+        root = await self._request("POST", "/test-folders", body=xml)
+        data = self._parse_entity(root)
+
+        folder = ALMFolder(
+            id=int(data.get("id", 0)),
+            name=data.get("name", name),
+            parent_id=int(data.get("parent-id", parent_id)),
+        )
+
+        logger.info(f"ALM: Folder erstellt: ID={folder.id}, Name={folder.name}")
+        return folder
+
+    async def get_test_lab_folder_path(self, folder_id: int) -> str:
+        """
+        Gibt den vollen Pfad eines Test Lab Folders zurueck.
+
+        Args:
+            folder_id: Folder-ID
+
+        Returns:
+            Pfad wie "Root/Regression/Sprint-1"
+        """
+        # Cache pruefen (5 Minuten TTL)
+        if self._test_lab_folder_cache_time and datetime.now() - self._test_lab_folder_cache_time > timedelta(minutes=5):
+            self._test_lab_folder_cache.clear()
+            self._test_lab_folder_cache_time = None
+
+        if folder_id in self._test_lab_folder_cache:
+            return self._test_lab_folder_cache[folder_id].path
+
+        # Folder laden
+        try:
+            root = await self._request("GET", f"/test-set-folders/{folder_id}")
+            data = self._parse_entity(root)
+
+            folder = ALMTestSetFolder(
+                id=folder_id,
+                name=data.get("name", ""),
+                parent_id=int(data.get("parent-id", 0)),
+            )
+
+            # Pfad rekursiv bauen
+            if folder.parent_id and folder.parent_id > 0:
+                parent_path = await self.get_test_lab_folder_path(folder.parent_id)
+                folder.path = f"{parent_path}/{folder.name}"
+            else:
+                folder.path = folder.name
+
+            self._test_lab_folder_cache[folder_id] = folder
+            self._test_lab_folder_cache_time = datetime.now()
+
+            return folder.path
+        except ALMError:
+            return f"TestLabFolder-{folder_id}"
 
     # ═══════════════════════════════════════════════════════════════════════
     # Test Execution (Test Lab)

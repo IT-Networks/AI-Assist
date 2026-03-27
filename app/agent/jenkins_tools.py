@@ -11,17 +11,32 @@ Tools:
 
 import base64
 import logging
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 import httpx
 
 from app.agent.tools import Tool, ToolCategory, ToolParameter, ToolResult, ToolRegistry
+from app.core.config import settings
 from app.core.http_client import get_jenkins_client
 
 logger = logging.getLogger(__name__)
 
 # Pending Build-Trigger für Bestätigung
 _pending_builds: Dict[str, dict] = {}
+
+
+def _get_jenkins_credentials() -> Tuple[str, str]:
+    """
+    Gibt Jenkins-Credentials zurück (username, api_token).
+
+    Prüft zuerst credential_ref, dann direkte Werte.
+    """
+    if settings.jenkins.credential_ref:
+        cred = settings.credentials.get(settings.jenkins.credential_ref)
+        if cred:
+            # Für Jenkins: username + token (token in password oder token Feld)
+            return (cred.username, cred.password or cred.token)
+    return (settings.jenkins.username, settings.jenkins.api_token)
 
 
 def _get_auth_header(username: str, api_token: str) -> Dict[str, str]:
@@ -87,8 +102,8 @@ def register_jenkins_tools(registry: ToolRegistry) -> int:
         result = await _jenkins_request(
             method="GET",
             url=f"{base_url}/api/json",
-            username=settings.jenkins.username,
-            api_token=settings.jenkins.api_token,
+            username=_get_jenkins_credentials()[0],
+            api_token=_get_jenkins_credentials()[1],
             verify_ssl=settings.jenkins.verify_ssl,
             timeout=settings.jenkins.timeout_seconds,
             params={"tree": "jobs[name,url,color,healthReport[score,description]]"},
@@ -166,8 +181,8 @@ def register_jenkins_tools(registry: ToolRegistry) -> int:
         result = await _jenkins_request(
             method="GET",
             url=f"{base_url}/job/{job_name}/api/json",
-            username=settings.jenkins.username,
-            api_token=settings.jenkins.api_token,
+            username=_get_jenkins_credentials()[0],
+            api_token=_get_jenkins_credentials()[1],
             verify_ssl=settings.jenkins.verify_ssl,
             timeout=settings.jenkins.timeout_seconds,
             params={"tree": "name,url,color,buildable,lastBuild[number,result,timestamp,duration],lastSuccessfulBuild[number,timestamp],lastFailedBuild[number,timestamp],healthReport[score,description]"},
@@ -239,8 +254,8 @@ def register_jenkins_tools(registry: ToolRegistry) -> int:
         result = await _jenkins_request(
             method="GET",
             url=f"{base_url}/job/{job_name}/{build_number}/api/json",
-            username=settings.jenkins.username,
-            api_token=settings.jenkins.api_token,
+            username=_get_jenkins_credentials()[0],
+            api_token=_get_jenkins_credentials()[1],
             verify_ssl=settings.jenkins.verify_ssl,
             timeout=settings.jenkins.timeout_seconds,
         )
@@ -254,8 +269,8 @@ def register_jenkins_tools(registry: ToolRegistry) -> int:
         console_result = await _jenkins_request(
             method="GET",
             url=f"{base_url}/job/{job_name}/{build_number}/consoleText",
-            username=settings.jenkins.username,
-            api_token=settings.jenkins.api_token,
+            username=_get_jenkins_credentials()[0],
+            api_token=_get_jenkins_credentials()[1],
             verify_ssl=settings.jenkins.verify_ssl,
             timeout=settings.jenkins.timeout_seconds,
         )
@@ -355,8 +370,8 @@ def register_jenkins_tools(registry: ToolRegistry) -> int:
         result = await _jenkins_request(
             method="POST",
             url=f"{base_url}/job/{job_name}/build",
-            username=settings.jenkins.username,
-            api_token=settings.jenkins.api_token,
+            username=_get_jenkins_credentials()[0],
+            api_token=_get_jenkins_credentials()[1],
             verify_ssl=settings.jenkins.verify_ssl,
             timeout=settings.jenkins.timeout_seconds,
         )
@@ -410,8 +425,8 @@ def register_jenkins_tools(registry: ToolRegistry) -> int:
         result = await _jenkins_request(
             method="GET",
             url=f"{base_url}/queue/api/json",
-            username=settings.jenkins.username,
-            api_token=settings.jenkins.api_token,
+            username=_get_jenkins_credentials()[0],
+            api_token=_get_jenkins_credentials()[1],
             verify_ssl=settings.jenkins.verify_ssl,
             timeout=settings.jenkins.timeout_seconds,
         )

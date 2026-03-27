@@ -18,6 +18,15 @@ from app.core.config import settings
 router = APIRouter(prefix="/api/github", tags=["github"])
 
 
+def _get_github_token() -> str:
+    """Gibt GitHub-Token zurück (credential_ref oder direkt)."""
+    if settings.github.credential_ref:
+        cred = settings.credentials.get(settings.github.credential_ref)
+        if cred:
+            return cred.token or cred.password
+    return _get_github_token()
+
+
 def _parse_link_header(link_header: str) -> Dict[str, str]:
     """Parst den GitHub Link-Header für Pagination."""
     links = {}
@@ -158,7 +167,7 @@ async def test_connection() -> Dict[str, Any]:
     if not settings.github.base_url:
         return {"success": False, "error": "Base URL nicht konfiguriert"}
 
-    if not settings.github.token:
+    if not _get_github_token():
         return {"success": False, "error": "Token nicht konfiguriert"}
 
     api_url = settings.github.get_api_url()
@@ -167,7 +176,7 @@ async def test_connection() -> Dict[str, Any]:
     user_result = await _github_request(
         method="GET",
         url=f"{api_url}/user",
-        token=settings.github.token,
+        token=_get_github_token(),
         verify_ssl=settings.github.verify_ssl,
         timeout=settings.github.timeout_seconds,
     )
@@ -188,7 +197,7 @@ async def test_connection() -> Dict[str, Any]:
         org_result = await _github_request(
             method="GET",
             url=f"{api_url}/orgs/{settings.github.default_org}",
-            token=settings.github.token,
+            token=_get_github_token(),
             verify_ssl=settings.github.verify_ssl,
             timeout=settings.github.timeout_seconds,
         )
@@ -238,7 +247,7 @@ async def list_repos(
         # Paginierte Abfrage - alle Seiten
         result = await _github_paginated_request(
             url=f"{api_url}/orgs/{org_name}/repos",
-            token=settings.github.token,
+            token=_get_github_token(),
             verify_ssl=settings.github.verify_ssl,
             timeout=settings.github.timeout_seconds,
             params={"per_page": 100, "sort": "updated"},  # Max pro Seite für Effizienz
@@ -249,7 +258,7 @@ async def list_repos(
         result = await _github_request(
             method="GET",
             url=f"{api_url}/orgs/{org_name}/repos",
-            token=settings.github.token,
+            token=_get_github_token(),
             verify_ssl=settings.github.verify_ssl,
             timeout=settings.github.timeout_seconds,
             params={"per_page": max_repos or settings.github.max_items, "sort": "updated"},
@@ -304,7 +313,7 @@ async def get_pr_details(owner: str, repo: str, pr_number: int) -> Dict[str, Any
     pr_result = await _github_request(
         method="GET",
         url=f"{api_url}/repos/{owner}/{repo}/pulls/{pr_number}",
-        token=settings.github.token,
+        token=_get_github_token(),
         verify_ssl=settings.github.verify_ssl,
         timeout=settings.github.timeout_seconds,
     )
@@ -324,7 +333,7 @@ async def get_pr_details(owner: str, repo: str, pr_number: int) -> Dict[str, Any
         user_result = await _github_request(
             method="GET",
             url=user_url,
-            token=settings.github.token,
+            token=_get_github_token(),
             verify_ssl=settings.github.verify_ssl,
             timeout=10,  # Kurzer Timeout für optionalen Call
         )
@@ -373,7 +382,7 @@ async def get_pr_diff(owner: str, repo: str, pr_number: int) -> Dict[str, Any]:
     # Diff mit speziellem Accept-Header holen
     headers = {
         "Accept": "application/vnd.github.v3.diff",
-        "Authorization": f"token {settings.github.token}",
+        "Authorization": f"token {_get_github_token()}",
     }
 
     async with httpx.AsyncClient(

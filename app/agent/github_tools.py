@@ -28,9 +28,23 @@ from typing import Any, Dict, List, Optional
 import httpx
 
 from app.agent.tools import Tool, ToolCategory, ToolParameter, ToolResult, ToolRegistry
+from app.core.config import settings
 from app.core.http_client import get_github_client
 
 logger = logging.getLogger(__name__)
+
+
+def _get_github_token() -> str:
+    """
+    Gibt GitHub-Token zurück.
+
+    Prüft zuerst credential_ref, dann direkten token.
+    """
+    if settings.github.credential_ref:
+        cred = settings.credentials.get(settings.github.credential_ref)
+        if cred:
+            return cred.token or cred.password
+    return settings.github.token
 
 
 def _parse_link_header(link_header: str) -> Dict[str, str]:
@@ -178,7 +192,7 @@ def register_github_tools(registry: ToolRegistry) -> int:
         # Paginierte Abfrage - holt alle Seiten
         result = await _github_paginated_request(
             url=f"{api_url}/orgs/{org}/repos",
-            token=settings.github.token,
+            token=_get_github_token(),
             verify_ssl=settings.github.verify_ssl,
             timeout=settings.github.timeout_seconds,
             params={"per_page": 100, "sort": "updated"},  # Max pro Seite
@@ -276,7 +290,7 @@ def register_github_tools(registry: ToolRegistry) -> int:
         # Paginierte Abfrage mit direction=desc für neueste zuerst
         result = await _github_paginated_request(
             url=f"{api_url}/repos/{repo}/pulls",
-            token=settings.github.token,
+            token=_get_github_token(),
             verify_ssl=settings.github.verify_ssl,
             timeout=settings.github.timeout_seconds,
             params={"state": state, "per_page": 100, "sort": "updated", "direction": "desc"},
@@ -364,7 +378,7 @@ def register_github_tools(registry: ToolRegistry) -> int:
         pr_result = await _github_request(
             method="GET",
             url=f"{api_url}/repos/{repo}/pulls/{pr_number}",
-            token=settings.github.token,
+            token=_get_github_token(),
             verify_ssl=settings.github.verify_ssl,
             timeout=settings.github.timeout_seconds,
         )
@@ -385,7 +399,7 @@ def register_github_tools(registry: ToolRegistry) -> int:
         reviews_result = await _github_request(
             method="GET",
             url=f"{api_url}/repos/{repo}/pulls/{pr_number}/reviews",
-            token=settings.github.token,
+            token=_get_github_token(),
             verify_ssl=settings.github.verify_ssl,
             timeout=settings.github.timeout_seconds,
         )
@@ -407,7 +421,7 @@ def register_github_tools(registry: ToolRegistry) -> int:
         comments_result = await _github_request(
             method="GET",
             url=f"{api_url}/repos/{repo}/pulls/{pr_number}/comments",
-            token=settings.github.token,
+            token=_get_github_token(),
             verify_ssl=settings.github.verify_ssl,
             timeout=settings.github.timeout_seconds,
             params={"per_page": 1},
@@ -503,7 +517,7 @@ def register_github_tools(registry: ToolRegistry) -> int:
         pr_result = await _github_request(
             method="GET",
             url=f"{api_url}/repos/{repo}/pulls/{pr_number}",
-            token=settings.github.token,
+            token=_get_github_token(),
             verify_ssl=settings.github.verify_ssl,
             timeout=settings.github.timeout_seconds,
         )
@@ -533,7 +547,7 @@ def register_github_tools(registry: ToolRegistry) -> int:
         # Geänderte Dateien holen (mit Patch/Diff)
         result = await _github_paginated_request(
             url=f"{api_url}/repos/{repo}/pulls/{pr_number}/files",
-            token=settings.github.token,
+            token=_get_github_token(),
             verify_ssl=settings.github.verify_ssl,
             timeout=settings.github.timeout_seconds,
             params={"per_page": 100},
@@ -682,7 +696,7 @@ def register_github_tools(registry: ToolRegistry) -> int:
 
         result = await _github_paginated_request(
             url=f"{api_url}/repos/{repo}/issues",
-            token=settings.github.token,
+            token=_get_github_token(),
             verify_ssl=settings.github.verify_ssl,
             timeout=settings.github.timeout_seconds,
             params=params,
@@ -776,7 +790,7 @@ def register_github_tools(registry: ToolRegistry) -> int:
         result = await _github_request(
             method="GET",
             url=f"{api_url}/repos/{repo}/issues/{issue_number}",
-            token=settings.github.token,
+            token=_get_github_token(),
             verify_ssl=settings.github.verify_ssl,
             timeout=settings.github.timeout_seconds,
         )
@@ -790,7 +804,7 @@ def register_github_tools(registry: ToolRegistry) -> int:
         comments_result = await _github_request(
             method="GET",
             url=f"{api_url}/repos/{repo}/issues/{issue_number}/comments",
-            token=settings.github.token,
+            token=_get_github_token(),
             verify_ssl=settings.github.verify_ssl,
             timeout=settings.github.timeout_seconds,
             params={"per_page": 10},
@@ -863,7 +877,7 @@ def register_github_tools(registry: ToolRegistry) -> int:
 
         result = await _github_paginated_request(
             url=f"{api_url}/repos/{repo}/branches",
-            token=settings.github.token,
+            token=_get_github_token(),
             verify_ssl=settings.github.verify_ssl,
             timeout=settings.github.timeout_seconds,
             params={"per_page": 100},
@@ -932,7 +946,7 @@ def register_github_tools(registry: ToolRegistry) -> int:
         result = await _github_request(
             method="GET",
             url=f"{api_url}/repos/{repo}/commits",
-            token=settings.github.token,
+            token=_get_github_token(),
             verify_ssl=settings.github.verify_ssl,
             timeout=settings.github.timeout_seconds,
             params=params,
@@ -1022,7 +1036,7 @@ def register_github_tools(registry: ToolRegistry) -> int:
         result = await _github_request(
             method="GET",
             url=f"{api_url}/repos/{repo}/contents/{path}",
-            token=settings.github.token,
+            token=_get_github_token(),
             verify_ssl=settings.github.verify_ssl,
             timeout=settings.github.timeout_seconds,
             params=params if params else None,
@@ -1123,7 +1137,7 @@ def register_github_tools(registry: ToolRegistry) -> int:
         result = await _github_request(
             method="GET",
             url=f"{api_url}/repos/{repo}/commits/{commit_sha}",
-            token=settings.github.token,
+            token=_get_github_token(),
             verify_ssl=settings.github.verify_ssl,
             timeout=settings.github.timeout_seconds,
         )
@@ -1260,7 +1274,7 @@ def register_github_tools(registry: ToolRegistry) -> int:
         # GitHub Code Search API aufrufen
         headers = {
             "Accept": "application/vnd.github.v3.text-match+json",  # Text-Matches aktivieren
-            "Authorization": f"token {settings.github.token}",
+            "Authorization": f"token {_get_github_token()}",
         }
 
         client = get_github_client(settings.github.verify_ssl, 30)
@@ -1319,7 +1333,7 @@ def register_github_tools(registry: ToolRegistry) -> int:
                     try:
                         content_resp = await client.get(content_url, headers={
                             "Accept": "application/vnd.github.v3+json",
-                            "Authorization": f"token {settings.github.token}",
+                            "Authorization": f"token {_get_github_token()}",
                         })
                         if content_resp.status_code == 200:
                             content_data = content_resp.json()

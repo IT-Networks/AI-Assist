@@ -22,6 +22,16 @@ router = APIRouter(prefix="/api/jenkins", tags=["jenkins"])
 
 def _get_auth() -> Optional[tuple]:
     """Gibt Auth-Tuple zurück wenn Credentials konfiguriert."""
+    # Prüfe zuerst zentrale Credentials
+    if settings.jenkins.credential_ref:
+        cred = settings.credentials.get(settings.jenkins.credential_ref)
+        if cred:
+            username = cred.username
+            password = cred.password or cred.token
+            if username and password:
+                return (username, password)
+
+    # Fallback auf direkte Credentials
     if settings.jenkins.username and settings.jenkins.api_token:
         return (settings.jenkins.username, settings.jenkins.api_token)
     return None

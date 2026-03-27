@@ -637,12 +637,16 @@ def register_alm_tools(registry: ToolRegistry) -> int:
                     data="Keine Folder gefunden" + (f" unter Parent-ID {parent_id}" if parent_id else "")
                 )
 
+            # Pfade fuer alle Folder laden
+            for folder in folders:
+                folder.path = await client.get_folder_path(folder.id)
+
             lines = ["## Test-Plan Folder\n"]
-            lines.append("| ID | Name | Parent-ID |")
+            lines.append("| ID | Name | Pfad |")
             lines.append("|---|---|---|")
 
             for folder in folders:
-                lines.append(f"| {folder.id} | {folder.name} | {folder.parent_id} |")
+                lines.append(f"| {folder.id} | {folder.name} | {folder.path} |")
 
             lines.append(f"\n*{len(folders)} Folder gefunden*")
             return ToolResult(success=True, data="\n".join(lines))
@@ -656,8 +660,8 @@ def register_alm_tools(registry: ToolRegistry) -> int:
     registry.register(Tool(
         name="alm_list_folders",
         description=(
-            "Listet Test-Plan Folder in HP ALM auf. "
-            "Verwende dies um die folder_id fuer alm_create_test zu ermitteln. "
+            "Listet Test-Plan Folder in HP ALM mit vollstaendigem Pfad auf. "
+            "Verwende dies um die folder_id und Pfade fuer Tests zu ermitteln. "
             "Ohne parent_id werden Root-Folder angezeigt."
         ),
         category=ToolCategory.KNOWLEDGE,
@@ -671,6 +675,149 @@ def register_alm_tools(registry: ToolRegistry) -> int:
             ),
         ],
         handler=alm_list_folders,
+    ))
+    count += 1
+
+    # ══════════════════════════════════════════════════════════════════════════
+    # alm_get_folder - Folder-Details mit Pfad, Parent und Children
+    # ══════════════════════════════════════════════════════════════════════════
+
+    async def alm_get_folder(**kwargs: Any) -> ToolResult:
+        """Laedt Folder-Details inkl. Pfad und Unterordner."""
+        if not settings.alm.enabled:
+            return ToolResult(success=False, error="HP ALM ist nicht aktiviert")
+
+        folder_id: int = kwargs.get("folder_id", 0)
+        folder_type: str = kwargs.get("folder_type", "test-plan")
+
+        if not folder_id:
+            return ToolResult(success=False, error="folder_id ist erforderlich")
+
+        try:
+            client = get_alm_client()
+
+            if folder_type == "test-lab":
+                # Test Lab Folder
+                path = await client.get_test_lab_folder_path(folder_id)
+                children = await client.list_test_set_folders(folder_id)
+                for child in children:
+                    child.path = await client.get_test_lab_folder_path(child.id)
+            else:
+                # Test Plan Folder (default)
+                path = await client.get_folder_path(folder_id)
+                children = await client.list_folders(folder_id)
+                for child in children:
+                    child.path = await client.get_folder_path(child.id)
+
+            lines = [f"## Folder Details\n"]
+            lines.append(f"**ID:** {folder_id}")
+            lines.append(f"**Pfad:** {path}")
+            lines.append(f"**Typ:** {folder_type}\n")
+
+            if children:
+                lines.append("### Unterordner\n")
+                lines.append("| ID | Name | Pfad |")
+                lines.append("|---|---|---|")
+                for child in children:
+                    lines.append(f"| {child.id} | {child.name} | {child.path} |")
+            else:
+                lines.append("*Keine Unterordner*")
+
+            return ToolResult(success=True, data="\n".join(lines))
+
+        except ALMError as e:
+            return ToolResult(success=False, error=str(e))
+        except Exception as e:
+            logger.exception("ALM Get Folder Error")
+            return ToolResult(success=False, error=f"Unerwarteter Fehler: {e}")
+
+    registry.register(Tool(
+        name="alm_get_folder",
+        description=(
+            "Laedt Details eines Folders inkl. vollstaendigem Pfad und Unterordnern. "
+            "Verwende folder_type='test-lab' fuer Test Lab Folder, sonst Test Plan Folder."
+        ),
+        category=ToolCategory.KNOWLEDGE,
+        parameters=[
+            ToolParameter(
+                name="folder_id",
+                type="integer",
+                description="Folder-ID",
+                required=True,
+            ),
+            ToolParameter(
+                name="folder_type",
+                type="string",
+                description="Folder-Typ: 'test-plan' (default) oder 'test-lab'",
+                required=False,
+                default="test-plan",
+            ),
+        ],
+        handler=alm_get_folder,
+    ))
+    count += 1
+
+    # ══════════════════════════════════════════════════════════════════════════
+    # alm_create_folder - Neuen Folder erstellen
+    # ══════════════════════════════════════════════════════════════════════════
+
+    async def alm_create_folder(**kwargs: Any) -> ToolResult:
+        """Erstellt einen neuen Folder im Test Plan."""
+        if not settings.alm.enabled:
+            return ToolResult(success=False, error="HP ALM ist nicht aktiviert")
+
+        name: str = kwargs.get("name", "")
+        parent_id: int = kwargs.get("parent_id", 0)
+
+        if not name:
+            return ToolResult(success=False, error="name ist erforderlich")
+
+        try:
+            client = get_alm_client()
+            folder = await client.create_folder(name, parent_id)
+
+            # Pfad laden
+            folder.path = await client.get_folder_path(folder.id)
+
+            return ToolResult(
+                success=True,
+                data=(
+                    f"## Folder erstellt\n\n"
+                    f"**ID:** {folder.id}\n"
+                    f"**Name:** {folder.name}\n"
+                    f"**Pfad:** {folder.path}"
+                )
+            )
+
+        except ALMError as e:
+            return ToolResult(success=False, error=str(e))
+        except Exception as e:
+            logger.exception("ALM Create Folder Error")
+            return ToolResult(success=False, error=f"Unerwarteter Fehler: {e}")
+
+    registry.register(Tool(
+        name="alm_create_folder",
+        description=(
+            "Erstellt einen neuen Folder im Test Plan. "
+            "Gib parent_id an um einen Unterordner zu erstellen."
+        ),
+        category=ToolCategory.DEVOPS,
+        parameters=[
+            ToolParameter(
+                name="name",
+                type="string",
+                description="Name des neuen Folders",
+                required=True,
+            ),
+            ToolParameter(
+                name="parent_id",
+                type="integer",
+                description="Parent-Folder-ID (0 = Root-Folder)",
+                required=False,
+                default=0,
+            ),
+        ],
+        handler=alm_create_folder,
     ))
     count += 1
 
@@ -842,12 +989,16 @@ def register_alm_tools(registry: ToolRegistry) -> int:
                     data="Keine Test Lab Folder gefunden" + (f" unter Parent-ID {parent_id}" if parent_id else "")
                 )
 
+            # Pfade fuer alle Folder laden
+            for folder in folders:
+                folder.path = await client.get_test_lab_folder_path(folder.id)
+
             lines = ["## Test Lab Folder\n"]
-            lines.append("| ID | Name | Parent-ID |")
+            lines.append("| ID | Name | Pfad |")
             lines.append("|---|---|---|")
 
             for folder in folders:
-                lines.append(f"| {folder.id} | {folder.name} | {folder.parent_id} |")
+                lines.append(f"| {folder.id} | {folder.name} | {folder.path} |")
 
             lines.append(f"\n*{len(folders)} Folder gefunden*")
             return ToolResult(success=True, data="\n".join(lines))
@@ -861,9 +1012,9 @@ def register_alm_tools(registry: ToolRegistry) -> int:
     registry.register(Tool(
         name="alm_list_test_lab_folders",
         description=(
-            "Listet Test Lab Folder in HP ALM auf. "
+            "Listet Test Lab Folder in HP ALM mit vollstaendigem Pfad auf. "
             "Dies ist die Ordnerstruktur im Test Lab (nicht Test Plan!). "
-            "Verwende dies um Test-Set-Folder-IDs zu ermitteln."
+            "Verwende dies um Test-Set-Folder-IDs und Pfade zu ermitteln."
         ),
         category=ToolCategory.KNOWLEDGE,
         parameters=[

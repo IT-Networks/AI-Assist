@@ -10144,6 +10144,11 @@ function renderSettingsSection() {
     return;
   }
 
+  if (section === 'credentials') {
+    renderCredentialsSection();
+    return;
+  }
+
   if (section === 'proxy') {
     renderProxySection();
     return;
@@ -10293,15 +10298,25 @@ function renderALMSection() {
     </div>
 
     <div class="settings-field">
-      <label for="alm-username">Benutzername</label>
-      <input type="text" id="alm-username" value="${escapeHtml(cfg.username || '')}"
-        placeholder="ALM Benutzername" onchange="markSettingsModified()">
+      <label for="alm-credential-ref">Zentrale Credentials verwenden</label>
+      <select id="alm-credential-ref" onchange="markSettingsModified(); almCredentialChanged()">
+        <option value="">(Keine - direkte Eingabe unten)</option>
+      </select>
+      <small class="field-hint">Verwende zentrale Credentials oder gib unten direkt ein</small>
     </div>
 
-    <div class="settings-field">
-      <label for="alm-password">Passwort</label>
-      <input type="password" id="alm-password" value="${escapeHtml(cfg.password || '')}"
-        placeholder="ALM Passwort" onchange="markSettingsModified()" autocomplete="off">
+    <div id="alm-direct-credentials">
+      <div class="settings-field">
+        <label for="alm-username">Benutzername</label>
+        <input type="text" id="alm-username" value="${escapeHtml(cfg.username || '')}"
+          placeholder="ALM Benutzername" onchange="markSettingsModified()">
+      </div>
+
+      <div class="settings-field">
+        <label for="alm-password">Passwort</label>
+        <input type="password" id="alm-password" value="${escapeHtml(cfg.password || '')}"
+          placeholder="ALM Passwort" onchange="markSettingsModified()" autocomplete="off">
+      </div>
     </div>
 
     <div class="settings-field">
@@ -10334,6 +10349,45 @@ function renderALMSection() {
     </div>
     <div id="alm-test-result" class="test-result" style="margin-top:10px"></div>
   `;
+
+  // Load credentials into dropdown
+  loadCredentialsDropdown('alm-credential-ref', cfg.credential_ref || '');
+}
+
+async function loadCredentialsDropdown(selectId, currentValue) {
+  try {
+    const response = await fetch('/api/settings/credentials');
+    const data = await response.json();
+    const credentials = data.credentials || [];
+
+    const select = document.getElementById(selectId);
+    if (!select) return;
+
+    // Add credential options
+    for (const cred of credentials) {
+      const option = document.createElement('option');
+      option.value = cred.name;
+      option.textContent = `${cred.name} (${cred.type})`;
+      if (cred.name === currentValue) {
+        option.selected = true;
+      }
+      select.appendChild(option);
+    }
+
+    // Trigger change handler to update visibility
+    const changeEvent = new Event('change');
+    select.dispatchEvent(changeEvent);
+  } catch (e) {
+    console.error('Failed to load credentials:', e);
+  }
+}
+
+function almCredentialChanged() {
+  const credRef = document.getElementById('alm-credential-ref').value;
+  const directCredentials = document.getElementById('alm-direct-credentials');
+  if (directCredentials) {
+    directCredentials.style.display = credRef ? 'none' : 'block';
+  }
 }
 
 function updateALMCheckboxLabels() {
@@ -10393,13 +10447,15 @@ async function testALMConnection() {
 }
 
 async function saveALMSettings() {
+  const credRef = document.getElementById('alm-credential-ref').value;
   const values = {
     enabled: document.getElementById('alm-enabled').checked,
     base_url: document.getElementById('alm-base-url').value,
     domain: document.getElementById('alm-domain').value,
     project: document.getElementById('alm-project').value,
-    username: document.getElementById('alm-username').value,
-    password: document.getElementById('alm-password').value,
+    credential_ref: credRef,
+    username: credRef ? '' : document.getElementById('alm-username').value,
+    password: credRef ? '' : document.getElementById('alm-password').value,
     verify_ssl: document.getElementById('alm-verify-ssl').checked,
     require_confirmation: document.getElementById('alm-require-confirmation').checked,
     timeout_seconds: parseInt(document.getElementById('alm-timeout').value) || 30,
@@ -10485,26 +10541,37 @@ function renderServiceNowSection() {
     </div>
   `;
 
-  // Username
+  // Credential Reference
   html += `
     <div class="settings-field">
-      <label for="setting-servicenow-username">Username</label>
-      <input type="text" id="setting-servicenow-username"
-        data-section="servicenow" data-key="username"
-        value="${escapeHtml(values.username || '')}"
-        placeholder="admin"
-        onchange="markSettingsModified()">
+      <label for="servicenow-credential-ref">Zentrale Credentials verwenden</label>
+      <select id="servicenow-credential-ref"
+        onchange="markSettingsModified(); servicenowCredentialChanged()">
+        <option value="">(Keine - direkte Eingabe unten)</option>
+      </select>
+      <small class="field-hint">Verwende zentrale Credentials oder gib unten direkt ein</small>
     </div>
   `;
 
-  // Password
+  // Username / Password (direct)
   html += `
-    <div class="settings-field">
-      <label for="setting-servicenow-password">Password</label>
-      <input type="password" id="setting-servicenow-password"
-        data-section="servicenow" data-key="password"
-        value="${escapeHtml(values.password || '')}"
-        onchange="markSettingsModified()" autocomplete="off">
+    <div id="servicenow-direct-credentials">
+      <div class="settings-field">
+        <label for="setting-servicenow-username">Username</label>
+        <input type="text" id="setting-servicenow-username"
+          data-section="servicenow" data-key="username"
+          value="${escapeHtml(values.username || '')}"
+          placeholder="admin"
+          onchange="markSettingsModified()">
+      </div>
+
+      <div class="settings-field">
+        <label for="setting-servicenow-password">Password</label>
+        <input type="password" id="setting-servicenow-password"
+          data-section="servicenow" data-key="password"
+          value="${escapeHtml(values.password || '')}"
+          onchange="markSettingsModified()" autocomplete="off">
+      </div>
     </div>
   `;
 
@@ -10545,8 +10612,19 @@ function renderServiceNowSection() {
 
   document.getElementById('settings-form').innerHTML = html;
 
+  // Credentials Dropdown laden
+  loadCredentialsDropdown('servicenow-credential-ref', values.credential_ref || '');
+
   // Status laden
   loadServiceNowStatus();
+}
+
+function servicenowCredentialChanged() {
+  const credRef = document.getElementById('servicenow-credential-ref').value;
+  const directCredentials = document.getElementById('servicenow-direct-credentials');
+  if (directCredentials) {
+    directCredentials.style.display = credRef ? 'none' : 'block';
+  }
 }
 
 async function loadServiceNowStatus() {
@@ -11568,13 +11646,15 @@ async function saveCurrentSection() {
 
   // ALM/Quality Center hat eigene Felder
   if (section === 'alm') {
+    const credRef = document.getElementById('alm-credential-ref')?.value || '';
     const values = {
       enabled: document.getElementById('alm-enabled')?.checked || false,
       base_url: document.getElementById('alm-base-url')?.value || '',
       domain: document.getElementById('alm-domain')?.value || '',
       project: document.getElementById('alm-project')?.value || '',
-      username: document.getElementById('alm-username')?.value || '',
-      password: document.getElementById('alm-password')?.value || '',
+      credential_ref: credRef,
+      username: credRef ? '' : (document.getElementById('alm-username')?.value || ''),
+      password: credRef ? '' : (document.getElementById('alm-password')?.value || ''),
       verify_ssl: document.getElementById('alm-verify-ssl')?.checked !== false,
       require_confirmation: document.getElementById('alm-require-confirmation')?.checked !== false,
       timeout_seconds: parseInt(document.getElementById('alm-timeout')?.value) || 30,
@@ -11589,6 +11669,34 @@ async function saveCurrentSection() {
       if (!res.ok) throw new Error(data.detail || 'Fehler');
       settingsState.settings.alm = data.values;
       updateSettingsStatus('ALM-Einstellungen angewendet', 'success');
+    } catch (err) {
+      updateSettingsStatus('Fehler: ' + err.message, 'error');
+    }
+    return;
+  }
+
+  // ServiceNow hat eigene Felder inkl. credential_ref
+  if (section === 'servicenow') {
+    const credRef = document.getElementById('servicenow-credential-ref')?.value || '';
+    const values = {
+      enabled: document.getElementById('setting-servicenow-enabled')?.checked || false,
+      instance_url: document.getElementById('setting-servicenow-instance_url')?.value || '',
+      auth_type: document.getElementById('setting-servicenow-auth_type')?.value || 'basic',
+      credential_ref: credRef,
+      username: credRef ? '' : (document.getElementById('setting-servicenow-username')?.value || ''),
+      password: credRef ? '' : (document.getElementById('setting-servicenow-password')?.value || ''),
+      cache_ttl_seconds: parseInt(document.getElementById('setting-servicenow-cache_ttl_seconds')?.value) || 300,
+    };
+    try {
+      const res = await fetch('/api/settings/section/servicenow', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(values),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.detail || 'Fehler');
+      settingsState.settings.servicenow = data.values;
+      updateSettingsStatus('ServiceNow-Einstellungen angewendet', 'success');
     } catch (err) {
       updateSettingsStatus('Fehler: ' + err.message, 'error');
     }
@@ -14518,9 +14626,19 @@ async function renderGitHubSection() {
     </div>
 
     <div class="settings-field">
-      <label for="github-token">Personal Access Token</label>
-      <input type="password" id="github-token" value="${escapeHtml(cfg.token || '')}"
-        placeholder="ghp_xxxxxxxxxxxx" onchange="markSettingsModified()" autocomplete="off">
+      <label for="github-credential-ref">Zentrale Credentials verwenden</label>
+      <select id="github-credential-ref" onchange="markSettingsModified(); githubCredentialChanged()">
+        <option value="">(Keine - direkte Eingabe unten)</option>
+      </select>
+      <small class="field-hint">Verwende zentrale Credentials (Typ: Bearer) oder gib unten direkt ein</small>
+    </div>
+
+    <div id="github-direct-credentials">
+      <div class="settings-field">
+        <label for="github-token">Personal Access Token</label>
+        <input type="password" id="github-token" value="${escapeHtml(cfg.token || '')}"
+          placeholder="ghp_xxxxxxxxxxxx" onchange="markSettingsModified()" autocomplete="off">
+      </div>
     </div>
 
     <div class="settings-field">
@@ -14571,6 +14689,17 @@ async function renderGitHubSection() {
       <span id="github-test-result" class="test-result"></span>
     </div>
   `;
+
+  // Load credentials into dropdown (only bearer type makes sense for GitHub)
+  loadCredentialsDropdown('github-credential-ref', cfg.credential_ref || '');
+}
+
+function githubCredentialChanged() {
+  const credRef = document.getElementById('github-credential-ref').value;
+  const directCredentials = document.getElementById('github-direct-credentials');
+  if (directCredentials) {
+    directCredentials.style.display = credRef ? 'none' : 'block';
+  }
 }
 
 async function githubTestConnection() {
@@ -14627,10 +14756,12 @@ async function githubTestConnection() {
 }
 
 function collectGitHubSettings() {
+  const credRef = document.getElementById('github-credential-ref')?.value || '';
   return {
     enabled: document.getElementById('github-enabled')?.checked || false,
     base_url: document.getElementById('github-base-url')?.value?.trim() || '',
-    token: document.getElementById('github-token')?.value || '',
+    credential_ref: credRef,
+    token: credRef ? '' : (document.getElementById('github-token')?.value || ''),
     verify_ssl: document.getElementById('github-verify-ssl')?.checked || false,
     default_org: document.getElementById('github-default-org')?.value?.trim() || '',
     default_repo: document.getElementById('github-default-repo')?.value?.trim() || '',
@@ -14700,24 +14831,36 @@ async function renderInternalFetchSection() {
       </select>
     </div>
 
-    <div id="if-auth-basic" style="display:${cfg.auth_type === 'basic' ? 'block' : 'none'}">
+    <div id="if-auth-fields" style="display:${cfg.auth_type && cfg.auth_type !== 'none' ? 'block' : 'none'}">
       <div class="settings-field">
-        <label for="if-auth-username">Benutzername</label>
-        <input type="text" id="if-auth-username" value="${escapeHtml(cfg.auth_username || '')}"
-          placeholder="username" onchange="markSettingsModified()">
+        <label for="if-credential-ref">Zentrale Credentials verwenden</label>
+        <select id="if-credential-ref" onchange="markSettingsModified(); ifCredentialChanged()">
+          <option value="">(Keine - direkte Eingabe unten)</option>
+        </select>
+        <small class="field-hint">Verwende zentrale Credentials oder gib unten direkt ein</small>
       </div>
-      <div class="settings-field">
-        <label for="if-auth-password">Passwort</label>
-        <input type="password" id="if-auth-password" value="${escapeHtml(cfg.auth_password || '')}"
-          placeholder="password" onchange="markSettingsModified()" autocomplete="off">
-      </div>
-    </div>
 
-    <div id="if-auth-bearer" style="display:${cfg.auth_type === 'bearer' ? 'block' : 'none'}">
-      <div class="settings-field">
-        <label for="if-auth-token">Bearer Token</label>
-        <input type="password" id="if-auth-token" value="${escapeHtml(cfg.auth_token || '')}"
-          placeholder="eyJhbGc..." onchange="markSettingsModified()" autocomplete="off">
+      <div id="if-direct-credentials">
+        <div id="if-auth-basic" style="display:${cfg.auth_type === 'basic' ? 'block' : 'none'}">
+          <div class="settings-field">
+            <label for="if-auth-username">Benutzername</label>
+            <input type="text" id="if-auth-username" value="${escapeHtml(cfg.auth_username || '')}"
+              placeholder="username" onchange="markSettingsModified()">
+          </div>
+          <div class="settings-field">
+            <label for="if-auth-password">Passwort</label>
+            <input type="password" id="if-auth-password" value="${escapeHtml(cfg.auth_password || '')}"
+              placeholder="password" onchange="markSettingsModified()" autocomplete="off">
+          </div>
+        </div>
+
+        <div id="if-auth-bearer" style="display:${cfg.auth_type === 'bearer' ? 'block' : 'none'}">
+          <div class="settings-field">
+            <label for="if-auth-token">Bearer Token</label>
+            <input type="password" id="if-auth-token" value="${escapeHtml(cfg.auth_token || '')}"
+              placeholder="eyJhbGc..." onchange="markSettingsModified()" autocomplete="off">
+          </div>
+        </div>
       </div>
     </div>
 
@@ -14741,12 +14884,34 @@ async function renderInternalFetchSection() {
       <span id="if-test-result" class="test-result"></span>
     </div>
   `;
+
+  // Load credentials into dropdown
+  loadCredentialsDropdown('if-credential-ref', cfg.credential_ref || '');
 }
 
 function internalFetchAuthTypeChanged() {
   const authType = document.getElementById('if-auth-type').value;
-  document.getElementById('if-auth-basic').style.display = authType === 'basic' ? 'block' : 'none';
-  document.getElementById('if-auth-bearer').style.display = authType === 'bearer' ? 'block' : 'none';
+  const authFields = document.getElementById('if-auth-fields');
+  const basicFields = document.getElementById('if-auth-basic');
+  const bearerFields = document.getElementById('if-auth-bearer');
+
+  if (authFields) {
+    authFields.style.display = authType && authType !== 'none' ? 'block' : 'none';
+  }
+  if (basicFields) {
+    basicFields.style.display = authType === 'basic' ? 'block' : 'none';
+  }
+  if (bearerFields) {
+    bearerFields.style.display = authType === 'bearer' ? 'block' : 'none';
+  }
+}
+
+function ifCredentialChanged() {
+  const credRef = document.getElementById('if-credential-ref').value;
+  const directCredentials = document.getElementById('if-direct-credentials');
+  if (directCredentials) {
+    directCredentials.style.display = credRef ? 'none' : 'block';
+  }
 }
 
 async function internalFetchTestConnection() {
@@ -14784,6 +14949,7 @@ async function internalFetchTestConnection() {
 function collectInternalFetchSettings() {
   const baseUrlsText = document.getElementById('if-base-urls')?.value || '';
   const baseUrls = baseUrlsText.split('\n').map(u => u.trim()).filter(u => u.length > 0);
+  const credRef = document.getElementById('if-credential-ref')?.value || '';
 
   return {
     enabled: document.getElementById('if-enabled')?.checked || false,
@@ -14791,9 +14957,10 @@ function collectInternalFetchSettings() {
     verify_ssl: document.getElementById('if-verify-ssl')?.checked || false,
     timeout_seconds: parseInt(document.getElementById('if-timeout')?.value) || 30,
     auth_type: document.getElementById('if-auth-type')?.value || 'none',
-    auth_username: document.getElementById('if-auth-username')?.value?.trim() || '',
-    auth_password: document.getElementById('if-auth-password')?.value || '',
-    auth_token: document.getElementById('if-auth-token')?.value || '',
+    credential_ref: credRef,
+    auth_username: credRef ? '' : (document.getElementById('if-auth-username')?.value?.trim() || ''),
+    auth_password: credRef ? '' : (document.getElementById('if-auth-password')?.value || ''),
+    auth_token: credRef ? '' : (document.getElementById('if-auth-token')?.value || ''),
     proxy_url: document.getElementById('if-proxy-url')?.value?.trim() || '',
   };
 }
@@ -15062,15 +15229,25 @@ async function renderJenkinsSection() {
     </div>
 
     <div class="settings-field">
-      <label for="jenkins-username">Benutzername</label>
-      <input type="text" id="jenkins-username" value="${escapeHtml(cfg.username || '')}"
-        placeholder="jenkins-user" onchange="markSettingsModified()">
+      <label for="jenkins-credential-ref">Zentrale Credentials verwenden</label>
+      <select id="jenkins-credential-ref" onchange="markSettingsModified(); jenkinsCredentialChanged()">
+        <option value="">(Keine - direkte Eingabe unten)</option>
+      </select>
+      <small class="field-hint">Verwende zentrale Credentials oder gib unten direkt ein</small>
     </div>
 
-    <div class="settings-field">
-      <label for="jenkins-token">API Token</label>
-      <input type="password" id="jenkins-token" value="${escapeHtml(cfg.api_token || '')}"
-        placeholder="Jenkins API Token" onchange="markSettingsModified()" autocomplete="off">
+    <div id="jenkins-direct-credentials">
+      <div class="settings-field">
+        <label for="jenkins-username">Benutzername</label>
+        <input type="text" id="jenkins-username" value="${escapeHtml(cfg.username || '')}"
+          placeholder="jenkins-user" onchange="markSettingsModified()">
+      </div>
+
+      <div class="settings-field">
+        <label for="jenkins-token">API Token</label>
+        <input type="password" id="jenkins-token" value="${escapeHtml(cfg.api_token || '')}"
+          placeholder="Jenkins API Token" onchange="markSettingsModified()" autocomplete="off">
+      </div>
     </div>
 
     <div class="settings-field">
@@ -15148,6 +15325,17 @@ async function renderJenkinsSection() {
       <span id="jenkins-test-result" class="test-result"></span>
     </div>
   `;
+
+  // Load credentials into dropdown
+  loadCredentialsDropdown('jenkins-credential-ref', cfg.credential_ref || '');
+}
+
+function jenkinsCredentialChanged() {
+  const credRef = document.getElementById('jenkins-credential-ref').value;
+  const directCredentials = document.getElementById('jenkins-direct-credentials');
+  if (directCredentials) {
+    directCredentials.style.display = credRef ? 'none' : 'block';
+  }
 }
 
 function jenkinsAddPath() {
@@ -15246,11 +15434,13 @@ async function jenkinsTestConnection() {
 
 // Beim Speichern die Jenkins-Felder sammeln
 function collectJenkinsSettings() {
+  const credRef = document.getElementById('jenkins-credential-ref')?.value || '';
   return {
     enabled: document.getElementById('jenkins-enabled')?.checked || false,
     base_url: document.getElementById('jenkins-base-url')?.value?.trim() || '',
-    username: document.getElementById('jenkins-username')?.value?.trim() || '',
-    api_token: document.getElementById('jenkins-token')?.value || '',
+    credential_ref: credRef,
+    username: credRef ? '' : (document.getElementById('jenkins-username')?.value?.trim() || ''),
+    api_token: credRef ? '' : (document.getElementById('jenkins-token')?.value || ''),
     verify_ssl: document.getElementById('jenkins-verify-ssl')?.checked || false,
     job_paths: settingsState.settings.jenkins?.job_paths || [],
     default_job_path: settingsState.settings.jenkins?.default_job_path || '',
@@ -17026,6 +17216,293 @@ function closeUpdateModal() {
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
+// Credentials Settings Section (Zentrale Credentials-Verwaltung)
+// ══════════════════════════════════════════════════════════════════════════════
+
+function renderCredentialsSection() {
+  const container = document.getElementById('settings-form');
+
+  container.innerHTML = `
+    <div class="settings-section">
+      <h3 class="settings-section-title">ZENTRALE CREDENTIALS</h3>
+      <p class="settings-section-desc">
+        Verwalte Zugangsdaten zentral an einem Ort. Services wie ALM, Jira, Jenkins etc.
+        können diese Credentials per Name referenzieren statt eigene Login-Daten zu speichern.
+      </p>
+
+      <div id="credentials-loading" style="text-align:center; padding:20px;">
+        <span class="spinner"></span> Lade Credentials...
+      </div>
+      <div id="credentials-content" style="display:none;"></div>
+    </div>
+  `;
+
+  loadCredentialsList();
+}
+
+async function loadCredentialsList() {
+  try {
+    const response = await fetch('/api/settings/credentials');
+    const data = await response.json();
+    const credentials = data.credentials || [];
+
+    document.getElementById('credentials-loading').style.display = 'none';
+    document.getElementById('credentials-content').style.display = 'block';
+
+    let html = `
+      <div class="settings-actions" style="margin-bottom: 20px;">
+        <button class="btn btn-primary" onclick="showAddCredentialForm()">+ Neues Credential</button>
+      </div>
+
+      <div id="credential-form-container" style="display:none; margin-bottom:20px;"></div>
+
+      <div id="credentials-list">
+    `;
+
+    if (credentials.length === 0) {
+      html += `<p style="color:var(--text-muted); font-style:italic;">Keine Credentials vorhanden. Erstelle ein neues Credential um es in Services zu verwenden.</p>`;
+    } else {
+      html += `<table class="settings-table" style="width:100%;">
+        <thead>
+          <tr>
+            <th>Name</th>
+            <th>Typ</th>
+            <th>Beschreibung</th>
+            <th>Details</th>
+            <th>Aktionen</th>
+          </tr>
+        </thead>
+        <tbody>`;
+
+      for (const cred of credentials) {
+        const typeLabel = cred.type === 'basic' ? 'Basic Auth' : cred.type === 'bearer' ? 'Bearer Token' : 'API Key';
+        const details = [];
+        if (cred.has_username) details.push('User');
+        if (cred.has_password) details.push('Password');
+        if (cred.has_token) details.push('Token');
+
+        html += `
+          <tr>
+            <td><strong>${escapeHtml(cred.name)}</strong></td>
+            <td><span class="badge">${typeLabel}</span></td>
+            <td>${escapeHtml(cred.description || '-')}</td>
+            <td>${details.join(', ') || '-'}</td>
+            <td>
+              <button class="btn btn-small" onclick="editCredential('${escapeHtml(cred.name)}')">Bearbeiten</button>
+              <button class="btn btn-small btn-danger" onclick="deleteCredential('${escapeHtml(cred.name)}')">Löschen</button>
+            </td>
+          </tr>
+        `;
+      }
+
+      html += `</tbody></table>`;
+    }
+
+    html += `</div>
+
+      <div class="settings-info" style="margin-top: 30px; padding: 15px; background: var(--bg-secondary); border-radius: 8px;">
+        <h4 style="margin-top:0;">Verwendung in Services</h4>
+        <p>Credentials können in folgenden Services referenziert werden:</p>
+        <ul style="margin-bottom:0;">
+          <li><strong>ALM/QC</strong>: credential_ref in ALM-Settings</li>
+          <li><strong>Jira</strong>: credential_ref in Jira-Settings</li>
+          <li><strong>Confluence</strong>: credential_ref in Confluence-Settings</li>
+          <li><strong>Jenkins</strong>: credential_ref in Jenkins-Settings</li>
+          <li><strong>GitHub</strong>: credential_ref in GitHub-Settings</li>
+          <li><strong>ServiceNow</strong>: credential_ref in ServiceNow-Settings</li>
+          <li><strong>Database</strong>: credential_ref in Database-Settings</li>
+          <li><strong>Internal Fetch</strong>: credential_ref in Internal-Fetch-Settings</li>
+        </ul>
+      </div>
+    `;
+
+    document.getElementById('credentials-content').innerHTML = html;
+
+  } catch (e) {
+    document.getElementById('credentials-loading').style.display = 'none';
+    document.getElementById('credentials-content').style.display = 'block';
+    document.getElementById('credentials-content').innerHTML = `
+      <div class="settings-error">Fehler beim Laden: ${escapeHtml(e.message)}</div>
+    `;
+  }
+}
+
+function showAddCredentialForm() {
+  showCredentialForm(null);
+}
+
+function showCredentialForm(editName) {
+  const isEdit = editName !== null;
+  const formContainer = document.getElementById('credential-form-container');
+  formContainer.style.display = 'block';
+
+  formContainer.innerHTML = `
+    <div class="settings-card" style="padding: 20px; border: 1px solid var(--border-color); border-radius: 8px;">
+      <h4 style="margin-top:0;">${isEdit ? 'Credential bearbeiten' : 'Neues Credential erstellen'}</h4>
+
+      <div class="settings-group">
+        <label class="settings-label">Name *</label>
+        <input type="text" id="cred-name" class="settings-input"
+          placeholder="z.B. alm-prod, jira-cloud" ${isEdit ? 'readonly' : ''}>
+        <small class="settings-hint">Eindeutiger Name zur Referenzierung</small>
+      </div>
+
+      <div class="settings-group">
+        <label class="settings-label">Typ</label>
+        <select id="cred-type" class="settings-select" onchange="credentialTypeChanged()">
+          <option value="basic">Basic Auth (Username + Password)</option>
+          <option value="bearer">Bearer Token</option>
+          <option value="api_key">API Key</option>
+        </select>
+      </div>
+
+      <div id="cred-basic-fields">
+        <div class="settings-group">
+          <label class="settings-label">Benutzername</label>
+          <input type="text" id="cred-username" class="settings-input"
+            placeholder="username">
+        </div>
+
+        <div class="settings-group">
+          <label class="settings-label">Passwort</label>
+          <input type="password" id="cred-password" class="settings-input"
+            placeholder="********" autocomplete="off">
+        </div>
+      </div>
+
+      <div id="cred-token-fields" style="display:none;">
+        <div class="settings-group">
+          <label class="settings-label">Token</label>
+          <input type="password" id="cred-token" class="settings-input"
+            placeholder="Bearer/API Token" autocomplete="off">
+        </div>
+      </div>
+
+      <div class="settings-group">
+        <label class="settings-label">Beschreibung (optional)</label>
+        <input type="text" id="cred-description" class="settings-input"
+          placeholder="z.B. Produktions-Zugang für ALM">
+      </div>
+
+      <div class="settings-actions">
+        <button class="btn btn-primary" onclick="saveCredential('${isEdit ? escapeHtml(editName) : ''}')">${isEdit ? 'Speichern' : 'Erstellen'}</button>
+        <button class="btn btn-secondary" onclick="hideCredentialForm()">Abbrechen</button>
+      </div>
+    </div>
+  `;
+
+  if (isEdit) {
+    loadCredentialForEdit(editName);
+  }
+}
+
+async function loadCredentialForEdit(name) {
+  try {
+    const response = await fetch(`/api/settings/credentials/${encodeURIComponent(name)}`);
+    const cred = await response.json();
+
+    document.getElementById('cred-name').value = cred.name;
+    document.getElementById('cred-type').value = cred.type;
+    document.getElementById('cred-username').value = cred.username || '';
+    document.getElementById('cred-password').value = cred.password || '';
+    document.getElementById('cred-token').value = cred.token || '';
+    document.getElementById('cred-description').value = cred.description || '';
+
+    credentialTypeChanged();
+  } catch (e) {
+    showToast(`Fehler beim Laden: ${e.message}`, 'error');
+  }
+}
+
+function credentialTypeChanged() {
+  const type = document.getElementById('cred-type').value;
+  const basicFields = document.getElementById('cred-basic-fields');
+  const tokenFields = document.getElementById('cred-token-fields');
+
+  if (type === 'basic') {
+    basicFields.style.display = 'block';
+    tokenFields.style.display = 'none';
+  } else {
+    basicFields.style.display = 'none';
+    tokenFields.style.display = 'block';
+  }
+}
+
+function hideCredentialForm() {
+  document.getElementById('credential-form-container').style.display = 'none';
+}
+
+async function saveCredential(editName) {
+  const isEdit = editName !== '';
+  const data = {
+    name: document.getElementById('cred-name').value.trim(),
+    type: document.getElementById('cred-type').value,
+    username: document.getElementById('cred-username').value.trim(),
+    password: document.getElementById('cred-password').value,
+    token: document.getElementById('cred-token').value,
+    description: document.getElementById('cred-description').value.trim(),
+  };
+
+  if (!data.name) {
+    showToast('Name ist erforderlich', 'error');
+    return;
+  }
+
+  try {
+    const url = isEdit
+      ? `/api/settings/credentials/${encodeURIComponent(editName)}`
+      : '/api/settings/credentials';
+    const method = isEdit ? 'PUT' : 'POST';
+
+    const response = await fetch(url, {
+      method: method,
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data),
+    });
+
+    const result = await response.json();
+
+    if (response.ok) {
+      showToast(result.message || 'Credential gespeichert', 'success');
+      hideCredentialForm();
+      loadCredentialsList();
+    } else {
+      showToast(`Fehler: ${result.detail || 'Speichern fehlgeschlagen'}`, 'error');
+    }
+  } catch (e) {
+    showToast(`Fehler: ${e.message}`, 'error');
+  }
+}
+
+function editCredential(name) {
+  showCredentialForm(name);
+}
+
+async function deleteCredential(name) {
+  if (!confirm(`Credential "${name}" wirklich löschen?\n\nWarnung: Services die dieses Credential referenzieren verlieren ihren Zugang!`)) {
+    return;
+  }
+
+  try {
+    const response = await fetch(`/api/settings/credentials/${encodeURIComponent(name)}`, {
+      method: 'DELETE',
+    });
+
+    const result = await response.json();
+
+    if (response.ok) {
+      showToast(result.message || 'Credential gelöscht', 'success');
+      loadCredentialsList();
+    } else {
+      showToast(`Fehler: ${result.detail || 'Löschen fehlgeschlagen'}`, 'error');
+    }
+  } catch (e) {
+    showToast(`Fehler: ${e.message}`, 'error');
+  }
+}
+
+
+// ══════════════════════════════════════════════════════════════════════════════
 // Proxy Settings Section (Global Proxy Configuration)
 // ══════════════════════════════════════════════════════════════════════════════
 
@@ -17077,17 +17554,27 @@ async function loadProxySettings() {
       </div>
 
       <div class="settings-group">
-        <label class="settings-label">Benutzername (optional)</label>
-        <input type="text" id="proxy-username" class="settings-input"
-          value="${config.username === '********' ? '********' : escapeHtml(config.username || '')}"
-          placeholder="proxy-user">
+        <label class="settings-label">Zentrale Credentials verwenden</label>
+        <select id="proxy-credential-ref" class="settings-input" onchange="proxyCredentialChanged()">
+          <option value="">(Keine - direkte Eingabe unten)</option>
+        </select>
+        <small class="settings-hint">Verwende zentrale Credentials oder gib unten direkt ein</small>
       </div>
 
-      <div class="settings-group">
-        <label class="settings-label">Passwort (optional)</label>
-        <input type="password" id="proxy-password" class="settings-input"
-          value="${config.password === '********' ? '********' : ''}"
-          placeholder="********">
+      <div id="proxy-direct-credentials">
+        <div class="settings-group">
+          <label class="settings-label">Benutzername (optional)</label>
+          <input type="text" id="proxy-username" class="settings-input"
+            value="${config.username === '********' ? '********' : escapeHtml(config.username || '')}"
+            placeholder="proxy-user">
+        </div>
+
+        <div class="settings-group">
+          <label class="settings-label">Passwort (optional)</label>
+          <input type="password" id="proxy-password" class="settings-input"
+            value="${config.password === '********' ? '********' : ''}"
+            placeholder="********">
+        </div>
       </div>
 
       <div class="settings-group">
@@ -17113,6 +17600,9 @@ async function loadProxySettings() {
 
       <div id="proxy-test-result" style="margin-top: 15px;"></div>
     `;
+
+    // Load credentials into dropdown
+    loadCredentialsDropdown('proxy-credential-ref', config.credential_ref || '');
   } catch (e) {
     document.getElementById('proxy-settings-loading').style.display = 'none';
     document.getElementById('proxy-settings-form').style.display = 'block';
@@ -17122,12 +17612,22 @@ async function loadProxySettings() {
   }
 }
 
+function proxyCredentialChanged() {
+  const credRef = document.getElementById('proxy-credential-ref').value;
+  const directCredentials = document.getElementById('proxy-direct-credentials');
+  if (directCredentials) {
+    directCredentials.style.display = credRef ? 'none' : 'block';
+  }
+}
+
 async function saveProxySettings() {
+  const credRef = document.getElementById('proxy-credential-ref').value;
   const data = {
     enabled: document.getElementById('proxy-enabled').checked,
     url: document.getElementById('proxy-url').value,
-    username: document.getElementById('proxy-username').value,
-    password: document.getElementById('proxy-password').value,
+    credential_ref: credRef,
+    username: credRef ? '' : document.getElementById('proxy-username').value,
+    password: credRef ? '' : document.getElementById('proxy-password').value,
     no_proxy: document.getElementById('proxy-no-proxy').value,
     verify_ssl: document.getElementById('proxy-verify-ssl').checked,
   };

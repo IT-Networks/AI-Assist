@@ -75,6 +75,7 @@ def get_settings_dict(unmask: bool = False) -> Dict[str, Any]:
 def get_section_schema(section: str) -> Dict[str, Any]:
     """Gibt das Schema einer Settings-Section zurück."""
     section_classes = {
+        "credentials": "CredentialsConfig",  # Zentrale Credentials
         "proxy": "ProxyConfig",  # Globale Proxy-Konfiguration
         "llm": "LLMConfig",
         "java": "JavaConfig",
@@ -185,6 +186,7 @@ async def get_settings_schema() -> Dict[str, Any]:
 def _get_section_description(section: str) -> str:
     """Gibt eine Beschreibung für eine Section zurück."""
     descriptions = {
+        "credentials": "Zentrale Credentials-Verwaltung für alle Services",
         "llm": "LLM-Verbindung und Modell-Einstellungen",
         "models": "Verfügbare LLM-Modelle",
         "java": "Java-Repository-Einstellungen",
@@ -209,6 +211,140 @@ def _get_section_description(section: str) -> str:
         "alm": "HP ALM/Quality Center Testmanagement-Integration",
     }
     return descriptions.get(section, "")
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Credentials API - Zentrale Credentials-Verwaltung
+# ══════════════════════════════════════════════════════════════════════════════
+
+class CredentialRequest(BaseModel):
+    """Request für ein neues oder aktualisiertes Credential."""
+    name: str = Field(..., min_length=1, max_length=100)
+    type: str = Field("basic", pattern="^(basic|bearer|api_key)$")
+    username: str = ""
+    password: str = ""
+    token: str = ""
+    description: str = ""
+
+
+@router.get("/credentials")
+async def list_credentials() -> Dict[str, Any]:
+    """
+    Listet alle verfügbaren Credentials (nur Namen und Typen, keine Secrets).
+
+    Für Dropdown-Listen in Service-Konfigurationen.
+    """
+    creds = []
+    for cred in settings.credentials.credentials:
+        creds.append({
+            "name": cred.name,
+            "type": cred.type,
+            "description": cred.description,
+            "has_username": bool(cred.username),
+            "has_password": bool(cred.password),
+            "has_token": bool(cred.token),
+        })
+    return {"credentials": creds}
+
+
+@router.get("/credentials/{name}")
+async def get_credential(name: str) -> Dict[str, Any]:
+    """
+    Gibt Details eines Credentials zurück (Secrets maskiert).
+    """
+    cred = settings.credentials.get(name)
+    if not cred:
+        raise HTTPException(status_code=404, detail=f"Credential '{name}' nicht gefunden")
+
+    return {
+        "name": cred.name,
+        "type": cred.type,
+        "username": cred.username,
+        "password": "********" if cred.password else "",
+        "token": "********" if cred.token else "",
+        "description": cred.description,
+    }
+
+
+@router.post("/credentials")
+async def create_credential(request: CredentialRequest) -> Dict[str, Any]:
+    """
+    Erstellt ein neues Credential.
+
+    Änderungen nur im Speicher - verwende POST /save zum Persistieren.
+    """
+    # Prüfen ob Name bereits existiert
+    if settings.credentials.get(request.name):
+        raise HTTPException(status_code=400, detail=f"Credential '{request.name}' existiert bereits")
+
+    from app.core.config import CredentialEntry
+    new_cred = CredentialEntry(
+        name=request.name,
+        type=request.type,
+        username=request.username,
+        password=request.password,
+        token=request.token,
+        description=request.description,
+    )
+    settings.credentials.credentials.append(new_cred)
+
+    return {
+        "success": True,
+        "message": f"Credential '{request.name}' erstellt",
+        "credential": {
+            "name": new_cred.name,
+            "type": new_cred.type,
+            "description": new_cred.description,
+        }
+    }
+
+
+@router.put("/credentials/{name}")
+async def update_credential(name: str, request: CredentialRequest) -> Dict[str, Any]:
+    """
+    Aktualisiert ein bestehendes Credential.
+
+    Hinweis: Wenn password/token "********" ist, wird der alte Wert beibehalten.
+    """
+    cred = settings.credentials.get(name)
+    if not cred:
+        raise HTTPException(status_code=404, detail=f"Credential '{name}' nicht gefunden")
+
+    # Name-Änderung erlauben
+    cred.name = request.name
+    cred.type = request.type
+    cred.username = request.username
+    cred.description = request.description
+
+    # Secrets nur updaten wenn nicht maskiert
+    if request.password and request.password != "********":
+        cred.password = request.password
+    if request.token and request.token != "********":
+        cred.token = request.token
+
+    return {
+        "success": True,
+        "message": f"Credential '{name}' aktualisiert",
+    }
+
+
+@router.delete("/credentials/{name}")
+async def delete_credential(name: str) -> Dict[str, Any]:
+    """
+    Löscht ein Credential.
+
+    Warnung: Services die dieses Credential referenzieren verlieren ihren Zugang!
+    """
+    cred = settings.credentials.get(name)
+    if not cred:
+        raise HTTPException(status_code=404, detail=f"Credential '{name}' nicht gefunden")
+
+    settings.credentials.credentials.remove(cred)
+
+    return {
+        "success": True,
+        "message": f"Credential '{name}' gelöscht",
+    }
 
 
 # ══════════════════════════════════════════════════════════════════════════════
