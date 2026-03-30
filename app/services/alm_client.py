@@ -1602,7 +1602,8 @@ class ALMClient:
         if comment:
             fields["comments"] = comment
         if cycle_id is not None:
-            fields["cycle-id"] = str(cycle_id)
+            # ALM API erwartet "test-cycle-id" (nicht "cycle-id")
+            fields["test-cycle-id"] = str(cycle_id)
 
         xml = self._build_entity_xml("run", fields)
         root = await self._request("POST", "/runs", body=xml)
