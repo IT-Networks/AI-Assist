@@ -217,9 +217,21 @@ class AgentOrchestrator:
         return self._states[session_id]
 
     def set_mode(self, session_id: str, mode: AgentMode) -> None:
-        """Setzt den Modus für eine Session."""
+        """Setzt den Modus für eine Session und speichert ihn persistent."""
         state = self._get_state(session_id)
         state.mode = mode
+
+        # Sofort speichern damit Modus nach Neustart erhalten bleibt
+        try:
+            from app.services.chat_store import save_chat
+            save_chat(
+                session_id=session_id,
+                title=state.title or "Chat",
+                messages_history=state.messages_history,
+                mode=state.mode.value,
+            )
+        except Exception as e:
+            logger.warning(f"[orchestrator] Failed to persist mode change for {session_id}: {e}")
 
     def set_active_skills(self, session_id: str, skill_ids: List[str]) -> None:
         """Setzt die aktiven Skills für eine Session."""
