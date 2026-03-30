@@ -232,6 +232,9 @@ class AgentState:
     pending_pr_analysis: Optional[asyncio.Task] = None
     pending_pr_number: Optional[int] = None
     pending_pr_state: Optional[str] = None
+    # Fehlerverfolgung: Erkennt wenn gleiche Tools wiederholt fehlschlagen
+    last_failed_tool: Optional[str] = None  # Name des zuletzt fehlgeschlagenen Tools
+    consecutive_failures: int = 0  # Anzahl aufeinanderfolgender Fehler des gleichen Tools
 
     def __post_init__(self):
         """Initialize entity_tracker if not provided."""

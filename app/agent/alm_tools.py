@@ -945,7 +945,10 @@ def register_alm_tools(registry: ToolRegistry) -> int:
                 logger.warning(f"Fehler beim Laden von Test-Instanzen: {e}")
 
         if not test_instance_id:
-            return ToolResult(success=False, error="test_instance_id ist erforderlich")
+            return ToolResult(
+                success=False,
+                error="test_instance_id ist erforderlich. Bitte frage den User nach der Test-Instanz-ID oder gebe test_set_id an um verfügbare Test-Instanzen anzuzeigen."
+            )
         if not status:
             return ToolResult(success=False, error="status ist erforderlich (Passed/Failed/Not Completed/Blocked)")
 

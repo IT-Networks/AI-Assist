@@ -2149,6 +2149,39 @@ class AgentOrchestrator:
                         )
                     # ────────────────────────────────────────────────────────────
 
+                    # ── Failure-Tracking: Erkennt wiederholte Fehler beim gleichen Tool ──
+                    if not result.success:
+                        if state.last_failed_tool == tool_call.name:
+                            # Gleichen Tool erneut fehlgeschlagen
+                            state.consecutive_failures += 1
+                        else:
+                            # Anderes Tool fehlgeschlagen - Reset
+                            state.last_failed_tool = tool_call.name
+                            state.consecutive_failures = 1
+
+                        # Nach 3 aufeinanderfolgenden Fehlern: KI auffordern zu fragen
+                        if state.consecutive_failures >= 3:
+                            failure_hint = (
+                                f"⚠️ Das Tool '{tool_call.name}' ist bereits {state.consecutive_failures}x "
+                                f"hintereinander fehlgeschlagen.\n\n"
+                                f"Bitte frage den Benutzer um fehlende Informationen statt das Tool erneut zu versuchen:\n"
+                                f"- Welche Werte benötigst du?\n"
+                                f"- Kann der Benutzer die erforderlichen Felder angeben?"
+                            )
+                            messages.append({
+                                "role": "system",
+                                "content": failure_hint
+                            })
+                            logger.warning(
+                                f"[agent] Tool {tool_call.name} failed {state.consecutive_failures} times - "
+                                f"injecting guidance to ask user"
+                            )
+                    else:
+                        # Tool erfolgreich: Reset failure counter
+                        state.last_failed_tool = None
+                        state.consecutive_failures = 0
+                    # ────────────────────────────────────────────────────────────
+
                     # ── Result-Validierung: Relevanz prüfen und Source-Metadata ──
                     if result.success and tool_call.name not in ("write_file", "execute_command"):
                         try:
@@ -2184,6 +2217,23 @@ class AgentOrchestrator:
                             "content": suggestions_hint
                         })
                         logger.debug(f"[agent] Suggestions injected for {tool_call.name}: {len(result.suggestions)} options")
+                    elif not result.success and result.error and "erforderlich" in result.error.lower():
+                        # Wenn ein erforderliches Feld fehlt aber keine Suggestions vorhanden:
+                        # KI explizit auffordern mit dem User zu sprechen
+                        missing_field_hint = (
+                            f"⚠️ Das Tool '{tool_call.name}' meldet einen Fehler:\n"
+                            f"\"{result.error}\"\n\n"
+                            f"Es scheint dass erforderliche Informationen fehlen. "
+                            f"Bitte:\n"
+                            f"1. Erkläre dem Benutzer kurz welche Information fehlt\n"
+                            f"2. Frage ihn um die fehlende(n) Information(en)\n"
+                            f"3. Versuche das Tool NICHT erneut ohne neue Informationen vom User"
+                        )
+                        messages.append({
+                            "role": "system",
+                            "content": missing_field_hint
+                        })
+                        logger.debug(f"[agent] Missing field hint injected for {tool_call.name}: {result.error}")
                     # ────────────────────────────────────────────────────────────
 
                     # Bestätigung benötigt?
