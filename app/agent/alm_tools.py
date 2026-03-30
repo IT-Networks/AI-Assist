@@ -999,16 +999,34 @@ def register_alm_tools(registry: ToolRegistry) -> int:
                 },
             )
 
-        # cycle_id für API bestimmen
-        cycle_id = test_set_id or None
+        # cycle_id für API bestimmen (WICHTIG: ALM benötigt gültige > 0 cycle-id!)
+        cycle_id = test_set_id if test_set_id and test_set_id > 0 else None
+
         if not cycle_id and test_instance_id:
             try:
                 client = get_alm_client()
                 inst = await client.get_test_instance(test_instance_id)
-                if inst:
+                if inst and inst.test_set_id and inst.test_set_id > 0:
                     cycle_id = inst.test_set_id
+                    logger.debug(f"ALM: cycle_id aus Test-Instance {test_instance_id} geladen: {cycle_id}")
+                elif inst:
+                    logger.warning(f"ALM: Test-Instance {test_instance_id} hat ungültige test_set_id: {getattr(inst, 'test_set_id', 'N/A')}")
             except Exception as e:
                 logger.warning(f"Fehler beim Laden von Test-Instance {test_instance_id}: {e}")
+
+        # VALIDIERUNG: cycle_id ist erforderlich und muss > 0 sein
+        if not cycle_id or cycle_id <= 0:
+            error_msg = (
+                f"❌ **Test-Set-ID (cycle_id) ist erforderlich und ungültig (aktuell: {cycle_id})**\n\n"
+                f"**Mögliche Lösungen:**\n"
+                f"1. Gib `test_set_id` direkt an (z.B. `test_set_id=123`)\n"
+                f"2. Wähle eine vorhandene Test-Instance aus (diese muss ein gültiges Test-Set haben)\n"
+                f"3. Erstelle zuerst ein Test-Set, dann eine Test-Instance darin\n\n"
+                f"**Hintergrund:**\n"
+                f"Die ALM API benötigt eine gültige Test-Set-ID (cycle-id) um Test-Runs zu erstellen. "
+                f"Diese wird normalerweise von der Test-Instance abgeleitet, ist aber jetzt ungültig."
+            )
+            return ToolResult(success=False, error=error_msg)
 
         try:
             client = get_alm_client()

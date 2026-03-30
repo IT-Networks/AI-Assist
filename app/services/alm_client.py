@@ -1593,6 +1593,11 @@ class ALMClient:
             except Exception as e:
                 logger.warning(f"ALM: Konnte cycle_id aus Test-Instance {test_instance_id} nicht laden: {e}")
 
+        # WICHTIG: cycle_id muss gültig sein (> 0)
+        # Wenn cycle_id=0 oder None, ALM wird "required-field-missing" error werfen
+        if cycle_id is None or cycle_id == 0:
+            logger.warning(f"ALM: cycle_id ist ungültig ({cycle_id}). Versuche trotzdem zu erstellen (manche ALM-Versionen benötigen es nicht)")
+
         fields = {
             "test-instance": test_instance_id,
             "status": status,
@@ -1603,14 +1608,15 @@ class ALMClient:
             fields["comments"] = comment
 
         # Versuche cycle_id mit verschiedenen Feldnamen zu senden (ALM-Versions-Kompatibilität)
-        # Manche ALM-Versionen benötigen das Feld nicht (alte Versions)
+        # Manche ALM-Versionen benötigen das Feld nicht (alte Versionen)
         # Andere ALM-Versionen benötigen es mit unterschiedlichen Namen
         cycle_id_field_names = ["cycle-id", "test-cycle-id", "testcycleid", "test-set-id"]
 
         attempt_results = []
         for field_name in cycle_id_field_names:
             attempt_fields = fields.copy()
-            if cycle_id is not None:
+            # WICHTIG: Nur senden wenn cycle_id gültig ist (> 0)
+            if cycle_id is not None and cycle_id > 0:
                 attempt_fields[field_name] = str(cycle_id)
 
             xml = self._build_entity_xml("run", attempt_fields)
