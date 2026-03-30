@@ -1496,6 +1496,37 @@ class ALMClient:
 
         return instances
 
+    async def get_latest_test_instance(self, test_set_id: int) -> Optional[ALMTestInstance]:
+        """
+        Laedt die neueste Test-Instance eines Test-Sets (nach exec-date).
+
+        Args:
+            test_set_id: Test-Set-ID
+
+        Returns:
+            Neueste ALMTestInstance oder None wenn keine gefunden
+        """
+        instances = await self.get_test_instances(test_set_id)
+        if not instances:
+            return None
+
+        # Sortiere nach exec-date (neueste zuerst)
+        # Falls exec-date fehlt, wird die zuerst gefunden als "neueste" genommen
+        instances_with_date = [inst for inst in instances if inst.exec_date]
+        instances_without_date = [inst for inst in instances if not inst.exec_date]
+
+        # Sortiere nach exec-date in absteigender Reihenfolge (neueste zuerst)
+        instances_with_date.sort(
+            key=lambda x: x.exec_date or "",
+            reverse=True
+        )
+
+        if instances_with_date:
+            return instances_with_date[0]
+        elif instances_without_date:
+            return instances_without_date[0]  # Fallback
+        return None
+
     async def get_test_instance(self, test_instance_id: int) -> Optional[ALMTestInstance]:
         """
         Laedt eine einzelne Test-Instance anhand ihrer ID.
@@ -1551,6 +1582,16 @@ class ALMClient:
         valid_statuses = ["Passed", "Failed", "Not Completed", "Blocked", "N/A"]
         if status not in valid_statuses:
             raise ALMError(f"Ungueltiger Status: {status}. Erlaubt: {valid_statuses}")
+
+        # Wenn cycle_id nicht gegeben, versuche aus Test-Instance zu laden
+        if cycle_id is None:
+            try:
+                inst = await self.get_test_instance(test_instance_id)
+                if inst:
+                    cycle_id = inst.test_set_id
+                    logger.debug(f"ALM: cycle_id aus Test-Instance {test_instance_id} geladen: {cycle_id}")
+            except Exception as e:
+                logger.warning(f"ALM: Konnte cycle_id aus Test-Instance {test_instance_id} nicht laden: {e}")
 
         fields = {
             "test-instance": test_instance_id,

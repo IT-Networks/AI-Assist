@@ -916,38 +916,66 @@ def register_alm_tools(registry: ToolRegistry) -> int:
 
         test_instance_id: int = kwargs.get("test_instance_id", 0)
         test_set_id: int = kwargs.get("test_set_id", 0)
+        test_name: str = kwargs.get("test_name", "")  # NEU: Zur Suche nach Instance
         status: str = kwargs.get("status", "")
         comment: str = kwargs.get("comment", "")
         confirmed: bool = kwargs.get("_confirmed", False)
 
-        # Wenn test_instance_id fehlt aber test_set_id vorhanden → Vorschläge laden
+        # Wenn test_instance_id fehlt aber test_name vorhanden → Suche nach neuester Instance mit diesem Namen
+        if not test_instance_id and test_name:
+            try:
+                client = get_alm_client()
+                matching_instances = await client.search_test_instances(query=test_name, limit=10)
+                if matching_instances:
+                    # Nimm die neueste (sollte nach execution-date sortiert sein)
+                    latest = matching_instances[0]
+                    test_instance_id = latest.id
+                    test_set_id = latest.test_set_id
+                    logger.info(f"ALM: Found test instance '{test_name}' → using #{test_instance_id}")
+                else:
+                    return ToolResult(
+                        success=False,
+                        error=f"Keine Test-Instance mit Name '{test_name}' gefunden. Bitte gib test_instance_id oder test_set_id an."
+                    )
+            except Exception as e:
+                logger.warning(f"Fehler beim Suchen von Test-Instance '{test_name}': {e}")
+
+        # Wenn test_instance_id fehlt aber test_set_id vorhanden → Versuche neueste zu laden
         if not test_instance_id and test_set_id:
             try:
                 client = get_alm_client()
-                instances = await client.get_test_instances(test_set_id)
-                if instances:
-                    suggestions = [
-                        {
-                            "label": f"Test-Instanz #{inst.id}: {inst.test_name} (Status: {inst.status})",
-                            "value": inst.id,
-                            "field": "test_instance_id",
-                        }
-                        for inst in instances
-                    ]
-                    return ToolResult(
-                        success=False,
-                        error=f"test_instance_id fehlt. Verfügbare Test-Instanzen in Test-Set {test_set_id}:",
-                        suggestions=suggestions,
-                    )
+                # Versuche erste die neueste Instanz zu laden
+                latest = await client.get_latest_test_instance(test_set_id)
+                if latest:
+                    # Neueste gefunden - nutze sie automatisch
+                    test_instance_id = latest.id
+                    logger.info(f"ALM: Automatisch neueste Test-Instance #{test_instance_id} aus Test-Set {test_set_id} ausgewählt")
                 else:
-                    return ToolResult(success=False, error=f"Keine Test-Instanzen in Test-Set {test_set_id} gefunden")
+                    # Keine gefunden - zeige Vorschläge
+                    instances = await client.get_test_instances(test_set_id)
+                    if instances:
+                        suggestions = [
+                            {
+                                "label": f"Test-Instanz #{inst.id}: {inst.test_name} (Status: {inst.status})",
+                                "value": inst.id,
+                                "field": "test_instance_id",
+                            }
+                            for inst in instances
+                        ]
+                        return ToolResult(
+                            success=False,
+                            error=f"test_instance_id fehlt. Verfügbare Test-Instanzen in Test-Set {test_set_id}:",
+                            suggestions=suggestions,
+                        )
+                    else:
+                        return ToolResult(success=False, error=f"Keine Test-Instanzen in Test-Set {test_set_id} gefunden")
             except Exception as e:
                 logger.warning(f"Fehler beim Laden von Test-Instanzen: {e}")
 
         if not test_instance_id:
             return ToolResult(
                 success=False,
-                error="test_instance_id ist erforderlich. Bitte frage den User nach der Test-Instanz-ID oder gebe test_set_id an um verfügbare Test-Instanzen anzuzeigen."
+                error="test_instance_id ist erforderlich. Möglichkeiten: (1) test_instance_id direkt angeben, (2) test_name angeben um Instanz zu suchen, (3) test_set_id angeben um aus verfügbaren zu wählen."
             )
         if not status:
             return ToolResult(success=False, error="status ist erforderlich (Passed/Failed/Not Completed/Blocked)")
@@ -1019,7 +1047,13 @@ def register_alm_tools(registry: ToolRegistry) -> int:
             ToolParameter(
                 name="test_instance_id",
                 type="integer",
-                description="Test-Instance-ID aus dem Test Lab. Falls nicht bekannt, kann test_set_id angegeben werden um Vorschläge zu bekommen.",
+                description="Test-Instance-ID aus dem Test Lab. Falls nicht bekannt, kann test_name oder test_set_id angegeben werden.",
+                required=False,
+            ),
+            ToolParameter(
+                name="test_name",
+                type="string",
+                description="Name oder Teil des Namens der Test-Instance. Das Tool findet die neueste Instanz mit diesem Namen.",
                 required=False,
             ),
             ToolParameter(
