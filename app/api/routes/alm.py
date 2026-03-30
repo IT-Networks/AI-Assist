@@ -66,6 +66,8 @@ class ALMTestSetResponse(BaseModel):
     name: str
     folder_id: int = 0
     status: str = ""
+    description: str = ""
+    user_01: str = "Nur intern"  # Custom Field: Anzeige (Extern, Nur intern, Sparkasse)
 
 
 @router.get("/status", response_model=ALMStatusResponse)
@@ -299,6 +301,8 @@ async def list_test_sets(
                 name=ts.name,
                 folder_id=ts.folder_id,
                 status=ts.status,
+                description=ts.description,
+                user_01=ts.user_01,
             )
             for ts in test_sets
         ]

@@ -1012,6 +1012,7 @@ def register_alm_tools(registry: ToolRegistry) -> int:
         name: str = kwargs.get("name", "")
         folder_id: int = kwargs.get("folder_id", 0)
         description: str = kwargs.get("description", "")
+        user_01: str = kwargs.get("user_01", "Nur intern")
         confirmed: bool = kwargs.get("_confirmed", False)
 
         if not name:
@@ -1032,6 +1033,7 @@ def register_alm_tools(registry: ToolRegistry) -> int:
             preview += f"**Test Lab Pfad:** {folder_path}/{name}\n"
             if description:
                 preview += f"**Beschreibung:** {description}\n"
+            preview += f"**Anzeige:** {user_01}\n"
 
             return ToolResult(
                 success=True,
@@ -1050,6 +1052,7 @@ def register_alm_tools(registry: ToolRegistry) -> int:
                 name=name,
                 folder_id=folder_id,
                 description=description,
+                user_01=user_01,
             )
 
             # Vollen Pfad laden
@@ -1098,6 +1101,13 @@ def register_alm_tools(registry: ToolRegistry) -> int:
                 type="string",
                 description="Optionale Beschreibung des Test-Sets",
                 required=False,
+            ),
+            ToolParameter(
+                name="user_01",
+                type="string",
+                description="Custom Field 'Anzeige' - Sichtbarkeit des Test-Sets: 'Extern', 'Nur intern', oder 'Sparkasse' (Default: 'Nur intern')",
+                required=False,
+                enum=["Extern", "Nur intern", "Sparkasse"],
             ),
         ],
         handler=alm_create_test_set,

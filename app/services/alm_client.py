@@ -214,6 +214,7 @@ class ALMTestSet:
     folder_id: int
     status: str = ""
     description: str = ""
+    user_01: str = "Nur intern"  # Custom Field: Anzeige (Extern, Nur intern, Sparkasse)
 
 
 @dataclass
@@ -1332,6 +1333,8 @@ class ALMClient:
                 name=data.get("name", ""),
                 folder_id=int(data.get("parent-id", 0)),
                 status=data.get("status", ""),
+                description=data.get("description", ""),
+                user_01=data.get("user-01", "Nur intern"),
             ))
 
         return test_sets
@@ -1341,6 +1344,7 @@ class ALMClient:
         name: str,
         folder_id: int,
         description: str = "",
+        user_01: str = "Nur intern",
     ) -> ALMTestSet:
         """
         Erstellt ein neues Test-Set im Test Lab.
@@ -1349,16 +1353,26 @@ class ALMClient:
             name: Name des Test-Sets
             folder_id: Test Lab Folder-ID (aus alm_list_test_lab_folders)
             description: Optionale Beschreibung
+            user_01: Custom Field "Anzeige" - Erlaubte Werte: "Extern", "Nur intern", "Sparkasse" (Default: "Nur intern")
 
         Returns:
             Erstelltes ALMTestSet
+
+        Raises:
+            ALMError: Wenn user_01 einen unzulaessigen Wert hat
         """
         self._check_configured()
+
+        # Validate user_01
+        valid_values = ["Extern", "Nur intern", "Sparkasse"]
+        if user_01 not in valid_values:
+            raise ALMError(f"Ungueltiger Wert fuer 'Anzeige' (user-01): '{user_01}'. Erlaubte Werte: {valid_values}")
 
         fields = {
             "name": name,
             "parent-id": str(folder_id),
             "subtype-id": "hp.qc.test-set.default",
+            "user-01": user_01,
         }
         if description:
             fields["description"] = description
@@ -1373,9 +1387,10 @@ class ALMClient:
             folder_id=int(data.get("parent-id", folder_id)),
             status=data.get("status", ""),
             description=description,
+            user_01=data.get("user-01", user_01),
         )
 
-        logger.info(f"ALM: Test-Set erstellt: ID={test_set.id}, Name={test_set.name}")
+        logger.info(f"ALM: Test-Set erstellt: ID={test_set.id}, Name={test_set.name}, Anzeige={user_01}")
         return test_set
 
     async def create_test_lab_folder(self, name: str, parent_id: int = 0) -> ALMTestSetFolder:
