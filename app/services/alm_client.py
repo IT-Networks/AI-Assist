@@ -1601,34 +1601,59 @@ class ALMClient:
         }
         if comment:
             fields["comments"] = comment
-        # HINWEIS: cycle_id wird NICHT gesendet für runs!
-        # Die Test-Set-Beziehung ist über test-instance definiert.
-        # Wenn die Test-Instance gültig ist, weiß ALM automatisch das Test-Set.
 
-        xml = self._build_entity_xml("run", fields)
-        logger.debug(f"ALM: XML für Run-Erstellung:\n{xml}")
-        try:
-            root = await self._request("POST", "/runs", body=xml)
-            data = self._parse_entity(root)
-        except ALMError as e:
-            # Bessere Error-Message mit Kontext
-            error_msg = str(e)
-            logger.error(f"ALM: Fehler beim Erstellen des Runs:\n{error_msg}")
-            # Debug: zeige welche Felder wir gesendet haben
-            logger.error(f"ALM: Verwendete Felder: {fields}")
-            raise ALMError(f"Fehler beim Erstellen des Test-Runs: {error_msg}\nGesendete Felder: {fields}")
+        # Versuche cycle_id mit verschiedenen Feldnamen zu senden (ALM-Versions-Kompatibilität)
+        # Manche ALM-Versionen benötigen das Feld nicht (alte Versions)
+        # Andere ALM-Versionen benötigen es mit unterschiedlichen Namen
+        cycle_id_field_names = ["cycle-id", "test-cycle-id", "testcycleid", "test-set-id"]
 
-        run = ALMRun(
-            id=int(data.get("id", 0)),
-            test_instance_id=test_instance_id,
-            status=status,
-            comment=comment,
-            execution_date=data.get("execution-date"),
-            executor=data.get("owner", self.username),
-        )
+        attempt_results = []
+        for field_name in cycle_id_field_names:
+            attempt_fields = fields.copy()
+            if cycle_id is not None:
+                attempt_fields[field_name] = str(cycle_id)
 
-        logger.info(f"ALM: Test-Run erstellt: ID={run.id}, Status={status}")
-        return run
+            xml = self._build_entity_xml("run", attempt_fields)
+            logger.debug(f"ALM: Versuche Run-Erstellung mit {field_name}={cycle_id}")
+
+            try:
+                root = await self._request("POST", "/runs", body=xml)
+                data = self._parse_entity(root)
+
+                run = ALMRun(
+                    id=int(data.get("id", 0)),
+                    test_instance_id=test_instance_id,
+                    status=status,
+                    comment=comment,
+                    execution_date=data.get("execution-date"),
+                    executor=data.get("owner", self.username),
+                )
+
+                logger.info(f"ALM: Test-Run erstellt mit {field_name}={cycle_id}: ID={run.id}, Status={status}")
+                return run
+
+            except ALMError as e:
+                error_msg = str(e)
+                attempt_results.append({
+                    "field_name": field_name,
+                    "cycle_id": cycle_id,
+                    "error": error_msg
+                })
+                logger.debug(f"ALM: Feldname '{field_name}' fehlgeschlagen: {error_msg[:100]}")
+                continue  # Versuche nächstes Feld
+
+        # Alle Versuche fehlgeschlagen - aussagekräftige Error-Message zusammenstellen
+        if attempt_results:
+            error_details = "\n".join([
+                f"  - Versuch mit '{r['field_name']}': {r['error'][:150]}"
+                for r in attempt_results
+            ])
+            error_msg = f"Run konnte mit keinem cycle-id Feldnamen erstellt werden:\n{error_details}"
+        else:
+            error_msg = "Run-Erstellung fehlgeschlagen (keine Versuche durchgeführt)"
+
+        logger.error(f"ALM: {error_msg}")
+        raise ALMError(error_msg)
 
     async def list_test_set_folders(self, parent_id: int = 0) -> List[ALMTestSetFolder]:
         """
