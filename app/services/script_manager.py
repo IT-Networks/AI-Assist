@@ -45,6 +45,7 @@ class Script:
     parameters: Dict[str, str] = field(default_factory=dict)
     tags: List[str] = field(default_factory=list)
     file_path: Optional[str] = None
+    requirements: List[str] = field(default_factory=list)  # pip packages to install
 
 
 @dataclass
@@ -90,7 +91,13 @@ class ScriptValidator:
     def __init__(self):
         config = settings.script_execution
         self.allowed_imports = set(config.allowed_imports)
-        self.blocked_patterns = [re.compile(p) for p in config.blocked_patterns]
+        self.allowed_file_paths = config.allowed_file_paths
+        # Wenn erlaubte Dateipfade konfiguriert sind, entferne den generischen open-write Blocker
+        # Der _safe_open() Guard in der Ausführung übernimmt die Sicherheitsprüfung
+        patterns = list(config.blocked_patterns)
+        if config.allowed_file_paths:
+            patterns = [p for p in patterns if "open" not in p]
+        self.blocked_patterns = [re.compile(p) for p in patterns]
 
     def validate(self, code: str) -> ValidationResult:
         """
@@ -207,18 +214,26 @@ class ScriptStorage:
                     last_executed TEXT,
                     execution_count INTEGER DEFAULT 0,
                     parameters TEXT,
-                    tags TEXT
+                    tags TEXT,
+                    requirements TEXT DEFAULT '[]'
                 )
             """)
             con.execute("CREATE INDEX IF NOT EXISTS idx_scripts_name ON scripts(name)")
             con.execute("CREATE INDEX IF NOT EXISTS idx_scripts_created ON scripts(created_at)")
+
+            # Migration: requirements column für existierende Datenbanken hinzufügen
+            try:
+                con.execute("ALTER TABLE scripts ADD COLUMN requirements TEXT DEFAULT '[]'")
+            except Exception:
+                pass  # Spalte existiert bereits
 
     def save(
         self,
         code: str,
         name: str,
         description: str,
-        parameters: Dict[str, str] = None
+        parameters: Dict[str, str] = None,
+        requirements: List[str] = None
     ) -> Script:
         """Speichert ein Script."""
         script_id = str(uuid.uuid4())[:8]
@@ -241,8 +256,8 @@ Erstellt: {datetime.now().isoformat()}
         con = self._get_connection()
         with con:
             con.execute("""
-                INSERT INTO scripts (id, name, description, file_name, created_at, parameters, tags)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
+                INSERT INTO scripts (id, name, description, file_name, created_at, parameters, tags, requirements)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             """, (
                 script_id,
                 name,
@@ -250,7 +265,8 @@ Erstellt: {datetime.now().isoformat()}
                 file_name,
                 datetime.now().isoformat(),
                 json.dumps(parameters or {}),
-                json.dumps([])
+                json.dumps([]),
+                json.dumps(requirements or [])
             ))
 
         logger.info(f"Script gespeichert: {script_id} ({name})")
@@ -262,7 +278,8 @@ Erstellt: {datetime.now().isoformat()}
             code=code,
             created_at=datetime.now(),
             parameters=parameters or {},
-            file_path=str(file_path)
+            file_path=str(file_path),
+            requirements=requirements or []
         )
 
     def get(self, script_id: str) -> Optional[Script]:
@@ -298,7 +315,8 @@ Erstellt: {datetime.now().isoformat()}
             execution_count=row['execution_count'],
             parameters=json.loads(row['parameters'] or '{}'),
             tags=json.loads(row['tags'] or '[]'),
-            file_path=str(file_path)
+            file_path=str(file_path),
+            requirements=json.loads(row.get('requirements') or '[]')
         )
 
     def list_all(self, filter_text: str = None, limit: int = 50) -> List[Script]:
@@ -331,7 +349,8 @@ Erstellt: {datetime.now().isoformat()}
                 execution_count=row['execution_count'],
                 parameters=json.loads(row['parameters'] or '{}'),
                 tags=json.loads(row['tags'] or '[]'),
-                file_path=str(file_path) if file_path.exists() else None
+                file_path=str(file_path) if file_path.exists() else None,
+                requirements=json.loads(row.get('requirements') or '[]')
             ))
         return scripts
 
@@ -450,10 +469,25 @@ class ScriptExecutor:
         """
         start_time = datetime.now()
 
-        # Wrapper-Code erstellen der args injiziert
-        wrapper_code = self._create_wrapper(script.code, args or {})
+        # 1. Requirements installieren (WICHTIG: muss vor Wrapper creation sein)
+        if script.requirements:
+            install_error = await self._install_requirements(script.requirements)
+            if install_error:
+                return ExecutionResult(
+                    success=False,
+                    stdout='',
+                    stderr='',
+                    error=f"Dependency-Installation fehlgeschlagen: {install_error}"
+                )
 
-        # Temporäre Datei erstellen
+        # 2. Wrapper-Code erstellen mit injizierten args und allowed file paths
+        wrapper_code = self._create_wrapper(
+            script.code,
+            args or {},
+            allowed_paths=self.config.allowed_file_paths
+        )
+
+        # 3. Temporäre Datei erstellen
         with tempfile.NamedTemporaryFile(
             mode='w',
             suffix='.py',
@@ -480,11 +514,102 @@ class ScriptExecutor:
             except Exception:
                 pass
 
-    def _create_wrapper(self, code: str, args: Dict[str, Any]) -> str:
-        """Erstellt Wrapper-Code mit injizierten Argumenten."""
-        args_json = json.dumps(args, ensure_ascii=False)
+    async def _install_requirements(self, requirements: List[str]) -> Optional[str]:
+        """
+        Installiert pip-Pakete aus konfiguriertem Nexus-Index.
 
-        wrapper = f'''# === AUTO-GENERATED WRAPPER ===
+        Args:
+            requirements: Liste von Package-Spezifikationen (z.B. ['openpyxl==3.1.2'])
+
+        Returns:
+            None bei Erfolg, Error-String bei Fehler
+        """
+        if not requirements:
+            return None
+
+        if not self.config.pip_install_enabled:
+            return "pip_install_enabled=False in ScriptExecutionConfig"
+
+        if not self.config.pip_index_url:
+            return "pip_index_url nicht konfiguriert in ScriptExecutionConfig"
+
+        import sys
+        cmd = [
+            sys.executable, '-m', 'pip', 'install',
+            '--index-url', self.config.pip_index_url,
+            '--no-deps',  # Verhindert transitive Deps von public PyPI
+            '--quiet',
+        ]
+
+        if self.config.pip_trusted_host:
+            cmd += ['--trusted-host', self.config.pip_trusted_host]
+
+        if self.config.pip_cache_requirements:
+            cmd += ['--cache-dir', self.config.pip_cache_dir]
+        else:
+            cmd += ['--no-cache-dir']
+
+        cmd += requirements
+
+        try:
+            process = await asyncio.create_subprocess_exec(
+                *cmd,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE
+            )
+
+            _, stderr = await asyncio.wait_for(
+                process.communicate(),
+                timeout=self.config.pip_install_timeout_seconds
+            )
+
+            if process.returncode != 0:
+                return f"pip install fehlgeschlagen: {stderr.decode('utf-8', errors='replace')[:500]}"
+
+            logger.info(f"pip install erfolgreich: {requirements}")
+            return None
+
+        except asyncio.TimeoutError:
+            return f"pip install Timeout nach {self.config.pip_install_timeout_seconds}s"
+        except Exception as e:
+            return f"pip install Fehler: {str(e)}"
+
+    def _create_wrapper(self, code: str, args: Dict[str, Any], allowed_paths: List[str] = None) -> str:
+        """Erstellt Wrapper-Code mit injizierten Argumenten und Sicherheits-Guard."""
+        args_json = json.dumps(args, ensure_ascii=False)
+        paths_json = json.dumps(allowed_paths or [], ensure_ascii=False)
+
+        # Wenn Dateipfade konfiguriert sind, injiziere _safe_open() Guard
+        if allowed_paths:
+            wrapper = f'''# === AUTO-GENERATED WRAPPER ===
+import json
+import builtins as _b
+import pathlib as _pathlib
+
+# Injizierte Argumente
+SCRIPT_ARGS = json.loads({repr(args_json)})
+ALLOWED_FILE_PATHS = json.loads({repr(paths_json)})
+
+# Sicheres open() - prüft Pfade gegen Whitelist bei Schreib-Modi
+_orig_open = _b.open
+def _safe_open(file, mode="r", *args, **kwargs):
+    write_modes = set("waxWAX")
+    if any(c in str(mode) for c in write_modes):
+        abs_file = str(_pathlib.Path(file).resolve())
+        if not any(abs_file.startswith(str(_pathlib.Path(p).resolve())) for p in ALLOWED_FILE_PATHS):
+            raise PermissionError(
+                f"File write blocked: {{abs_file!r}} not in allowed_file_paths. Allowed: {{ALLOWED_FILE_PATHS}}"
+            )
+    return _orig_open(file, mode, *args, **kwargs)
+_b.open = _safe_open
+
+# === USER SCRIPT START ===
+{code}
+# === USER SCRIPT END ===
+'''
+        else:
+            # Keine Dateipfade konfiguriert - einfacher Wrapper ohne Guard
+            wrapper = f'''# === AUTO-GENERATED WRAPPER ===
 import json
 import sys
 
@@ -587,7 +712,8 @@ class ScriptManager:
         code: str,
         name: str,
         description: str,
-        parameters: Dict[str, str] = None
+        parameters: Dict[str, str] = None,
+        requirements: List[str] = None
     ) -> Tuple[Script, ValidationResult]:
         """
         Validiert und speichert ein Script.
@@ -597,6 +723,7 @@ class ScriptManager:
             name: Kurzer Name für das Script
             description: Beschreibung was das Script macht
             parameters: Parameter-Definitionen {name: description}
+            requirements: pip-Packages zum Installieren vor Ausführung
 
         Returns:
             Tuple aus (Script, ValidationResult)
@@ -610,9 +737,9 @@ class ScriptManager:
             raise ScriptSecurityError(validation.errors)
 
         # 2. Speichern
-        script = self.storage.save(code, name, description, parameters)
+        script = self.storage.save(code, name, description, parameters, requirements)
 
-        logger.info(f"Script generiert und gespeichert: {script.id} ({name})")
+        logger.info(f"Script generiert und gespeichert: {script.id} ({name}), requirements={requirements}")
         return script, validation
 
     async def execute(

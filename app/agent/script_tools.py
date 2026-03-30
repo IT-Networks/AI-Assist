@@ -32,6 +32,7 @@ async def handle_generate_script(
     name: str,
     description: str,
     parameters: Dict[str, str] = None,
+    requirements: List[str] = None,
     **kwargs
 ) -> ToolResult:
     """
@@ -42,19 +43,48 @@ async def handle_generate_script(
     """
     try:
         manager = get_script_manager()
+        config = settings.script_execution
+
+        # Validierung von requirements
+        if requirements:
+            if not config.pip_install_enabled:
+                return ToolResult(success=False,
+                    error="requirements angegeben aber pip_install_enabled=False in ScriptExecutionConfig")
+
+            # Package-Namen validieren (verhindert Argument-Injection)
+            import re as _re
+            valid_pkg = _re.compile(r'^[A-Za-z0-9_.\-]+(==|>=|<=|~=|!=|>|<)[A-Za-z0-9_.]+$|^[A-Za-z0-9_.\-]+$')
+            for pkg in requirements:
+                if not valid_pkg.match(pkg.strip()):
+                    return ToolResult(success=False,
+                        error=f"Ungültiger Package-Name: {pkg!r}. Format: 'package==1.2.3' oder 'package'")
+
+            # Package-Namen müssen in allowed_imports sein (Admin-Freigabe)
+            for pkg in requirements:
+                pkg_name = _re.split(r'[>=<!~]', pkg)[0].strip().lower().replace('-', '_')
+                if pkg_name not in config.allowed_imports:
+                    return ToolResult(success=False,
+                        error=f"Paket '{pkg_name}' nicht in allowed_imports. "
+                               f"Admin muss es zuerst in ScriptExecutionConfig eintragen.")
 
         # Validieren und speichern
         script, validation = await manager.generate_and_save(
             code=code,
             name=name,
             description=description,
-            parameters=parameters
+            parameters=parameters,
+            requirements=requirements
         )
 
         # Warnungen formatieren
         warnings_text = ""
         if validation.warnings:
             warnings_text = "\n⚠️ Warnungen:\n" + "\n".join(f"  - {w}" for w in validation.warnings)
+
+        # Requirements formatieren
+        requirements_text = ""
+        if requirements:
+            requirements_text = "\n📦 pip-Packages:\n" + "\n".join(f"  - {r}" for r in requirements)
 
         result_data = {
             "script_id": script.id,
@@ -63,7 +93,8 @@ async def handle_generate_script(
             "file_path": script.file_path,
             "code": code,
             "imports_used": validation.imports_used,
-            "warnings": validation.warnings
+            "warnings": validation.warnings,
+            "requirements": requirements or []
         }
 
         return ToolResult(
@@ -72,7 +103,7 @@ async def handle_generate_script(
 
 📝 Script-ID: {script.id}
 📁 Pfad: {script.file_path}
-📦 Verwendete Imports: {', '.join(validation.imports_used) if validation.imports_used else 'keine'}
+📦 Verwendete Imports: {', '.join(validation.imports_used) if validation.imports_used else 'keine'}{requirements_text}
 {warnings_text}
 
 Das Script ist bereit zur Ausführung. Verwende `execute_python_script` mit script_id="{script.id}" um es auszuführen.""",
@@ -316,6 +347,14 @@ Das Script kann über SCRIPT_ARGS auf übergebene Argumente zugreifen.""",
             name="parameters",
             type="object",
             description="Parameter-Definitionen als {name: beschreibung} für Dokumentation",
+            required=False
+        ),
+        ToolParameter(
+            name="requirements",
+            type="array",
+            items={"type": "string"},
+            description="pip-Pakete die vor Ausführung installiert werden (z.B. ['openpyxl==3.1.2', 'xlrd']). "
+                        "Nur verfügbar wenn pip_install_enabled=True in Config. Pakete müssen in allowed_imports sein.",
             required=False
         ),
     ],

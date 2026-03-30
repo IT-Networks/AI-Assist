@@ -1223,6 +1223,17 @@ class ScriptExecutionConfig(BaseModel):
     timeout_seconds: int = 30                 # Max. Ausführungszeit
     max_output_size_kb: int = 256             # Max. stdout/stderr in KB
 
+    # Dateisystem-Zugriff für Scripts
+    allowed_file_paths: List[str] = []        # Pfade auf die Scripte zugreifen dürfen (leer = kein Zugriff)
+
+    # pip install aus internem Nexus
+    pip_install_enabled: bool = False         # pip install vor Script-Ausführung erlauben
+    pip_index_url: str = ""                   # Nexus PyPI URL (z.B. https://nexus.intern/repository/pypi/)
+    pip_trusted_host: str = ""                # Trusted Host für pip (z.B. nexus.intern)
+    pip_install_timeout_seconds: int = 60     # Timeout für pip install
+    pip_cache_requirements: bool = True       # pip-Cache verwenden (schneller bei Wiederholungen)
+    pip_cache_dir: str = "./scripts/.pip_cache"  # Pip-Cache-Verzeichnis
+
 
 class GitHubConfig(BaseModel):
     """GitHub Enterprise Server Konfiguration (intern gehostet)."""
@@ -1471,6 +1482,17 @@ class Settings(BaseModel):
             self.servicenow.username = os.getenv("SERVICENOW_USERNAME")
         if os.getenv("SERVICENOW_PASSWORD"):
             self.servicenow.password = os.getenv("SERVICENOW_PASSWORD")
+        # Script Execution Env-Overrides
+        if os.getenv("SCRIPT_ALLOWED_FILE_PATHS"):
+            sep = ';' if os.name == 'nt' else ':'
+            self.script_execution.allowed_file_paths = [
+                p.strip() for p in os.getenv("SCRIPT_ALLOWED_FILE_PATHS").split(sep) if p.strip()
+            ]
+        if os.getenv("SCRIPT_PIP_INDEX_URL"):
+            self.script_execution.pip_index_url = os.getenv("SCRIPT_PIP_INDEX_URL")
+            self.script_execution.pip_install_enabled = True
+        if os.getenv("SCRIPT_PIP_TRUSTED_HOST"):
+            self.script_execution.pip_trusted_host = os.getenv("SCRIPT_PIP_TRUSTED_HOST")
         return self
 
 
