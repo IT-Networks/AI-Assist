@@ -1012,7 +1012,7 @@ def register_alm_tools(registry: ToolRegistry) -> int:
         name: str = kwargs.get("name", "")
         folder_id: int = kwargs.get("folder_id", 0)
         description: str = kwargs.get("description", "")
-        user_01: str = kwargs.get("user_01", "Nur intern")
+        user_01: str = kwargs.get("user_01", "Nur Intern")
         confirmed: bool = kwargs.get("_confirmed", False)
 
         if not name:
@@ -1105,9 +1105,9 @@ def register_alm_tools(registry: ToolRegistry) -> int:
             ToolParameter(
                 name="user_01",
                 type="string",
-                description="Custom Field 'Anzeige' - Sichtbarkeit des Test-Sets: 'Extern', 'Nur intern', oder 'Sparkasse' (Default: 'Nur intern')",
+                description="Custom Field 'Anzeige' - Sichtbarkeit des Test-Sets: 'Extern', 'Nur Intern', oder 'Sparkasse' (Default: 'Nur Intern')",
                 required=False,
-                enum=["Extern", "Nur intern", "Sparkasse"],
+                enum=["Extern", "Nur Intern", "Sparkasse"],
             ),
         ],
         handler=alm_create_test_set,

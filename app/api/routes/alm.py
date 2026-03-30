@@ -67,7 +67,7 @@ class ALMTestSetResponse(BaseModel):
     folder_id: int = 0
     status: str = ""
     description: str = ""
-    user_01: str = "Nur intern"  # Custom Field: Anzeige (Extern, Nur intern, Sparkasse)
+    user_01: str = "Nur Intern"  # Custom Field: Anzeige (Extern, Nur Intern, Sparkasse)
 
 
 @router.get("/status", response_model=ALMStatusResponse)
