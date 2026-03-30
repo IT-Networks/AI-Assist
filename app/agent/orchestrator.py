@@ -39,6 +39,8 @@ from app.agent.orchestration.types import (
     ToolCall,
     TokenUsage,
     MCP_EVENT_TYPE_MAPPING,
+    OperationRecord,
+    OperationStatus,
 )
 from app.agent.orchestration.utils import (
     get_model_context_limit as _get_model_context_limit,
@@ -145,6 +147,49 @@ from app.utils.token_counter import estimate_tokens, estimate_messages_tokens, t
 # Tool Parser: _parse_text_tool_calls
 # Command Parser: parse_mcp_force_capability, parse_slash_command, check_continue_markers
 # ══════════════════════════════════════════════════════════════════════════════
+
+
+def _build_operation_status_hint(state: "AgentState") -> str:
+    """
+    Erzeugt eine Übersicht durchgeführter/abgelehnter Write-Operationen.
+
+    Dies wird als System-Message injiziert damit die KI:
+    - Nicht automatisch abgeschlossene Operationen wiederholt
+    - Weiß dass abgelehnte Operationen NICHT ohne neue Anweisung erneut ausgeführt werden
+    - Den aktuellen Kontext der Session versteht
+
+    Returns:
+        String mit Statusübersicht (leer wenn keine Operationen)
+    """
+    if not state.completed_operations:
+        return ""
+
+    from app.agent.orchestration.types import OperationStatus
+
+    lines = ["## Status durchgeführter Operationen in dieser Session:\n"]
+    for op in state.completed_operations:
+        if op.status == OperationStatus.COMPLETED:
+            icon = "✅"
+            summary = f"erfolgreich - {op.result_summary}" if op.result_summary else "erfolgreich"
+        elif op.status == OperationStatus.REJECTED:
+            icon = "❌"
+            summary = "ABGELEHNT vom Benutzer - diese Operation NICHT wiederholen!"
+        else:  # FAILED
+            icon = "⚠️"
+            summary = f"fehlgeschlagen - {op.result_summary}" if op.result_summary else "fehlgeschlagen"
+
+        # Kurze Parameter-Zusammenfassung (max 3 Parameter)
+        param_str = ", ".join(
+            f"{k}={repr(v)[:30]}"
+            for k, v in list(op.parameters.items())[:3]
+        )
+        lines.append(f"{icon} {op.tool_name}({param_str}): {summary}")
+
+    lines.append(
+        "\n⚠️ WICHTIG: ❌ ABGELEHNTE Operationen dürfen NICHT automatisch wiederholt werden!"
+        " Nur bei neuer expliziter Anweisung des Users."
+    )
+    return "\n".join(lines)
 
 
 class AgentOrchestrator:
@@ -1042,6 +1087,13 @@ class AgentOrchestrator:
             if budget_hint:
                 messages.append({"role": "system", "content": budget_hint})
                 logger.debug(f"[agent] Budget-Hint injiziert (Level: {state.tool_budget.level.value})")
+
+        # Operation-Status-Hinweis: Übersicht abgeschlossener/abgelehnter Operationen
+        op_hint = _build_operation_status_hint(state)
+        if op_hint:
+            messages.append({"role": "system", "content": op_hint})
+            budget.set("memory", budget.used_memory + estimate_tokens(op_hint))
+            logger.debug(f"[agent] Operation-Status-Hint injiziert ({len(state.completed_operations)} Operationen)")
 
         # Manuell vom Nutzer ausgewählte Kontext-Elemente (Explorer-Chips)
         if context_selection:
@@ -2192,6 +2244,24 @@ class AgentOrchestrator:
                                     result_msg = f"Datei erfolgreich geschrieben: {path}"
                                     context_msg = f"[{tool_call.name}] Ausgeführt: {path}"
 
+                                # NEU: Operation als COMPLETED tracken
+                                clean_params = {
+                                    k: v for k, v in result.confirmation_data.get("params", {}).items()
+                                    if not k.startswith("_")
+                                }
+                                if not clean_params:
+                                    # Fallback: Nimm alle außer special keys
+                                    clean_params = {
+                                        k: v for k, v in result.confirmation_data.items()
+                                        if not k.startswith("_") and k not in ("action", "description", "preview", "operation", "files", "path")
+                                    }
+                                state.completed_operations.append(OperationRecord(
+                                    tool_name=result.confirmation_data.get("action", tool_call.name),
+                                    parameters=clean_params,
+                                    status=OperationStatus.COMPLETED,
+                                    result_summary=str(confirm_msg)[:200],
+                                ))
+
                                 yield AgentEvent(AgentEventType.CONFIRMED, {
                                     "id": tool_call.id,
                                     "message": confirm_msg
@@ -2211,6 +2281,23 @@ class AgentOrchestrator:
                                     "data": confirm_msg
                                 })
                             else:
+                                # NEU: Operation als FAILED tracken
+                                clean_params = {
+                                    k: v for k, v in result.confirmation_data.get("params", {}).items()
+                                    if not k.startswith("_")
+                                }
+                                if not clean_params:
+                                    clean_params = {
+                                        k: v for k, v in result.confirmation_data.items()
+                                        if not k.startswith("_") and k not in ("action", "description", "preview", "operation", "files", "path")
+                                    }
+                                state.completed_operations.append(OperationRecord(
+                                    tool_name=result.confirmation_data.get("action", tool_call.name),
+                                    parameters=clean_params,
+                                    status=OperationStatus.FAILED,
+                                    result_summary=str(exec_result.error)[:200],
+                                ))
+
                                 yield AgentEvent(AgentEventType.ERROR, {
                                     "id": tool_call.id,
                                     "error": exec_result.error
@@ -2230,6 +2317,23 @@ class AgentOrchestrator:
                                 })
                         elif not blocked_by_mode:
                             # User hat abgelehnt (nicht blockiert durch Mode)
+                            # NEU: Operation als REJECTED tracken
+                            clean_params = {
+                                k: v for k, v in result.confirmation_data.get("params", {}).items()
+                                if not k.startswith("_")
+                            }
+                            if not clean_params:
+                                clean_params = {
+                                    k: v for k, v in result.confirmation_data.items()
+                                    if not k.startswith("_") and k not in ("action", "description", "preview", "operation", "files", "path")
+                                }
+                            state.completed_operations.append(OperationRecord(
+                                tool_name=result.confirmation_data.get("action", tool_call.name),
+                                parameters=clean_params,
+                                status=OperationStatus.REJECTED,
+                                result_summary="Vom Benutzer abgelehnt",
+                            ))
+
                             yield AgentEvent(AgentEventType.CANCELLED, {
                                 "id": tool_call.id,
                                 "message": "Operation abgebrochen"

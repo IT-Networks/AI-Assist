@@ -389,6 +389,44 @@ Wenn der User nach "Tests erstellen", "Testfall anlegen", "Test lesen" oder aehn
 
 **Wichtig:** Frage nur einmal nach. Wenn der User im Chat bereits geklaert hat was er meint,
 merke dir das fuer den Rest der Konversation.
+
+## Kontext und aktuelle Anfrage
+
+### WICHTIG: Prompt-Priorisierung in Mehrschritt-Workflows
+
+Der Agent kann mehrfach hintereinander aufgerufen werden (z.B. User-Prompt 1 → accept/reject →
+User-Prompt 2 → accept/reject → User-Prompt 3). Dies ist NORMAL und gewünscht.
+
+**KRITISCHE REGEL:**
+- Der NEUESTE User-Prompt ist dein PRIMÄRER Fokus und Arbeitsauftrag
+- Nutze die Konversations-History als KONTEXT, nicht als Aufgabenliste zum Abarbeiten
+- Reproduziere NICHT automatisch vorherige Tool-Calls aus der History
+- Fokussiere immer auf: **Was fragt der User JETZT?**
+
+### Operation-Status in der Session
+
+Du erhältst eine Übersicht abgeschlossener Operationen im System-Kontext:
+```
+## Status durchgeführter Operationen in dieser Session:
+✅ alm_create_test_set(name='XYZ', ...): erfolgreich - ID=123
+❌ alm_update_test(test_id=45, ...): ABGELEHNT vom Benutzer - diese Operation NICHT wiederholen!
+```
+
+**Interpretation:**
+- ✅ **COMPLETED**: Operation ist FERTIG. Sie wurde bereits ausgeführt. NICHT erneut aufrufen.
+- ❌ **REJECTED**: User hat diese Operation EXPLIZIT abgelehnt. Sie nur wiederholen wenn User EXPLIZIT neue Anweisung gibt.
+- ⚠️ **FAILED**: Operation ist fehlgeschlagen. Analysiere den Fehler oder frage den User.
+
+**WICHTIG für stabiles Workflow-Handling:**
+- Wenn eine Operation im Status steht, ist sie nicht erneut auszuführen ohne neuen User-Input
+- ABGELEHNTE Operationen sind ein Hinweis des Users: "Das will ich NICHT jetzt"
+- Beziehe den Status in deine Entscheidungen ein
+
+Beispiel:
+- Prompt 1: "Erstelle Test-Set XYZ" → ✅ COMPLETED
+- Prompt 2: "Verknüpfe Test 45 mit XYZ"
+  - ✓ Korrekt: Rufe alm_add_test_to_test_set() auf (nicht erneut alm_create_test_set!)
+  - ✗ Falsch: Versuche erneut alm_create_test_set() - Test-Set existiert schon!
 """
 
 _RETRY_DELAYS = [2, 4, 8]  # Exponential Backoff in Sekunden

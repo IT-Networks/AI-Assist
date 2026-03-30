@@ -147,6 +147,23 @@ class AgentEvent:
         }
 
 
+class OperationStatus(str, Enum):
+    """Status einer dokumentierten Operation."""
+    COMPLETED = "completed"  # Erfolgreich ausgeführt
+    REJECTED = "rejected"    # Vom User abgelehnt
+    FAILED = "failed"        # Fehler bei Ausführung
+
+
+@dataclass
+class OperationRecord:
+    """Dokumentiert den Status einer Write-Operation in der Session."""
+    tool_name: str                 # z.B. "alm_create_test_set", "write_file"
+    parameters: Dict[str, Any]     # Übergabewerte (ohne _confirmed)
+    status: OperationStatus        # COMPLETED / REJECTED / FAILED
+    result_summary: str = ""       # Kurze Zusammenfassung des Ergebnisses (max 200 Zeichen)
+    timestamp: float = field(default_factory=lambda: __import__("time").time())
+
+
 @dataclass
 class ToolCall:
     """Ein Tool-Call vom LLM."""
@@ -167,6 +184,7 @@ class AgentState:
     active_skill_ids: Set[str] = field(default_factory=set)
     pending_confirmation: Optional[ToolCall] = None
     tool_calls_history: List[ToolCall] = field(default_factory=list)
+    completed_operations: List[OperationRecord] = field(default_factory=list)  # Session-scoped: Write-Operations tracking
     context_items: List[str] = field(default_factory=list)
     # Konversations-Historie fuer Multi-Turn Chats
     messages_history: List[Dict[str, str]] = field(default_factory=list)
