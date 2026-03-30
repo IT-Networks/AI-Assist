@@ -1075,11 +1075,13 @@ def register_alm_tools(registry: ToolRegistry) -> int:
     registry.register(Tool(
         name="alm_create_test_set",
         description=(
-            "Erstellt ein neues Test-Set im TEST LAB von HP ALM. "
-            "WICHTIG: Test-Sets liegen im Test Lab (NICHT im Test Pool!). "
-            "Die folder_id muss eine Test Lab Folder-ID sein (aus alm_list_test_lab_folders). "
-            "Nach dem Erstellen koennen Testfaelle mit alm_add_test_to_test_set zugeordnet werden. "
-            "Erfordert Bestaetigung durch den User."
+            "ERSTELLT ein NEUES Test-Set im TEST LAB von HP ALM (nicht zum Aendern vorhandener Test-Sets!). "
+            "Verwende dieses Tool NUR wenn du ein brandneues Test-Set anlegen moechtest. "
+            "Wenn ein Test-Set bereits existiert, verwende NICHT dieses Tool - verwende stattdessen alm_add_test_to_test_set "
+            "um Testfaelle hinzuzufuegen! "
+            "Parameter: name = Test-Set-Name, folder_id = Test Lab Folder-ID (aus alm_list_test_lab_folders). "
+            "Erfordert Bestaetigung durch den User. "
+            "Nach dem Erstellen eines neuen Test-Sets koennen Testfaelle mit alm_add_test_to_test_set hinzugefuegt werden."
         ),
         category=ToolCategory.DEVOPS,
         is_write_operation=True,
@@ -1187,10 +1189,14 @@ def register_alm_tools(registry: ToolRegistry) -> int:
     registry.register(Tool(
         name="alm_add_test_to_test_set",
         description=(
-            "Fuegt einen Testfall aus dem Test Pool einem Test-Set im Test Lab hinzu. "
-            "Erstellt eine Test-Instance die dann im Test Lab ausgefuehrt werden kann. "
-            "test_id = Testfall-ID aus dem Test Pool (alm_search_tests). "
+            "VERKNUEPFT einen Testfall aus dem Test Pool mit einem Test-Set im Test Lab. "
+            "Dies ist die Methode um eine Test-Instance zu erstellen - nachdem du ein Test-Set erstellt hast, "
+            "verwendest du dieses Tool um Testfaelle aus dem Test Pool hinzuzufuegen und sie im Test Lab auszufuehren. "
+            "WICHTIG: Verwende DIESES Tool um Testfaelle zu einem Test-Set hinzuzufuegen (nicht alm_create_test_set). "
+            "Parameter: "
+            "test_id = Testfall-ID aus dem Test Pool (alm_search_tests, alm_read_test), "
             "test_set_id = Test-Set-ID aus dem Test Lab (alm_list_test_sets). "
+            "Die Test-Instance wird dann im Test Lab sichtbar und kann ausgefuehrt werden. "
             "Erfordert Bestaetigung durch den User."
         ),
         category=ToolCategory.DEVOPS,
@@ -1199,13 +1205,13 @@ def register_alm_tools(registry: ToolRegistry) -> int:
             ToolParameter(
                 name="test_id",
                 type="integer",
-                description="Test-ID des Testfalls aus dem Test Pool",
+                description="Test-ID des Testfalls aus dem Test Pool (erhalte mit alm_search_tests oder alm_read_test)",
                 required=True,
             ),
             ToolParameter(
                 name="test_set_id",
                 type="integer",
-                description="Test-Set-ID im Test Lab (aus alm_list_test_sets)",
+                description="Test-Set-ID im Test Lab (erhalte mit alm_list_test_sets)",
                 required=True,
             ),
         ],
