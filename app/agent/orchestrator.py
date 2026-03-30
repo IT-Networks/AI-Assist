@@ -2017,7 +2017,7 @@ class AgentOrchestrator:
                         })
 
                         logger.info(f"[agent] suggest_answers displayed - waiting for user input")
-                        continue  # Process next tool if any
+                        break  # Stop processing more tools - wait for user response
                     # ────────────────────────────────────────────────────────
 
                     # Tool ausführen - MCP-Tools speziell behandeln
@@ -2636,6 +2636,12 @@ class AgentOrchestrator:
                                     })
 
                     state.tool_calls_history.append(tool_call)
+
+                # ── QUESTION-HANDLING: Wenn eine Frage ausstehend ist, nicht weiter LLM aufrufen ──
+                # Warte auf User-Response via POST /question-response
+                if state.pending_question:
+                    logger.info(f"[agent] Pending question detected - stopping iteration to wait for user input")
+                    break  # Exit iteration loop - don't call LLM again
 
                 # Messages für nächste Iteration aktualisieren
                 # Note: _truncate_result is imported from tool_executor module

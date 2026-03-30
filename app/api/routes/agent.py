@@ -54,6 +54,12 @@ class AgentConfirmRequest(BaseModel):
     confirmed: bool = Field(..., description="True = ausführen, False = abbrechen")
 
 
+class QuestionResponseRequest(BaseModel):
+    """Anfrage zur Beantwortung einer Frage vom suggest_answers Tool."""
+    tool_id: str = Field(..., description="ID des suggest_answers Tool-Calls")
+    answer: Optional[str] = Field(None, description="Benutzer-Antwort (freier Text oder Option-Label)")
+
+
 class AgentModeResponse(BaseModel):
     """Antwort mit aktuellem Agent-Modus."""
     session_id: str
@@ -319,6 +325,71 @@ async def confirm_operation(
             "message": f"Operation '{tool_call.name}' abgebrochen",
             "continue": True  # Auch bei Abbruch kann weitergemacht werden
         }
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Question Response Endpoint
+# ══════════════════════════════════════════════════════════════════════════════
+
+@router.post("/question-response/{session_id}")
+async def answer_question(
+    session_id: str,
+    request: QuestionResponseRequest
+) -> Dict[str, Any]:
+    """
+    Beantwortet eine Frage vom suggest_answers Tool.
+
+    Wird nach einem QUESTION Event aufgerufen wenn der Benutzer
+    eine der angebotenen Optionen auswählt oder eine Antwort eingibt.
+
+    Args:
+        session_id: Session-ID
+        request: tool_id und Benutzer-Antwort
+
+    Returns:
+        Status und Signal zum Fortfahren mit dem Chat
+    """
+    from app.agent.orchestrator import get_agent_orchestrator
+
+    orchestrator = get_agent_orchestrator()
+    state = orchestrator._get_state(session_id)
+
+    if not state.pending_question:
+        raise HTTPException(
+            status_code=400,
+            detail="Keine ausstehende Frage für diese Session"
+        )
+
+    tool_call = state.pending_question
+
+    # Validiere dass die tool_id passt
+    if tool_call.id != request.tool_id:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Tool-ID passt nicht: erwartet {tool_call.id}, erhalten {request.tool_id}"
+        )
+
+    # Benutzer-Antwort zur Message-Historie hinzufügen
+    # Format: "User selected: <option-label>" oder "User answered: <freetext>"
+    user_message = f"User selected: {request.answer}" if request.answer else "User skipped question"
+
+    state.messages_history.append({
+        "role": "user",
+        "content": user_message
+    })
+
+    # Tool-Call als beantwortet markieren
+    tool_call.confirmed = True
+    state.tool_calls_history.append(tool_call)
+
+    # Ausstehende Frage löschen
+    state.pending_question = None
+
+    return {
+        "status": "answered",
+        "message": f"Frage beantwortet: {request.answer}",
+        "continue": True  # Signal ans Frontend: weitere Anfrage starten
+    }
 
 
 # ══════════════════════════════════════════════════════════════════════════════
