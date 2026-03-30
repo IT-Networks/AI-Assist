@@ -1601,13 +1601,22 @@ class ALMClient:
         }
         if comment:
             fields["comments"] = comment
-        if cycle_id is not None:
-            # ALM API erwartet "test-cycle-id" (nicht "cycle-id")
-            fields["test-cycle-id"] = str(cycle_id)
+        # HINWEIS: cycle_id wird NICHT gesendet für runs!
+        # Die Test-Set-Beziehung ist über test-instance definiert.
+        # Wenn die Test-Instance gültig ist, weiß ALM automatisch das Test-Set.
 
         xml = self._build_entity_xml("run", fields)
-        root = await self._request("POST", "/runs", body=xml)
-        data = self._parse_entity(root)
+        logger.debug(f"ALM: XML für Run-Erstellung:\n{xml}")
+        try:
+            root = await self._request("POST", "/runs", body=xml)
+            data = self._parse_entity(root)
+        except ALMError as e:
+            # Bessere Error-Message mit Kontext
+            error_msg = str(e)
+            logger.error(f"ALM: Fehler beim Erstellen des Runs:\n{error_msg}")
+            # Debug: zeige welche Felder wir gesendet haben
+            logger.error(f"ALM: Verwendete Felder: {fields}")
+            raise ALMError(f"Fehler beim Erstellen des Test-Runs: {error_msg}\nGesendete Felder: {fields}")
 
         run = ALMRun(
             id=int(data.get("id", 0)),
