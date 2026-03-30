@@ -1980,36 +1980,44 @@ class AgentOrchestrator:
                     except Exception:
                         pass  # Task-Tracking-Fehler nicht propagieren
 
-                    # ── suggest_answers: Display-only Tool im Debug-Modus ────
+                    # ── suggest_answers: Display Questions & wait for User Response ────
                     if tool_call.name == "suggest_answers":
                         question = tool_call.arguments.get("question", "")
                         options = tool_call.arguments.get("options", [])
+
+                        # Store as pending question so agent knows it's waiting
+                        state.pending_question = tool_call
+
+                        # Emit QUESTION event with tool ID so frontend can match response back
                         yield AgentEvent(AgentEventType.QUESTION, {
                             "question": question,
                             "options": options,
+                            "tool_id": tool_call.id,  # Link response back to this question
                         })
+
                         result = ToolResult(
                             success=True,
-                            data={"status": "options_presented_to_user", "count": len(options)}
+                            data={
+                                "status": "question_displayed",
+                                "count": len(options),
+                                "waiting_for_user_input": True
+                            }
                         )
                         tool_call.result = result
                         has_used_tools = True
                         current_tool_calls_for_messages.append(tc)
-                        # WICHTIG: Tool-Call-ID muss mit der ID in tc übereinstimmen!
+                        state.tool_calls_history.append(tool_call)
+
+                        # Add to messages for LLM context
                         tc_id = tc.get("id") or tool_call.id
                         messages.append({
                             "role": "tool",
                             "tool_call_id": tc_id,
-                            "content": result.to_context()
+                            "content": f"Frage dem User angezeigt mit {len(options)} Optionen: {question}"
                         })
-                        state.tool_calls_history.append(tool_call)
-                        yield AgentEvent(AgentEventType.TOOL_RESULT, {
-                            "id": tc_id,
-                            "name": tool_call.name,
-                            "result": result.to_context()[:500],
-                            "success": True,
-                        })
-                        continue  # Nächsten Tool-Call verarbeiten
+
+                        logger.info(f"[agent] suggest_answers displayed - waiting for user input")
+                        continue  # Process next tool if any
                     # ────────────────────────────────────────────────────────
 
                     # Tool ausführen - MCP-Tools speziell behandeln

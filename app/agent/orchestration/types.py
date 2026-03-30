@@ -235,6 +235,8 @@ class AgentState:
     # Fehlerverfolgung: Erkennt wenn gleiche Tools wiederholt fehlschlagen
     last_failed_tool: Optional[str] = None  # Name des zuletzt fehlgeschlagenen Tools
     consecutive_failures: int = 0  # Anzahl aufeinanderfolgender Fehler des gleichen Tools
+    # Question handling: Wartet auf User-Antwort zu einer Frage
+    pending_question: Optional[ToolCall] = None  # Frage wartet auf User-Antwort
 
     def __post_init__(self):
         """Initialize entity_tracker if not provided."""
