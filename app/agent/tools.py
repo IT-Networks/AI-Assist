@@ -17,6 +17,42 @@ import logging
 logger = logging.getLogger(__name__)
 
 
+def _sanitize_error_message(error_text: str) -> str:
+    """
+    Entfernt Stacktraces aus Fehlermeldungen und behält nur die wesentliche Message.
+
+    Beispiele:
+    - "ValueError: test_instance_id erforderlich\n  File..." → "ValueError: test_instance_id erforderlich"
+    - "ALMError: Missing field: cycle-id\n  at line 123" → "ALMError: Missing field: cycle-id"
+
+    Args:
+        error_text: Rohe Fehlermeldung, möglicherweise mit Stacktrace
+
+    Returns:
+        Bereinigte Fehlermeldung (nur erste Zeile + ggf. zweite Zeile wenn Context)
+    """
+    if not error_text:
+        return error_text
+
+    lines = error_text.split('\n')
+
+    # Behalte nur die ersten 1-2 aussagekräftigen Zeilen
+    result_lines = []
+    for i, line in enumerate(lines[:3]):  # Prüfe erste 3 Zeilen
+        stripped = line.strip()
+        # Skip Zeilen die nur Traceback/Stack-Info enthalten
+        if any(x in stripped for x in ['File "', 'at line', 'Traceback', '    ', '  File']):
+            break
+        if stripped:
+            result_lines.append(stripped)
+
+    if result_lines:
+        return '\n'.join(result_lines)
+
+    # Fallback: erste Zeile
+    return lines[0] if lines else error_text
+
+
 class ToolCategory(str, Enum):
     """Kategorien von Tools."""
     SEARCH = "search"
@@ -50,7 +86,9 @@ class ToolResult:
     def to_context(self) -> str:
         """Konvertiert das Ergebnis in einen String für den LLM-Kontext."""
         if self.error:
-            result = f"[Fehler] {self.error}"
+            # Bereinige Fehler: entferne Stacktraces, behalte nur wesentliche Message
+            clean_error = _sanitize_error_message(self.error)
+            result = f"[Fehler] {clean_error}"
             if self.suggestions:
                 for s in self.suggestions:
                     result += f"\n  - {s.get('label', '')}"

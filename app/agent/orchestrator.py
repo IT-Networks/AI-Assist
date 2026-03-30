@@ -2217,23 +2217,23 @@ class AgentOrchestrator:
                             "content": suggestions_hint
                         })
                         logger.debug(f"[agent] Suggestions injected for {tool_call.name}: {len(result.suggestions)} options")
-                    elif not result.success and result.error and "erforderlich" in result.error.lower():
-                        # Wenn ein erforderliches Feld fehlt aber keine Suggestions vorhanden:
-                        # KI explizit auffordern mit dem User zu sprechen
-                        missing_field_hint = (
-                            f"⚠️ Das Tool '{tool_call.name}' meldet einen Fehler:\n"
-                            f"\"{result.error}\"\n\n"
-                            f"Es scheint dass erforderliche Informationen fehlen. "
-                            f"Bitte:\n"
-                            f"1. Erkläre dem Benutzer kurz welche Information fehlt\n"
-                            f"2. Frage ihn um die fehlende(n) Information(en)\n"
-                            f"3. Versuche das Tool NICHT erneut ohne neue Informationen vom User"
+                    elif not result.success and result.error:
+                        # Tool ist fehlgeschlagen - injiziere klare Anweisung
+                        # Dies gilt für ALLE fehlgeschlagenen Tools, nicht nur die mit "erforderlich"
+                        failed_tool_hint = (
+                            f"⚠️ Das Tool '{tool_call.name}' ist fehlgeschlagen:\n"
+                            f"Fehlermeldung: \"{result.error}\"\n\n"
+                            f"Bitte gehe wie folgt vor:\n"
+                            f"1. Lese die Fehlermeldung und versuche zu verstehen was schief ging\n"
+                            f"2. Wenn ein Feld oder Parameter fehlt: Frage den Benutzer danach\n"
+                            f"3. Wenn ein bekannter Fehler ist: Erklär es kurz und schlag eine Lösung vor\n"
+                            f"4. Versuche das Tool NICHT erneut ohne neue Informationen vom User oder ohne das Problem zu beheben"
                         )
                         messages.append({
                             "role": "system",
-                            "content": missing_field_hint
+                            "content": failed_tool_hint
                         })
-                        logger.debug(f"[agent] Missing field hint injected for {tool_call.name}: {result.error}")
+                        logger.debug(f"[agent] Failed tool hint injected for {tool_call.name}: {result.error[:100]}")
                     # ────────────────────────────────────────────────────────────
 
                     # Bestätigung benötigt?
