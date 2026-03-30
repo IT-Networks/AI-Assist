@@ -45,11 +45,16 @@ class ToolResult:
     error: Optional[str] = None
     requires_confirmation: bool = False
     confirmation_data: Optional[Dict] = None  # Für Diff-Preview etc.
+    suggestions: Optional[List[Dict]] = None  # Vorschläge für fehlende Felder
 
     def to_context(self) -> str:
         """Konvertiert das Ergebnis in einen String für den LLM-Kontext."""
         if self.error:
-            return f"[Fehler] {self.error}"
+            result = f"[Fehler] {self.error}"
+            if self.suggestions:
+                for s in self.suggestions:
+                    result += f"\n  - {s.get('label', '')}"
+            return result
         if isinstance(self.data, str):
             return self.data
         return json.dumps(self.data, ensure_ascii=False, indent=2)

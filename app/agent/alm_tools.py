@@ -915,9 +915,34 @@ def register_alm_tools(registry: ToolRegistry) -> int:
             return ToolResult(success=False, error="HP ALM ist nicht aktiviert")
 
         test_instance_id: int = kwargs.get("test_instance_id", 0)
+        test_set_id: int = kwargs.get("test_set_id", 0)
         status: str = kwargs.get("status", "")
         comment: str = kwargs.get("comment", "")
         confirmed: bool = kwargs.get("_confirmed", False)
+
+        # Wenn test_instance_id fehlt aber test_set_id vorhanden → Vorschläge laden
+        if not test_instance_id and test_set_id:
+            try:
+                client = get_alm_client()
+                instances = await client.get_test_instances(test_set_id)
+                if instances:
+                    suggestions = [
+                        {
+                            "label": f"Test-Instanz #{inst.id}: {inst.test_name} (Status: {inst.status})",
+                            "value": inst.id,
+                            "field": "test_instance_id",
+                        }
+                        for inst in instances
+                    ]
+                    return ToolResult(
+                        success=False,
+                        error=f"test_instance_id fehlt. Verfügbare Test-Instanzen in Test-Set {test_set_id}:",
+                        suggestions=suggestions,
+                    )
+                else:
+                    return ToolResult(success=False, error=f"Keine Test-Instanzen in Test-Set {test_set_id} gefunden")
+            except Exception as e:
+                logger.warning(f"Fehler beim Laden von Test-Instanzen: {e}")
 
         if not test_instance_id:
             return ToolResult(success=False, error="test_instance_id ist erforderlich")
@@ -943,12 +968,24 @@ def register_alm_tools(registry: ToolRegistry) -> int:
                 },
             )
 
+        # cycle_id für API bestimmen
+        cycle_id = test_set_id or None
+        if not cycle_id and test_instance_id:
+            try:
+                client = get_alm_client()
+                inst = await client.get_test_instance(test_instance_id)
+                if inst:
+                    cycle_id = inst.test_set_id
+            except Exception as e:
+                logger.warning(f"Fehler beim Laden von Test-Instance {test_instance_id}: {e}")
+
         try:
             client = get_alm_client()
             run = await client.create_run(
                 test_instance_id=test_instance_id,
                 status=status,
                 comment=comment,
+                cycle_id=cycle_id,
             )
 
             result = f"Test-Run erfolgreich erstellt!\n\n"
@@ -979,8 +1016,14 @@ def register_alm_tools(registry: ToolRegistry) -> int:
             ToolParameter(
                 name="test_instance_id",
                 type="integer",
-                description="Test-Instance-ID aus dem Test Lab",
-                required=True,
+                description="Test-Instance-ID aus dem Test Lab. Falls nicht bekannt, kann test_set_id angegeben werden um Vorschläge zu bekommen.",
+                required=False,
+            ),
+            ToolParameter(
+                name="test_set_id",
+                type="integer",
+                description="Test-Set-ID (cycle-id). Optional wenn test_instance_id bekannt. Falls nur test_set_id angegeben, werden verfügbare Test-Instanzen als Vorschläge zurückgegeben.",
+                required=False,
             ),
             ToolParameter(
                 name="status",

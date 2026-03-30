@@ -1496,11 +1496,42 @@ class ALMClient:
 
         return instances
 
+    async def get_test_instance(self, test_instance_id: int) -> Optional[ALMTestInstance]:
+        """
+        Laedt eine einzelne Test-Instance anhand ihrer ID.
+
+        Args:
+            test_instance_id: Test-Instance-ID
+
+        Returns:
+            ALMTestInstance oder None wenn nicht gefunden
+        """
+        self._check_configured()
+
+        try:
+            root = await self._request("GET", f"/test-instances/{test_instance_id}")
+            data = self._parse_entity(root)
+            test_name = data.get("test-config-name") or data.get("name", "")
+            return ALMTestInstance(
+                id=int(data.get("id", 0) or 0),
+                test_id=int(data.get("test-id", 0) or 0),
+                test_name=test_name,
+                test_set_id=int(data.get("cycle-id", 0) or 0),
+                status=data.get("status", "No Run"),
+                last_run_id=None,
+                exec_date=data.get("exec-date"),
+                tester=data.get("actual-tester", ""),
+            )
+        except Exception as e:
+            logger.warning(f"ALM: Test-Instance {test_instance_id} nicht gefunden: {e}")
+            return None
+
     async def create_run(
         self,
         test_instance_id: int,
         status: str,
         comment: str = "",
+        cycle_id: Optional[int] = None,
     ) -> ALMRun:
         """
         Erstellt einen Test-Run.
@@ -1509,6 +1540,7 @@ class ALMClient:
             test_instance_id: Test-Instance-ID
             status: Passed | Failed | Not Completed | Blocked
             comment: Kommentar zum Ergebnis
+            cycle_id: Test-Set-ID (cycle-id). Optional, wird in einigen QC-Installationen benötigt.
 
         Returns:
             Erstellter ALMRun
@@ -1528,6 +1560,8 @@ class ALMClient:
         }
         if comment:
             fields["comments"] = comment
+        if cycle_id is not None:
+            fields["cycle-id"] = str(cycle_id)
 
         xml = self._build_entity_xml("run", fields)
         root = await self._request("POST", "/runs", body=xml)

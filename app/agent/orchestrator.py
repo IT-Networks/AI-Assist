@@ -192,6 +192,33 @@ def _build_operation_status_hint(state: "AgentState") -> str:
     return "\n".join(lines)
 
 
+def _build_suggestions_hint(tool_name: str, suggestions: List[Dict]) -> str:
+    """
+    Erzeugt einen Hinweis für verfügbare Optionen bei fehlenden Feldern.
+
+    Der Hinweis wird als System-Message injiziert damit die KI dem User
+    die Vorschläge präsentieren kann.
+
+    Args:
+        tool_name: Name des Tools das Suggestions zurückgegeben hat
+        suggestions: Liste von Suggestion-Dicts mit 'label', 'value', 'field'
+
+    Returns:
+        String mit formatierten Vorschlägen
+    """
+    lines = [f"## Verfügbare Optionen für {tool_name}:\n"]
+    for s in suggestions:
+        label = s.get('label', '')
+        value = s.get('value', '')
+        field = s.get('field', 'unknown')
+        lines.append(f"  - {label}")
+    lines.append(
+        "\nBitte frage den User welche Option verwendet werden soll, "
+        "und führe dann das Tool erneut mit dem gewählten Wert aus."
+    )
+    return "\n".join(lines)
+
+
 class AgentOrchestrator:
     """
     Koordiniert den Agent-Loop ähnlich wie Claude Code.
@@ -2147,6 +2174,16 @@ class AgentOrchestrator:
                                 )
                         except Exception as e:
                             logger.debug(f"[agent] Result validation failed: {e}")
+                    # ────────────────────────────────────────────────────────────
+
+                    # ── Suggestions-Handling: Wenn Felder fehlen, Optionen injizieren ──
+                    if result.suggestions:
+                        suggestions_hint = _build_suggestions_hint(tool_call.name, result.suggestions)
+                        messages.append({
+                            "role": "system",
+                            "content": suggestions_hint
+                        })
+                        logger.debug(f"[agent] Suggestions injected for {tool_call.name}: {len(result.suggestions)} options")
                     # ────────────────────────────────────────────────────────────
 
                     # Bestätigung benötigt?
