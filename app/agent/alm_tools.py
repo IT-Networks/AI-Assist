@@ -1016,17 +1016,74 @@ def register_alm_tools(registry: ToolRegistry) -> int:
 
         # VALIDIERUNG: cycle_id ist erforderlich und muss > 0 sein
         if not cycle_id or cycle_id <= 0:
-            error_msg = (
-                f"❌ **Test-Set-ID (cycle_id) ist erforderlich und ungültig (aktuell: {cycle_id})**\n\n"
-                f"**Mögliche Lösungen:**\n"
-                f"1. Gib `test_set_id` direkt an (z.B. `test_set_id=123`)\n"
-                f"2. Wähle eine vorhandene Test-Instance aus (diese muss ein gültiges Test-Set haben)\n"
-                f"3. Erstelle zuerst ein Test-Set, dann eine Test-Instance darin\n\n"
-                f"**Hintergrund:**\n"
-                f"Die ALM API benötigt eine gültige Test-Set-ID (cycle-id) um Test-Runs zu erstellen. "
-                f"Diese wird normalerweise von der Test-Instance abgeleitet, ist aber jetzt ungültig."
-            )
-            return ToolResult(success=False, error=error_msg)
+            # Statt einfach zu fehlschlagen - versuche Test-Instances zu laden und frag den User
+            logger.warning(f"ALM: cycle_id ungültig ({cycle_id}), versuche Test-Instances zu laden...")
+
+            try:
+                client = get_alm_client()
+
+                # Wenn test_instance_id gegeben aber ungültig: Zeige andere Instances
+                if test_instance_id and test_instance_id > 0:
+                    error_msg = (
+                        f"❌ **Test-Instance {test_instance_id} hat ungültige Test-Set-ID**\n\n"
+                        f"Die Test-Instance konnte nicht mit einem gültigen Test-Set verknüpft werden.\n\n"
+                        f"**Was du tun kannst:**\n"
+                        f"1. Nutze `alm_list_test_sets` um alle Test-Sets zu sehen\n"
+                        f"2. Nutze `alm_search_test_instances test_set_id=<ID>` um Instances für ein Set zu finden\n"
+                        f"3. Probiere einen anderen test_instance_id oder test_set_id\n\n"
+                        f"Oder starte einfach noch mal neu - ich versuche beliebte Test-Sets zu ermitteln..."
+                    )
+
+                    # Versuche beliebte Test-Sets zu laden
+                    try:
+                        test_sets = await client.list_test_sets()
+                        if test_sets:
+                            suggestions = [
+                                {
+                                    "label": f"Test-Set: {ts.name} (ID: {ts.id})",
+                                    "value": ts.id,
+                                    "field": "test_set_id",
+                                }
+                                for ts in test_sets[:10]  # Top 10
+                            ]
+                            return ToolResult(
+                                success=False,
+                                error=f"Gültige Test-Set-ID erforderlich. Verfügbare Test-Sets:",
+                                suggestions=suggestions,
+                            )
+                    except Exception as e:
+                        logger.warning(f"Fehler beim Laden von Test-Sets: {e}")
+
+                    return ToolResult(success=False, error=error_msg)
+
+                # Wenn gar keine Instance gegeben: Lade alle verfügbaren
+                test_sets = await client.list_test_sets()
+                if test_sets:
+                    # Baue Vorschläge für Test-Sets
+                    suggestions = [
+                        {
+                            "label": f"Test-Set: {ts.name} (ID: {ts.id})",
+                            "value": ts.id,
+                            "field": "test_set_id",
+                        }
+                        for ts in test_sets[:15]
+                    ]
+                    return ToolResult(
+                        success=False,
+                        error="Test-Set-ID ist erforderlich. Verfügbare Test-Sets:",
+                        suggestions=suggestions,
+                    )
+                else:
+                    return ToolResult(success=False, error="Keine Test-Sets in ALM gefunden. Bitte erst ein Test-Set erstellen.")
+
+            except Exception as e:
+                logger.exception("Fehler beim Laden von ALM-Daten für Vorschläge")
+                return ToolResult(
+                    success=False,
+                    error=f"❌ Test-Set-ID ungültig und konnte nicht ermittelt werden.\n\n"
+                           f"**Bitte angeben:** test_set_id (Test-Set-ID aus ALM)\n\n"
+                           f"Fehler bei der Ermittlung: {str(e)}"
+                )
 
         try:
             client = get_alm_client()
