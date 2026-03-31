@@ -462,7 +462,7 @@ internal_fetch:
 # Container Sandbox - WSL Podman
 # Sichere Code-Ausführung in Podman-Containern innerhalb WSL Ubuntu
 docker_sandbox:
-  enabled: true
+  enabled: false
   image: python:3.11-slim
   custom_image: ''
   memory_limit: 512m

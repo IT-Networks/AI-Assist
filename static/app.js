@@ -4519,6 +4519,8 @@ function showSuggestions(question, options) {
       hideSuggestions();
       const input = document.getElementById('message-input');
       input.value = opt;
+      // Mark this as a suggestion response so sendMessage() bypasses the streamingState guard
+      input.dataset.isSuggestionResponse = 'true';
       sendMessage();
     });
     chipsEl.appendChild(btn);
@@ -5017,6 +5019,12 @@ async function sendMessage() {
   const text = input.value.trim();
   if (!text) return;
 
+  // Check if this is a suggestion response (user clicked a suggestion chip)
+  // Suggestion responses are allowed even while LLM is streaming, since they're
+  // answers to questions the LLM explicitly asked for
+  const isSuggestionResponse = input.dataset.isSuggestionResponse === 'true';
+  delete input.dataset.isSuggestionResponse;
+
   // ── Slash-Command-Router ─────────────────────────────────────────────────
   if (text.startsWith('/')) {
     const handled = await handleChatCommand(text);
@@ -5038,7 +5046,21 @@ async function sendMessage() {
 
   const activeChat = chatManager.getActive();
   // Verhindere Doppel-Senden wenn dieser Chat bereits streamt
-  if (activeChat?.streamingState || _chatAbortController) return;
+  // ABER: Suggestion responses (Answers to questions the LLM asked) sind erlaubt
+  if (!isSuggestionResponse && (activeChat?.streamingState || _chatAbortController)) return;
+
+  // Wenn eine Suggestion während des Streamens gesendet wird, stoppe das aktuelle Streaming
+  // um zu verhindern, dass zwei Response-Reader gleichzeitig laufen
+  if (isSuggestionResponse && activeChat?.streamingState) {
+    log.info('[suggest] Aborting current streaming to send suggestion response');
+    if (activeChat.streamingState.abortController) {
+      activeChat.streamingState.abortController.abort();
+    }
+    if (activeChat.streamingState.timerInterval) {
+      clearInterval(activeChat.streamingState.timerInterval);
+    }
+    activeChat.streamingState = null;
+  }
 
   input.value = '';
   input.style.height = 'auto';
