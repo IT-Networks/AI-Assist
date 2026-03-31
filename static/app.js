@@ -5031,6 +5031,10 @@ function createStreamingState(abortController) {
     startTime: null,
     liveTokenCount: 0,
     timerInterval: null,
+    // Performance optimization: batching & debouncing
+    renderTimeout: null,
+    tokensSinceLastStatusUpdate: 0,
+    lastScrollTime: 0,
   };
 }
 
@@ -5043,6 +5047,10 @@ function abortStreamingState(chat) {
   }
   if (streamingState.timerInterval) {
     clearInterval(streamingState.timerInterval);
+  }
+  // Clear any pending render timeout
+  if (streamingState.renderTimeout) {
+    clearTimeout(streamingState.renderTimeout);
   }
   chat.streamingState = null;
 }
@@ -5231,15 +5239,18 @@ async function sendAgentChat(message, abortSignal, chat) {
             await processAgentEvent(event, bubble, msgDiv, chat);
             if (event.type === 'token' && event.data) {
               fullText += event.data;
-              bubble.innerHTML = marked.parse(fullText);
-              applyHighlight(bubble);
-              if (document.contains(chat.pane)) scrollToBottom();
               chat.streamingState.liveTokenCount += countTokensApprox(event.data);
-              updateChatStatusBar(chat);
+              chat.streamingState.tokensSinceLastStatusUpdate++;
             }
           } catch (e) { /* ignore */ }
         }
       }
+      // Final render when stream completes
+      clearTimeout(chat.streamingState.renderTimeout);
+      bubble.innerHTML = marked.parse(fullText);
+      applyHighlight(bubble);
+      if (document.contains(chat.pane)) scrollToBottom();
+      updateChatStatusBar(chat);
       break;
     }
 
@@ -5254,11 +5265,29 @@ async function sendAgentChat(message, abortSignal, chat) {
         await processAgentEvent(event, bubble, msgDiv, chat);
         if (event.type === 'token' && event.data) {
           fullText += event.data;
-          bubble.innerHTML = marked.parse(fullText);
-          applyHighlight(bubble);
-          if (document.contains(chat.pane)) scrollToBottom();
+
+          // OPTIMIZATION 1: Debounce markdown parsing (batch multiple tokens)
+          // Instead of parsing on EVERY token, batch every 50ms
+          clearTimeout(chat.streamingState.renderTimeout);
+          chat.streamingState.renderTimeout = setTimeout(() => {
+            bubble.innerHTML = marked.parse(fullText);
+            applyHighlight(bubble);
+          }, 50);
+
+          // OPTIMIZATION 2: Throttle scroll updates (max 20 scrolls/sec)
+          const now = Date.now();
+          if (now - chat.streamingState.lastScrollTime > 50) {
+            if (document.contains(chat.pane)) scrollToBottom();
+            chat.streamingState.lastScrollTime = now;
+          }
+
+          // OPTIMIZATION 3: Batch token counting (update every 10 tokens instead of every token)
           chat.streamingState.liveTokenCount += countTokensApprox(event.data);
-          updateChatStatusBar(chat);
+          chat.streamingState.tokensSinceLastStatusUpdate++;
+          if (chat.streamingState.tokensSinceLastStatusUpdate >= 10) {
+            updateChatStatusBar(chat);
+            chat.streamingState.tokensSinceLastStatusUpdate = 0;
+          }
         }
       } catch (e) {
         // Ignore parse errors for partial chunks
@@ -5268,6 +5297,8 @@ async function sendAgentChat(message, abortSignal, chat) {
 
   stopChatTimer(chat);
 
+  // Clear any pending render timeout and do final render
+  clearTimeout(chat.streamingState.renderTimeout);
   if (fullText) {
     bubble.innerHTML = marked.parse(fullText);
     applyHighlight(bubble);
@@ -5305,8 +5336,9 @@ function createLiveStatusBar() {
 function startChatTimer(chat) {
   if (!chat.streamingState) return;
   chat.streamingState.startTime = Date.now();
+  // OPTIMIZATION 4: Reduce timer frequency from 100ms to 500ms (5x less CPU)
   // Interval hält eine Closure auf chat – kein globaler State nötig
-  chat.streamingState.timerInterval = setInterval(() => updateChatStatusBar(chat), 100);
+  chat.streamingState.timerInterval = setInterval(() => updateChatStatusBar(chat), 500);
 }
 
 function stopChatTimer(chat) {
