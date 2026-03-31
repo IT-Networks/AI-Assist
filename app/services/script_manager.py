@@ -488,14 +488,24 @@ class ScriptExecutor:
         )
 
         # 3. Temporäre Datei erstellen
-        with tempfile.NamedTemporaryFile(
-            mode='w',
-            suffix='.py',
-            delete=False,
-            encoding='utf-8'
-        ) as f:
-            f.write(wrapper_code)
-            temp_path = f.name
+        temp_path = None
+        try:
+            with tempfile.NamedTemporaryFile(
+                mode='w',
+                suffix='.py',
+                delete=False,
+                encoding='utf-8'
+            ) as f:
+                f.write(wrapper_code)
+                temp_path = f.name
+        except IOError as e:
+            logger.error(f"Temp-Datei-Erstellung fehlgeschlagen: {e}")
+            return ExecutionResult(
+                success=False,
+                stdout='',
+                stderr='',
+                error=f"Temp-Datei-Fehler: {str(e)[:200]}"
+            )
 
         try:
             if self.config.use_container and settings.docker_sandbox.enabled:
@@ -508,11 +518,9 @@ class ScriptExecutor:
             return result
 
         finally:
-            # Temp-Datei aufräumen
-            try:
-                Path(temp_path).unlink()
-            except Exception:
-                pass
+            # Temp-Datei aufräumen mit Retry (für Windows Locks)
+            if temp_path:
+                self._cleanup_temp_file(temp_path)
 
     async def _install_requirements(self, requirements: List[str]) -> Optional[str]:
         """
@@ -551,6 +559,7 @@ class ScriptExecutor:
 
         cmd += requirements
 
+        process = None
         try:
             process = await asyncio.create_subprocess_exec(
                 *cmd,
@@ -564,15 +573,53 @@ class ScriptExecutor:
             )
 
             if process.returncode != 0:
-                return f"pip install fehlgeschlagen: {stderr.decode('utf-8', errors='replace')[:500]}"
+                stderr_text = stderr.decode('utf-8', errors='replace')[:1000]
+                return f"pip install fehlgeschlagen: {stderr_text}"
 
             logger.info(f"pip install erfolgreich: {requirements}")
             return None
 
         except asyncio.TimeoutError:
+            if process:
+                try:
+                    process.terminate()
+                    await asyncio.wait_for(process.wait(), timeout=2)
+                except (asyncio.TimeoutError, ProcessLookupError):
+                    try:
+                        process.kill()
+                        await asyncio.wait_for(process.wait(), timeout=1)
+                    except Exception:
+                        pass
+            logger.warning(f"pip install timeout nach {self.config.pip_install_timeout_seconds}s für {requirements}")
             return f"pip install Timeout nach {self.config.pip_install_timeout_seconds}s"
         except Exception as e:
-            return f"pip install Fehler: {str(e)}"
+            logger.error(f"pip install Fehler: {type(e).__name__}: {e}")
+            return f"pip install Fehler: {type(e).__name__}: {str(e)[:200]}"
+
+    def _cleanup_temp_file(self, temp_path: str) -> None:
+        """
+        Löscht temporäre Datei mit Retry-Logik für Windows File Locks.
+
+        Versucht die Datei 3x zu löschen (mit kurzer Verzögerung für Windows Locks).
+        """
+        import time
+        path = Path(temp_path)
+
+        for attempt in range(3):
+            try:
+                if path.exists():
+                    path.unlink()
+                    logger.debug(f"Temp-Datei gelöscht: {temp_path}")
+                return
+            except PermissionError:
+                # Windows: Datei wird noch vom Prozess gesperrt
+                if attempt < 2:
+                    time.sleep(0.1)
+                    continue
+                logger.warning(f"Temp-Datei konnte nicht gelöscht werden (PermissionError): {temp_path}")
+            except Exception as e:
+                logger.warning(f"Temp-Datei-Cleanup fehlgeschlagen ({type(e).__name__}): {temp_path}")
+                return
 
     def _create_wrapper(self, code: str, args: Dict[str, Any], allowed_paths: List[str] = None) -> str:
         """Erstellt Wrapper-Code mit injizierten Argumenten und Sicherheits-Guard."""
@@ -623,9 +670,14 @@ SCRIPT_ARGS = json.loads({repr(args_json)})
         return wrapper
 
     async def _run_local(self, script_path: str, input_data: str = None) -> ExecutionResult:
-        """Führt Script lokal aus (ohne Container)."""
+        """
+        Führt Script lokal aus (ohne Container).
+
+        Handles timeouts gracefully with proper process cleanup.
+        """
+        import sys
+        process = None
         try:
-            import sys
             process = await asyncio.create_subprocess_exec(
                 sys.executable, script_path,
                 stdin=asyncio.subprocess.PIPE if input_data else None,
@@ -639,38 +691,74 @@ SCRIPT_ARGS = json.loads({repr(args_json)})
                     timeout=self.timeout
                 )
             except asyncio.TimeoutError:
-                process.kill()
+                # Graceful shutdown: terminate first, then kill if needed
+                try:
+                    process.terminate()
+                    await asyncio.wait_for(process.wait(), timeout=2)
+                except asyncio.TimeoutError:
+                    try:
+                        process.kill()
+                        await asyncio.wait_for(process.wait(), timeout=1)
+                    except Exception:
+                        pass
+                logger.warning(f"Script timeout after {self.timeout}s: {script_path}")
                 return ExecutionResult(
                     success=False,
                     stdout='',
                     stderr='',
-                    error=f"Timeout nach {self.timeout}s"
+                    error=f"Script Timeout nach {self.timeout}s (maximale Ausführungszeit überschritten)"
                 )
 
             stdout_str = stdout.decode('utf-8', errors='replace')
             stderr_str = stderr.decode('utf-8', errors='replace')
 
-            # Output begrenzen
+            # Output begrenzen mit Warnung
             max_output = self.config.max_output_size_kb * 1024
+            truncated = False
             if len(stdout_str) > max_output:
-                stdout_str = stdout_str[:max_output] + f"\n... (gekürzt, {len(stdout_str)} Bytes total)"
+                stdout_str = stdout_str[:max_output] + f"\n\n⚠️ OUTPUT GEKÜRZT: {len(stdout_str) - max_output} Bytes nicht angezeigt"
+                truncated = True
             if len(stderr_str) > max_output:
-                stderr_str = stderr_str[:max_output] + f"\n... (gekürzt)"
+                stderr_str = stderr_str[:max_output] + f"\n\n⚠️ STDERR GEKÜRZT: weitere Fehlerausgabe nicht angezeigt"
+                truncated = True
+
+            if truncated and process.returncode != 0:
+                # If script failed AND output was truncated, user needs to know error was cut off
+                error_msg = f"Script fehlgeschlagen. Fehlerausgabe gekürzt (max. {max_output} Bytes)"
+            else:
+                error_msg = stderr_str if process.returncode != 0 else None
 
             return ExecutionResult(
                 success=process.returncode == 0,
                 stdout=stdout_str,
                 stderr=stderr_str,
-                error=stderr_str if process.returncode != 0 else None
+                error=error_msg
             )
 
-        except Exception as e:
-            logger.error(f"Script-Ausführung fehlgeschlagen: {e}")
+        except FileNotFoundError as e:
+            logger.error(f"Script-Datei nicht gefunden: {script_path}")
             return ExecutionResult(
                 success=False,
                 stdout='',
                 stderr='',
-                error=str(e)
+                error=f"Script-Datei nicht gefunden: {script_path}"
+            )
+        except PermissionError as e:
+            logger.error(f"Keine Berechtigung zum Ausführen von Script: {script_path}")
+            return ExecutionResult(
+                success=False,
+                stdout='',
+                stderr='',
+                error=f"Keine Berechtigung zum Ausführen des Scripts (PermissionError)"
+            )
+        except Exception as e:
+            error_type = type(e).__name__
+            logger.error(f"Script-Ausführung fehlgeschlagen ({error_type}): {e}")
+            return ExecutionResult(
+                success=False,
+                stdout='',
+                stderr='',
+                error=f"Script-Ausführungsfehler ({error_type}): {str(e)[:200]}"
             )
 
     async def _run_in_container(self, script_path: str, input_data: str = None) -> ExecutionResult:
