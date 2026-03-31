@@ -2279,9 +2279,13 @@ class AgentOrchestrator:
                                 "confirmation_data": result.confirmation_data
                             })
 
-                            # Warten auf Bestätigung
-                            confirmed = yield
-                            tool_call.confirmed = confirmed
+                            # Non-blocking Confirmation: Speichere pending_confirmation für async Handling
+                            state.pending_confirmation = tool_call
+                            state.pending_confirmation_data = result.confirmation_data
+
+                            # Nicht blockieren - Continue im nächsten Schritt wenn bestätigt
+                            confirmed = False
+                            tool_call.confirmed = False
                         elif should_auto_execute:
                             # PLAN_THEN_EXECUTE mit genehmigtem Plan: Auto-Ausführung
                             logger.info(f"[agent] Auto-executing {tool_call.name} (plan approved)")

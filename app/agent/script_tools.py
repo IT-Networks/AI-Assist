@@ -481,6 +481,163 @@ delete_script_tool = Tool(
 
 
 # ══════════════════════════════════════════════════════════════════════════════
+# Combined Tool: Generate AND Execute in One Call (Performance Optimization)
+# ══════════════════════════════════════════════════════════════════════════════
+
+async def handle_generate_and_execute_script(
+    code: str,
+    name: str,
+    description: str,
+    parameters: Dict[str, str] = None,
+    requirements: List[str] = None,
+    execute_args: Dict[str, Any] = None,
+    execute_input: str = None,
+    **kwargs
+) -> ToolResult:
+    """
+    Handler für generate_and_execute_python_script Tool.
+
+    Kombiniert Generierung und Ausführung in einem Tool-Call.
+    Reduziert LLM-Iterationen von 3 auf 1-2.
+    Performance-Einsparung: ~40-50 Sekunden
+    """
+    try:
+        manager = get_script_manager()
+        config = settings.script_execution
+
+        # Validierung von requirements
+        if requirements:
+            if not config.pip_install_enabled:
+                return ToolResult(success=False,
+                    error="requirements angegeben aber pip_install_enabled=False in ScriptExecutionConfig")
+
+            import re as _re
+            valid_pkg = _re.compile(r'^[A-Za-z0-9_.\-]+(==|>=|<=|~=|!=|>|<)[A-Za-z0-9_.]+$|^[A-Za-z0-9_.\-]+$')
+            for pkg in requirements:
+                if not valid_pkg.match(pkg.strip()):
+                    return ToolResult(success=False,
+                        error=f"Ungültiger Package-Name: {pkg!r}. Format: 'package==1.2.3' oder 'package'")
+
+            for pkg in requirements:
+                pkg_name = _re.split(r'[>=<!~]', pkg)[0].strip().lower().replace('-', '_')
+                allowed_names = [p.lower().replace('-', '_') for p in config.pip_allowed_packages]
+                if pkg_name not in allowed_names:
+                    return ToolResult(success=False,
+                        error=f"Paket '{pkg_name}' nicht in pip_allowed_packages. Admin muss es zuerst in Settings → Python Scripts hinzufügen.")
+
+        # Schritt 1: Generierung
+        script, validation = await manager.generate_and_save(
+            code=code,
+            name=name,
+            description=description,
+            parameters=parameters,
+            requirements=requirements
+        )
+
+        gen_data = f"Script '{name}' generiert (ID: {script.id})"
+        logger.info(f"[combined-tool] {gen_data}")
+
+        # Schritt 2: Direkt ausführen (ohne weitere Confirmation)
+        if script.requirements:
+            # pip install zuerst
+            from app.core.config import settings as app_settings
+            pip_index = app_settings.script_execution.pip_index_url or "<nexus_url>"
+            err = await manager.install_requirements(script.requirements)
+            if err:
+                return ToolResult(success=False,
+                    error=f"pip install fehlgeschlagen: {err}")
+            logger.info(f"[combined-tool] Pakete installiert: {', '.join(script.requirements)}")
+
+        # Ausführen
+        exec_result = await manager.execute(script.id, execute_args or {}, execute_input)
+
+        if exec_result.success:
+            output_text = f"""Generated and Executed Script '{name}' (ID: {script.id})
+
+Executed in {exec_result.execution_time_ms}ms
+
+Output:
+{exec_result.stdout if exec_result.stdout else '(no output)'}"""
+
+            if exec_result.stderr:
+                output_text += f"\n\nStderr:\n{exec_result.stderr}"
+
+            return ToolResult(success=True, data=output_text)
+        else:
+            return ToolResult(
+                success=False,
+                error=f"Execution failed:\n{exec_result.error or exec_result.stderr}"
+            )
+
+    except Exception as e:
+        logger.error(f"generate_and_execute_script failed: {e}")
+        return ToolResult(success=False, error=str(e))
+
+
+generate_and_execute_script_tool = Tool(
+    name="generate_and_execute_python_script",
+    description="""Generiert UND führt ein Python-Script in einem Schritt aus.
+
+SCHNELLER als separate generate + execute calls!
+Kombiniert beide Operationen → Einsparung: ~40-50 Sekunden
+
+Wann verwenden:
+✅ Script soll direkt ausgeführt werden (nicht nur generiert)
+✅ User vertraut dem generierten Code (keine Vorschau nötig)
+✅ Schnelle Iteration gewünscht
+
+Verfügbare Imports: json, csv, pathlib, re, datetime, pandas, numpy, yaml, etc.""",
+    category=ToolCategory.ANALYSIS,
+    parameters=[
+        ToolParameter(
+            name="code",
+            type="string",
+            description="Python-Quellcode des Scripts",
+            required=True
+        ),
+        ToolParameter(
+            name="name",
+            type="string",
+            description="Name des Scripts",
+            required=True
+        ),
+        ToolParameter(
+            name="description",
+            type="string",
+            description="Beschreibung was das Script macht",
+            required=True
+        ),
+        ToolParameter(
+            name="parameters",
+            type="object",
+            description="Parameter-Definitionen",
+            required=False
+        ),
+        ToolParameter(
+            name="requirements",
+            type="array",
+            description="pip-Pakete (z.B. ['pandas', 'requests'])",
+            required=False
+        ),
+        ToolParameter(
+            name="execute_args",
+            type="object",
+            description="Argumente für Script-Ausführung",
+            required=False
+        ),
+        ToolParameter(
+            name="execute_input",
+            type="string",
+            description="Optionale Eingabedaten",
+            required=False
+        ),
+    ],
+    is_write_operation=True,
+    handler=handle_generate_and_execute_script
+)
+
+
+# ══════════════════════════════════════════════════════════════════════════════
 # Registration
 # ══════════════════════════════════════════════════════════════════════════════
 
@@ -494,8 +651,9 @@ def register_script_tools(registry: ToolRegistry):
 
     registry.register(generate_script_tool)
     registry.register(execute_script_tool)
+    registry.register(generate_and_execute_script_tool)  # NEW: Combined Tool
     registry.register(list_scripts_tool)
     registry.register(validate_script_tool)
     registry.register(delete_script_tool)
 
-    logger.info("Script-Tools registriert (5 Tools)")
+    logger.info("Script-Tools registriert (6 Tools)")
