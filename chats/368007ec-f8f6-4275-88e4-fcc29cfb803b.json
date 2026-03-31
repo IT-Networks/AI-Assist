@@ -1,0 +1,17 @@
+{
+  "session_id": "368007ec-f8f6-4275-88e4-fcc29cfb803b",
+  "title": "Analyze the most recent PR - what files were changed and how…",
+  "mode": "read_only",
+  "messages_history": [
+    {
+      "role": "user",
+      "content": "Analyze the most recent PR - what files were changed and how?"
+    },
+    {
+      "role": "assistant",
+      "content": "Please provide the repository name in the format \"owner/repo\" or just the repo name if it's set as the default organization."
+    }
+  ],
+  "created_at": 1774620758.263715,
+  "updated_at": 1774620758.263715
+}

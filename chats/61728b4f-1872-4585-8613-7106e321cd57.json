@@ -1,0 +1,17 @@
+{
+  "session_id": "61728b4f-1872-4585-8613-7106e321cd57",
+  "title": "List all branches in this repository",
+  "mode": "read_only",
+  "messages_history": [
+    {
+      "role": "user",
+      "content": "List all branches in this repository"
+    },
+    {
+      "role": "assistant",
+      "content": "Es scheint, dass ich keine Informationen über das Repository habe, in dem ich die Branches auflisten soll. Bitte teile mir den Namen des Repositories oder die Organisation mit, damit ich die Branches auflisten kann."
+    }
+  ],
+  "created_at": 1774603832.043829,
+  "updated_at": 1774603832.043829
+}

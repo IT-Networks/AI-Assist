@@ -1,0 +1,17 @@
+{
+  "session_id": "c9ec7c3b-a820-4437-a625-a37a3f2e414f",
+  "title": "Read the file C:\\Users\\marku\\AppData\\Local\\Temp\\e2e_test_4tb…",
+  "mode": "read_only",
+  "messages_history": [
+    {
+      "role": "user",
+      "content": "Read the file C:\\Users\\marku\\AppData\\Local\\Temp\\e2e_test_4tb1tv3m\\example.py and tell me what functions are defined"
+    },
+    {
+      "role": "assistant",
+      "content": "In der Datei `example.py` sind die folgenden Funktionen definiert:\n\n1. **greet(name: str) -> str**\n   - Diese Funktion begrüßt jemanden mit dem übergebenen Namen und gibt eine Begrüßungsnachricht zurück.\n\n2. **add(a: int, b: int) -> int**\n   - Diese Funktion addiert zwei Zahlen und gibt das Ergebnis zurück.\n\nZusätzlich gibt es eine Klasse:\n\n- **Calculator**\n  - Mit der Methode **multiply(self, x: int, y: int) -> int**, die zwei Zahlen multipliziert und das Ergebnis zurückgibt.\n\nMöchtest du weitere Informationen oder Änderungen an dieser Datei?"
+    }
+  ],
+  "created_at": 1774620812.9290493,
+  "updated_at": 1774620812.9290493
+}

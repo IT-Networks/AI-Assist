@@ -1,0 +1,17 @@
+{
+  "session_id": "e5464c2e-f91d-4cf0-ba9b-70672af96f45",
+  "title": "Get the details of the most recent PR in the AI-Assist repos…",
+  "mode": "read_only",
+  "messages_history": [
+    {
+      "role": "user",
+      "content": "Get the details of the most recent PR in the AI-Assist repository"
+    },
+    {
+      "role": "assistant",
+      "content": "Es scheint, dass ich die Details des neuesten Pull Requests im Repository \"AI-Assist\" nicht abrufen kann, da ich die erforderlichen Informationen über die Organisation oder den Besitzer des Repositories nicht habe. \n\nBitte teile mir den Namen der Organisation oder des Benutzers mit, der das Repository \"AI-Assist\" besitzt, damit ich die Informationen abrufen kann."
+    }
+  ],
+  "created_at": 1774603777.5283659,
+  "updated_at": 1774603777.5283659
+}

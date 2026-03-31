@@ -1,0 +1,17 @@
+{
+  "session_id": "f0bd1094-689c-46f9-9fa8-5fff3760007e",
+  "title": "Read the file C:\\Users\\marku\\AppData\\Local\\Temp\\e2e_test_xos…",
+  "mode": "read_only",
+  "messages_history": [
+    {
+      "role": "user",
+      "content": "Read the file C:\\Users\\marku\\AppData\\Local\\Temp\\e2e_test_xos8a3gk\\does_not_exist.py and summarize it"
+    },
+    {
+      "role": "assistant",
+      "content": "Die Datei `does_not_exist.py` konnte nicht gefunden werden. Es gibt keine Treffer für diese Datei in den durchsuchten Repositories. \n\nWenn du weitere Informationen oder eine andere Datei benötigst, lass es mich wissen!"
+    }
+  ],
+  "created_at": 1774604006.9951026,
+  "updated_at": 1774604006.9951026
+}

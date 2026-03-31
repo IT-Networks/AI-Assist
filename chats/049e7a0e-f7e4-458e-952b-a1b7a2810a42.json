@@ -1,0 +1,17 @@
+{
+  "session_id": "049e7a0e-f7e4-458e-952b-a1b7a2810a42",
+  "title": "Use search_jira to find all open bugs. List the issue keys.",
+  "mode": "read_only",
+  "messages_history": [
+    {
+      "role": "user",
+      "content": "Use search_jira to find all open bugs. List the issue keys."
+    },
+    {
+      "role": "assistant",
+      "content": "The function `search_jira` is not available in this context, so I cannot retrieve open bugs or their issue keys. If you have access to a Jira instance, you can perform a search there directly. If you need assistance with a specific query or how to use Jira, feel free to ask!"
+    }
+  ],
+  "created_at": 1774620762.5355942,
+  "updated_at": 1774620762.5355942
+}

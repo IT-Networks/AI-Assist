@@ -1,0 +1,17 @@
+{
+  "session_id": "4be210e5-ee6d-492f-b126-45fa919fb0a0",
+  "title": "In C:\\Users\\marku\\AppData\\Local\\Temp\\e2e_test_viq42awg, find…",
+  "mode": "read_only",
+  "messages_history": [
+    {
+      "role": "user",
+      "content": "In C:\\Users\\marku\\AppData\\Local\\Temp\\e2e_test_viq42awg, find where 'greet' is defined and all places it's called"
+    },
+    {
+      "role": "assistant",
+      "content": "Die Funktion `greet` ist in der Datei `example.py` definiert. Hier sind die Details:\n\n### Definition der Funktion `greet`\n```python\ndef greet(name: str) -> str:\n    \"\"\"\n    Greet someone by name.\n\n    Args:\n        name: The name of the person to greet\n\n    Returns:\n        A greeting string\n    \"\"\"\n```\n- **Datei:** `example.py`\n- **Zeile:** 11\n\n### Aufrufe der Funktion `greet`\nDie Funktion `greet` wird in mehreren Dateien aufgerufen:\n\n1. **In `src/main.py`:**\n   ```python\n   from example import greet\n   ...\n   greeting = greet(name)\n   ```\n   - **Zeile:** 29\n\n2. **In `tests/test_example.py`:**\n   ```python\n   from example import greet\n   ...\n   assert greet(\"World\") == \"Hello, World!\"\n   ```\n   - **Zeile:** 22\n\n   ```python\n   assert greet(\"\") == \"Hello, !\"\n   ```\n   - **Zeile:** 25\n\n   ```python\n   assert greet(\"Test-User_123\") == \"Hello, Test-User_123!\"\n   ```\n   - **Zeile:** 30\n\n### Zusammenfassung\n- **Definition:** `greet` ist in `example.py` definiert (Zeile 11).\n- **Aufrufe:** \n  - `src/main.py` (Zeile 29)\n  - `tests/test_example.py` (Zeilen 22, 25, 30)\n\nWenn du weitere Informationen benötigst oder etwas anderes tun möchtest, lass es mich wissen!"
+    }
+  ],
+  "created_at": 1774604267.5247233,
+  "updated_at": 1774604267.5247233
+}

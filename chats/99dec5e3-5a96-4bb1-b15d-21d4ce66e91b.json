@@ -1,0 +1,17 @@
+{
+  "session_id": "99dec5e3-5a96-4bb1-b15d-21d4ce66e91b",
+  "title": "Read the file C:\\Users\\marku\\AppData\\Local\\Temp\\e2e_test_kqq…",
+  "mode": "read_only",
+  "messages_history": [
+    {
+      "role": "user",
+      "content": "Read the file C:\\Users\\marku\\AppData\\Local\\Temp\\e2e_test_kqqcsng8\\example.py and tell me what functions are defined"
+    },
+    {
+      "role": "assistant",
+      "content": "In der Datei `example.py` sind die folgenden Funktionen definiert:\n\n1. **greet(name: str) -> str**\n   - Beschreibung: Begrüßt jemanden mit dem angegebenen Namen.\n   - Rückgabewert: Eine Begrüßung als String.\n\n2. **add(a: int, b: int) -> int**\n   - Beschreibung: Addiert zwei Zahlen.\n   - Rückgabewert: Die Summe der beiden Zahlen als Integer.\n\nZusätzlich gibt es eine Klasse `Calculator`, die eine Methode `multiply(self, x: int, y: int) -> int` enthält, die zwei Zahlen multipliziert und das Ergebnis zurückgibt. \n\nMöchtest du weitere Informationen oder Änderungen an diesem Code?"
+    }
+  ],
+  "created_at": 1774603987.724611,
+  "updated_at": 1774603987.724611
+}

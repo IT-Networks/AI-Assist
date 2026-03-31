@@ -1,0 +1,17 @@
+{
+  "session_id": "7b95f941-6a07-426d-9268-6499c1696df3",
+  "title": "Use read_jira_issue to read the full details of BUG-1.",
+  "mode": "read_only",
+  "messages_history": [
+    {
+      "role": "user",
+      "content": "Use read_jira_issue to read the full details of BUG-1."
+    },
+    {
+      "role": "assistant",
+      "content": "Es scheint, dass die Jira-Funktion nicht verfügbar ist oder nicht konfiguriert wurde. Daher kann ich die Details des Issues \"BUG-1\" nicht abrufen. \n\nWenn du weitere Informationen benötigst oder eine andere Anfrage hast, lass es mich wissen!"
+    }
+  ],
+  "created_at": 1774603914.4259048,
+  "updated_at": 1774603914.4259048
+}

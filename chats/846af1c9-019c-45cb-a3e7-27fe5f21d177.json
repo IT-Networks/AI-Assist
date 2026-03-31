@@ -1,0 +1,17 @@
+{
+  "session_id": "846af1c9-019c-45cb-a3e7-27fe5f21d177",
+  "title": "\n            1. Read Jira issue BUG-1 to understand the bug\n…",
+  "mode": "read_only",
+  "messages_history": [
+    {
+      "role": "user",
+      "content": "\n            1. Read Jira issue BUG-1 to understand the bug\n            2. The issue mentions affected files - read each one\n            3. Summarize what code changes are needed\n            "
+    },
+    {
+      "role": "assistant",
+      "content": "Es scheint, dass ich keinen Zugriff auf Jira habe, um das Issue BUG-1 zu lesen. Bitte überprüfen Sie die Jira-Konfiguration oder geben Sie mir die Details des Bugs und die betroffenen Dateien, damit ich Ihnen weiterhelfen kann."
+    }
+  ],
+  "created_at": 1774620773.8081138,
+  "updated_at": 1774620773.8081138
+}

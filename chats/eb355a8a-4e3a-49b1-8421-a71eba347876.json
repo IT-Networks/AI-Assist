@@ -1,0 +1,17 @@
+{
+  "session_id": "eb355a8a-4e3a-49b1-8421-a71eba347876",
+  "title": "Count the number of functions in C:\\Users\\marku\\AppData\\Loca…",
+  "mode": "read_only",
+  "messages_history": [
+    {
+      "role": "user",
+      "content": "Count the number of functions in C:\\Users\\marku\\AppData\\Local\\Temp\\e2e_test_sjzvfjgv\\example.py"
+    },
+    {
+      "role": "assistant",
+      "content": "Die Datei `example.py` enthält insgesamt 3 Funktionen. Zwei davon sind Standalone-Funktionen, und eine ist eine Methode innerhalb der Klasse `Calculator`."
+    }
+  ],
+  "created_at": 1774621004.266922,
+  "updated_at": 1774621004.266922
+}

@@ -1,0 +1,17 @@
+{
+  "session_id": "44a2b2d1-cb1b-4609-97be-26fd691922b1",
+  "title": "\n            Process code review CR-1:\n            1. Read t…",
+  "mode": "read_only",
+  "messages_history": [
+    {
+      "role": "user",
+      "content": "\n            Process code review CR-1:\n            1. Read the main story\n            2. List its subtasks\n            3. Summarize what needs to be reviewed\n            "
+    },
+    {
+      "role": "assistant",
+      "content": "Es scheint, dass ich keinen Zugriff auf Jira habe, um die Informationen zu \"CR-1\" abzurufen. \n\nUm die Code-Review durchzuführen, benötige ich die folgenden Informationen:\n\n1. **Hauptstory**: Eine Beschreibung oder der Titel der Hauptstory.\n2. **Subtasks**: Eine Liste der Subtasks, die mit der Hauptstory verbunden sind.\n3. **Review-Anforderungen**: Eine Zusammenfassung dessen, was überprüft werden muss.\n\nWenn du mir diese Informationen bereitstellen kannst, helfe ich dir gerne weiter!"
+    }
+  ],
+  "created_at": 1774603953.4772253,
+  "updated_at": 1774603953.4772253
+}

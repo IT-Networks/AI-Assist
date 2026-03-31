@@ -1,0 +1,17 @@
+{
+  "session_id": "cf1d8ba4-e67b-4622-9019-3d040e3b04ff",
+  "title": "Get the most recent PR and show me the main file that was ch…",
+  "mode": "read_only",
+  "messages_history": [
+    {
+      "role": "user",
+      "content": "Get the most recent PR and show me the main file that was changed"
+    },
+    {
+      "role": "assistant",
+      "content": "Es scheint ein Problem mit der Verbindung zu GitHub zu geben, was dazu führt, dass ich die neuesten Pull Requests nicht abrufen kann. \n\nIch kann die Informationen über die letzten Commits oder PRs nicht abrufen. Wenn du mir mehr Details zu dem Repository geben kannst oder wenn du eine andere Anfrage hast, lass es mich wissen!"
+    }
+  ],
+  "created_at": 1774620730.6748314,
+  "updated_at": 1774620730.6748314
+}

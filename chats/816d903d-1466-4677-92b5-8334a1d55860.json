@@ -1,0 +1,17 @@
+{
+  "session_id": "816d903d-1466-4677-92b5-8334a1d55860",
+  "title": "What is the project name and version in C:\\Users\\marku\\AppDa…",
+  "mode": "read_only",
+  "messages_history": [
+    {
+      "role": "user",
+      "content": "What is the project name and version in C:\\Users\\marku\\AppData\\Local\\Temp\\e2e_test_25pkyemu\\config.json?"
+    },
+    {
+      "role": "assistant",
+      "content": "The project name in the file `C:\\Users\\marku\\AppData\\Local\\Temp\\e2e_test_25pkyemu\\config.json` is **'test-project'** and the version is **'1.0.0'**."
+    }
+  ],
+  "created_at": 1774620821.3789103,
+  "updated_at": 1774620821.3789103
+}

@@ -625,8 +625,9 @@ SCRIPT_ARGS = json.loads({repr(args_json)})
     async def _run_local(self, script_path: str, input_data: str = None) -> ExecutionResult:
         """Führt Script lokal aus (ohne Container)."""
         try:
+            import sys
             process = await asyncio.create_subprocess_exec(
-                'python', script_path,
+                sys.executable, script_path,
                 stdin=asyncio.subprocess.PIPE if input_data else None,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE

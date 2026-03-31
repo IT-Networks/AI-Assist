@@ -1,0 +1,17 @@
+{
+  "session_id": "cc82473d-179f-4668-b551-a427c0aa0584",
+  "title": "List all Python files in C:\\Users\\marku\\AppData\\Local\\Temp\\e…",
+  "mode": "read_only",
+  "messages_history": [
+    {
+      "role": "user",
+      "content": "List all Python files in C:\\Users\\marku\\AppData\\Local\\Temp\\e2e_test_9wxbs49w"
+    },
+    {
+      "role": "assistant",
+      "content": "Der angegebene Pfad `C:\\Users\\marku\\AppData\\Local\\Temp\\e2e_test_9wxbs49w` liegt nicht in den erlaubten Verzeichnissen. Ich kann nur auf Dateien im Verzeichnis `C:\\Users\\marku\\OneDrive\\Dokumente\\VisualCode\\AI-Assist\\e2e-test-workspace` zugreifen.\n\nWenn du möchtest, kann ich die Python-Dateien in dem erlaubten Verzeichnis auflisten. Bitte lass es mich wissen!"
+    }
+  ],
+  "created_at": 1774604042.3811605,
+  "updated_at": 1774604042.3811605
+}

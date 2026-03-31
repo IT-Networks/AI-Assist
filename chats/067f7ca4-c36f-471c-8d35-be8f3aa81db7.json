@@ -1,0 +1,17 @@
+{
+  "session_id": "067f7ca4-c36f-471c-8d35-be8f3aa81db7",
+  "title": "Show me the code changes in the most recent PR",
+  "mode": "read_only",
+  "messages_history": [
+    {
+      "role": "user",
+      "content": "Show me the code changes in the most recent PR"
+    },
+    {
+      "role": "assistant",
+      "content": "Es scheint ein Problem mit der Verbindung zu GitHub zu geben, das die Abfrage der Pull Requests verhindert. Ich kann die Änderungen im neuesten PR derzeit nicht abrufen. \n\nMöchtest du es später noch einmal versuchen oder gibt es etwas anderes, bei dem ich dir helfen kann?"
+    }
+  ],
+  "created_at": 1774603801.2368264,
+  "updated_at": 1774603801.2368264
+}

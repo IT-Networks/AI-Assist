@@ -1,0 +1,17 @@
+{
+  "session_id": "34cc572b-ebfa-4b49-bed3-abc6dd30a619",
+  "title": "What is the project name and version in C:\\Users\\marku\\AppDa…",
+  "mode": "read_only",
+  "messages_history": [
+    {
+      "role": "user",
+      "content": "What is the project name and version in C:\\Users\\marku\\AppData\\Local\\Temp\\e2e_test_pbdzawvn\\config.json?"
+    },
+    {
+      "role": "assistant",
+      "content": "The project name in the `config.json` file is **'test-project'** and the version is **'1.0.0'**."
+    }
+  ],
+  "created_at": 1774603993.9255075,
+  "updated_at": 1774603993.9255075
+}

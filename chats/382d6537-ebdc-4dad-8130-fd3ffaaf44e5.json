@@ -1,0 +1,17 @@
+{
+  "session_id": "382d6537-ebdc-4dad-8130-fd3ffaaf44e5",
+  "title": "Count the number of functions in C:\\Users\\marku\\AppData\\Loca…",
+  "mode": "read_only",
+  "messages_history": [
+    {
+      "role": "user",
+      "content": "Count the number of functions in C:\\Users\\marku\\AppData\\Local\\Temp\\e2e_test_3fx0jcwz\\example.py"
+    },
+    {
+      "role": "assistant",
+      "content": "In der Datei `example.py` gibt es insgesamt **drei Funktionen**:\n\n1. `greet(name: str) -> str`\n2. `add(a: int, b: int) -> int`\n3. `multiply(self, x: int, y: int) -> int` (als Methode innerhalb der Klasse `Calculator`)\n\nWenn du weitere Informationen benötigst, lass es mich wissen!"
+    }
+  ],
+  "created_at": 1774604383.983711,
+  "updated_at": 1774604383.983711
+}

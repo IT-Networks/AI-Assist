@@ -969,9 +969,9 @@ script_execution:
     - statsmodels
   
   # Nexus pip Repository
-  pip_install_enabled: false
-  pip_index_url: ''
-  pip_trusted_host: ''
+  pip_install_enabled: true
+  pip_index_url: 'https://pypi.org/simple/'
+  pip_trusted_host: 'pypi.org'
   pip_install_timeout_seconds: 60
   pip_cache_requirements: true
   pip_cache_dir: ./scripts/.pip_cache

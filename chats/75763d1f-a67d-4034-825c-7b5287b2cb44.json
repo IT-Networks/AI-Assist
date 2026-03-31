@@ -1,0 +1,17 @@
+{
+  "session_id": "75763d1f-a67d-4034-825c-7b5287b2cb44",
+  "title": "Analyze the most recent PR - what files were changed and how…",
+  "mode": "read_only",
+  "messages_history": [
+    {
+      "role": "user",
+      "content": "Analyze the most recent PR - what files were changed and how?"
+    },
+    {
+      "role": "assistant",
+      "content": "Es scheint, dass ich nicht auf die GitHub-Daten zugreifen kann, um die neuesten Pull Requests oder Commits zu analysieren. Um dir besser helfen zu können, benötige ich den Namen des Repositories oder die Organisation, in der sich das Repository befindet.\n\nBitte teile mir den Namen des Repositories oder die Organisation mit, damit ich die Informationen abrufen kann."
+    }
+  ],
+  "created_at": 1774603896.9422305,
+  "updated_at": 1774603896.9422305
+}
