@@ -11,6 +11,7 @@ import logging
 from typing import Any, Dict, List, Optional
 
 from app.agent.tools import Tool, ToolCategory, ToolParameter, ToolRegistry, ToolResult
+from app.core.config import settings
 from app.services.script_manager import (
     ExecutionResult,
     ScriptManager,

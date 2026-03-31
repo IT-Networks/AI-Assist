@@ -10425,7 +10425,7 @@ function renderScriptExecutionSection() {
 
       <div class="settings-field">
         <label for="script-timeout">Execution Timeout (Sekunden)</label>
-        <input type="number" id="script-timeout" value="${cfg.max_execution_timeout_seconds || 300}" min="10" max="3600" onchange="markSettingsModified()">
+        <input type="number" id="script-timeout" value="${cfg.timeout_seconds || 30}" min="10" max="3600" onchange="markSettingsModified()">
         <small class="field-hint">Max. Zeit für eine Script-Ausführung</small>
       </div>
 
@@ -11896,8 +11896,8 @@ async function saveCurrentSection() {
   if (section === 'script_execution') {
     const values = {
       enabled: document.getElementById('script-enabled')?.checked || false,
-      max_execution_timeout_seconds: parseInt(document.getElementById('script-timeout')?.value) || 300,
-      max_output_size_kb: parseInt(document.getElementById('script-output-size')?.value) || 10240,
+      timeout_seconds: parseInt(document.getElementById('script-timeout')?.value) || 30,
+      max_output_size_kb: parseInt(document.getElementById('script-output-size')?.value) || 256,
       allowed_file_paths: getArrayFieldValues('script-allowed-paths'),
       allowed_imports: getArrayFieldValues('script-allowed-imports'),
       pip_install_enabled: document.getElementById('script-pip-enabled')?.checked || false,
