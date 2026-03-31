@@ -100,6 +100,7 @@ def get_section_schema(section: str) -> Dict[str, Any]:
         "servicenow": "ServiceNowConfig",
         "test_tool": "TestToolConfig",
         "alm": "ALMConfig",
+        "script_execution": "ScriptExecutionConfig",
     }
 
     if section not in section_classes:

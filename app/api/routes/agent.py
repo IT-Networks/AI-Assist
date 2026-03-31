@@ -269,6 +269,19 @@ async def confirm_operation(
         try:
             result = await orchestrator._execute_confirmed_operation(confirmation_data)
 
+            # Phase-2: Wenn requires_confirmation=True → weitere Bestätigung nötig
+            if result.requires_confirmation:
+                # Aktualisiere pending_confirmation mit neuen Daten
+                tool_call.result.confirmation_data = result.confirmation_data
+                # pending_confirmation NICHT löschen
+                return {
+                    "status": "confirm_required",
+                    "name": f"Script '{result.confirmation_data.get('script_name', '')}' ausführen",
+                    "confirmation_data": result.confirmation_data,
+                    "message": result.data,
+                    "continue": False  # Panel bleibt offen
+                }
+
             # Message-Historie aktualisieren damit LLM weiß was passiert ist
             if result.success:
                 result_text = f"✓ Datei erfolgreich geschrieben: {file_path}"

@@ -800,6 +800,18 @@ class ScriptManager:
         """Führt Cleanup alter Scripte durch."""
         return self.storage.cleanup_old(self.config.cleanup_days)
 
+    async def install_requirements(self, requirements: List[str]) -> Optional[str]:
+        """
+        Installiert pip-Pakete aus Nexus-Repository.
+
+        Args:
+            requirements: Liste von Paket-Spezifikationen (z.B. ['pandas==1.3.0', 'numpy'])
+
+        Returns:
+            None bei Erfolg, error-string bei Fehler
+        """
+        return await self.executor._install_requirements(requirements)
+
 
 def get_script_manager() -> ScriptManager:
     """Factory-Funktion für ScriptManager-Instanz."""

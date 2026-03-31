@@ -3095,6 +3095,40 @@ class AgentOrchestrator:
 
             return result
 
+        elif operation == "pip_install_confirm":
+            # Python-Script Phase 1: pip install bestätigung
+            from app.services.script_manager import get_script_manager
+            from app.core.config import settings as app_settings
+
+            manager = get_script_manager()
+            requirements = confirmation_data.get("requirements", [])
+
+            # Pakete installieren
+            err = await manager.install_requirements(requirements)
+            if err:
+                return ToolResult(success=False, error=f"pip install fehlgeschlagen: {err}")
+
+            # Pakete installiert → Phase 2 Confirmation Data für Script-Ausführung
+            script_confirmation = {
+                "operation": "execute_script",
+                "script_id": confirmation_data["script_id"],
+                "script_name": confirmation_data["script_name"],
+                "script_description": confirmation_data.get("script_description", ""),
+                "code": confirmation_data.get("code", ""),
+                "args": confirmation_data.get("args", {}),
+                "input_data": confirmation_data.get("input_data"),
+                "file_path": confirmation_data.get("file_path", ""),
+                "allowed_file_paths": app_settings.script_execution.allowed_file_paths,
+            }
+
+            # Gibt requires_confirmation=True zurück → /confirm Endpoint erkennt und leitet weiter
+            return ToolResult(
+                success=True,
+                data=f"Pakete installiert: {', '.join(requirements)}",
+                requires_confirmation=True,
+                confirmation_data=script_confirmation
+            )
+
         else:
             # Generische Bestaetigungs-Ausfuehrung: Tool-Handler nochmal aufrufen mit _confirmed=True
             # Wird fuer ALM-Tools, IQ-Server-Tools und andere nicht-Datei-basierte Write-Ops verwendet

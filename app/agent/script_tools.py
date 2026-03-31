@@ -8,7 +8,7 @@ Ermöglicht dem AI-Agent:
 """
 
 import logging
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 from app.agent.tools import Tool, ToolCategory, ToolParameter, ToolRegistry, ToolResult
 from app.services.script_manager import (
@@ -144,7 +144,33 @@ async def handle_execute_script(
                 error=f"Script '{script_id}' nicht gefunden. Verwende list_python_scripts um verfügbare Scripte anzuzeigen."
             )
 
-        # Bestätigungsdaten vorbereiten
+        # Phase 1: Wenn Script requirements hat → pip install zuerst bestätigen
+        if script.requirements:
+            from app.core.config import settings as app_settings
+            pip_index = app_settings.script_execution.pip_index_url or "<nexus_url>"
+            pip_cmd = f"pip install --index-url {pip_index} --no-deps " + " ".join(script.requirements)
+
+            pip_confirmation_data = {
+                "operation": "pip_install_confirm",
+                "script_id": script_id,
+                "script_name": script.name,
+                "script_description": script.description,
+                "requirements": script.requirements,
+                "pip_cmd_preview": pip_cmd,
+                "code": script.code,
+                "args": args or {},
+                "input_data": input_data,
+                "file_path": script.file_path,
+            }
+
+            return ToolResult(
+                success=True,
+                data=f"pip install für '{script.name}' bereit. {len(script.requirements)} Paket(e): {', '.join(script.requirements)}",
+                requires_confirmation=True,
+                confirmation_data=pip_confirmation_data
+            )
+
+        # Phase 1 (no requirements): Direkt Script-Ausführung bestätigen
         confirmation_data = {
             "operation": "execute_script",
             "script_id": script_id,
@@ -153,7 +179,8 @@ async def handle_execute_script(
             "code": script.code,
             "args": args or {},
             "input_data": input_data,
-            "file_path": script.file_path
+            "file_path": script.file_path,
+            "allowed_file_paths": manager.config.allowed_file_paths,
         }
 
         return ToolResult(
@@ -352,7 +379,6 @@ Das Script kann über SCRIPT_ARGS auf übergebene Argumente zugreifen.""",
         ToolParameter(
             name="requirements",
             type="array",
-            items={"type": "string"},
             description="pip-Pakete die vor Ausführung installiert werden (z.B. ['openpyxl==3.1.2', 'xlrd']). "
                         "Nur verfügbar wenn pip_install_enabled=True in Config. Pakete müssen in allowed_imports sein.",
             required=False

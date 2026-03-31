@@ -6251,7 +6251,27 @@ function showConfirmationPanel(data) {
 
   // Show diff or preview
   const diffContent = document.getElementById('diff-content');
-  if (cd.diff) {
+  if (cd.operation === 'execute_script') {
+    // Python-Script: Code anzeigen + Datei-Warnung
+    let content = cd.code || '';
+    if (cd.allowed_file_paths && cd.allowed_file_paths.length > 0) {
+      content += '\n\n⚠️ Schreibzugriff auf:\n' + cd.allowed_file_paths.map(p => '  - ' + p).join('\n');
+    }
+    diffContent.textContent = content;
+    diffContent.className = 'language-python';
+    hljs.highlightElement(diffContent);
+  } else if (cd.operation === 'pip_install_confirm') {
+    // pip install: Pakete + Befehl anzeigen
+    const pkgs = cd.requirements || [];
+    let content = '# pip install\n\n';
+    content += pkgs.map(p => `pip install ${p}`).join('\n');
+    if (cd.pip_cmd_preview) {
+      content += '\n\n# Vollständiger Befehl:\n' + cd.pip_cmd_preview;
+    }
+    diffContent.textContent = content;
+    diffContent.className = 'language-bash';
+    hljs.highlightElement(diffContent);
+  } else if (cd.diff) {
     diffContent.textContent = cd.diff;
     hljs.highlightElement(diffContent);
   } else if (cd.preview) {
@@ -6283,6 +6303,11 @@ async function confirmOperation(confirmed) {
 
     if (confirmed && data.status === 'executed') {
       appendMessage('system', `✓ Operation ausgeführt: ${data.message}`);
+    } else if (confirmed && data.status === 'confirm_required') {
+      // Phase 2: Nächste Bestätigung anzeigen
+      appendMessage('system', `✓ ${data.message || 'Pakete installiert'} - Bitte nächste Aktion bestätigen`);
+      showConfirmationPanel(data);
+      return; // Panel bleibt offen, pending_confirmation bleibt gesetzt
     } else if (!confirmed) {
       appendMessage('system', `✗ Operation abgebrochen`);
     } else {
@@ -10139,6 +10164,11 @@ function renderSettingsSection() {
     return;
   }
 
+  if (section === 'script_execution') {
+    renderScriptExecutionSection();
+    return;
+  }
+
   if (section === 'servicenow') {
     renderServiceNowSection();
     return;
@@ -10367,6 +10397,119 @@ function renderALMSection() {
 
   // Load credentials into dropdown
   loadCredentialsDropdown('alm-credential-ref', cfg.credential_ref || '');
+}
+
+function renderScriptExecutionSection() {
+  const cfg = settingsState.settings.script_execution || {};
+
+  const form = document.getElementById('settings-form');
+  form.innerHTML = `
+    <div class="settings-section">
+      <h3 class="settings-section-title">Python Script Ausführung</h3>
+      <p class="settings-section-desc">
+        Konfiguriere Python-Script-Ausführung: Dateisystemzugriff, pip-Installation von Nexus, etc.
+      </p>
+    </div>
+
+    <!-- Allgemein -->
+    <div class="settings-section-group">
+      <h4 class="settings-group-title">Allgemein</h4>
+
+      <div class="settings-field">
+        <label for="script-enabled">Aktiviert</label>
+        <label class="checkbox-label">
+          <input type="checkbox" id="script-enabled" ${cfg.enabled ? 'checked' : ''} onchange="markSettingsModified()">
+          <span>${cfg.enabled ? 'Aktiviert' : 'Deaktiviert'}</span>
+        </label>
+      </div>
+
+      <div class="settings-field">
+        <label for="script-timeout">Execution Timeout (Sekunden)</label>
+        <input type="number" id="script-timeout" value="${cfg.max_execution_timeout_seconds || 300}" min="10" max="3600" onchange="markSettingsModified()">
+        <small class="field-hint">Max. Zeit für eine Script-Ausführung</small>
+      </div>
+
+      <div class="settings-field">
+        <label for="script-output-size">Max. Output Size (KB)</label>
+        <input type="number" id="script-output-size" value="${cfg.max_output_size_kb || 10240}" min="100" max="102400" onchange="markSettingsModified()">
+        <small class="field-hint">Maximum size des Script-Outputs</small>
+      </div>
+    </div>
+
+    <!-- Dateizugriff -->
+    <div class="settings-section-group">
+      <h4 class="settings-group-title">Dateisystemzugriff</h4>
+
+      <div class="settings-field">
+        <label>Erlaubte Dateipfade für Schreibvorgänge</label>
+        <div class="settings-array" id="script-allowed-paths-container">
+          ${renderArrayItems('script-allowed-paths', cfg.allowed_file_paths || [])}
+        </div>
+        <button class="btn btn-sm" onclick="addArrayItem('script-allowed-paths')">+ Pfad hinzufügen</button>
+      </div>
+
+      <div class="settings-field">
+        <label>Erlaubte Imports</label>
+        <div class="settings-array" id="script-allowed-imports-container">
+          ${renderArrayItems('script-allowed-imports', cfg.allowed_imports || [])}
+        </div>
+        <small class="field-hint">Pakete die in Scripts importiert werden dürfen (z.B. pandas, numpy, requests)</small>
+      </div>
+    </div>
+
+    <!-- Nexus pip Install -->
+    <div class="settings-section-group">
+      <h4 class="settings-group-title">Nexus pip Repository</h4>
+
+      <div class="settings-field">
+        <label for="script-pip-enabled">pip install aktiviert</label>
+        <label class="checkbox-label">
+          <input type="checkbox" id="script-pip-enabled" ${cfg.pip_install_enabled ? 'checked' : ''} onchange="markSettingsModified()">
+          <span>${cfg.pip_install_enabled ? 'Aktiviert' : 'Deaktiviert'}</span>
+        </label>
+        <small class="field-hint">Erlaubt automatische Paket-Installation von Nexus</small>
+      </div>
+
+      <div class="settings-field">
+        <label for="script-pip-url">Nexus pip Index URL</label>
+        <input type="text" id="script-pip-url" value="${escapeHtml(cfg.pip_index_url || '')}"
+          placeholder="https://nexus.company.com/repository/pypi/simple/" onchange="markSettingsModified()" style="font-family:var(--font-mono)">
+        <small class="field-hint">URL des internen pip-Repositories (z.B. Nexus)</small>
+      </div>
+
+      <div class="settings-field">
+        <label for="script-pip-host">Trusted Host</label>
+        <input type="text" id="script-pip-host" value="${escapeHtml(cfg.pip_trusted_host || '')}"
+          placeholder="nexus.company.com" onchange="markSettingsModified()">
+        <small class="field-hint">Hostname für SSL-Verification Skip (optional)</small>
+      </div>
+
+      <div class="settings-field">
+        <label for="script-pip-timeout">pip Install Timeout (Sekunden)</label>
+        <input type="number" id="script-pip-timeout" value="${cfg.pip_install_timeout_seconds || 60}" min="10" max="600" onchange="markSettingsModified()">
+      </div>
+
+      <div class="settings-field">
+        <label for="script-pip-cache">Cache pip Packages</label>
+        <label class="checkbox-label">
+          <input type="checkbox" id="script-pip-cache" ${cfg.pip_cache_requirements ? 'checked' : ''} onchange="markSettingsModified()">
+          <span>${cfg.pip_cache_requirements ? 'Aktiviert' : 'Deaktiviert'}</span>
+        </label>
+        <small class="field-hint">Downloaded packages cachen für schnellere Wiederverwendung</small>
+      </div>
+
+      <div class="settings-field">
+        <label for="script-pip-cache-dir">Cache-Verzeichnis</label>
+        <input type="text" id="script-pip-cache-dir" value="${escapeHtml(cfg.pip_cache_dir || './scripts/.pip_cache')}"
+          placeholder="./scripts/.pip_cache" onchange="markSettingsModified()" style="font-family:var(--font-mono)">
+        <small class="field-hint">Pfad für pip-Cache (relativ zu App-Root)</small>
+      </div>
+    </div>
+  `;
+
+  // Setup array field behaviors
+  setupArrayFieldListeners('script-allowed-paths', cfg.allowed_file_paths || []);
+  setupArrayFieldListeners('script-allowed-imports', cfg.allowed_imports || []);
 }
 
 async function loadCredentialsDropdown(selectId, currentValue) {
@@ -11743,6 +11886,37 @@ async function saveCurrentSection() {
       if (!res.ok) throw new Error(data.detail || 'Fehler');
       settingsState.settings.alm = data.values;
       updateSettingsStatus('ALM-Einstellungen angewendet', 'success');
+    } catch (err) {
+      updateSettingsStatus('Fehler: ' + err.message, 'error');
+    }
+    return;
+  }
+
+  // Python Script Execution hat eigene Felder
+  if (section === 'script_execution') {
+    const values = {
+      enabled: document.getElementById('script-enabled')?.checked || false,
+      max_execution_timeout_seconds: parseInt(document.getElementById('script-timeout')?.value) || 300,
+      max_output_size_kb: parseInt(document.getElementById('script-output-size')?.value) || 10240,
+      allowed_file_paths: getArrayFieldValues('script-allowed-paths'),
+      allowed_imports: getArrayFieldValues('script-allowed-imports'),
+      pip_install_enabled: document.getElementById('script-pip-enabled')?.checked || false,
+      pip_index_url: document.getElementById('script-pip-url')?.value?.trim() || '',
+      pip_trusted_host: document.getElementById('script-pip-host')?.value?.trim() || '',
+      pip_install_timeout_seconds: parseInt(document.getElementById('script-pip-timeout')?.value) || 60,
+      pip_cache_requirements: document.getElementById('script-pip-cache')?.checked || false,
+      pip_cache_dir: document.getElementById('script-pip-cache-dir')?.value || './scripts/.pip_cache',
+    };
+    try {
+      const res = await fetch('/api/settings/section/script_execution', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(values),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.detail || 'Fehler');
+      settingsState.settings.script_execution = data.values;
+      updateSettingsStatus('Python-Script-Einstellungen angewendet', 'success');
     } catch (err) {
       updateSettingsStatus('Fehler: ' + err.message, 'error');
     }
