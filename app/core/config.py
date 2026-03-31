@@ -1219,7 +1219,7 @@ class ScriptExecutionConfig(BaseModel):
     ]
 
     # Ausführung
-    use_container: bool = True                # Docker/Podman-Sandbox nutzen
+    use_container: bool = False               # Docker/Podman-Sandbox (momentan nicht implementiert, wird lokal ausgeführt)
     timeout_seconds: int = 30                 # Max. Ausführungszeit
     max_output_size_kb: int = 256             # Max. stdout/stderr in KB
 
