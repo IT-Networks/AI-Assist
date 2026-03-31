@@ -854,3 +854,124 @@ update:
   use_proxy: true                 # Proxy aus search-Konfiguration verwenden
   verify_ssl: false               # SSL-Zertifikate prüfen
   check_on_start: false           # Beim Start nach Updates suchen
+
+# Python Script Execution Settings
+# ═════════════════════════════════════════════════════════════════════
+script_execution:
+  enabled: true
+  scripts_directory: ./scripts
+  max_scripts: 100
+  max_script_size_kb: 100
+  max_total_size_mb: 50
+  cleanup_days: 30
+  require_confirmation: true
+  use_container: false  # Docker sandbox nicht implementiert - lokal ausführen
+  timeout_seconds: 30
+  max_output_size_kb: 256
+  
+  # Dateisystem-Zugriff
+  allowed_file_paths: []  # Pfade wo Scripts schreiben dürfen (leer = kein Zugriff)
+  
+  # Code-Imports (für 'import X' Statements)
+  allowed_imports:
+    - json
+    - csv
+    - pathlib
+    - re
+    - datetime
+    - collections
+    - itertools
+    - functools
+    - math
+    - statistics
+    - typing
+    - dataclasses
+    - enum
+    - copy
+    - io
+    - base64
+    - hashlib
+    - uuid
+    - random
+    - string
+    - textwrap
+    - difflib
+    - decimal
+    - fractions
+    - operator
+    - contextlib
+    - abc
+    - struct
+    - pandas
+    - numpy
+    - yaml
+    - xml
+    - html
+    - pprint
+  
+  # Verbotene Patterns in Code
+  blocked_patterns:
+    - subprocess
+    - os\.system
+    - os\.popen
+    - os\.exec
+    - eval\s*\(
+    - exec\s*\(
+    - __import__
+    - compile\s*\(
+    - open\s*\([^)]*['\"][wa]
+    - shutil\.rmtree
+    - shutil\.move
+    - socket\.
+    - urllib\.request
+    - http\.client
+    - importlib
+    - builtins
+    - globals\s*\(
+    - locals\s*\(
+    - getattr\s*\(
+    - setattr\s*\(
+    - delattr\s*\(
+  
+  # pip-Pakete (für 'pip install X')
+  pip_allowed_packages:
+    - pandas
+    - numpy
+    - scipy
+    - scikit-learn
+    - openpyxl
+    - xlrd
+    - xlwt
+    - pyexcel
+    - requests
+    - httpx
+    - aiohttp
+    - pyyaml
+    - toml
+    - msgpack
+    - xlsxwriter
+    - beautifulsoup4
+    - selenium
+    - scrapy
+    - cryptography
+    - pycryptodome
+    - python-dateutil
+    - pytz
+    - pillow
+    - opencv-python
+    - lxml
+    - defusedxml
+    - click
+    - colorama
+    - tabulate
+    - tqdm
+    - sympy
+    - statsmodels
+  
+  # Nexus pip Repository
+  pip_install_enabled: false
+  pip_index_url: ''
+  pip_trusted_host: ''
+  pip_install_timeout_seconds: 60
+  pip_cache_requirements: true
+  pip_cache_dir: ./scripts/.pip_cache
