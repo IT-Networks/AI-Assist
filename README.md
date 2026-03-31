@@ -31,6 +31,24 @@ python main.py
 
 Browser: **http://localhost:8000**
 
+## ⚠️ WICHTIG: Configuration Changes erfordern Server Restart
+
+**Kritisch:** Änderungen in `config.yaml` werden nur wirksam, wenn der Server **neu gestartet** wird!
+
+Dies betrifft insbesondere:
+- `docker_sandbox.enabled` - Docker/Podman-Sandbox Aktivierung
+- `script_execution.use_container` - Python Script Ausführung in Container
+- Alle Security-relevanten Settings
+
+**Symptom:** Fehler wie `"can only run python in sandbox"` treten auf, obwohl `use_container: false` in der Config eingestellt ist.
+
+**Lösung:**
+```bash
+# Server stoppen (Ctrl+C)
+# Dann neu starten:
+python main.py
+```
+
 ## Architektur
 
 ```

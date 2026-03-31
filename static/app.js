@@ -5045,6 +5045,11 @@ async function sendMessage() {
   // ─────────────────────────────────────────────────────────────────────────
 
   const activeChat = chatManager.getActive();
+  if (!activeChat) return;
+
+  // Capture Chat ID um zu verhindern, dass Chat-Wechsel während Verarbeitung uns verwirrt
+  const chatId = activeChat.id;
+
   // Verhindere Doppel-Senden wenn dieser Chat bereits streamt
   // ABER: Suggestion responses (Answers to questions the LLM asked) sind erlaubt
   if (!isSuggestionResponse && (activeChat?.streamingState || _chatAbortController)) return;
@@ -5053,11 +5058,13 @@ async function sendMessage() {
   // um zu verhindern, dass zwei Response-Reader gleichzeitig laufen
   if (isSuggestionResponse && activeChat?.streamingState) {
     log.info('[suggest] Aborting current streaming to send suggestion response');
-    if (activeChat.streamingState.abortController) {
-      activeChat.streamingState.abortController.abort();
+    // Snapshot des streaming State um Race Conditions zu vermeiden
+    const streamingState = activeChat.streamingState;
+    if (streamingState?.abortController) {
+      streamingState.abortController.abort();
     }
-    if (activeChat.streamingState.timerInterval) {
-      clearInterval(activeChat.streamingState.timerInterval);
+    if (streamingState?.timerInterval) {
+      clearInterval(streamingState.timerInterval);
     }
     activeChat.streamingState = null;
   }
@@ -5104,10 +5111,28 @@ async function sendChatInternal(message) {
   const activeChat = chatManager.getActive();
   if (!activeChat) return;
 
+  // Check if this is a suggestion response (for consistency with sendMessage)
+  const isSuggestionResponse = message.dataset?.isSuggestionResponse === 'true';
+  if (message.dataset) delete message.dataset.isSuggestionResponse;
+
   // Verhindere Doppel-Senden wenn bereits am Streamen
-  if (activeChat.streamingState || _chatAbortController) {
+  // ABER: Suggestion responses (interne Messages) können auch während Streaming sein
+  if (!isSuggestionResponse && (activeChat.streamingState || _chatAbortController)) {
     log.info('[sendChatInternal] Bereits am Streamen, überspringe');
     return;
+  }
+
+  // Auch für interne Messages: abort wenn Suggestion gesendet wird
+  if (isSuggestionResponse && activeChat?.streamingState) {
+    log.info('[sendChatInternal-suggest] Aborting current streaming');
+    const streamingState = activeChat.streamingState;
+    if (streamingState?.abortController) {
+      streamingState.abortController.abort();
+    }
+    if (streamingState?.timerInterval) {
+      clearInterval(streamingState.timerInterval);
+    }
+    activeChat.streamingState = null;
   }
 
   // Stuck-Hint entfernen wenn vorhanden (neue Anfrage = neuer Versuch)
