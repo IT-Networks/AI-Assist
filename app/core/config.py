@@ -1234,6 +1234,34 @@ class ScriptExecutionConfig(BaseModel):
     pip_cache_requirements: bool = True       # pip-Cache verwenden (schneller bei Wiederholungen)
     pip_cache_dir: str = "./scripts/.pip_cache"  # Pip-Cache-Verzeichnis
 
+    # pip Packages die installiert werden dürfen (separate Whitelist von allowed_imports!)
+    pip_allowed_packages: List[str] = [
+        # Data Processing
+        "pandas", "numpy", "scipy", "scikit-learn",
+        # Excel/CSV
+        "openpyxl", "xlrd", "xlwt", "pyexcel",
+        # Web/HTTP
+        "requests", "httpx", "aiohttp",
+        # Data Serialization
+        "pyyaml", "toml", "msgpack",
+        # Excel
+        "xlsxwriter", "openpyxl",
+        # Web scraping
+        "beautifulsoup4", "selenium", "scrapy",
+        # Encryption
+        "cryptography", "pycryptodome",
+        # Dates/Time
+        "python-dateutil", "pytz",
+        # Image
+        "pillow", "opencv-python",
+        # JSON/XML
+        "lxml", "defusedxml",
+        # Utilities
+        "click", "colorama", "tabulate", "tqdm",
+        # Math
+        "sympy", "statsmodels",
+    ]
+
 
 class GitHubConfig(BaseModel):
     """GitHub Enterprise Server Konfiguration (intern gehostet)."""

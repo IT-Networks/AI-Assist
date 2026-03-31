@@ -10442,18 +10442,20 @@ function renderScriptExecutionSection() {
 
       <div class="settings-field">
         <label>Erlaubte Dateipfade für Schreibvorgänge</label>
-        <div class="settings-array" id="script-allowed-paths-container">
-          ${renderArrayItems('script-allowed-paths', cfg.allowed_file_paths || [])}
-        </div>
-        <button class="btn btn-sm" onclick="addArrayItem('script-allowed-paths')">+ Pfad hinzufügen</button>
+        ${renderArrayField('script-allowed-paths', 'script_execution', 'allowed_file_paths', cfg.allowed_file_paths || [])}
+        <small class="field-hint">Verzeichnisse wo Scripts schreiben dürfen (z.B. /data/output, /tmp/reports)</small>
       </div>
 
       <div class="settings-field">
-        <label>Erlaubte Imports</label>
-        <div class="settings-array" id="script-allowed-imports-container">
-          ${renderArrayItems('script-allowed-imports', cfg.allowed_imports || [])}
-        </div>
-        <small class="field-hint">Pakete die in Scripts importiert werden dürfen (z.B. pandas, numpy, requests)</small>
+        <label>Erlaubte pip-Pakete (Installation via pip)</label>
+        ${renderArrayField('script-pip-packages', 'script_execution', 'pip_allowed_packages', cfg.pip_allowed_packages || [])}
+        <small class="field-hint">Pakete die via pip install() erlaubt sind (z.B. pandas, requests, openpyxl)</small>
+      </div>
+
+      <div class="settings-field">
+        <label>Erlaubte Code-Imports</label>
+        ${renderArrayField('script-allowed-imports', 'script_execution', 'allowed_imports', cfg.allowed_imports || [])}
+        <small class="field-hint">Python-Module die im Script importiert werden dürfen (Whitelist)</small>
       </div>
     </div>
 
@@ -10507,9 +10509,7 @@ function renderScriptExecutionSection() {
     </div>
   `;
 
-  // Setup array field behaviors
-  setupArrayFieldListeners('script-allowed-paths', cfg.allowed_file_paths || []);
-  setupArrayFieldListeners('script-allowed-imports', cfg.allowed_imports || []);
+  // renderArrayField() bereits alle Event-Listener registriert
 }
 
 async function loadCredentialsDropdown(selectId, currentValue) {
@@ -11660,6 +11660,20 @@ function collectSectionValues(section) {
   return values;
 }
 
+function getArrayFieldValues(fieldId) {
+  // Sammelt alle Werte aus einem Array-Feld
+  const container = document.getElementById(fieldId + '-container');
+  if (!container) return [];
+
+  const inputs = container.querySelectorAll('input[type="text"]');
+  const values = [];
+  inputs.forEach(input => {
+    const val = input.value?.trim();
+    if (val) values.push(val);
+  });
+  return values;
+}
+
 async function saveCurrentSection() {
   const section = settingsState.currentSection;
 
@@ -11900,6 +11914,7 @@ async function saveCurrentSection() {
       max_output_size_kb: parseInt(document.getElementById('script-output-size')?.value) || 256,
       allowed_file_paths: getArrayFieldValues('script-allowed-paths'),
       allowed_imports: getArrayFieldValues('script-allowed-imports'),
+      pip_allowed_packages: getArrayFieldValues('script-pip-packages'),
       pip_install_enabled: document.getElementById('script-pip-enabled')?.checked || false,
       pip_index_url: document.getElementById('script-pip-url')?.value?.trim() || '',
       pip_trusted_host: document.getElementById('script-pip-host')?.value?.trim() || '',

@@ -60,13 +60,14 @@ async def handle_generate_script(
                     return ToolResult(success=False,
                         error=f"Ungültiger Package-Name: {pkg!r}. Format: 'package==1.2.3' oder 'package'")
 
-            # Package-Namen müssen in allowed_imports sein (Admin-Freigabe)
+            # Package-Namen müssen in pip_allowed_packages sein (Admin-Freigabe)
             for pkg in requirements:
                 pkg_name = _re.split(r'[>=<!~]', pkg)[0].strip().lower().replace('-', '_')
-                if pkg_name not in config.allowed_imports:
+                allowed_names = [p.lower().replace('-', '_') for p in config.pip_allowed_packages]
+                if pkg_name not in allowed_names:
                     return ToolResult(success=False,
-                        error=f"Paket '{pkg_name}' nicht in allowed_imports. "
-                               f"Admin muss es zuerst in ScriptExecutionConfig eintragen.")
+                        error=f"Paket '{pkg_name}' nicht in pip_allowed_packages. "
+                               f"Admin muss es zuerst in Settings → Python Scripts hinzufügen.")
 
         # Validieren und speichern
         script, validation = await manager.generate_and_save(
