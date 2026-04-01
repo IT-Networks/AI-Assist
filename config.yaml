@@ -913,6 +913,8 @@ script_execution:
     - pprint
     # Document Processing
     - docx2pdf
+    # Windows COM (for Office automation)
+    - win32com
   
   # Verbotene Patterns in Code
   blocked_patterns:
