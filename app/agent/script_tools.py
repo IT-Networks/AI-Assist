@@ -229,6 +229,29 @@ async def execute_script_after_confirmation(
         manager = get_script_manager()
         result = await manager.execute(script_id, args, input_data, on_output_chunk=on_output_chunk)
 
+        # PHASE 3: Check if file access was blocked and user approval is needed
+        if result.pending_confirmation:
+            # Script failed because a file write was blocked
+            # Return confirmation request to frontend
+            confirmation_data = {
+                "operation": "path_approval_confirm",
+                "script_id": script_id,
+                "script_name": f"Script {script_id}",
+                "requested_path": result.pending_confirmation.get("requested_path"),
+                "access_type": result.pending_confirmation.get("access_type", "write"),
+                "reason": result.pending_confirmation.get("reason", "Script versucht Datei zu schreiben"),
+                "is_system_critical": False,
+                "script_args": args or {},
+                "script_input_data": input_data,
+            }
+
+            return ToolResult(
+                success=True,
+                data=f"Dateizugriff blockiert: {result.pending_confirmation.get('requested_path')}\nBitte bestätigen Sie, um Zugriff freizugeben.",
+                requires_confirmation=True,
+                confirmation_data=confirmation_data
+            )
+
         if result.success:
             output_text = f"""✅ Script erfolgreich ausgeführt in {result.execution_time_ms}ms
 

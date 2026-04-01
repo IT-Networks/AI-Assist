@@ -911,11 +911,29 @@ SCRIPT_ARGS = json.loads({repr(args_json)})
             else:
                 error_msg = stderr_str if process.returncode != 0 else None
 
+            # PHASE 3: Check for path approval request (file write blocked)
+            # If script failed due to blocked file write, signal that user approval is needed
+            pending_confirmation = None
+            if process.returncode != 0:
+                blocked_path = self._extract_blocked_path(stderr_str, stdout_str)
+                if blocked_path:
+                    # File write was blocked - request user approval
+                    pending_confirmation = {
+                        "operation": "path_approval_confirm",
+                        "blocked_reason": "file_write_blocked",
+                        "requested_path": blocked_path,
+                        "access_type": "write",
+                        "reason": "Script versucht Datei zu schreiben",
+                    }
+                    logger.info(f"Path approval requested: {blocked_path}")
+                    error_msg = f"Dateizugriff blockiert: {blocked_path}\nBerechtigungsanfrage gesendet."
+
             return ExecutionResult(
                 success=process.returncode == 0,
                 stdout=stdout_str,
                 stderr=stderr_str,
-                error=error_msg
+                error=error_msg,
+                pending_confirmation=pending_confirmation
             )
 
         except FileNotFoundError as e:
@@ -943,6 +961,34 @@ SCRIPT_ARGS = json.loads({repr(args_json)})
                 stderr='',
                 error=f"Script-Ausführungsfehler ({error_type}): {str(e)[:200]}"
             )
+
+    def _extract_blocked_path(self, stderr: str, stdout: str) -> Optional[str]:
+        """
+        Extrahiert den blockierten Pfad aus Fehlermeldungen.
+
+        Sucht nach Pattern: "File write blocked: '/path/to/file' not in allowed_file_paths"
+
+        Args:
+            stderr: stderr output des Scripts
+            stdout: stdout output des Scripts
+
+        Returns:
+            Pfad als String oder None wenn kein blockierter Pfad gefunden
+        """
+        import re
+
+        # Kombiniere stdout + stderr für Suche
+        output = stderr + "\n" + stdout
+
+        # Pattern: "File write blocked: '/path/to/file' not in allowed_file_paths"
+        # oder: "PermissionError: File write blocked: ..."
+        pattern = r"File write blocked:\s*(['\"])([^'\"]+)\1"
+        match = re.search(pattern, output)
+
+        if match:
+            return match.group(2)  # Gruppe 2 ist der Pfad (ohne Quotes)
+
+        return None
 
     async def _run_in_container(self, script_path: str, input_data: str = None) -> ExecutionResult:
         """Führt Script in Docker/Podman-Container aus."""
