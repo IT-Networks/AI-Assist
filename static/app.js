@@ -5745,7 +5745,16 @@ async function processAgentEvent(event, bubble, msgDiv, chat) {
       break;
     }
     case 'mcp_progress': {
-      updateThinkingProgress(data, chat);
+      // PHASE 3: Route pip and script output to specialized handlers
+      const eventType = data.type;
+      if (eventType && eventType.startsWith('pip_')) {
+        handlePipProgress(data, chat);
+      } else if (eventType === 'script_output') {
+        handleScriptOutput(data, chat);
+      } else {
+        // Existing thinking progress handler
+        updateThinkingProgress(data, chat);
+      }
       break;
     }
     case 'mcp_complete': {
@@ -17150,6 +17159,68 @@ function showThinkingError(data, chat) {
   }
 
   updateMcpBadge(chat);
+}
+
+/**
+ * PHASE 3: Handles pip installation progress events.
+ * Displays pip messages in the chat as installation progresses.
+ * @param {Object} data - Event data with type, package, message, etc.
+ * @param {Object} chat - Chat object
+ */
+function handlePipProgress(data, chat) {
+  const isActive = chat.id === chatManager.activeId;
+  if (!isActive) return;
+
+  const { type, message, success, error } = data;
+
+  switch (type) {
+    case 'pip_install_start':
+      // "Installiere 3 Python-Pakete..."
+      appendMessage('system', `⬇️ ${escapeHtml(message)}`);
+      break;
+    case 'pip_installing':
+      // "↓ Installiere: pandas"
+      appendMessage('system', `  ${escapeHtml(message)}`);
+      break;
+    case 'pip_installed':
+      // "✓ pandas installiert" or "✗ pandas fehlgeschlagen: ..."
+      appendMessage('system', `  ${escapeHtml(message)}`);
+      break;
+    case 'pip_install_complete':
+      // "✓ Pip-Installation abgeschlossen (XXXms)"
+      appendMessage('system', `✅ ${escapeHtml(message)}`);
+      break;
+  }
+}
+
+/**
+ * PHASE 3: Handles script output streaming events.
+ * Displays script stdout/stderr in the chat as it's produced.
+ * @param {Object} data - Event data with stream_type and chunk
+ * @param {Object} chat - Chat object
+ */
+function handleScriptOutput(data, chat) {
+  const isActive = chat.id === chatManager.activeId;
+  if (!isActive) return;
+
+  const { stream_type, chunk, message } = data;
+
+  // Initialize output buffer per chat if not exists
+  if (!chat.scriptOutput) {
+    chat.scriptOutput = { stdout: '', stderr: '' };
+  }
+
+  // Accumulate output
+  if (stream_type && chunk) {
+    chat.scriptOutput[stream_type] += chunk + '\n';
+  }
+
+  // Display with stream type indicator
+  const prefix = stream_type === 'stderr' ? '⚠️' : '📤';
+  const displayText = message || escapeHtml(chunk || '');
+  if (displayText) {
+    appendMessage('system', `${prefix} ${displayText}`);
+  }
 }
 
 /**
