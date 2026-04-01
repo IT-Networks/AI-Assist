@@ -734,12 +734,25 @@ class ScriptExecutor:
                 return
 
     def _create_wrapper(self, code: str, args: Dict[str, Any], allowed_paths: List[str] = None) -> str:
-        """Erstellt Wrapper-Code mit injizierten Argumenten und Sicherheits-Guard."""
+        """
+        Erstellt Wrapper-Code mit injizierten Argumenten und Sicherheits-Guard.
+
+        FIX v2.28.31: ALWAYS create guard, but:
+        - If allowed_paths is None: No guard (backward compat)
+        - If allowed_paths is [] (empty): Block ALL file writes
+        - If allowed_paths has entries: Whitelist them
+        """
         args_json = json.dumps(args, ensure_ascii=False)
         paths_json = json.dumps(allowed_paths or [], ensure_ascii=False)
 
-        # Wenn Dateipfade konfiguriert sind, injiziere _safe_open() Guard
-        if allowed_paths:
+        # CRITICAL FIX: Distinction between "not configured" vs "empty whitelist"
+        # None = no guard (not configured)
+        # [] = block all writes (empty whitelist = deny by default)
+        # [...] = whitelist specific paths
+
+        if allowed_paths is not None:
+            # File path validation is ENABLED
+            # Either [] (deny all) or [...] (whitelist)
             wrapper = f'''# === AUTO-GENERATED WRAPPER ===
 import json
 import builtins as _b
@@ -755,9 +768,10 @@ def _safe_open(file, mode="r", *args, **kwargs):
     write_modes = set("waxWAX")
     if any(c in str(mode) for c in write_modes):
         abs_file = str(_pathlib.Path(file).resolve())
-        if not any(abs_file.startswith(str(_pathlib.Path(p).resolve())) for p in ALLOWED_FILE_PATHS):
+        # FIX: Empty ALLOWED_FILE_PATHS = deny all (not allow all!)
+        if not ALLOWED_FILE_PATHS or not any(abs_file.startswith(str(_pathlib.Path(p).resolve())) for p in ALLOWED_FILE_PATHS):
             raise PermissionError(
-                f"File write blocked: {{abs_file!r}} not in allowed_file_paths. Allowed: {{ALLOWED_FILE_PATHS}}"
+                f"File write blocked: {{abs_file!r}} not in allowed_file_paths. Allowed: {{ALLOWED_FILE_PATHS if ALLOWED_FILE_PATHS else '(none - file access disabled)'}}"
             )
     return _orig_open(file, mode, *args, **kwargs)
 _b.open = _safe_open
@@ -767,7 +781,7 @@ _b.open = _safe_open
 # === USER SCRIPT END ===
 '''
         else:
-            # Keine Dateipfade konfiguriert - einfacher Wrapper ohne Guard
+            # Keine Dateipfade konfiguriert - einfacher Wrapper ohne Guard (backward compat)
             wrapper = f'''# === AUTO-GENERATED WRAPPER ===
 import json
 import sys
