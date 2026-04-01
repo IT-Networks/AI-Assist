@@ -468,6 +468,13 @@ class ScriptExecutor:
         # Callback-Mechanismus für Output-Streaming (Phase 2)
         self.on_output_chunk = None  # Callable[[str, str], None] - (stream_type, chunk)
 
+        # OPTIMIZATION: Cache async status to avoid iscoroutinefunction() per call
+        self._on_pip_start_is_async = False
+        self._on_pip_installing_is_async = False
+        self._on_pip_installed_is_async = False
+        self._on_pip_complete_is_async = False
+        self._on_output_chunk_is_async = False
+
     async def run(
         self,
         script: Script,
@@ -502,6 +509,13 @@ class ScriptExecutor:
         self.on_pip_complete = on_pip_complete
         # PHASE 2: Register Output Callback
         self.on_output_chunk = on_output_chunk
+
+        # OPTIMIZATION: Pre-compute async status for callbacks (avoid per-call introspection)
+        self._on_pip_start_is_async = asyncio.iscoroutinefunction(on_pip_start) if on_pip_start else False
+        self._on_pip_installing_is_async = asyncio.iscoroutinefunction(on_pip_installing) if on_pip_installing else False
+        self._on_pip_installed_is_async = asyncio.iscoroutinefunction(on_pip_installed) if on_pip_installed else False
+        self._on_pip_complete_is_async = asyncio.iscoroutinefunction(on_pip_complete) if on_pip_complete else False
+        self._on_output_chunk_is_async = asyncio.iscoroutinefunction(on_output_chunk) if on_output_chunk else False
 
         start_time = datetime.now()
 
@@ -579,7 +593,7 @@ class ScriptExecutor:
 
         # PHASE 1: Send pip_start event
         if self.on_pip_start:
-            if asyncio.iscoroutinefunction(self.on_pip_start):
+            if self._on_pip_start_is_async:
                 await self.on_pip_start(requirements)
             else:
                 self.on_pip_start(requirements)
@@ -593,7 +607,7 @@ class ScriptExecutor:
         for pkg in requirements:
             # PHASE 1: Send pip_installing event
             if self.on_pip_installing:
-                if asyncio.iscoroutinefunction(self.on_pip_installing):
+                if self._on_pip_installing_is_async:
                     await self.on_pip_installing(pkg)
                 else:
                     self.on_pip_installing(pkg)
@@ -632,7 +646,7 @@ class ScriptExecutor:
                     stderr_text = stderr.decode('utf-8', errors='replace')[:200]
                     # PHASE 1: Send pip_installed error event
                     if self.on_pip_installed:
-                        if asyncio.iscoroutinefunction(self.on_pip_installed):
+                        if self._on_pip_installed_is_async:
                             await self.on_pip_installed(pkg, False, stderr_text)
                         else:
                             self.on_pip_installed(pkg, False, stderr_text)
@@ -641,7 +655,7 @@ class ScriptExecutor:
                     logger.info(f"pip install erfolgreich: {pkg}")
                     # PHASE 1: Send pip_installed success event
                     if self.on_pip_installed:
-                        if asyncio.iscoroutinefunction(self.on_pip_installed):
+                        if self._on_pip_installed_is_async:
                             await self.on_pip_installed(pkg, True, None)
                         else:
                             self.on_pip_installed(pkg, True, None)
@@ -661,7 +675,7 @@ class ScriptExecutor:
                 error_msg = f"Timeout nach {self.config.pip_install_timeout_seconds}s"
                 # PHASE 1: Send pip_installed error event
                 if self.on_pip_installed:
-                    if asyncio.iscoroutinefunction(self.on_pip_installed):
+                    if self._on_pip_installed_is_async:
                         await self.on_pip_installed(pkg, False, error_msg)
                     else:
                         self.on_pip_installed(pkg, False, error_msg)
@@ -671,7 +685,7 @@ class ScriptExecutor:
                 error_msg = f"{type(e).__name__}: {str(e)[:100]}"
                 # PHASE 1: Send pip_installed error event
                 if self.on_pip_installed:
-                    if asyncio.iscoroutinefunction(self.on_pip_installed):
+                    if self._on_pip_installed_is_async:
                         await self.on_pip_installed(pkg, False, error_msg)
                     else:
                         self.on_pip_installed(pkg, False, error_msg)
@@ -681,7 +695,7 @@ class ScriptExecutor:
         install_time = int((datetime.now() - install_start).total_seconds() * 1000)
         success = len(failed_packages) == 0
         if self.on_pip_complete:
-            if asyncio.iscoroutinefunction(self.on_pip_complete):
+            if self._on_pip_complete_is_async:
                 await self.on_pip_complete(success, install_time)
             else:
                 self.on_pip_complete(success, install_time)
@@ -775,8 +789,9 @@ SCRIPT_ARGS = json.loads({repr(args_json)})
         """
         import sys
         process = None
-        stdout_str = ''
-        stderr_str = ''
+        # OPTIMIZATION: Use lists for accumulation instead of string += (O(n) instead of O(n²))
+        stdout_lines = []
+        stderr_lines = []
 
         try:
             process = await asyncio.create_subprocess_exec(
@@ -796,7 +811,6 @@ SCRIPT_ARGS = json.loads({repr(args_json)})
             try:
                 # Stream stdout and stderr concurrently
                 async def stream_output(stream, stream_type):
-                    nonlocal stdout_str, stderr_str
                     try:
                         while True:
                             line = await asyncio.wait_for(
@@ -805,18 +819,20 @@ SCRIPT_ARGS = json.loads({repr(args_json)})
                             )
                             if not line:
                                 break
-                            decoded = line.decode('utf-8', errors='replace').rstrip('\r\n')
+                            # OPTIMIZATION: Decode once, reuse for both storage and callback
+                            decoded = line.decode('utf-8', errors='replace')
                             if stream_type == 'stdout':
-                                stdout_str += line.decode('utf-8', errors='replace')
+                                stdout_lines.append(decoded)
                             else:
-                                stderr_str += line.decode('utf-8', errors='replace')
+                                stderr_lines.append(decoded)
 
-                            # PHASE 2: Emit output callback
+                            # PHASE 2: Emit output callback (with newline stripped for display)
                             if self.on_output_chunk:
-                                if asyncio.iscoroutinefunction(self.on_output_chunk):
-                                    await self.on_output_chunk(stream_type, decoded)
+                                display_text = decoded.rstrip('\r\n')
+                                if self._on_output_chunk_is_async:
+                                    await self.on_output_chunk(stream_type, display_text)
                                 else:
-                                    self.on_output_chunk(stream_type, decoded)
+                                    self.on_output_chunk(stream_type, display_text)
                     except asyncio.TimeoutError:
                         # Timeout on reading individual line, continue
                         pass
@@ -845,12 +861,19 @@ SCRIPT_ARGS = json.loads({repr(args_json)})
                     except Exception:
                         pass
                 logger.warning(f"Script timeout after {self.timeout}s: {script_path}")
+                # OPTIMIZATION: Join lists to strings (O(n) instead of repeated +=)
+                stdout_str = ''.join(stdout_lines)
+                stderr_str = ''.join(stderr_lines)
                 return ExecutionResult(
                     success=False,
                     stdout=stdout_str,
                     stderr=stderr_str,
                     error=f"Script Timeout nach {self.timeout}s (maximale Ausführungszeit überschritten)"
                 )
+
+            # OPTIMIZATION: Join lists to strings once at end
+            stdout_str = ''.join(stdout_lines)
+            stderr_str = ''.join(stderr_lines)
 
             # Output begrenzen mit Warnung
             max_output = self.config.max_output_size_kb * 1024
