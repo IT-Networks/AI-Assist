@@ -46,4 +46,8 @@ def reset_singletons():
     import app.services.arena_mode as arena_module
     arena_module._arena_mode_service = None
 
+    # Reset script manager singleton (Phase 1/2/3 testing)
+    import app.services.script_manager as script_mgr_module
+    script_mgr_module.ScriptManager._instance = None
+
     yield
