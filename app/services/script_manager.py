@@ -327,7 +327,7 @@ Erstellt: {datetime.now().isoformat()}
             parameters=json.loads(row['parameters'] or '{}'),
             tags=json.loads(row['tags'] or '[]'),
             file_path=str(file_path),
-            requirements=json.loads(row.get('requirements') or '[]')
+            requirements=json.loads(row['requirements'] or '[]')
         )
 
     def list_all(self, filter_text: str = None, limit: int = 50) -> List[Script]:
@@ -361,7 +361,7 @@ Erstellt: {datetime.now().isoformat()}
                 parameters=json.loads(row['parameters'] or '{}'),
                 tags=json.loads(row['tags'] or '[]'),
                 file_path=str(file_path) if file_path.exists() else None,
-                requirements=json.loads(row.get('requirements') or '[]')
+                requirements=json.loads(row['requirements'] or '[]')
             ))
         return scripts
 
