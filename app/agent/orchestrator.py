@@ -3081,7 +3081,12 @@ class AgentOrchestrator:
             args = confirmation_data.get("args")
             input_data = confirmation_data.get("input_data")
 
-            result = await execute_script_after_confirmation(script_id, args, input_data)
+            # PHASE 2: Extract output callbacks if provided
+            output_callbacks = confirmation_data.get("_output_callbacks", {})
+            result = await execute_script_after_confirmation(
+                script_id, args, input_data,
+                on_output_chunk=output_callbacks.get("on_output_chunk")
+            )
 
             # Emit workspace event für Script-Ergebnis
             if result.success:

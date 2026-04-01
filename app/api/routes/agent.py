@@ -338,6 +338,27 @@ async def confirm_operation(
                     "on_pip_complete": on_pip_complete
                 }
 
+            # PHASE 2: For execute_script, create output streaming callbacks
+            elif operation == "execute_script":
+                from app.agent.orchestration.types import AgentEventType
+
+                async def on_output_chunk(stream_type: str, chunk: str):
+                    """Emit event when script outputs data."""
+                    await orchestrator._event_bridge.emit(
+                        AgentEventType.MCP_PROGRESS.value,
+                        {
+                            "type": "script_output",
+                            "stream_type": stream_type,
+                            "chunk": chunk,
+                            "message": f"{chunk}"
+                        }
+                    )
+
+                # Add callbacks to confirmation_data for use in orchestrator
+                confirmation_data["_output_callbacks"] = {
+                    "on_output_chunk": on_output_chunk
+                }
+
             result = await orchestrator._execute_confirmed_operation(confirmation_data)
 
             # Phase-2: Wenn requires_confirmation=True → weitere Bestätigung nötig

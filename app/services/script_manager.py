@@ -465,6 +465,8 @@ class ScriptExecutor:
         self.on_pip_installing = None  # Callable[[str], None]
         self.on_pip_installed = None  # Callable[[str, bool, Optional[str]], None]
         self.on_pip_complete = None  # Callable[[bool, int], None]
+        # Callback-Mechanismus für Output-Streaming (Phase 2)
+        self.on_output_chunk = None  # Callable[[str, str], None] - (stream_type, chunk)
 
     async def run(
         self,
@@ -474,7 +476,8 @@ class ScriptExecutor:
         on_pip_start=None,
         on_pip_installing=None,
         on_pip_installed=None,
-        on_pip_complete=None
+        on_pip_complete=None,
+        on_output_chunk=None
     ) -> ExecutionResult:
         """
         Führt ein Script aus.
@@ -487,6 +490,7 @@ class ScriptExecutor:
             on_pip_installing: Callback(package: str) für Package-Installation
             on_pip_installed: Callback(package: str, success: bool, error: Optional[str])
             on_pip_complete: Callback(success: bool, total_ms: int) für pip complete
+            on_output_chunk: Callback(stream_type: str, chunk: str) für stdout/stderr streaming
 
         Returns:
             ExecutionResult mit stdout/stderr
@@ -496,6 +500,8 @@ class ScriptExecutor:
         self.on_pip_installing = on_pip_installing
         self.on_pip_installed = on_pip_installed
         self.on_pip_complete = on_pip_complete
+        # PHASE 2: Register Output Callback
+        self.on_output_chunk = on_output_chunk
 
         start_time = datetime.now()
 
@@ -764,10 +770,14 @@ SCRIPT_ARGS = json.loads({repr(args_json)})
         """
         Führt Script lokal aus (ohne Container).
 
+        Streams stdout/stderr in real-time via callbacks instead of buffering.
         Handles timeouts gracefully with proper process cleanup.
         """
         import sys
         process = None
+        stdout_str = ''
+        stderr_str = ''
+
         try:
             process = await asyncio.create_subprocess_exec(
                 sys.executable, script_path,
@@ -776,11 +786,53 @@ SCRIPT_ARGS = json.loads({repr(args_json)})
                 stderr=asyncio.subprocess.PIPE
             )
 
+            # PHASE 2: Stream output instead of buffering with communicate()
+            if input_data:
+                process.stdin.write(input_data.encode())
+                await process.stdin.drain()
+                process.stdin.close()
+
+            start_time = datetime.now()
             try:
-                stdout, stderr = await asyncio.wait_for(
-                    process.communicate(input_data.encode() if input_data else None),
+                # Stream stdout and stderr concurrently
+                async def stream_output(stream, stream_type):
+                    nonlocal stdout_str, stderr_str
+                    try:
+                        while True:
+                            line = await asyncio.wait_for(
+                                stream.readline(),
+                                timeout=0.5
+                            )
+                            if not line:
+                                break
+                            decoded = line.decode('utf-8', errors='replace').rstrip('\r\n')
+                            if stream_type == 'stdout':
+                                stdout_str += line.decode('utf-8', errors='replace')
+                            else:
+                                stderr_str += line.decode('utf-8', errors='replace')
+
+                            # PHASE 2: Emit output callback
+                            if self.on_output_chunk:
+                                if asyncio.iscoroutinefunction(self.on_output_chunk):
+                                    await self.on_output_chunk(stream_type, decoded)
+                                else:
+                                    self.on_output_chunk(stream_type, decoded)
+                    except asyncio.TimeoutError:
+                        # Timeout on reading individual line, continue
+                        pass
+                    except Exception as e:
+                        logger.warning(f"Error streaming {stream_type}: {e}")
+
+                # Stream both stdout and stderr concurrently
+                await asyncio.wait_for(
+                    asyncio.gather(
+                        stream_output(process.stdout, 'stdout'),
+                        stream_output(process.stderr, 'stderr'),
+                        process.wait()
+                    ),
                     timeout=self.timeout
                 )
+
             except asyncio.TimeoutError:
                 # Graceful shutdown: terminate first, then kill if needed
                 try:
@@ -795,13 +847,10 @@ SCRIPT_ARGS = json.loads({repr(args_json)})
                 logger.warning(f"Script timeout after {self.timeout}s: {script_path}")
                 return ExecutionResult(
                     success=False,
-                    stdout='',
-                    stderr='',
+                    stdout=stdout_str,
+                    stderr=stderr_str,
                     error=f"Script Timeout nach {self.timeout}s (maximale Ausführungszeit überschritten)"
                 )
-
-            stdout_str = stdout.decode('utf-8', errors='replace')
-            stderr_str = stderr.decode('utf-8', errors='replace')
 
             # Output begrenzen mit Warnung
             max_output = self.config.max_output_size_kb * 1024
@@ -935,7 +984,8 @@ class ScriptManager:
         on_pip_start=None,
         on_pip_installing=None,
         on_pip_installed=None,
-        on_pip_complete=None
+        on_pip_complete=None,
+        on_output_chunk=None
     ) -> ExecutionResult:
         """
         Führt ein Script aus.
@@ -948,6 +998,7 @@ class ScriptManager:
             on_pip_installing: Callback(package: str) für Package-Installation
             on_pip_installed: Callback(package: str, success: bool, error: Optional[str])
             on_pip_complete: Callback(success: bool, total_ms: int) für pip complete
+            on_output_chunk: Callback(stream_type: str, chunk: str) für stdout/stderr streaming
 
         Returns:
             ExecutionResult mit stdout/stderr
@@ -960,12 +1011,14 @@ class ScriptManager:
             raise ScriptNotFoundError(f"Script '{script_id}' nicht gefunden")
 
         # PHASE 1: Pass callbacks to executor
+        # PHASE 2: Add output streaming callback
         result = await self.executor.run(
             script, args, input_data,
             on_pip_start=on_pip_start,
             on_pip_installing=on_pip_installing,
             on_pip_installed=on_pip_installed,
-            on_pip_complete=on_pip_complete
+            on_pip_complete=on_pip_complete,
+            on_output_chunk=on_output_chunk
         )
 
         # Statistik aktualisieren

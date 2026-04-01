@@ -200,17 +200,24 @@ async def handle_execute_script(
 async def execute_script_after_confirmation(
     script_id: str,
     args: Dict[str, Any] = None,
-    input_data: str = None
+    input_data: str = None,
+    on_output_chunk=None
 ) -> ToolResult:
     """
     Führt ein Script nach User-Bestätigung aus.
 
     Diese Funktion wird vom Orchestrator aufgerufen, nachdem
     der User die Ausführung bestätigt hat.
+
+    Args:
+        script_id: ID des Scripts
+        args: Script-Argumente
+        input_data: Eingabedaten
+        on_output_chunk: Callback(stream_type: str, chunk: str) für stdout/stderr streaming
     """
     try:
         manager = get_script_manager()
-        result = await manager.execute(script_id, args, input_data)
+        result = await manager.execute(script_id, args, input_data, on_output_chunk=on_output_chunk)
 
         if result.success:
             output_text = f"""✅ Script erfolgreich ausgeführt in {result.execution_time_ms}ms
