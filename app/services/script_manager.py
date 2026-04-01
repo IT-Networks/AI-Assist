@@ -460,12 +460,21 @@ class ScriptExecutor:
     def __init__(self):
         self.config = settings.script_execution
         self.timeout = self.config.timeout_seconds
+        # Callback-Mechanismus für Progress-Events (Phase 1)
+        self.on_pip_start = None  # Callable[[List[str]], None]
+        self.on_pip_installing = None  # Callable[[str], None]
+        self.on_pip_installed = None  # Callable[[str, bool, Optional[str]], None]
+        self.on_pip_complete = None  # Callable[[bool, int], None]
 
     async def run(
         self,
         script: Script,
         args: Dict[str, Any] = None,
-        input_data: str = None
+        input_data: str = None,
+        on_pip_start=None,
+        on_pip_installing=None,
+        on_pip_installed=None,
+        on_pip_complete=None
     ) -> ExecutionResult:
         """
         Führt ein Script aus.
@@ -474,10 +483,20 @@ class ScriptExecutor:
             script: Das auszuführende Script
             args: Argumente als Dictionary (werden als JSON übergeben)
             input_data: Optionale Eingabedaten
+            on_pip_start: Callback(packages: List[str]) für pip start
+            on_pip_installing: Callback(package: str) für Package-Installation
+            on_pip_installed: Callback(package: str, success: bool, error: Optional[str])
+            on_pip_complete: Callback(success: bool, total_ms: int) für pip complete
 
         Returns:
             ExecutionResult mit stdout/stderr
         """
+        # PHASE 1: Register Callbacks
+        self.on_pip_start = on_pip_start
+        self.on_pip_installing = on_pip_installing
+        self.on_pip_installed = on_pip_installed
+        self.on_pip_complete = on_pip_complete
+
         start_time = datetime.now()
 
         # 1. Requirements installieren (WICHTIG: muss vor Wrapper creation sein)
@@ -552,60 +571,121 @@ class ScriptExecutor:
         if not self.config.pip_index_url:
             return "pip_index_url nicht konfiguriert in ScriptExecutionConfig"
 
+        # PHASE 1: Send pip_start event
+        if self.on_pip_start:
+            if asyncio.iscoroutinefunction(self.on_pip_start):
+                await self.on_pip_start(requirements)
+            else:
+                self.on_pip_start(requirements)
+
         import sys
-        cmd = [
-            sys.executable, '-m', 'pip', 'install',
-            '--index-url', self.config.pip_index_url,
-            '--no-deps',  # Verhindert transitive Deps von public PyPI
-            '--quiet',
-        ]
 
-        if self.config.pip_trusted_host:
-            cmd += ['--trusted-host', self.config.pip_trusted_host]
+        # PHASE 1: Install pro Paket statt alle auf einmal (für Progress-Events)
+        install_start = datetime.now()
+        failed_packages = []
 
-        if self.config.pip_cache_requirements:
-            cmd += ['--cache-dir', self.config.pip_cache_dir]
-        else:
-            cmd += ['--no-cache-dir']
+        for pkg in requirements:
+            # PHASE 1: Send pip_installing event
+            if self.on_pip_installing:
+                if asyncio.iscoroutinefunction(self.on_pip_installing):
+                    await self.on_pip_installing(pkg)
+                else:
+                    self.on_pip_installing(pkg)
 
-        cmd += requirements
+            cmd = [
+                sys.executable, '-m', 'pip', 'install',
+                '--index-url', self.config.pip_index_url,
+                '--no-deps',  # Verhindert transitive Deps von public PyPI
+                '--quiet',
+            ]
 
-        process = None
-        try:
-            process = await asyncio.create_subprocess_exec(
-                *cmd,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE
-            )
+            if self.config.pip_trusted_host:
+                cmd += ['--trusted-host', self.config.pip_trusted_host]
 
-            _, stderr = await asyncio.wait_for(
-                process.communicate(),
-                timeout=self.config.pip_install_timeout_seconds
-            )
+            if self.config.pip_cache_requirements:
+                cmd += ['--cache-dir', self.config.pip_cache_dir]
+            else:
+                cmd += ['--no-cache-dir']
 
-            if process.returncode != 0:
-                stderr_text = stderr.decode('utf-8', errors='replace')[:1000]
-                return f"pip install fehlgeschlagen: {stderr_text}"
+            cmd += [pkg]
 
-            logger.info(f"pip install erfolgreich: {requirements}")
-            return None
+            process = None
+            try:
+                process = await asyncio.create_subprocess_exec(
+                    *cmd,
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.PIPE
+                )
 
-        except asyncio.TimeoutError:
-            if process:
-                try:
-                    process.terminate()
-                    await asyncio.wait_for(process.wait(), timeout=2)
-                except (asyncio.TimeoutError, ProcessLookupError):
+                _, stderr = await asyncio.wait_for(
+                    process.communicate(),
+                    timeout=self.config.pip_install_timeout_seconds
+                )
+
+                if process.returncode != 0:
+                    stderr_text = stderr.decode('utf-8', errors='replace')[:200]
+                    # PHASE 1: Send pip_installed error event
+                    if self.on_pip_installed:
+                        if asyncio.iscoroutinefunction(self.on_pip_installed):
+                            await self.on_pip_installed(pkg, False, stderr_text)
+                        else:
+                            self.on_pip_installed(pkg, False, stderr_text)
+                    failed_packages.append((pkg, stderr_text))
+                else:
+                    logger.info(f"pip install erfolgreich: {pkg}")
+                    # PHASE 1: Send pip_installed success event
+                    if self.on_pip_installed:
+                        if asyncio.iscoroutinefunction(self.on_pip_installed):
+                            await self.on_pip_installed(pkg, True, None)
+                        else:
+                            self.on_pip_installed(pkg, True, None)
+
+            except asyncio.TimeoutError:
+                if process:
                     try:
-                        process.kill()
-                        await asyncio.wait_for(process.wait(), timeout=1)
-                    except Exception:
-                        pass
-            logger.warning(f"pip install timeout nach {self.config.pip_install_timeout_seconds}s für {requirements}")
-            return f"pip install Timeout nach {self.config.pip_install_timeout_seconds}s"
-        except Exception as e:
-            logger.error(f"pip install Fehler: {type(e).__name__}: {e}")
-            return f"pip install Fehler: {type(e).__name__}: {str(e)[:200]}"
+                        process.terminate()
+                        await asyncio.wait_for(process.wait(), timeout=2)
+                    except (asyncio.TimeoutError, ProcessLookupError):
+                        try:
+                            process.kill()
+                            await asyncio.wait_for(process.wait(), timeout=1)
+                        except Exception:
+                            pass
+                logger.warning(f"pip install timeout nach {self.config.pip_install_timeout_seconds}s für {pkg}")
+                error_msg = f"Timeout nach {self.config.pip_install_timeout_seconds}s"
+                # PHASE 1: Send pip_installed error event
+                if self.on_pip_installed:
+                    if asyncio.iscoroutinefunction(self.on_pip_installed):
+                        await self.on_pip_installed(pkg, False, error_msg)
+                    else:
+                        self.on_pip_installed(pkg, False, error_msg)
+                failed_packages.append((pkg, error_msg))
+            except Exception as e:
+                logger.error(f"pip install Fehler für {pkg}: {type(e).__name__}: {e}")
+                error_msg = f"{type(e).__name__}: {str(e)[:100]}"
+                # PHASE 1: Send pip_installed error event
+                if self.on_pip_installed:
+                    if asyncio.iscoroutinefunction(self.on_pip_installed):
+                        await self.on_pip_installed(pkg, False, error_msg)
+                    else:
+                        self.on_pip_installed(pkg, False, error_msg)
+                failed_packages.append((pkg, error_msg))
+
+        # PHASE 1: Send pip_complete event
+        install_time = int((datetime.now() - install_start).total_seconds() * 1000)
+        success = len(failed_packages) == 0
+        if self.on_pip_complete:
+            if asyncio.iscoroutinefunction(self.on_pip_complete):
+                await self.on_pip_complete(success, install_time)
+            else:
+                self.on_pip_complete(success, install_time)
+
+        # Return error if any packages failed
+        if failed_packages:
+            error_summary = "\n".join(f"  • {pkg}: {err}" for pkg, err in failed_packages)
+            return f"pip install für einige Pakete fehlgeschlagen:\n{error_summary}"
+
+        return None
 
     def _cleanup_temp_file(self, temp_path: str) -> None:
         """
@@ -851,7 +931,11 @@ class ScriptManager:
         self,
         script_id: str,
         args: Dict[str, Any] = None,
-        input_data: str = None
+        input_data: str = None,
+        on_pip_start=None,
+        on_pip_installing=None,
+        on_pip_installed=None,
+        on_pip_complete=None
     ) -> ExecutionResult:
         """
         Führt ein Script aus.
@@ -860,6 +944,10 @@ class ScriptManager:
             script_id: ID des Scripts
             args: Argumente für das Script
             input_data: Optionale Eingabedaten
+            on_pip_start: Callback(packages: List[str]) für pip start
+            on_pip_installing: Callback(package: str) für Package-Installation
+            on_pip_installed: Callback(package: str, success: bool, error: Optional[str])
+            on_pip_complete: Callback(success: bool, total_ms: int) für pip complete
 
         Returns:
             ExecutionResult mit stdout/stderr
@@ -871,7 +959,14 @@ class ScriptManager:
         if not script:
             raise ScriptNotFoundError(f"Script '{script_id}' nicht gefunden")
 
-        result = await self.executor.run(script, args, input_data)
+        # PHASE 1: Pass callbacks to executor
+        result = await self.executor.run(
+            script, args, input_data,
+            on_pip_start=on_pip_start,
+            on_pip_installing=on_pip_installing,
+            on_pip_installed=on_pip_installed,
+            on_pip_complete=on_pip_complete
+        )
 
         # Statistik aktualisieren
         self.storage.update_execution(script_id)
@@ -905,17 +1000,41 @@ class ScriptManager:
         """Führt Cleanup alter Scripte durch."""
         return self.storage.cleanup_old(self.config.cleanup_days)
 
-    async def install_requirements(self, requirements: List[str]) -> Optional[str]:
+    async def install_requirements(
+        self,
+        requirements: List[str],
+        on_pip_start=None,
+        on_pip_installing=None,
+        on_pip_installed=None,
+        on_pip_complete=None
+    ) -> Optional[str]:
         """
         Installiert pip-Pakete aus Nexus-Repository.
 
         Args:
             requirements: Liste von Paket-Spezifikationen (z.B. ['pandas==1.3.0', 'numpy'])
+            on_pip_start: Callback(requirements: List[str]) - wird am Anfang aufgerufen
+            on_pip_installing: Callback(pkg: str) - wird vor Installation jedes Pakets aufgerufen
+            on_pip_installed: Callback(pkg: str, success: bool, error: Optional[str]) - nach Installation
+            on_pip_complete: Callback(success: bool, total_ms: int) - am Ende
 
         Returns:
             None bei Erfolg, error-string bei Fehler
         """
-        return await self.executor._install_requirements(requirements)
+        # Setze Callbacks auf Executor
+        self.executor.on_pip_start = on_pip_start
+        self.executor.on_pip_installing = on_pip_installing
+        self.executor.on_pip_installed = on_pip_installed
+        self.executor.on_pip_complete = on_pip_complete
+
+        try:
+            return await self.executor._install_requirements(requirements)
+        finally:
+            # Cleanup Callbacks
+            self.executor.on_pip_start = None
+            self.executor.on_pip_installing = None
+            self.executor.on_pip_installed = None
+            self.executor.on_pip_complete = None
 
 
 def get_script_manager() -> ScriptManager:

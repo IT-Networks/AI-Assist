@@ -267,6 +267,77 @@ async def confirm_operation(
     if request.confirmed:
         # Operation ausführen
         try:
+            # Für pip_install_confirm: Create callback functions for progress events
+            operation = confirmation_data.get("operation")
+            if operation == "pip_install_confirm":
+                from app.agent.orchestration.types import AgentEventType
+
+                async def on_pip_start(requirements):
+                    """Emit event when pip install starts."""
+                    await orchestrator._event_bridge.emit(
+                        AgentEventType.MCP_START.value,
+                        {
+                            "type": "pip_install_start",
+                            "message": f"Installiere {len(requirements)} Python-Paket(e)...",
+                            "total": len(requirements)
+                        }
+                    )
+
+                async def on_pip_installing(pkg):
+                    """Emit event when installing a package."""
+                    await orchestrator._event_bridge.emit(
+                        AgentEventType.MCP_PROGRESS.value,
+                        {
+                            "type": "pip_installing",
+                            "package": pkg,
+                            "message": f"↓ Installiere: {pkg}"
+                        }
+                    )
+
+                async def on_pip_installed(pkg, success, error):
+                    """Emit event when package installation completes."""
+                    if success:
+                        await orchestrator._event_bridge.emit(
+                            AgentEventType.MCP_PROGRESS.value,
+                            {
+                                "type": "pip_installed",
+                                "package": pkg,
+                                "success": True,
+                                "message": f"✓ {pkg} installiert"
+                            }
+                        )
+                    else:
+                        await orchestrator._event_bridge.emit(
+                            AgentEventType.MCP_PROGRESS.value,
+                            {
+                                "type": "pip_installed",
+                                "package": pkg,
+                                "success": False,
+                                "error": error,
+                                "message": f"✗ {pkg} fehlgeschlagen: {error}"
+                            }
+                        )
+
+                async def on_pip_complete(success, total_ms):
+                    """Emit event when all pip installs complete."""
+                    await orchestrator._event_bridge.emit(
+                        AgentEventType.MCP_COMPLETE.value,
+                        {
+                            "type": "pip_install_complete",
+                            "success": success,
+                            "duration_ms": total_ms,
+                            "message": f"✓ Pip-Installation abgeschlossen ({total_ms}ms)" if success else f"✗ Pip-Installation fehlgeschlagen"
+                        }
+                    )
+
+                # Add callbacks to confirmation_data for use in orchestrator
+                confirmation_data["_pip_callbacks"] = {
+                    "on_pip_start": on_pip_start,
+                    "on_pip_installing": on_pip_installing,
+                    "on_pip_installed": on_pip_installed,
+                    "on_pip_complete": on_pip_complete
+                }
+
             result = await orchestrator._execute_confirmed_operation(confirmation_data)
 
             # Phase-2: Wenn requires_confirmation=True → weitere Bestätigung nötig

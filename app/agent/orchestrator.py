@@ -3107,8 +3107,15 @@ class AgentOrchestrator:
             manager = get_script_manager()
             requirements = confirmation_data.get("requirements", [])
 
-            # Pakete installieren
-            err = await manager.install_requirements(requirements)
+            # Extract callbacks if provided
+            callbacks = confirmation_data.get("_pip_callbacks", {})
+            err = await manager.install_requirements(
+                requirements,
+                on_pip_start=callbacks.get("on_pip_start"),
+                on_pip_installing=callbacks.get("on_pip_installing"),
+                on_pip_installed=callbacks.get("on_pip_installed"),
+                on_pip_complete=callbacks.get("on_pip_complete")
+            )
             if err:
                 return ToolResult(success=False, error=f"pip install fehlgeschlagen: {err}")
 
