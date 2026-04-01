@@ -967,6 +967,9 @@ script_execution:
     - tqdm
     - sympy
     - statsmodels
+    - docx2pdf
+    - python-pptx
+    - openpyxl-stubs
   
   # Nexus pip Repository
   pip_install_enabled: true

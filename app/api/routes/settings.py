@@ -424,6 +424,10 @@ async def update_section_settings(
         elif section == "alm":
             from app.services.alm_client import reset_alm_client
             reset_alm_client()
+        elif section == "script_execution":
+            # Invalidate ScriptManager singleton cache when config changes
+            from app.services.script_manager import ScriptManager
+            ScriptManager.invalidate_cache()
 
     except Exception as e:
         raise HTTPException(

@@ -5444,9 +5444,9 @@ function createLiveStatusBar() {
 function startChatTimer(chat) {
   if (!chat.streamingState) return;
   chat.streamingState.startTime = Date.now();
-  // OPTIMIZATION 4: Reduce timer frequency from 100ms to 500ms (5x less CPU)
+  // OPTIMIZATION 4: Reduce timer frequency from 100ms to 200ms (smooth visual updates with reduced CPU)
   // Interval hält eine Closure auf chat – kein globaler State nötig
-  chat.streamingState.timerInterval = setInterval(() => updateChatStatusBar(chat), 500);
+  chat.streamingState.timerInterval = setInterval(() => updateChatStatusBar(chat), 200);
 }
 
 function stopChatTimer(chat) {

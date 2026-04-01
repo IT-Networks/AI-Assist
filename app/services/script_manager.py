@@ -89,15 +89,23 @@ class ScriptValidator:
     """Statische Sicherheitsanalyse für Python-Scripte mittels AST."""
 
     def __init__(self):
+        # Don't cache config - load dynamically in validate() to pick up UI changes
+        pass
+
+    def _get_current_config(self):
+        """Load config dynamically to reflect UI changes (no caching)."""
         config = settings.script_execution
-        self.allowed_imports = set(config.allowed_imports)
-        self.allowed_file_paths = config.allowed_file_paths
+        allowed_imports = set(config.allowed_imports)
+        allowed_file_paths = config.allowed_file_paths
+
         # Wenn erlaubte Dateipfade konfiguriert sind, entferne den generischen open-write Blocker
         # Der _safe_open() Guard in der Ausführung übernimmt die Sicherheitsprüfung
         patterns = list(config.blocked_patterns)
         if config.allowed_file_paths:
             patterns = [p for p in patterns if "open" not in p]
-        self.blocked_patterns = [re.compile(p) for p in patterns]
+
+        blocked_patterns = [re.compile(p) for p in patterns]
+        return allowed_imports, allowed_file_paths, blocked_patterns
 
     def validate(self, code: str) -> ValidationResult:
         """
@@ -109,6 +117,9 @@ class ScriptValidator:
         Returns:
             ValidationResult mit Sicherheitsbewertung
         """
+        # Load current config dynamically (not cached) - reflects UI changes
+        allowed_imports, allowed_file_paths, blocked_patterns = self._get_current_config()
+
         errors = []
         warnings = []
         imports_used = []
@@ -132,14 +143,14 @@ class ScriptValidator:
                 for alias in node.names:
                     module = alias.name.split('.')[0]
                     imports_used.append(alias.name)
-                    if module not in self.allowed_imports:
+                    if module not in allowed_imports:
                         errors.append(f"Nicht erlaubter Import: {alias.name}")
 
             elif isinstance(node, ast.ImportFrom):
                 if node.module:
                     module = node.module.split('.')[0]
                     imports_used.append(node.module)
-                    if module not in self.allowed_imports:
+                    if module not in allowed_imports:
                         errors.append(f"Nicht erlaubter Import: from {node.module}")
 
             elif isinstance(node, ast.Call):
@@ -149,7 +160,7 @@ class ScriptValidator:
                     functions_called.append(node.func.attr)
 
         # 3. Gefährliche Patterns (Regex)
-        for pattern in self.blocked_patterns:
+        for pattern in blocked_patterns:
             match = pattern.search(code)
             if match:
                 errors.append(f"Gefährliches Pattern: {match.group()}")
@@ -795,6 +806,11 @@ class ScriptManager:
         if cls._instance is None:
             cls._instance = cls()
         return cls._instance
+
+    @classmethod
+    def invalidate_cache(cls):
+        """Invalidates the singleton cache when settings are updated via UI."""
+        cls._instance = None
 
     async def generate_and_save(
         self,
