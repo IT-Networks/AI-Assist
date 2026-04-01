@@ -873,6 +873,7 @@ script_execution:
   allowed_file_paths: []  # Pfade wo Scripts schreiben dürfen (leer = kein Zugriff)
   
   # Code-Imports (für 'import X' Statements)
+  # HINWEIS: Diese Liste kann über die Settings-UI angepasst werden!
   allowed_imports:
     - json
     - csv
@@ -908,16 +909,6 @@ script_execution:
     - xml
     - html
     - pprint
-    - docx2pdf
-    - pptx
-    - openpyxl
-    - requests
-    - beautifulsoup4
-    - lxml
-    - pillow
-    - scipy
-    - scikit-learn
-    - cryptography
   
   # Verbotene Patterns in Code
   blocked_patterns:
@@ -944,6 +935,7 @@ script_execution:
     - delattr\s*\(
   
   # pip-Pakete (für 'pip install X')
+  # HINWEIS: Diese Liste kann über die Settings-UI angepasst werden!
   pip_allowed_packages:
     - pandas
     - numpy
@@ -977,9 +969,6 @@ script_execution:
     - tqdm
     - sympy
     - statsmodels
-    - docx2pdf
-    - python-pptx
-    - openpyxl-stubs
   
   # Nexus pip Repository
   pip_install_enabled: true
