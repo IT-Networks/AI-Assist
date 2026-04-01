@@ -908,6 +908,16 @@ script_execution:
     - xml
     - html
     - pprint
+    - docx2pdf
+    - pptx
+    - openpyxl
+    - requests
+    - beautifulsoup4
+    - lxml
+    - pillow
+    - scipy
+    - scikit-learn
+    - cryptography
   
   # Verbotene Patterns in Code
   blocked_patterns:
