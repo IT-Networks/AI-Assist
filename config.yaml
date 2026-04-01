@@ -866,8 +866,8 @@ script_execution:
   cleanup_days: 30
   require_confirmation: true
   use_container: false  # Docker sandbox nicht implementiert - lokal ausführen
-  timeout_seconds: 30
-  max_output_size_kb: 256
+  timeout_seconds: 120  # Erhöht von 30s für win32com/COM-Operationen die 20-60+ Sekunden benötigen
+  max_output_size_kb: 512  # Erhöht von 256 für ausführlichere Fehlermeldungen
   
   # Dateisystem-Zugriff
   allowed_file_paths: []  # Pfade wo Scripts schreiben dürfen (leer = kein Zugriff)
@@ -876,6 +876,7 @@ script_execution:
   # HINWEIS: Diese Liste kann über die Settings-UI angepasst werden!
   allowed_imports:
     # Standard Library (sicher)
+    - sys
     - json
     - csv
     - pathlib
