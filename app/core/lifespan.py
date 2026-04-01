@@ -316,6 +316,23 @@ def register_standard_services(registry: ServiceRegistry) -> None:
         priority=35,
     )
 
+    # Knowledge Store (Priorität 37 - nach Handbook, vor Skills)
+    async def startup_knowledge_store():
+        from app.core.config import settings
+        if not settings.knowledge_base.enabled:
+            return None
+
+        from app.services.knowledge_store import init_knowledge_store
+        store = init_knowledge_store(settings.knowledge_base.path)
+        logger.info(f"KnowledgeStore initialisiert: {settings.knowledge_base.path}")
+        return store
+
+    registry.register(
+        "knowledge_store",
+        startup=startup_knowledge_store,
+        priority=37,
+    )
+
     # Skill Manager (Priorität 40)
     async def startup_skills():
         from app.core.config import settings
@@ -360,6 +377,14 @@ def register_standard_services(registry: ServiceRegistry) -> None:
             register_wlp_tools(registry)
         except Exception:
             pass
+
+        # Knowledge Collector Tools
+        try:
+            from app.agent.knowledge_tools import register_knowledge_collector_tools
+            kc_count = register_knowledge_collector_tools(registry)
+            logger.info(f"Knowledge Collector Tools registriert: {kc_count}")
+        except Exception as e:
+            logger.debug(f"Knowledge Collector Tools nicht verfügbar: {e}")
 
         return {"registry": registry, "orchestrator": orchestrator}
 

@@ -5091,6 +5091,8 @@ function shouldBatchEvent(eventType) {
     'enhancement_rejected',
     'subagent_start',     // Visual feedback
     'subagent_routing',   // Visual feedback
+    'research_started',   // Research card creation
+    'research_complete',  // Research card completion
   ]);
 
   // Non-critical events that can be batched
@@ -5804,6 +5806,47 @@ async function processAgentEvent(event, bubble, msgDiv, chat) {
       handleTaskExecutionComplete(data, chat);
       break;
     }
+
+    // ── Research / Knowledge Collector Events ──
+    case 'research_started': {
+      const card = createResearchCard(data);
+      bubble.appendChild(card);
+      chat.researchCard = card;
+      if (document.contains(chat.pane)) scrollToBottom();
+      break;
+    }
+    case 'research_discovery': {
+      updateResearchCard(chat.researchCard, 'discovery', data);
+      break;
+    }
+    case 'research_plan': {
+      updateResearchCard(chat.researchCard, 'plan', data);
+      break;
+    }
+    case 'research_page_start':
+    case 'research_page_done':
+    case 'research_pdf_start': {
+      updateResearchCard(chat.researchCard, 'page', data);
+      break;
+    }
+    case 'research_finding': {
+      updateResearchCard(chat.researchCard, 'finding', data);
+      break;
+    }
+    case 'research_progress': {
+      updateResearchCard(chat.researchCard, 'progress', data);
+      if (document.contains(chat.pane)) scrollToBottom();
+      break;
+    }
+    case 'research_complete': {
+      updateResearchCard(chat.researchCard, 'complete', data);
+      if (document.contains(chat.pane)) scrollToBottom();
+      break;
+    }
+    case 'research_error': {
+      updateResearchCard(chat.researchCard, 'error', data);
+      break;
+    }
   }
 }
 
@@ -6243,6 +6286,186 @@ function updateSubAgentCard(card, type, data) {
       statusEl.textContent = 'Teilweise fehlgeschlagen';
     }
   }
+}
+
+// ── Research Card (Knowledge Collector) ──
+
+function createResearchCard(data) {
+  const card = document.createElement('div');
+  card.className = 'research-card';
+
+  const topic = escapeHtml(data.topic || 'Recherche');
+  const providers = (data.providers || []).map(p => escapeHtml(p));
+  const providerBadges = providers.length > 0
+    ? providers.map(p => `<span class="research-provider-badge">${p}</span>`).join('')
+    : '<span class="research-provider-badge">auto</span>';
+
+  card.innerHTML = `
+    <div class="research-header">
+      <span class="research-icon">&#128218;</span>
+      <span class="research-title">Wissenssammlung: ${topic}</span>
+      <span class="research-status running">Startet...</span>
+    </div>
+    <div class="research-providers">${providerBadges}</div>
+    <div class="research-progress-bar-container">
+      <div class="research-progress-bar" style="width: 0%"></div>
+    </div>
+    <div class="research-details">
+      <span class="research-pages">0 Seiten</span>
+      <span class="research-findings">0 Erkenntnisse</span>
+    </div>
+    <div class="research-activity"></div>
+    <div class="research-findings-list"></div>
+  `;
+  return card;
+}
+
+function updateResearchCard(card, type, data) {
+  if (!card) return;
+
+  const statusEl = card.querySelector('.research-status');
+  const progressBar = card.querySelector('.research-progress-bar');
+  const pagesEl = card.querySelector('.research-pages');
+  const findingsEl = card.querySelector('.research-findings');
+  const activityEl = card.querySelector('.research-activity');
+  const findingsListEl = card.querySelector('.research-findings-list');
+
+  switch (type) {
+    case 'discovery': {
+      if (statusEl) {
+        statusEl.className = 'research-status running';
+        statusEl.textContent = 'Entdecke Seiten...';
+      }
+      if (data.current_page && activityEl) {
+        _setResearchActivity(activityEl, `&#128196; ${escapeHtml(data.current_page)}`);
+      }
+      if (data.pages_total && pagesEl) {
+        pagesEl.textContent = `${data.pages_total} Seiten entdeckt`;
+      }
+      break;
+    }
+
+    case 'plan': {
+      if (statusEl) {
+        statusEl.className = 'research-status running';
+        statusEl.textContent = 'Analysiere...';
+      }
+      if (data.pages_total && pagesEl) {
+        pagesEl.textContent = `${data.pages_total} Seiten geplant`;
+      }
+      if (data.current_action && activityEl) {
+        _setResearchActivity(activityEl, escapeHtml(data.current_action));
+      }
+      break;
+    }
+
+    case 'page': {
+      if (data.current_page && activityEl) {
+        const icon = data.phase === 'research_pdf_start' ? '&#128196;' : '&#128196;';
+        _setResearchActivity(activityEl, `${icon} ${escapeHtml(data.current_page)}`);
+      }
+      if (data.pages_analyzed != null && data.pages_total && pagesEl) {
+        pagesEl.textContent = `${data.pages_analyzed}/${data.pages_total} Seiten`;
+      }
+      break;
+    }
+
+    case 'finding': {
+      if (data.latest_finding && findingsListEl) {
+        // Max 5 Findings in der Live-Liste
+        const existingFindings = findingsListEl.querySelectorAll('.research-finding-item');
+        if (existingFindings.length >= 5) {
+          existingFindings[0].remove();
+        }
+        const item = document.createElement('div');
+        item.className = 'research-finding-item';
+        item.innerHTML = `<span class="research-finding-icon">&#128161;</span> ${escapeHtml(data.latest_finding.substring(0, 150))}`;
+        findingsListEl.appendChild(item);
+      }
+      if (data.findings_count != null && findingsEl) {
+        findingsEl.textContent = `${data.findings_count} Erkenntnisse`;
+      }
+      break;
+    }
+
+    case 'progress': {
+      if (statusEl) {
+        statusEl.className = 'research-status running';
+        const phase = data.phase || 'analyzing';
+        const phaseLabels = {
+          discovering: 'Entdecke Seiten...',
+          planning: 'Plane Analyse...',
+          analyzing: 'Analysiere...',
+          synthesizing: 'Fasse zusammen...',
+        };
+        statusEl.textContent = phaseLabels[phase] || phase;
+      }
+      // Fortschrittsbalken
+      if (data.pages_analyzed != null && data.pages_total > 0 && progressBar) {
+        const percent = Math.round((data.pages_analyzed / data.pages_total) * 100);
+        progressBar.style.width = `${percent}%`;
+      }
+      if (data.phase === 'synthesizing' && progressBar) {
+        progressBar.style.width = '90%';
+      }
+      // Zahlen
+      if (data.pages_analyzed != null && data.pages_total && pagesEl) {
+        pagesEl.textContent = `${data.pages_analyzed}/${data.pages_total} Seiten`;
+      }
+      if (data.findings_count != null && findingsEl) {
+        findingsEl.textContent = `${data.findings_count} Erkenntnisse`;
+      }
+      // Aktivität
+      if (data.current_action && activityEl) {
+        _setResearchActivity(activityEl, escapeHtml(data.current_action));
+      }
+      if (data.latest_finding && findingsListEl) {
+        const existingFindings = findingsListEl.querySelectorAll('.research-finding-item');
+        if (existingFindings.length >= 5) existingFindings[0].remove();
+        const item = document.createElement('div');
+        item.className = 'research-finding-item';
+        item.innerHTML = `<span class="research-finding-icon">&#128161;</span> ${escapeHtml(data.latest_finding.substring(0, 150))}`;
+        findingsListEl.appendChild(item);
+      }
+      break;
+    }
+
+    case 'complete': {
+      if (statusEl) {
+        statusEl.className = 'research-status done';
+        statusEl.textContent = 'Abgeschlossen';
+      }
+      if (progressBar) progressBar.style.width = '100%';
+      card.classList.add('research-card-done');
+      // Finale Zahlen
+      if (data.pages_analyzed && pagesEl) {
+        pagesEl.textContent = `${data.pages_analyzed} Seiten analysiert`;
+      }
+      if (data.findings_count != null && findingsEl) {
+        findingsEl.textContent = `${data.findings_count} Erkenntnisse`;
+      }
+      if (activityEl) {
+        _setResearchActivity(activityEl, data.current_action || 'Wissen gespeichert');
+      }
+      break;
+    }
+
+    case 'error': {
+      if (statusEl) {
+        statusEl.className = 'research-status error';
+        statusEl.textContent = 'Fehler';
+      }
+      if (data.error && activityEl) {
+        _setResearchActivity(activityEl, `&#10060; ${escapeHtml(data.error)}`);
+      }
+      break;
+    }
+  }
+}
+
+function _setResearchActivity(el, html) {
+  if (!el) return;
+  el.innerHTML = `<div class="research-activity-line">${html}</div>`;
 }
 
 // ── Tool History ──

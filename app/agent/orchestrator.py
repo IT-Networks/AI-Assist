@@ -2020,14 +2020,54 @@ class AgentOrchestrator:
                         break  # Stop processing more tools - wait for user response
                     # ────────────────────────────────────────────────────────
 
-                    # Tool ausführen - MCP-Tools speziell behandeln
+                    # Tool ausführen - MCP-Tools und Streaming-Tools speziell behandeln
                     # Capabilities: analyze (Code-Analyse), sequential_thinking
                     # NOTE: brainstorm, design, implement wurden zu Skills migriert (siehe ~/.claude/commands/sc/)
                     MCP_CAPABILITY_TOOLS = {
                         "sequential_thinking", "seq_think",
                         "analyze",  # Code-Analyse bleibt als MCP-Capability
                     }
-                    if tool_call.name.startswith("mcp_") or tool_call.name in MCP_CAPABILITY_TOOLS:
+                    # Streaming-Tools: Standard-Tools die Events über EventBridge emittieren
+                    # Werden wie MCP-Tools mit Event-Polling behandelt, aber über ToolRegistry ausgeführt
+                    STREAMING_TOOLS = {
+                        "research_topic",  # Knowledge Collector: emittiert RESEARCH_* Events
+                    }
+                    if tool_call.name in STREAMING_TOOLS:
+                        # Streaming-Tool: Standard-Tool mit Live-Event-Streaming über EventBridge
+                        # Identisches Polling-Pattern wie MCP-Tools, aber Ausführung über ToolRegistry
+                        streaming_queue = self._event_bridge.subscribe()
+
+                        try:
+                            # Tool in separatem Task ausführen (für Event-Polling während Laufzeit)
+                            import time as _time
+                            _start = _time.time()
+                            streaming_task = asyncio.create_task(
+                                self.tools.execute(tool_call.name, **tool_call.arguments)
+                            )
+
+                            # Events live streamen während Tool läuft
+                            while not streaming_task.done():
+                                async for streaming_event in self._drain_mcp_events_from_queue(streaming_queue):
+                                    yield streaming_event
+                                await asyncio.sleep(0.05)
+
+                            # Tool-Result abholen
+                            result = await streaming_task
+                            _duration_ms = int((_time.time() - _start) * 1000)
+
+                            # Finale Events
+                            async for streaming_event in self._drain_mcp_events_from_queue(streaming_queue, timeout=0.1):
+                                yield streaming_event
+
+                            # Budget-Tracking
+                            if state.tool_budget:
+                                state.tool_budget.record_tool_call(
+                                    tool_call.name, duration_ms=_duration_ms, cached=False
+                                )
+                        finally:
+                            self._event_bridge.unsubscribe(streaming_queue)
+
+                    elif tool_call.name.startswith("mcp_") or tool_call.name in MCP_CAPABILITY_TOOLS:
                         # MCP-Tool über Bridge ausführen mit Live-Event-Streaming
                         if self._mcp_bridge is None:
                             self._mcp_bridge = get_tool_bridge(

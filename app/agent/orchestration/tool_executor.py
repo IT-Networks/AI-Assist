@@ -48,6 +48,7 @@ SEQUENTIAL_ONLY_TOOLS = {
     "execute_command", "run_sql_query",
     "suggest_answers",  # Requires user interaction
     "sequential_thinking", "seq_think", "analyze",  # Skills
+    "research_topic",  # Knowledge Collector (streaming tool, long-running)
 }
 
 # MCP capability tools

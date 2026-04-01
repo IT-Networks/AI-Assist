@@ -541,7 +541,9 @@ _KEYWORD_ROUTING: Dict[str, List[str]] = {
     "database_agent": ["tabelle", "sql", "datenbank", "db", "schema", "query", "abfrage",
                        "spalte", "select", "db2", "table", "record", "datensatz"],
     "knowledge_agent":  ["handbuch", "service", "pdf", "skill", "wissen", "konzept",
-                         "prozess", "vorgang", "field", "feld"],
+                         "prozess", "vorgang", "field", "feld",
+                         "knowledge", "wissensbasis", "recherche", "gesammelt",
+                         "knowledge-base", "kb"],
     "datasource_agent": ["jenkins", "github", "gitlab", "pipeline", "build", "deployment",
                          "api", "rest", "endpoint", "datenquelle", "datasource", "service-api"],
 }

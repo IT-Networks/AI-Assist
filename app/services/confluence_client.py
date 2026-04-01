@@ -253,6 +253,49 @@ class ConfluenceClient:
 
         raise ConfluenceError(f"Keine Seiten-ID in der URL gefunden: {url}. Bitte die Seiten-ID direkt angeben.")
 
+    async def get_child_pages(self, page_id: str, limit: int = 50) -> List[Dict]:
+        """
+        Holt die direkten Kind-Seiten einer Confluence-Seite.
+
+        Verwendet /content/{id}/child/page Endpunkt.
+        Für rekursive Traversierung: Aufrufer ruft wiederholt auf.
+
+        Args:
+            page_id: Confluence Seiten-ID
+            limit: Max. Anzahl Kind-Seiten
+
+        Returns:
+            Liste von Dicts mit id, title, url, space_key
+        """
+        self._check_configured()
+        await self._ensure_api_path()
+        client = _get_http_client()
+
+        try:
+            resp = await client.get(
+                self._api_url(f"/content/{page_id}/child/page"),
+                headers=self._headers(),
+                params={"limit": limit, "expand": "version,space"},
+            )
+            resp.raise_for_status()
+            data = resp.json()
+        except httpx.HTTPStatusError as e:
+            raise ConfluenceError(f"Fehler beim Abrufen der Kind-Seiten von {page_id}: {e.response.status_code}") from e
+        except httpx.RequestError as e:
+            raise ConfluenceError(f"Verbindungsfehler: {e}") from e
+
+        results = []
+        for item in data.get("results", []):
+            base = item.get("_links", {}).get("base", self.base_url)
+            web_ui = item.get("_links", {}).get("webui", "")
+            results.append({
+                "id": item.get("id", ""),
+                "title": item.get("title", ""),
+                "url": f"{base}{web_ui}" if web_ui else "",
+                "space_key": item.get("space", {}).get("key", ""),
+            })
+        return results
+
     def extract_text_from_html(self, html_content: str) -> str:
         """
         Konvertiert HTML (export_view oder storage) in lesbaren Text.

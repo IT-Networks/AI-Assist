@@ -27,4 +27,5 @@ class KnowledgeAgent(SubAgent):
         "get_pdf_info",
         "read_pdf_pages",
         "search_skills",
+        "search_knowledge",
     ]

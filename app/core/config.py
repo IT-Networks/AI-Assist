@@ -1369,6 +1369,25 @@ class AnalyticsConfig(BaseModel):
 # Task-Decomposition Agent System
 # ══════════════════════════════════════════════════════════════════════════════
 
+class KnowledgeBaseSourcesConfig(BaseModel):
+    """Welche Quellen für den Knowledge Collector aktiviert sind."""
+    confluence: bool = True
+    handbook: bool = True
+
+
+class KnowledgeBaseConfig(BaseModel):
+    """Konfiguration für den Knowledge Collector."""
+    enabled: bool = True
+    path: str = "knowledge-base"
+    max_crawl_depth: int = 3
+    max_pages_per_research: int = 30
+    max_pdfs_per_research: int = 10
+    max_parallel_agents: int = 5
+    synthesis_model: str = ""
+    auto_search: bool = True
+    sources: KnowledgeBaseSourcesConfig = Field(default_factory=KnowledgeBaseSourcesConfig)
+
+
 class TaskAgentConfig(BaseModel):
     """
     Konfiguration fuer das Task-Decomposition Agent System.
@@ -1437,6 +1456,7 @@ class Settings(BaseModel):
     file_operations: FileOperationsConfig = FileOperationsConfig()
     data_sources: DataSourcesConfig = Field(default_factory=DataSourcesConfig)
     sub_agents: SubAgentsConfig = Field(default_factory=SubAgentsConfig)
+    knowledge_base: KnowledgeBaseConfig = Field(default_factory=KnowledgeBaseConfig)
     task_agents: TaskAgentConfig = Field(default_factory=TaskAgentConfig)
     mq: MQConfig = Field(default_factory=MQConfig)
     test_tool: TestToolConfig = Field(default_factory=TestToolConfig)

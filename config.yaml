@@ -121,6 +121,20 @@ confluence:
   verify_ssl: false
   api_path: ''
 
+# Knowledge Collector – Wissenserfassung aus Confluence, Handbuch etc.
+knowledge_base:
+  enabled: true
+  path: "knowledge-base"              # Ordner für gesammelte Wissens-MDs
+  max_crawl_depth: 3                  # Max. Tiefe Unterseiten-Traversierung
+  max_pages_per_research: 30          # Budget: max. analysierte Seiten pro Research
+  max_pdfs_per_research: 10           # Budget: max. analysierte PDFs pro Research
+  max_parallel_agents: 5              # Parallele ResearchAgents
+  synthesis_model: ""                 # LLM für Synthese (leer = default_model)
+  auto_search: true                   # search_knowledge automatisch bei Fragen nutzen
+  sources:                            # Welche Quellen aktiviert sind
+    confluence: true                  # Confluence Wiki (wenn confluence.base_url gesetzt)
+    handbook: true                    # Internes Handbuch (wenn handbook.enabled)
+
 # Kontext-Limits
 context:
   max_tokens: 64000

@@ -92,6 +92,17 @@ class AgentEventType(str, Enum):
     # Progress & Stuck Detection Events
     STUCK_DETECTED = "stuck_detected"                # Agent dreht sich im Kreis
     PROGRESS_UPDATE = "progress_update"              # Neues Wissen gewonnen
+    # Knowledge Collector / Research Events
+    RESEARCH_STARTED = "research_started"             # Research-Pipeline gestartet
+    RESEARCH_DISCOVERY = "research_discovery"         # Neue Seite im Baum entdeckt
+    RESEARCH_PLAN = "research_plan"                   # Research-Plan erstellt
+    RESEARCH_PAGE_START = "research_page_start"       # Seite wird analysiert
+    RESEARCH_PAGE_DONE = "research_page_done"         # Seite analysiert
+    RESEARCH_FINDING = "research_finding"             # Einzelne Erkenntnis gefunden
+    RESEARCH_PDF_START = "research_pdf_start"         # PDF wird ausgewertet
+    RESEARCH_PROGRESS = "research_progress"           # Aggregierter Fortschritt
+    RESEARCH_COMPLETE = "research_complete"           # Research abgeschlossen
+    RESEARCH_ERROR = "research_error"                 # Fehler (non-fatal)
 
 
 # MCP Event Type Mapping - Maps string event types to AgentEventType
@@ -120,6 +131,17 @@ MCP_EVENT_TYPE_MAPPING: Dict[str, "AgentEventType"] = {
     "workspace_research": AgentEventType.WORKSPACE_RESEARCH,
     "workspace_pr": AgentEventType.WORKSPACE_PR,
     "workspace_pr_analysis": AgentEventType.WORKSPACE_PR_ANALYSIS,
+    # Research / Knowledge Collector events
+    "research_started": AgentEventType.RESEARCH_STARTED,
+    "research_discovery": AgentEventType.RESEARCH_DISCOVERY,
+    "research_plan": AgentEventType.RESEARCH_PLAN,
+    "research_page_start": AgentEventType.RESEARCH_PAGE_START,
+    "research_page_done": AgentEventType.RESEARCH_PAGE_DONE,
+    "research_finding": AgentEventType.RESEARCH_FINDING,
+    "research_pdf_start": AgentEventType.RESEARCH_PDF_START,
+    "research_progress": AgentEventType.RESEARCH_PROGRESS,
+    "research_complete": AgentEventType.RESEARCH_COMPLETE,
+    "research_error": AgentEventType.RESEARCH_ERROR,
 }
 
 
