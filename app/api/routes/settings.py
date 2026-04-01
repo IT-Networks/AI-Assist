@@ -530,6 +530,62 @@ def _save_config() -> bool:
         return False
 
 
+async def save_config_setting(section: str, key: str, value: Any) -> bool:
+    """
+    Speichert eine einzelne Setting in config.yaml.
+
+    Wird von Orchestrator verwendet um Pfade zu whitelisten ohne kompletten Save-Flow.
+
+    Args:
+        section: Settings-Section (z.B. "script_execution")
+        key: Setting-Name (z.B. "allowed_file_paths")
+        value: Neuer Wert
+
+    Returns:
+        True bei Erfolg
+    """
+    try:
+        # Current settings auslesen
+        settings_dict = settings.model_dump()
+
+        # Pfad zu Setting navigieren
+        if section not in settings_dict:
+            raise KeyError(f"Section '{section}' nicht gefunden")
+
+        # Value aktualisieren
+        if isinstance(settings_dict[section], dict):
+            settings_dict[section][key] = value
+        else:
+            raise ValueError(f"Section '{section}' ist kein Dictionary")
+
+        # Config-Datei speichern
+        config_path = Path("config.yaml")
+        yaml_content = _generate_yaml_with_comments(settings_dict)
+
+        with open(config_path, "w", encoding="utf-8") as f:
+            f.write(yaml_content)
+
+        # Settings neu laden
+        from app.core.config import load_settings as reload_settings
+        import app.core.config as config_module
+
+        new_settings = reload_settings()
+        config_module.settings = new_settings
+
+        # Local settings aktualisieren
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.info(f"Setting saved: {section}.{key}")
+
+        return True
+
+    except Exception as e:
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.error(f"Failed to save setting {section}.{key}: {e}")
+        return False
+
+
 def _generate_yaml_with_comments(data: Dict[str, Any]) -> str:
     """Generiert YAML mit Kommentaren für bessere Lesbarkeit."""
 

@@ -6521,6 +6521,25 @@ function showConfirmationPanel(data) {
     diffContent.textContent = content;
     diffContent.className = 'language-bash';
     hljs.highlightElement(diffContent);
+  } else if (cd.operation === 'path_approval_confirm') {
+    // Dateizugriff-Bestätigung: Pfad + Zugriffstyp anzeigen
+    const path = cd.requested_path || 'unbekannt';
+    const accessType = cd.access_type || 'write';
+    const reason = cd.reason || 'Dateizugriff erforderlich';
+
+    let content = `# Dateizugriff erforderlich\n\n`;
+    content += `Zugriff: ${accessType}\n`;
+    content += `Pfad: ${path}\n`;
+    content += `Grund: ${reason}\n`;
+
+    if (cd.is_system_critical) {
+      content += '\n[WARNUNG] System-kritischer Pfad!\n';
+      content += 'Dieser Pfad kann nicht genehmigt werden.';
+    }
+
+    diffContent.textContent = content;
+    diffContent.className = 'language-text';
+    hljs.highlightElement(diffContent);
   } else if (cd.diff) {
     diffContent.textContent = cd.diff;
     hljs.highlightElement(diffContent);

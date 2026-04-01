@@ -3147,6 +3147,87 @@ class AgentOrchestrator:
                 confirmation_data=script_confirmation
             )
 
+        elif operation == "path_approval_confirm":
+            # Path Whitelisting Phase: User bestätigt Dateipfad-Zugriff
+            from app.services.script_manager import get_script_manager
+            from app.services.path_validator import PathValidator
+            from app.core import config as config_module
+            from app.api.routes.settings import save_config_setting
+
+            requested_path = confirmation_data.get("requested_path")
+            access_type = confirmation_data.get("access_type", "write")
+            script_id = confirmation_data.get("script_id")
+
+            # Validate & Security Check
+            validator = PathValidator()
+            validation = validator.validate_approval(
+                requested_path,
+                access_type=access_type,
+                whitelisted_paths=config_module.settings.script_execution.allowed_file_paths
+            )
+
+            if not validation.approved:
+                # System blockiert (z.B. System-Verzeichnis)
+                return ToolResult(
+                    success=False,
+                    error=f"Zugriff verweigert: {validation.suggestion or validation.reason}",
+                    requires_confirmation=False
+                )
+
+            # Pfad genehmigt → zu Whitelist hinzufügen
+            current_config = config_module.settings.script_execution
+            if requested_path not in current_config.allowed_file_paths:
+                current_config.allowed_file_paths.append(requested_path)
+                # Save to config.yaml
+                try:
+                    await save_config_setting(
+                        "script_execution",
+                        "allowed_file_paths",
+                        current_config.allowed_file_paths
+                    )
+                    logger.info(f"Path whitelisted: {requested_path}")
+                except Exception as e:
+                    logger.error(f"Failed to whitelist path: {e}")
+                    return ToolResult(
+                        success=False,
+                        error=f"Fehler beim Speichern der Whitelist: {str(e)}",
+                        requires_confirmation=False
+                    )
+
+            # Restart script with original args
+            manager = get_script_manager()
+            script_args = confirmation_data.get("script_args", {})
+            script_input = confirmation_data.get("script_input_data")
+
+            exec_result = await manager.execute(
+                script_id=script_id,
+                args=script_args,
+                input_data=script_input,
+                on_output_chunk=None
+            )
+
+            if exec_result.success:
+                return ToolResult(
+                    success=True,
+                    data=f"Pfad genehmigt und whitelisted: {requested_path}\n\nScript erfolgreich ausgeführt.",
+                    requires_confirmation=False
+                )
+            else:
+                # Script may request another path or fail completely
+                if getattr(exec_result, 'pending_confirmation', None):
+                    return ToolResult(
+                        success=True,
+                        data=f"Pfad genehmigt. Script benötigt weiteren Zugriff...",
+                        requires_confirmation=True,
+                        confirmation_data=exec_result.pending_confirmation
+                    )
+                else:
+                    return ToolResult(
+                        success=False,
+                        error=f"Script-Ausführung fehlgeschlagen: {exec_result.error}",
+                        requires_confirmation=False
+                    )
+
         else:
             # Generische Bestaetigungs-Ausfuehrung: Tool-Handler nochmal aufrufen mit _confirmed=True
             # Wird fuer ALM-Tools, IQ-Server-Tools und andere nicht-Datei-basierte Write-Ops verwendet

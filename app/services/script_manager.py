@@ -67,6 +67,7 @@ class ExecutionResult:
     return_value: Any = None
     execution_time_ms: int = 0
     error: Optional[str] = None
+    pending_confirmation: Optional[Dict[str, Any]] = None  # For path approval confirmations
 
 
 class ScriptSecurityError(Exception):
