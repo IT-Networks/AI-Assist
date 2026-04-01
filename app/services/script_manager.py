@@ -813,9 +813,12 @@ SCRIPT_ARGS = json.loads({repr(args_json)})
                 async def stream_output(stream, stream_type):
                     try:
                         while True:
+                            # FIX: Use larger timeout for readline (scripts may not produce output for minutes)
+                            # Was: timeout=0.5s → caused busy-loop for long-running scripts like docx2pdf
+                            # Now: timeout=self.timeout → scripts can run the full duration without output
                             line = await asyncio.wait_for(
                                 stream.readline(),
-                                timeout=0.5
+                                timeout=self.timeout
                             )
                             if not line:
                                 break
@@ -834,7 +837,9 @@ SCRIPT_ARGS = json.loads({repr(args_json)})
                                 else:
                                     self.on_output_chunk(stream_type, display_text)
                     except asyncio.TimeoutError:
-                        # Timeout on reading individual line, continue
+                        # Timeout on reading individual line
+                        # This happens when stream has no more data but process still running
+                        # Just exit the streaming loop - process.wait() will handle the actual timeout
                         pass
                     except Exception as e:
                         logger.warning(f"Error streaming {stream_type}: {e}")
