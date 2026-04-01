@@ -1197,16 +1197,11 @@ class ScriptExecutionConfig(BaseModel):
     require_confirmation: bool = True         # Bestätigung vor Ausführung (empfohlen: True)
 
     # Sicherheit - erlaubte Imports (Whitelist)
-    allowed_imports: List[str] = [
-        # Standard-Library (sicher)
-        "json", "csv", "pathlib", "re", "datetime", "collections",
-        "itertools", "functools", "math", "statistics", "typing",
-        "dataclasses", "enum", "copy", "io", "base64", "hashlib",
-        "uuid", "random", "string", "textwrap", "difflib", "decimal",
-        "fractions", "operator", "contextlib", "abc", "struct",
-        # Datenverarbeitung
-        "pandas", "numpy", "yaml", "xml", "html", "pprint",
-    ]
+    # WICHTIG: Diese Liste wird AUSSCHLIESSLICH aus config.yaml geladen
+    # config.yaml ist die Single Source of Truth für allowed_imports
+    # Alle Änderungen werden über Settings UI in config.yaml persistiert
+    # Keine Defaults hier - verhindert Konfusion zwischen config.py und config.yaml
+    allowed_imports: List[str] = []
 
     # Sicherheit - blockierte Patterns (Regex)
     blocked_patterns: List[str] = [
@@ -1235,32 +1230,11 @@ class ScriptExecutionConfig(BaseModel):
     pip_cache_dir: str = "./scripts/.pip_cache"  # Pip-Cache-Verzeichnis
 
     # pip Packages die installiert werden dürfen (separate Whitelist von allowed_imports!)
-    pip_allowed_packages: List[str] = [
-        # Data Processing
-        "pandas", "numpy", "scipy", "scikit-learn",
-        # Excel/CSV
-        "openpyxl", "xlrd", "xlwt", "pyexcel",
-        # Web/HTTP
-        "requests", "httpx", "aiohttp",
-        # Data Serialization
-        "pyyaml", "toml", "msgpack",
-        # Excel
-        "xlsxwriter", "openpyxl",
-        # Web scraping
-        "beautifulsoup4", "selenium", "scrapy",
-        # Encryption
-        "cryptography", "pycryptodome",
-        # Dates/Time
-        "python-dateutil", "pytz",
-        # Image
-        "pillow", "opencv-python",
-        # JSON/XML
-        "lxml", "defusedxml",
-        # Utilities
-        "click", "colorama", "tabulate", "tqdm",
-        # Math
-        "sympy", "statsmodels",
-    ]
+    # WICHTIG: Diese Liste wird AUSSCHLIESSLICH aus config.yaml geladen
+    # config.yaml ist die Single Source of Truth für pip_allowed_packages
+    # Alle Änderungen werden über Settings UI in config.yaml persistiert
+    # Keine Defaults hier - verhindert Konfusion zwischen config.py und config.yaml
+    pip_allowed_packages: List[str] = []
 
 
 class GitHubConfig(BaseModel):

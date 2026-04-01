@@ -875,6 +875,7 @@ script_execution:
   # Code-Imports (für 'import X' Statements)
   # HINWEIS: Diese Liste kann über die Settings-UI angepasst werden!
   allowed_imports:
+    # Standard Library (sicher)
     - json
     - csv
     - pathlib
@@ -903,12 +904,15 @@ script_execution:
     - contextlib
     - abc
     - struct
+    # Data Processing
     - pandas
     - numpy
     - yaml
     - xml
     - html
     - pprint
+    # Document Processing
+    - docx2pdf
   
   # Verbotene Patterns in Code
   blocked_patterns:
@@ -937,38 +941,51 @@ script_execution:
   # pip-Pakete (für 'pip install X')
   # HINWEIS: Diese Liste kann über die Settings-UI angepasst werden!
   pip_allowed_packages:
+    # Data Processing
     - pandas
     - numpy
     - scipy
     - scikit-learn
+    # Excel/CSV
     - openpyxl
     - xlrd
     - xlwt
     - pyexcel
+    - xlsxwriter
+    # Web/HTTP
     - requests
     - httpx
     - aiohttp
+    # Data Serialization
     - pyyaml
     - toml
     - msgpack
-    - xlsxwriter
+    # Web Scraping
     - beautifulsoup4
     - selenium
     - scrapy
+    # Encryption
     - cryptography
     - pycryptodome
+    # Date/Time
     - python-dateutil
     - pytz
+    # Image Processing
     - pillow
     - opencv-python
+    # XML/JSON
     - lxml
     - defusedxml
+    # Utilities
     - click
     - colorama
     - tabulate
     - tqdm
     - sympy
     - statsmodels
+    # Document Processing
+    - docx2pdf
+    - python-pptx
   
   # Nexus pip Repository
   pip_install_enabled: true
