@@ -3107,7 +3107,7 @@ class AgentOrchestrator:
         elif operation == "pip_install_confirm":
             # Python-Script Phase 1: pip install bestätigung
             from app.services.script_manager import get_script_manager
-            from app.core.config import settings as app_settings
+            from app.core import config as config_module
 
             manager = get_script_manager()
             requirements = confirmation_data.get("requirements", [])
@@ -3125,6 +3125,8 @@ class AgentOrchestrator:
                 return ToolResult(success=False, error=f"pip install fehlgeschlagen: {err}")
 
             # Pakete installiert → Phase 2 Confirmation Data für Script-Ausführung
+            # WICHTIG: Aktuelle Config laden (falls über API aktualisiert)
+            current_config = config_module.settings.script_execution
             script_confirmation = {
                 "operation": "execute_script",
                 "script_id": confirmation_data["script_id"],
@@ -3134,7 +3136,7 @@ class AgentOrchestrator:
                 "args": confirmation_data.get("args", {}),
                 "input_data": confirmation_data.get("input_data"),
                 "file_path": confirmation_data.get("file_path", ""),
-                "allowed_file_paths": app_settings.script_execution.allowed_file_paths,
+                "allowed_file_paths": current_config.allowed_file_paths,
             }
 
             # Gibt requires_confirmation=True zurück → /confirm Endpoint erkennt und leitet weiter

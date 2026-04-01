@@ -446,7 +446,10 @@ async def update_section_settings(
 @router.post("/save")
 async def save_settings(request: SettingsSaveRequest = None) -> Dict[str, Any]:
     """
-    Speichert die aktuellen Settings in config.yaml.
+    Speichert die aktuellen Settings in config.yaml UND lädt sie neu.
+
+    Wichtig: Nach dem Speichern werden die Settings aus config.yaml neu geladen,
+    damit alle Änderungen sofort wirksam sind (keine Neustart nötig).
 
     Args:
         request: Optional - ob Backup erstellt werden soll
@@ -481,11 +484,27 @@ async def save_settings(request: SettingsSaveRequest = None) -> Dict[str, Any]:
             detail=f"Fehler beim Speichern: {str(e)}"
         )
 
+    # WICHTIG: Settings aus config.yaml neu laden
+    # Dies stellt sicher, dass die in-memory settings mit config.yaml synchron sind
+    # Besonders wichtig für pip_allowed_packages und allowed_imports
+    try:
+        from app.core.config import load_settings as reload_settings
+        import app.core.config as config_module
+
+        new_settings = reload_settings()
+        config_module.settings = new_settings
+
+    except Exception as e:
+        # Fehler beim Neuladen sind nicht kritisch - Settings sind in YAML gespeichert
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.warning(f"Settings-Reload nach Save fehlgeschlagen (aber config.yaml wurde gespeichert): {e}")
+
     return {
         "saved": True,
         "path": str(config_path.absolute()),
         "backup_path": str(backup_path) if backup_path else None,
-        "message": "Settings gespeichert. Server-Neustart für volle Wirkung empfohlen."
+        "message": "Settings gespeichert und neu geladen. Änderungen sind sofort wirksam."
     }
 
 

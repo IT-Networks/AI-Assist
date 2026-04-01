@@ -11,7 +11,6 @@ import logging
 from typing import Any, Dict, List, Optional
 
 from app.agent.tools import Tool, ToolCategory, ToolParameter, ToolRegistry, ToolResult
-from app.core.config import settings
 from app.services.script_manager import (
     ExecutionResult,
     ScriptManager,
@@ -22,6 +21,17 @@ from app.services.script_manager import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+def _get_current_config():
+    """
+    Holt die aktuelle Config dynamisch.
+
+    Wichtig: Nicht am Modul-Level cachen, da Settings über API aktualisiert werden können.
+    Diese Funktion gibt immer die neuesten Settings zurück.
+    """
+    from app.core import config as config_module
+    return config_module.settings.script_execution
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -44,7 +54,7 @@ async def handle_generate_script(
     """
     try:
         manager = get_script_manager()
-        config = settings.script_execution
+        config = _get_current_config()
 
         # Validierung von requirements
         if requirements:
@@ -389,7 +399,7 @@ Das Script kann über SCRIPT_ARGS auf übergebene Argumente zugreifen.""",
             name="requirements",
             type="array",
             description="pip-Pakete die vor Ausführung installiert werden (z.B. ['openpyxl==3.1.2', 'xlrd']). "
-                        "Nur verfügbar wenn pip_install_enabled=True in Config. Pakete müssen in allowed_imports sein.",
+                        "Nur verfügbar wenn pip_install_enabled=True in Config. Pakete müssen in pip_allowed_packages sein (Settings → Python Scripts).",
             required=False
         ),
     ],
@@ -510,7 +520,7 @@ async def handle_generate_and_execute_script(
     """
     try:
         manager = get_script_manager()
-        config = settings.script_execution
+        config = _get_current_config()
 
         # Validierung von requirements
         if requirements:
