@@ -30,6 +30,11 @@ class NodeType(str, Enum):
     PACKAGE = "package"
     ENUM = "enum"
     ANNOTATION = "annotation"
+    # Knowledge Collector Knoten
+    KNOWLEDGE_DOC = "knowledge_doc"         # MD-Datei aus Knowledge-Base
+    CONFLUENCE_PAGE = "confluence_page"     # Quell-Confluence-Seite
+    HANDBOOK_SERVICE = "handbook_service"   # Service aus Handbuch
+    PROCESS = "process"                     # Dokumentierter Prozess
 
 
 class EdgeType(str, Enum):
@@ -46,6 +51,10 @@ class EdgeType(str, Enum):
     REFERENCES = "references"     # generic reference
     ANNOTATED_BY = "annotated_by" # class/method has annotation
     RETURNS = "returns"           # method returns type
+    # Knowledge Collector Kanten
+    DOCUMENTS = "documents"       # Knowledge dokumentiert Code-Element
+    DESCRIBES = "describes"       # Handbuch beschreibt Service
+    RELATED_TO = "related_to"     # Thematische Verbindung (gemeinsame Tags)
 
 
 @dataclass
@@ -215,6 +224,43 @@ class KnowledgeGraphStore:
                     metadata=json.loads(row[5]) if row[5] else {}
                 )
             return None
+
+    def search_nodes(self, query: str, limit: int = 10) -> List[GraphNode]:
+        """Sucht Knoten nach Name (LIKE-Suche, case-insensitive)."""
+        with sqlite3.connect(self.db_path) as conn:
+            rows = conn.execute("""
+                SELECT id, type, name, file_path, line_number, metadata
+                FROM nodes WHERE LOWER(name) LIKE LOWER(?) LIMIT ?
+            """, (f"%{query}%", limit)).fetchall()
+
+            results = []
+            for r in rows:
+                try:
+                    results.append(GraphNode(
+                        id=r[0], type=NodeType(r[1]), name=r[2],
+                        file_path=r[3], line_number=r[4],
+                        metadata=json.loads(r[5]) if r[5] else {}
+                    ))
+                except ValueError:
+                    pass  # Unbekannter NodeType
+            return results
+
+    def get_nodes_by_type(self, node_type: NodeType) -> List[GraphNode]:
+        """Holt alle Knoten eines bestimmten Typs."""
+        with sqlite3.connect(self.db_path) as conn:
+            rows = conn.execute("""
+                SELECT id, type, name, file_path, line_number, metadata
+                FROM nodes WHERE type = ?
+            """, (node_type.value,)).fetchall()
+
+            return [
+                GraphNode(
+                    id=r[0], type=NodeType(r[1]), name=r[2],
+                    file_path=r[3], line_number=r[4],
+                    metadata=json.loads(r[5]) if r[5] else {}
+                )
+                for r in rows
+            ]
 
     def get_edges_from(self, node_id: str,
                        edge_types: List[EdgeType] = None) -> List[GraphEdge]:

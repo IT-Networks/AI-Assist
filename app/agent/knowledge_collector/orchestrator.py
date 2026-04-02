@@ -477,6 +477,19 @@ class ResearchOrchestrator:
             metadata=metadata,
         )
 
+        # Knowledge Graph Linking (optional — nur wenn Graph aktiv)
+        try:
+            from app.services.knowledge_graph_linker import KnowledgeGraphLinker
+            from app.services.knowledge_graph import get_graph_registry
+            registry = get_graph_registry()
+            active_graph = registry.get_active()
+            if active_graph:
+                linker = KnowledgeGraphLinker(active_graph)
+                edges = linker.link_knowledge_document(path, metadata, findings)
+                logger.info(f"[Research] {edges} Graph-Kanten erstellt")
+        except Exception as e:
+            logger.debug(f"[Research] Graph-Linking uebersprungen: {e}")
+
         return path
 
     # ══════════════════════════════════════════════════════════════════════════

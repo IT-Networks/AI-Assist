@@ -1025,6 +1025,23 @@ class AgentOrchestrator:
             except Exception:
                 pass
 
+        # Knowledge-Base Anweisungen (wenn aktiviert)
+        if settings.knowledge_base.enabled and settings.knowledge_base.auto_search:
+            system_prompt += (
+                "\n\n## Firmeninterne Knowledge-Base\n"
+                "Du hast Zugriff auf eine firmeninterne Wissensbasis mit gesammeltem Wissen "
+                "aus Confluence, Handbuch und anderen Quellen.\n\n"
+                "REGELN:\n"
+                "1. Bei Fragen zu firmeninternen Themen (Services, Deployments, Prozesse, Architektur, "
+                "Konfigurationen): ZUERST search_knowledge(query='...') aufrufen.\n"
+                "2. Bei Treffern: Antwort basierend auf den Ergebnissen formulieren. "
+                "IMMER Quellen zitieren: [Quelle: pfad/zur/datei.md]\n"
+                "3. Bei KEINEM Treffer: Hinweis geben und research_topic als Follow-Up vorschlagen.\n"
+                "4. NIEMALS Informationen aus der Knowledge-Base erfinden.\n"
+                "5. Wenn das Datum einer Quelle aelter als 30 Tage ist: "
+                "'(Wissen vom {datum} - moeglicherweise veraltet)' erwaehnen.\n"
+            )
+
         # Tool-Definitionen
         tool_schemas = self.tools.get_openai_schemas(include_write_ops=include_write_ops)
 

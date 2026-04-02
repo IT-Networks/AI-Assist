@@ -143,8 +143,22 @@ async def _handle_search_knowledge(
     output_lines = [f"Knowledge-Base Suche: '{query}' ({len(results)} Treffer)\n"]
 
     for i, entry in enumerate(results, 1):
+        # Freshness berechnen
+        freshness_hint = ""
+        if entry.date:
+            try:
+                from datetime import datetime, date
+                doc_date = datetime.strptime(entry.date, "%Y-%m-%d").date()
+                age_days = (date.today() - doc_date).days
+                if age_days > 30:
+                    freshness_hint = f" (Alter: {age_days} Tage - moeglicherweise veraltet)"
+                else:
+                    freshness_hint = f" (Alter: {age_days} Tage)"
+            except (ValueError, TypeError):
+                pass
+
         output_lines.append(f"--- [{i}] {entry.title} ---")
-        output_lines.append(f"Space: {entry.space} | Datum: {entry.date} | Confidence: {entry.confidence}")
+        output_lines.append(f"Space: {entry.space} | Datum: {entry.date}{freshness_hint} | Confidence: {entry.confidence}")
         if entry.tags:
             output_lines.append(f"Tags: {', '.join(entry.tags)}")
         output_lines.append(f"Pfad: {entry.path}")
@@ -156,6 +170,9 @@ async def _handle_search_knowledge(
         else:
             output_lines.append(f"Zusammenfassung:\n{entry.summary}")
         output_lines.append("")
+
+    if not results:
+        output_lines.append("Kein Wissen zu diesem Thema vorhanden. Vorschlag: research_topic(topic='...') um Wissen zu sammeln.")
 
     return ToolResult(success=True, data="\n".join(output_lines))
 

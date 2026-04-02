@@ -34,7 +34,12 @@ class KnowledgeGraphViewer {
       'file': '#64748b',
       'package': '#0ea5e9',
       'enum': '#ec4899',
-      'annotation': '#14b8a6'
+      'annotation': '#14b8a6',
+      // Knowledge Collector Knoten
+      'knowledge_doc': '#4caf50',
+      'confluence_page': '#2196f3',
+      'handbook_service': '#ff9800',
+      'process': '#9c27b0'
     };
 
     // Node sizes by type
@@ -46,7 +51,12 @@ class KnowledgeGraphViewer {
       'table': 12,
       'package': 16,
       'enum': 10,
-      'annotation': 8
+      'annotation': 8,
+      // Knowledge Collector Knoten (groesser, da Dokument-Level)
+      'knowledge_doc': 16,
+      'confluence_page': 12,
+      'handbook_service': 12,
+      'process': 14
     };
 
     this._initControls();

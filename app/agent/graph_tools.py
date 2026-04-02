@@ -260,12 +260,29 @@ async def handle_graph_search(
             "",
         ]
 
+        # Knowledge-Typ Labels fuer bessere Lesbarkeit
+        _kb_labels = {
+            "knowledge_doc": "Knowledge",
+            "confluence_page": "Confluence",
+            "handbook_service": "Handbuch",
+            "process": "Prozess",
+        }
+
         for node in results:
-            line = f"  [{node.type.value}] {node.name}"
+            type_label = _kb_labels.get(node.type.value, node.type.value)
+            line = f"  [{type_label}] {node.name}"
             if node.file_path:
                 # Kurzer Pfad
                 short_path = node.file_path.replace("\\", "/").split("/")[-2:]
                 line += f" ({'/'.join(short_path)}:{node.line_number or ''})"
+            # Knowledge-Knoten: Space und Tags anzeigen
+            if node.type.value in _kb_labels and node.metadata:
+                space = node.metadata.get("space", "")
+                tags = node.metadata.get("tags", [])
+                if space:
+                    line += f" [Space: {space}]"
+                if tags:
+                    line += f" Tags: {', '.join(tags[:5])}"
             output_lines.append(line)
 
         return ToolResult(success=True, data="\n".join(output_lines))
