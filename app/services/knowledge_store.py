@@ -334,13 +334,23 @@ class KnowledgeStore:
         """
         Baut eine FTS5-kompatible Query.
 
-        Einfache Terme werden mit implizitem AND verknüpft.
-        Sonderzeichen werden entfernt.
+        Sicherheit: Entfernt alle FTS5-Operatoren (AND, OR, NOT, NEAR, Quotes)
+        und Sonderzeichen. Nur alphanumerische Terme werden als Prefix-Suche verwendet.
         """
-        # Sonderzeichen entfernen die FTS5 stören
-        cleaned = re.sub(r'[^\w\s\-äöüß]', ' ', query, flags=re.UNICODE)
-        terms = [t.strip() for t in cleaned.split() if len(t.strip()) >= 2]
+        if not query or not query.strip():
+            return "___empty___"  # FTS5 braucht mindestens einen Term
+
+        # Alles entfernen was kein Wort-Zeichen ist (inkl. FTS5-Operatoren)
+        cleaned = re.sub(r'[^\w\säöüßÄÖÜ]', ' ', query, flags=re.UNICODE)
+        # FTS5 reservierte Woerter entfernen
+        fts5_reserved = {"AND", "OR", "NOT", "NEAR"}
+        terms = [
+            t.strip() for t in cleaned.split()
+            if len(t.strip()) >= 2 and t.strip().upper() not in fts5_reserved
+        ]
         if not terms:
-            return query
-        # Terme als Prefix-Suche (term*) für breitere Ergebnisse
+            # Fallback: Ersten Term des Originals verwenden
+            fallback = re.sub(r'[^\w]', '', query)[:20]
+            return f"{fallback}*" if fallback else "___empty___"
+        # Terme als Prefix-Suche (term*) fuer breitere Ergebnisse
         return " ".join(f"{t}*" for t in terms[:10])

@@ -142,8 +142,8 @@ class ResearchAgent(SubAgent):
             for finding in findings:
                 try:
                     await on_finding(finding)
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug(f"[ResearchAgent] Finding-Callback Fehler (non-critical): {e}")
 
         return findings
 

@@ -143,12 +143,16 @@ class KnowledgeSynthesizer:
         providers = list(set(f.source_provider for f in findings))
         pdfs_count = sum(1 for f in findings if f.source_type == "pdf")
 
+        # Topic YAML-safe escapen (Doppelpunkte, Anfuehrungszeichen)
+        safe_topic = topic.replace('"', '\\"').replace(":", " -")
+        safe_space = (plan.space_key or "_allgemein").replace('"', '')
+
         lines = [
             "---",
-            f'title: "{topic}"',
+            f'title: "{safe_topic}"',
             f'date: "{datetime.now().strftime("%Y-%m-%d")}"',
             f"source: {', '.join(providers)}",
-            f"space: {plan.space_key}" if plan.space_key else "space: _allgemein",
+            f"space: {safe_space}",
             f"pages_analyzed: {plan.estimated_pages}",
             f"pdfs_analyzed: {pdfs_count}",
             f"findings_count: {len(findings)}",
@@ -157,7 +161,9 @@ class KnowledgeSynthesizer:
             "tags:",
         ]
         for tag in tags[:10]:
-            lines.append(f"  - {tag}")
+            safe_tag = tag.replace('"', '').replace(":", "").strip()
+            if safe_tag:
+                lines.append(f"  - {safe_tag}")
         lines.append("---")
         return "\n".join(lines)
 

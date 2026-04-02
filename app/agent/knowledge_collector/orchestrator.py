@@ -194,11 +194,8 @@ class ResearchOrchestrator:
                 temperature=0.0,
                 max_tokens=100,
             )
-
-            start = text.find("{")
-            end = text.rfind("}") + 1
-            if start >= 0 and end > start:
-                data = json.loads(text[start:end])
+            data = self._safe_parse_json(text)
+            if data:
                 selected_names = data.get("sources", [])
                 selected = [p for p in available if p.name in selected_names]
                 if selected:
@@ -333,10 +330,8 @@ class ResearchOrchestrator:
                 max_tokens=200,
             )
 
-            start = text.find("{")
-            end = text.rfind("}") + 1
-            if start >= 0 and end > start:
-                data = json.loads(text[start:end])
+            data = self._safe_parse_json(text)
+            if data:
                 indices = data.get("relevant", [])
                 # 1-basierte Indizes → 0-basiert
                 selected = [pages[i - 1] for i in indices if 0 < i <= len(pages)]
@@ -514,8 +509,7 @@ class ResearchOrchestrator:
         for finding in findings:
             # Finde referenzierte Seiten-IDs in Findings
             # Pattern: "Seite 12345", "page_id: 12345", "[ID:12345]"
-            import re
-            page_id_matches = re.findall(r'(?:ID[:\s]*|page[_\s]*id[:\s]*|Seite\s+)(\d{4,})', finding.fact)
+            page_id_matches = re.findall(r'(?:ID[:\s]*|page[_\s]*id[:\s]*|Seite\s+)(\d{4,})', finding.fact[:500])
             for page_id in page_id_matches:
                 if page_id not in seen_ids and len(new_pages) < remaining_budget:
                     seen_ids.add(page_id)
@@ -600,6 +594,20 @@ class ResearchOrchestrator:
     # ══════════════════════════════════════════════════════════════════════════
     # Hilfsfunktionen
     # ══════════════════════════════════════════════════════════════════════════
+
+    @staticmethod
+    def _safe_parse_json(text: str) -> Optional[Dict]:
+        """Sicheres JSON-Parsing aus LLM-Antworten. Gibt None zurueck bei Fehler."""
+        if not text:
+            return None
+        try:
+            start = text.find("{")
+            end = text.rfind("}") + 1
+            if start >= 0 and end > start:
+                return json.loads(text[start:end])
+        except (json.JSONDecodeError, KeyError, ValueError) as e:
+            logger.debug(f"[Research] JSON-Parse fehlgeschlagen: {e}")
+        return None
 
     async def _resolve_url(self, url: str) -> Optional[str]:
         """
