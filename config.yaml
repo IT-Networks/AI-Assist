@@ -137,21 +137,40 @@ knowledge_base:
 
 # Multi-Agent Team System (Feature-Flag: enabled=false zum Testen)
 multi_agent:
-  enabled: false                      # Auf true setzen um run_team Tool zu aktivieren
+  enabled: true                       # AKTIVIERT zum Testen
   coordinator_model: ""               # LLM fuer Task-Zerlegung (leer = default_model)
   max_concurrent_agents: 3            # Max parallele Agenten
   task_timeout_seconds: 120           # Timeout pro Task
   default_strategy: "dependency-first"
-  teams: []                           # Teams hier definieren, z.B.:
-  # - name: "code-review-team"
-  #   description: "Team fuer Code-Reviews"
-  #   agents:
-  #     - name: "analyst"
-  #       system_prompt: "Du analysierst Code-Struktur und Architektur."
-  #       tools: ["search_code", "read_file", "list_files"]
-  #     - name: "reviewer"
-  #       system_prompt: "Du reviewst Code auf Korrektheit."
-  #       tools: ["search_code", "read_file", "grep_content"]
+  teams:
+    - name: "code-review-team"
+      description: "Team fuer umfassende Code-Reviews mit Architektur-, Security- und Performance-Analyse"
+      strategy: "dependency-first"
+      max_parallel: 3
+      agents:
+        - name: "analyst"
+          system_prompt: "Du analysierst Code-Struktur, Architektur und Design Patterns. Suche nach Klassen, Methoden und deren Beziehungen. Bewerte die Code-Qualitaet."
+          tools: ["search_code", "read_file", "list_files", "glob_files", "grep_content"]
+        - name: "security"
+          system_prompt: "Du pruefst Code auf Sicherheitsluecken, OWASP-Risiken und unsichere Patterns. Suche nach SQL-Injection, XSS, fehlender Validierung und hartkodierten Credentials."
+          tools: ["search_code", "read_file", "grep_content"]
+        - name: "reviewer"
+          system_prompt: "Du reviewst Code auf Korrektheit, Lesbarkeit und Best Practices. Fasse die Ergebnisse der anderen Agenten zusammen und erstelle Verbesserungsvorschlaege."
+          tools: ["search_code", "read_file", "grep_content"]
+    - name: "research-team"
+      description: "Team fuer tiefe Recherche ueber Confluence, Handbuch und Code"
+      strategy: "dependency-first"
+      max_parallel: 3
+      agents:
+        - name: "wiki-researcher"
+          system_prompt: "Du durchsuchst Confluence nach relevanter Dokumentation und extrahierst Fakten."
+          tools: ["search_confluence", "read_confluence_page"]
+        - name: "code-analyst"
+          system_prompt: "Du analysierst den Quellcode und findest relevante Implementierungen."
+          tools: ["search_code", "read_file", "grep_content"]
+        - name: "synthesizer"
+          system_prompt: "Du fasst die Ergebnisse der anderen Agenten zu einem kohaerenten Bericht zusammen."
+          tools: ["search_knowledge"]
 
 # Kontext-Limits
 context:
