@@ -250,10 +250,12 @@ def register_knowledge_collector_tools(registry: ToolRegistry) -> int:
     registry.register(Tool(
         name="research_topic",
         description=(
-            "Startet eine systematische Recherche zu einem Thema. "
-            "Durchsucht Confluence-Seiten inkl. Unterseiten und PDFs sowie das Handbuch. "
+            "WICHTIG: Nutze dieses Tool wenn der User eine Recherche, Wissenssammlung oder Knowledge-Base-Aufbau anfordert. "
+            "Startet eine automatische, systematische Recherche zu einem Thema. "
+            "Durchsucht Confluence-Seiten inkl. ALLER Unterseiten und PDFs sowie das Handbuch AUTOMATISCH. "
             "Extrahiert Fakten und Erkenntnisse und speichert sie als Knowledge-MD. "
-            "Nutze dieses Tool wenn der User eine umfassende Recherche zu einem firmeninternen Thema möchte."
+            "NICHT manuell einzelne Confluence-Seiten lesen — dieses Tool macht das automatisch und parallel. "
+            "Keywords: recherchiere, sammle Wissen, Knowledge-Base, research, Wissensbasis aufbauen."
         ),
         category=ToolCategory.KNOWLEDGE,
         parameters=[

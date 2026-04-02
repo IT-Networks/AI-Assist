@@ -1039,7 +1039,13 @@ class AgentOrchestrator:
                 "3. Bei KEINEM Treffer: Hinweis geben und research_topic als Follow-Up vorschlagen.\n"
                 "4. NIEMALS Informationen aus der Knowledge-Base erfinden.\n"
                 "5. Wenn das Datum einer Quelle aelter als 30 Tage ist: "
-                "'(Wissen vom {datum} - moeglicherweise veraltet)' erwaehnen.\n"
+                "'(Wissen vom {datum} - moeglicherweise veraltet)' erwaehnen.\n\n"
+                "WICHTIG - Recherche-Anfragen:\n"
+                "Wenn der User eine RECHERCHE oder WISSENSSAMMLUNG anfordert "
+                "(z.B. 'recherchiere', 'sammle Wissen', 'Knowledge-Base aufbauen', 'research'):\n"
+                "→ IMMER research_topic(topic='...') verwenden!\n"
+                "→ NICHT manuell einzelne Confluence-Seiten lesen!\n"
+                "research_topic macht das automatisch, parallel und speichert die Ergebnisse.\n"
             )
 
         # Tool-Definitionen
@@ -1896,7 +1902,7 @@ class AgentOrchestrator:
                                     "content": _truncate_result(parsed_tc.result.to_context(), tool_name=parsed_tc.name)
                                 })
                     else:
-                        messages.append({"role": "assistant", "content": content or ""})
+                        messages.append({"role": "assistant", "content": content if content else "(Tool-Aufrufe werden verarbeitet)"})
                         results_parts = [
                             f"### Tool-Ergebnis: {tc.name}\n{_truncate_result(tc.result.to_context(), tool_name=tc.name)}"
                             for tc in parsed_tool_calls if tc.result
@@ -2729,9 +2735,12 @@ class AgentOrchestrator:
                 else:
                     # Text-basiertes Format (Mistral-Compact, Qwen etc.):
                     # Kein tool_calls-Feld im assistant-Message, Ergebnisse als user-Message
+                    # WICHTIG: Mistral/vLLM lehnt leere assistant-Messages ab (400 Bad Request)
+                    # Wenn content leer ist, Platzhalter setzen
+                    assistant_content = content if content else "(Tool-Aufrufe werden verarbeitet)"
                     messages.append({
                         "role": "assistant",
-                        "content": content or ""
+                        "content": assistant_content
                     })
                     results_parts = []
                     for tc in current_tool_calls_for_messages:

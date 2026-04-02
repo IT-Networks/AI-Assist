@@ -339,9 +339,10 @@ class SubAgent:
                 })
             else:
                 # Text-basiertes Format: Kein tool_calls-Feld im assistant-Message
+                # WICHTIG: Mistral/vLLM lehnt leere assistant-Messages ab (400 Bad Request)
                 messages.append({
                     "role": "assistant",
-                    "content": response_text or ""
+                    "content": response_text if response_text else "(Tool-Aufrufe werden verarbeitet)"
                 })
 
             tool_results = []
