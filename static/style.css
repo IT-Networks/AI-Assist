@@ -1238,6 +1238,47 @@ body {
   to { opacity: 1; transform: translateY(0); }
 }
 
+/* ── Team Card (Multi-Agent) ── */
+
+.team-card {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-left: 3px solid #9c27b0;
+  border-radius: 8px;
+  margin: 8px 0;
+  overflow: hidden;
+}
+.team-card-done { border-left-color: var(--success); }
+.team-header {
+  display: flex; align-items: center; gap: 8px;
+  padding: 8px 12px; background: var(--surface);
+  border-bottom: 1px solid var(--border); font-size: 0.8rem;
+}
+.team-icon { font-size: 1.1rem; }
+.team-title { font-weight: 600; color: #9c27b0; flex: 1; }
+.team-status { margin-left: auto; font-size: 0.72rem; padding: 2px 8px; border-radius: 10px; white-space: nowrap; }
+.team-status.running { background: var(--warning-bg); color: var(--warning); }
+.team-status.done { background: var(--success-bg); color: var(--success); }
+.team-goal { padding: 4px 12px; font-size: 0.72rem; color: var(--text-secondary); font-style: italic; }
+.team-agents { display: flex; flex-wrap: wrap; gap: 4px; padding: 6px 12px; }
+.team-agent-badge {
+  font-size: 0.68rem; padding: 1px 7px; border-radius: 10px; font-weight: 500;
+  background: var(--bg-tertiary, #2a2d3a); color: var(--text-secondary);
+}
+.team-agent-badge.running { background: var(--warning-bg); color: var(--warning); }
+.team-agent-badge.done { background: var(--success-bg); color: var(--success); }
+.team-progress-bar-container { height: 3px; background: var(--border); overflow: hidden; }
+.team-progress-bar { height: 100%; background: #9c27b0; transition: width 0.4s ease; border-radius: 0 2px 2px 0; }
+.team-card-done .team-progress-bar { background: var(--success); }
+.team-details { padding: 4px 12px; font-size: 0.75rem; color: var(--text-secondary); }
+.team-task-list { padding: 0 12px 8px; display: flex; flex-direction: column; gap: 2px; }
+.team-task-item { font-size: 0.72rem; padding: 2px 0; display: flex; align-items: center; gap: 4px; }
+.team-task-item.running { color: var(--warning); }
+.team-task-item.done { color: var(--success); }
+.team-task-item.error { color: var(--danger); }
+.team-task-icon { width: 14px; text-align: center; }
+.team-task-agent { margin-left: auto; font-size: 0.65rem; color: var(--text-tertiary, #666); }
+
 /* Sub-Agenten Settings */
 .sa-agents-list {
   display: flex;

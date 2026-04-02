@@ -5093,6 +5093,8 @@ function shouldBatchEvent(eventType) {
     'subagent_routing',   // Visual feedback
     'research_started',   // Research card creation
     'research_complete',  // Research card completion
+    'team_started',       // Team card creation
+    'team_complete',      // Team card completion
   ]);
 
   // Non-critical events that can be batched
@@ -5847,6 +5849,46 @@ async function processAgentEvent(event, bubble, msgDiv, chat) {
       updateResearchCard(chat.researchCard, 'error', data);
       break;
     }
+
+    // ── Multi-Agent Team Events ──
+    case 'team_started': {
+      const card = createTeamCard(data);
+      bubble.appendChild(card);
+      chat.teamCard = card;
+      if (document.contains(chat.pane)) scrollToBottom();
+      break;
+    }
+    case 'team_planned':
+    case 'team_planning': {
+      updateTeamCard(chat.teamCard, 'planned', data);
+      break;
+    }
+    case 'team_executing': {
+      updateTeamCard(chat.teamCard, 'executing', data);
+      if (document.contains(chat.pane)) scrollToBottom();
+      break;
+    }
+    case 'team_task_completed': {
+      updateTeamCard(chat.teamCard, 'task_completed', data);
+      break;
+    }
+    case 'team_task_failed': {
+      updateTeamCard(chat.teamCard, 'task_failed', data);
+      break;
+    }
+    case 'team_progress': {
+      updateTeamCard(chat.teamCard, 'progress', data);
+      break;
+    }
+    case 'team_synthesizing': {
+      updateTeamCard(chat.teamCard, 'synthesizing', data);
+      break;
+    }
+    case 'team_complete': {
+      updateTeamCard(chat.teamCard, 'complete', data);
+      if (document.contains(chat.pane)) scrollToBottom();
+      break;
+    }
   }
 }
 
@@ -6466,6 +6508,103 @@ function updateResearchCard(card, type, data) {
 function _setResearchActivity(el, html) {
   if (!el) return;
   el.innerHTML = `<div class="research-activity-line">${html}</div>`;
+}
+
+// ── Team Card (Multi-Agent) ──
+
+function createTeamCard(data) {
+  const card = document.createElement('div');
+  card.className = 'team-card';
+  const teamName = escapeHtml(data.team || 'Team');
+  const goal = escapeHtml((data.goal || '').substring(0, 120));
+  const agents = (data.agents || []).map(a => escapeHtml(a));
+  const agentBadges = agents.map(a => `<span class="team-agent-badge pending">${a}</span>`).join('');
+
+  card.innerHTML = `
+    <div class="team-header">
+      <span class="team-icon">&#129309;</span>
+      <span class="team-title">${teamName}</span>
+      <span class="team-status running">Startet...</span>
+    </div>
+    <div class="team-goal">${goal}</div>
+    <div class="team-agents">${agentBadges}</div>
+    <div class="team-progress-bar-container"><div class="team-progress-bar" style="width:0%"></div></div>
+    <div class="team-details"><span class="team-tasks-count">0 Tasks</span></div>
+    <div class="team-task-list"></div>
+  `;
+  return card;
+}
+
+function updateTeamCard(card, type, data) {
+  if (!card) return;
+  const statusEl = card.querySelector('.team-status');
+  const progressBar = card.querySelector('.team-progress-bar');
+  const tasksCount = card.querySelector('.team-tasks-count');
+  const taskList = card.querySelector('.team-task-list');
+
+  switch (type) {
+    case 'planned': {
+      if (statusEl) { statusEl.className = 'team-status running'; statusEl.textContent = `${data.tasks || '?'} Tasks geplant`; }
+      if (tasksCount) tasksCount.textContent = `${data.tasks || 0} Tasks`;
+      break;
+    }
+    case 'executing': {
+      if (statusEl) { statusEl.className = 'team-status running'; statusEl.textContent = 'Ausfuehrung...'; }
+      if (data.task && taskList) {
+        const item = document.createElement('div');
+        item.className = 'team-task-item running';
+        item.dataset.task = data.task;
+        item.innerHTML = `<span class="team-task-icon">&#9654;</span> ${escapeHtml(data.task)} <span class="team-task-agent">${escapeHtml(data.agent || '')}</span>`;
+        taskList.appendChild(item);
+      }
+      // Agent-Badge aktualisieren
+      if (data.agent) {
+        const badge = [...card.querySelectorAll('.team-agent-badge')].find(b => b.textContent.trim() === data.agent);
+        if (badge) badge.className = 'team-agent-badge running';
+      }
+      // Fortschritt
+      if (data.completed != null && data.total > 0 && progressBar) {
+        progressBar.style.width = `${Math.round((data.completed / data.total) * 100)}%`;
+      }
+      break;
+    }
+    case 'task_completed': {
+      if (data.task && taskList) {
+        const item = taskList.querySelector(`[data-task="${CSS.escape(data.task)}"]`);
+        if (item) { item.className = 'team-task-item done'; item.querySelector('.team-task-icon').innerHTML = '&#10003;'; }
+      }
+      if (data.agent) {
+        const badge = [...card.querySelectorAll('.team-agent-badge')].find(b => b.textContent.trim() === data.agent);
+        if (badge) badge.className = 'team-agent-badge done';
+      }
+      if (data.completed != null && data.total > 0) {
+        if (progressBar) progressBar.style.width = `${Math.round((data.completed / data.total) * 100)}%`;
+        if (tasksCount) tasksCount.textContent = `${data.completed}/${data.total} Tasks`;
+      }
+      break;
+    }
+    case 'task_failed': {
+      if (data.task && taskList) {
+        const item = taskList.querySelector(`[data-task="${CSS.escape(data.task)}"]`);
+        if (item) { item.className = 'team-task-item error'; item.querySelector('.team-task-icon').innerHTML = '&#10007;'; }
+      }
+      break;
+    }
+    case 'synthesizing': {
+      if (statusEl) { statusEl.className = 'team-status running'; statusEl.textContent = 'Zusammenfassung...'; }
+      if (progressBar) progressBar.style.width = '90%';
+      break;
+    }
+    case 'complete': {
+      if (statusEl) { statusEl.className = 'team-status done'; statusEl.textContent = 'Abgeschlossen'; }
+      if (progressBar) progressBar.style.width = '100%';
+      card.classList.add('team-card-done');
+      if (data.completed != null && data.total) {
+        if (tasksCount) tasksCount.textContent = `${data.completed}/${data.total} Tasks (${data.duration || '?'}s)`;
+      }
+      break;
+    }
+  }
 }
 
 // ── Tool History ──

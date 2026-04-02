@@ -49,6 +49,7 @@ SEQUENTIAL_ONLY_TOOLS = {
     "suggest_answers",  # Requires user interaction
     "sequential_thinking", "seq_think", "analyze",  # Skills
     "research_topic",  # Knowledge Collector (streaming tool, long-running)
+    "run_team",        # Multi-Agent Team (streaming tool, long-running)
 }
 
 # MCP capability tools

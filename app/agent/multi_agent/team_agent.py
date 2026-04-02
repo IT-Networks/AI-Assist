@@ -1,0 +1,93 @@
+"""
+TeamAgent – Agent innerhalb eines Teams.
+
+Erbt von SubAgent: Mini-LLM-Loop, Tool-Whitelist, Content-Extraktion.
+Erweiterungen: Team-Context (SharedContext + MessageBus), Task-spezifischer Prompt.
+"""
+
+import logging
+from typing import Optional
+
+from app.agent.sub_agent import SubAgent
+from app.agent.multi_agent.message_bus import MessageBus
+from app.agent.multi_agent.models import TeamAgentConfig, TeamTask
+from app.core.config import settings
+
+logger = logging.getLogger(__name__)
+
+
+class TeamAgent(SubAgent):
+    """
+    Agent innerhalb eines Teams.
+
+    Wird vom AgentPool ausgefuehrt. Bekommt pro Task:
+    - Die Aufgabenbeschreibung
+    - Ergebnisse von Dependency-Tasks (SharedContext)
+    - Nachrichten von anderen Agenten (MessageBus)
+    """
+
+    def __init__(self, config: TeamAgentConfig, message_bus: Optional[MessageBus] = None):
+        super().__init__()
+        self.name = config.name
+        self.display_name = config.name.replace("_", " ").title()
+        self.description = config.system_prompt or f"Team-Agent: {config.name}"
+        self.allowed_tools = list(config.tools)
+        self.max_iterations = config.max_turns
+        self._message_bus = message_bus
+        self._model = config.model or settings.llm.tool_model or settings.llm.default_model
+
+    async def run_task(
+        self,
+        task: TeamTask,
+        shared_context: str = "",
+    ) -> str:
+        """
+        Fuehrt einen Task aus mit Team-Kontext.
+
+        Args:
+            task: Der auszufuehrende Task
+            shared_context: Ergebnisse von Dependency-Tasks
+
+        Returns:
+            Ergebnis-Text (summary)
+        """
+        from app.agent import get_tool_registry
+        from app.services.llm_client import llm_client as default_llm_client
+
+        # Kontext zusammenbauen
+        context_parts = [f"DEINE ROLLE: {self.description}"]
+
+        if shared_context:
+            context_parts.append(f"\nKONTEXT VON VORHERIGEN TASKS:\n{shared_context}")
+
+        # Nachrichten an diesen Agent
+        if self._message_bus:
+            messages = self._message_bus.get_for(self.name)
+            if messages:
+                msg_text = "\n".join(f"[{m.from_agent}]: {m.content}" for m in messages[-5:])
+                context_parts.append(f"\nNACHRICHTEN VON ANDEREN AGENTEN:\n{msg_text}")
+
+        context = "\n".join(context_parts)
+
+        logger.info(f"[TeamAgent:{self.name}] Starte Task '{task.title}' (Tools: {self.allowed_tools})")
+
+        result = await self.run(
+            query=f"Aufgabe: {task.title}\n\n{task.description}",
+            llm_client=default_llm_client,
+            tool_registry=get_tool_registry(),
+            conversation_context=context,
+        )
+
+        if result.success:
+            logger.info(f"[TeamAgent:{self.name}] Task '{task.title}' abgeschlossen ({len(result.key_findings)} Findings)")
+            # Ergebnis als Broadcast an andere Agenten senden
+            if self._message_bus and result.summary:
+                self._message_bus.broadcast(
+                    self.name,
+                    f"Ergebnis von '{task.title}': {result.summary[:300]}"
+                )
+            return result.summary
+        else:
+            error_msg = result.error or "Unbekannter Fehler"
+            logger.warning(f"[TeamAgent:{self.name}] Task '{task.title}' fehlgeschlagen: {error_msg}")
+            return f"FEHLER: {error_msg}"

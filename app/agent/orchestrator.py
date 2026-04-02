@@ -2055,6 +2055,7 @@ class AgentOrchestrator:
                     # Werden wie MCP-Tools mit Event-Polling behandelt, aber über ToolRegistry ausgeführt
                     STREAMING_TOOLS = {
                         "research_topic",  # Knowledge Collector: emittiert RESEARCH_* Events
+                        "run_team",        # Multi-Agent Team: emittiert TEAM_* Events
                     }
                     if tool_call.name in STREAMING_TOOLS:
                         # Streaming-Tool: Standard-Tool mit Live-Event-Streaming über EventBridge

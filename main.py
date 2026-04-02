@@ -189,6 +189,15 @@ async def lifespan(app: FastAPI):
         except Exception as e:
             print(f"[startup] Knowledge Collector Tools fehlgeschlagen: {e}")
 
+        # Multi-Agent Team Tools registrieren (run_team)
+        try:
+            from app.agent.multi_agent.team_tools import register_team_tools
+            team_count = register_team_tools(registry)
+            if team_count:
+                print(f"[startup] Multi-Agent Team Tools registriert: {team_count}")
+        except Exception as e:
+            print(f"[startup] Multi-Agent Team Tools fehlgeschlagen: {e}")
+
     except Exception as e:
         print(f"[startup] Agent-Initialisierung fehlgeschlagen: {e}")
 

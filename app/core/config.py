@@ -1388,6 +1388,34 @@ class KnowledgeBaseConfig(BaseModel):
     sources: KnowledgeBaseSourcesConfig = Field(default_factory=KnowledgeBaseSourcesConfig)
 
 
+class MultiAgentTeamAgentConfig(BaseModel):
+    """Konfiguration eines Agenten innerhalb eines Multi-Agent-Teams."""
+    name: str = ""
+    model: str = ""
+    system_prompt: str = ""
+    tools: List[str] = []
+    max_turns: int = 10
+
+
+class MultiAgentTeamConfig(BaseModel):
+    """Konfiguration eines Multi-Agent-Teams."""
+    name: str = ""
+    description: str = ""
+    agents: List[MultiAgentTeamAgentConfig] = []
+    strategy: str = "dependency-first"
+    max_parallel: int = 3
+
+
+class MultiAgentConfig(BaseModel):
+    """Konfiguration fuer das Multi-Agent Team System."""
+    enabled: bool = False
+    coordinator_model: str = ""
+    max_concurrent_agents: int = 3
+    task_timeout_seconds: int = 120
+    default_strategy: str = "dependency-first"
+    teams: List[MultiAgentTeamConfig] = []
+
+
 class TaskAgentConfig(BaseModel):
     """
     Konfiguration fuer das Task-Decomposition Agent System.
@@ -1457,6 +1485,7 @@ class Settings(BaseModel):
     data_sources: DataSourcesConfig = Field(default_factory=DataSourcesConfig)
     sub_agents: SubAgentsConfig = Field(default_factory=SubAgentsConfig)
     knowledge_base: KnowledgeBaseConfig = Field(default_factory=KnowledgeBaseConfig)
+    multi_agent: MultiAgentConfig = Field(default_factory=MultiAgentConfig)
     task_agents: TaskAgentConfig = Field(default_factory=TaskAgentConfig)
     mq: MQConfig = Field(default_factory=MQConfig)
     test_tool: TestToolConfig = Field(default_factory=TestToolConfig)

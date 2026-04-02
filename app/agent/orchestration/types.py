@@ -103,6 +103,15 @@ class AgentEventType(str, Enum):
     RESEARCH_PROGRESS = "research_progress"           # Aggregierter Fortschritt
     RESEARCH_COMPLETE = "research_complete"           # Research abgeschlossen
     RESEARCH_ERROR = "research_error"                 # Fehler (non-fatal)
+    # Multi-Agent Team Events
+    TEAM_STARTED = "team_started"                     # Team-Run gestartet
+    TEAM_PLAN_CREATED = "team_planned"                # Task-Plan erstellt
+    TEAM_TASK_STARTED = "team_executing"              # Task wird ausgefuehrt
+    TEAM_TASK_COMPLETED = "team_task_completed"       # Task abgeschlossen
+    TEAM_TASK_FAILED = "team_task_failed"             # Task fehlgeschlagen
+    TEAM_PROGRESS = "team_progress"                   # Fortschritts-Update
+    TEAM_SYNTHESIZING = "team_synthesizing"           # Synthese laeuft
+    TEAM_COMPLETE = "team_complete"                   # Team-Run abgeschlossen
 
 
 # MCP Event Type Mapping - Maps string event types to AgentEventType
@@ -142,6 +151,16 @@ MCP_EVENT_TYPE_MAPPING: Dict[str, "AgentEventType"] = {
     "research_progress": AgentEventType.RESEARCH_PROGRESS,
     "research_complete": AgentEventType.RESEARCH_COMPLETE,
     "research_error": AgentEventType.RESEARCH_ERROR,
+    # Multi-Agent Team events
+    "team_started": AgentEventType.TEAM_STARTED,
+    "team_planned": AgentEventType.TEAM_PLAN_CREATED,
+    "team_planning": AgentEventType.TEAM_PLAN_CREATED,
+    "team_executing": AgentEventType.TEAM_TASK_STARTED,
+    "team_task_completed": AgentEventType.TEAM_TASK_COMPLETED,
+    "team_task_failed": AgentEventType.TEAM_TASK_FAILED,
+    "team_progress": AgentEventType.TEAM_PROGRESS,
+    "team_synthesizing": AgentEventType.TEAM_SYNTHESIZING,
+    "team_complete": AgentEventType.TEAM_COMPLETE,
 }
 
 
