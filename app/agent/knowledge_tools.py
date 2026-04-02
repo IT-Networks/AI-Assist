@@ -29,10 +29,31 @@ async def _handle_research_topic(
     Emittiert RESEARCH_*-Events über die globale MCPEventBridge für Live-Streaming.
     Der Orchestrator (orchestrator.py) pollt diese Events und yieldet sie als SSE.
     """
+    import re as _re
     from app.core.config import settings
 
     if not settings.knowledge_base.enabled:
         return ToolResult(success=False, error="Knowledge Base ist nicht aktiviert (knowledge_base.enabled=false)")
+
+    # URL-Erkennung: Wenn topic oder root_page_id eine URL enthaelt, als confluence_url behandeln
+    url_pattern = _re.compile(r'https?://\S+')
+    if not confluence_url:
+        for field_value in [topic, root_page_id]:
+            if field_value:
+                url_match = url_pattern.search(field_value)
+                if url_match:
+                    confluence_url = url_match.group(0)
+                    logger.info(f"[research_topic] URL aus Parameter extrahiert: {confluence_url}")
+                    # Wenn URL im topic war, topic bereinigen
+                    if field_value == topic:
+                        topic = url_pattern.sub("", topic).strip() or topic
+                    break
+
+    # root_page_id: Wenn es eine URL ist, als confluence_url behandeln
+    if root_page_id and root_page_id.startswith("http"):
+        confluence_url = confluence_url or root_page_id
+        root_page_id = None
+        logger.info(f"[research_topic] root_page_id war URL, verschoben zu confluence_url")
 
     # Provider zusammenstellen (mit detailliertem Logging)
     providers, provider_info = _get_available_providers_with_info()
@@ -291,17 +312,19 @@ def register_knowledge_collector_tools(registry: ToolRegistry) -> int:
             "Startet eine automatische, systematische Recherche zu einem Thema. "
             "Durchsucht Confluence-Seiten inkl. ALLER Unterseiten und PDFs sowie das Handbuch AUTOMATISCH. "
             "NICHT manuell einzelne Confluence-Seiten lesen — dieses Tool macht das automatisch und parallel. "
-            "WICHTIG: 'topic' muss ein KURZER Suchbegriff sein (2-4 Woerter), KEIN ganzer Satz! "
-            "Beispiel: topic='Dyns Prozesse PGV' statt topic='Pruefung von Dyns Prozessen fuer PGVs...' "
+            "WICHTIG fuer 'topic': Kurzer Suchbegriff (2-4 Woerter), KEIN ganzer Satz! "
+            "Wenn der User eine CONFLUENCE-URL gibt: Als 'confluence_url' uebergeben — "
+            "die Seite wird dann als Startpunkt verwendet und alle Unterseiten automatisch gelesen. "
+            "Beispiel: confluence_url='https://confluence.example.com/pages/12345' "
             "Nach Aufruf: Ergebnis dem User mitteilen und KEINE weiteren Tools aufrufen."
         ),
         category=ToolCategory.KNOWLEDGE,
         parameters=[
-            ToolParameter("topic", "string", "Das zu recherchierende Thema", required=True),
-            ToolParameter("space_key", "string", "Confluence Space Key (z.B. 'DEV', 'OPS')", required=False),
-            ToolParameter("root_page_id", "string", "ID der Confluence-Startseite für Unterseiten-Traversierung", required=False),
-            ToolParameter("confluence_url", "string", "URL einer Confluence-Seite als Startpunkt", required=False),
-            ToolParameter("max_depth", "integer", "Max. Tiefe für Unterseiten (Standard: 3)", required=False, default=3),
+            ToolParameter("topic", "string", "Kurzer Suchbegriff (2-4 Woerter). Beispiel: 'Dyns Prozesse PGV'", required=True),
+            ToolParameter("space_key", "string", "Confluence Space Key (z.B. 'DEV', 'OPS'). Schraenkt Suche auf einen Space ein.", required=False),
+            ToolParameter("root_page_id", "string", "Numerische Confluence Seiten-ID als Startpunkt (z.B. '12345'). Liest diese Seite + alle Unterseiten.", required=False),
+            ToolParameter("confluence_url", "string", "Vollstaendige Confluence-URL als Startpunkt. Die page_id wird automatisch extrahiert. Liest die Seite + alle Unterseiten.", required=False),
+            ToolParameter("max_depth", "integer", "Max. Tiefe fuer Unterseiten-Traversierung (Standard: 3)", required=False, default=3),
         ],
         is_write_operation=False,  # Keine Bestätigung nötig — erstellt nur MD in knowledge-base/
         handler=_handle_research_topic,

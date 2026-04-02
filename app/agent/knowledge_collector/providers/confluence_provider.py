@@ -133,12 +133,17 @@ class ConfluenceProvider(SourceProvider):
     ) -> List[PageNode]:
         """Rekursive Traversierung der Kind-Seiten."""
         if current_depth >= max_depth:
+            logger.info(f"[ConfluenceProvider] Max Tiefe {max_depth} erreicht bei page_id={page_id}")
             return []
 
         try:
             children = await client.get_child_pages(page_id)
+            if children:
+                logger.info(f"[ConfluenceProvider] {len(children)} Unterseiten fuer page_id={page_id} (Tiefe {current_depth}): {[c.get('title','?') for c in children[:5]]}")
+            else:
+                logger.info(f"[ConfluenceProvider] Keine Unterseiten fuer page_id={page_id} (Tiefe {current_depth})")
         except Exception as e:
-            logger.debug(f"[ConfluenceProvider] Keine Kind-Seiten für {page_id}: {e}")
+            logger.warning(f"[ConfluenceProvider] Unterseiten-Abfrage fehlgeschlagen fuer {page_id}: {e}")
             return []
 
         nodes = []

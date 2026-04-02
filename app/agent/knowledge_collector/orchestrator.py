@@ -602,16 +602,53 @@ class ResearchOrchestrator:
     # ══════════════════════════════════════════════════════════════════════════
 
     async def _resolve_url(self, url: str) -> Optional[str]:
-        """Extrahiert page_id aus einer Confluence-URL."""
-        match = re.search(r"/pages/(\d+)", url)
+        """
+        Extrahiert page_id aus einer Confluence-URL.
+
+        Unterstuetzte Formate:
+        - /pages/12345
+        - /pages/12345/Page+Title
+        - /pages/viewpage.action?pageId=12345
+        - /wiki/spaces/SPACE/pages/12345/Title
+        - /display/SPACE/Page+Title (erfordert API-Lookup)
+        - ?pageId=12345
+        """
+        if not url:
+            return None
+
+        # Format: /pages/12345 oder /pages/12345/Title
+        match = re.search(r'/pages/(\d+)', url)
         if match:
+            logger.info(f"[Research] URL aufgeloest: {url} → page_id={match.group(1)}")
             return match.group(1)
-        # pageId Query-Param
+
+        # Format: ?pageId=12345 (viewpage.action etc.)
         from urllib.parse import urlparse, parse_qs
         parsed = urlparse(url)
         params = parse_qs(parsed.query)
         if "pageId" in params:
-            return params["pageId"][0]
+            page_id = params["pageId"][0]
+            logger.info(f"[Research] URL aufgeloest (pageId param): {url} → page_id={page_id}")
+            return page_id
+
+        # Format: /display/SPACE/Page+Title → API-Lookup noetig
+        display_match = re.search(r'/display/([^/]+)/(.+?)(?:\?|#|$)', url)
+        if display_match:
+            space = display_match.group(1)
+            title = display_match.group(2).replace('+', ' ').replace('%20', ' ')
+            logger.info(f"[Research] URL /display/ erkannt: space={space}, title={title}")
+            try:
+                from app.services.confluence_client import ConfluenceClient
+                client = ConfluenceClient()
+                results = await client.search(title, space_key=space, limit=1)
+                if results:
+                    page_id = results[0]["id"]
+                    logger.info(f"[Research] /display/ aufgeloest via API: page_id={page_id}")
+                    return page_id
+            except Exception as e:
+                logger.warning(f"[Research] /display/ URL-Aufloesung fehlgeschlagen: {e}")
+
+        logger.warning(f"[Research] Konnte keine page_id aus URL extrahieren: {url}")
         return None
 
     @staticmethod
