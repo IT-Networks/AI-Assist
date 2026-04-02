@@ -34,13 +34,16 @@ async def _handle_research_topic(
     if not settings.knowledge_base.enabled:
         return ToolResult(success=False, error="Knowledge Base ist nicht aktiviert (knowledge_base.enabled=false)")
 
-    # Provider zusammenstellen
-    providers = _get_available_providers()
+    # Provider zusammenstellen (mit detailliertem Logging)
+    providers, provider_info = _get_available_providers_with_info()
     if not providers:
         return ToolResult(
             success=False,
-            error="Keine Wissensquellen verfügbar. Prüfe: confluence.base_url oder handbook.enabled in config.yaml",
+            error=f"Keine Wissensquellen verfuegbar.\n{provider_info}\nPruefe config.yaml: confluence.base_url und/oder handbook.enabled",
         )
+
+    logger.info(f"[research_topic] Start: topic='{topic}', providers={[p.name for p in providers]}")
+    logger.info(f"[research_topic] Provider-Info: {provider_info}")
 
     # KnowledgeStore
     from app.services.knowledge_store import get_knowledge_store
@@ -57,8 +60,6 @@ async def _handle_research_topic(
     async def on_research_progress(progress):
         """Callback: ResearchProgress → MCPEventBridge Events."""
         from app.agent.orchestration.types import AgentEventType
-
-        # Phase → Event-Typ Mapping
         phase_to_event = {
             "discovering": AgentEventType.RESEARCH_DISCOVERY.value,
             "planning": AgentEventType.RESEARCH_PLAN.value,
@@ -68,7 +69,6 @@ async def _handle_research_topic(
             "error": AgentEventType.RESEARCH_ERROR.value,
         }
         event_type = phase_to_event.get(progress.phase, AgentEventType.RESEARCH_PROGRESS.value)
-
         await event_bridge.emit(event_type, progress.to_dict())
 
     # Orchestrator erstellen mit Event-Callback
@@ -81,7 +81,6 @@ async def _handle_research_topic(
         on_progress=on_research_progress,
     )
 
-    # Start-Event
     await event_bridge.emit("research_started", {
         "topic": topic,
         "space_key": space_key or "",
@@ -107,15 +106,28 @@ async def _handle_research_topic(
                 ),
             )
         else:
+            # Detaillierte Fehlermeldung statt generische
             return ToolResult(
-                success=False,
-                error="Research konnte keine relevanten Informationen finden.",
+                success=True,  # success=True damit LLM nicht endlos retry
+                data=(
+                    f"Research zu '{topic}' abgeschlossen, aber keine Seiten gefunden.\n"
+                    f"Aktive Quellen: {', '.join(p.name for p in providers)}\n"
+                    f"{provider_info}\n"
+                    f"Moegliche Ursachen:\n"
+                    f"- Confluence: Kein Treffer fuer '{topic}' (pruefe Space/Suchbegriff)\n"
+                    f"- Handbuch: Kein Service mit diesem Namen\n"
+                    f"Tipp: Versuche mit space_key oder root_page_id fuer gezieltere Suche."
+                ),
             )
 
     except Exception as e:
         logger.error(f"[research_topic] Fehler: {e}", exc_info=True)
         await event_bridge.emit("research_error", {"error": str(e), "topic": topic})
-        return ToolResult(success=False, error=f"Research-Fehler: {e}")
+        # success=True mit Fehlerinfo — verhindert Endlos-Retry durch LLM
+        return ToolResult(
+            success=True,
+            data=f"Research-Fehler: {e}\nDie Recherche konnte nicht abgeschlossen werden.",
+        )
 
 
 async def _handle_search_knowledge(
@@ -215,23 +227,48 @@ async def _handle_list_knowledge(
 
 def _get_available_providers():
     """Erstellt die Liste verfügbarer SourceProvider basierend auf Config."""
+    providers, _ = _get_available_providers_with_info()
+    return providers
+
+
+def _get_available_providers_with_info():
+    """Erstellt Provider-Liste mit detaillierten Diagnose-Infos."""
     from app.core.config import settings
 
     providers = []
+    info_lines = []
 
+    # Confluence
     if settings.knowledge_base.sources.confluence:
         from app.agent.knowledge_collector.providers.confluence_provider import ConfluenceProvider
         provider = ConfluenceProvider()
         if provider.is_available():
             providers.append(provider)
+            info_lines.append(f"Confluence: AKTIV (base_url={settings.confluence.base_url})")
+        else:
+            info_lines.append(f"Confluence: INAKTIV (base_url ist leer in config.yaml)")
+            logger.warning("[research] Confluence-Provider nicht verfuegbar: base_url ist leer")
+    else:
+        info_lines.append("Confluence: DEAKTIVIERT (knowledge_base.sources.confluence=false)")
 
+    # Handbuch
     if settings.knowledge_base.sources.handbook:
         from app.agent.knowledge_collector.providers.handbook_provider import HandbookProvider
         provider = HandbookProvider()
         if provider.is_available():
             providers.append(provider)
+            info_lines.append(f"Handbuch: AKTIV (path={settings.handbook.path})")
+        else:
+            reason = "nicht enabled" if not settings.handbook.enabled else "path ist leer"
+            info_lines.append(f"Handbuch: INAKTIV ({reason})")
+            logger.warning(f"[research] Handbook-Provider nicht verfuegbar: {reason}")
+    else:
+        info_lines.append("Handbuch: DEAKTIVIERT (knowledge_base.sources.handbook=false)")
 
-    return providers
+    info = "\n".join(info_lines)
+    logger.info(f"[research] Provider-Status:\n{info}")
+
+    return providers, info
 
 
 # ══════════════════════════════════════════════════════════════════════════════

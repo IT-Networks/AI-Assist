@@ -97,11 +97,12 @@ class ResearchOrchestrator:
         ))
         selected_providers = await self._select_sources(topic)
         if not selected_providers:
-            await self._emit(ResearchProgress(phase="error", error="Keine Wissensquellen verfügbar"))
+            logger.warning(f"[Research] Keine Provider ausgewaehlt fuer '{topic}'")
+            await self._emit(ResearchProgress(phase="error", error="Keine Wissensquellen verfuegbar"))
             return ""
 
         provider_names = [p.name for p in selected_providers]
-        logger.info(f"[Research] Provider ausgewählt: {provider_names}")
+        logger.info(f"[Research] Provider ausgewaehlt: {provider_names}")
 
         # ── Phase 1: Discovery ──
         await self._emit(ResearchProgress(
@@ -109,13 +110,17 @@ class ResearchOrchestrator:
             current_action=f"Suche in {', '.join(p.display_name for p in selected_providers)}...",
             providers_active=provider_names,
         ))
-        all_pages = await self._discover_all(selected_providers, topic, root_page_id, max_depth)
+
+        all_pages, discovery_errors = await self._discover_all_with_errors(
+            selected_providers, topic, root_page_id, max_depth, space_key
+        )
 
         if not all_pages:
-            await self._emit(ResearchProgress(
-                phase="error",
-                error="Keine Seiten oder Dokumente zum Thema gefunden",
-            ))
+            error_detail = f"Keine Seiten zu '{topic}' gefunden."
+            if discovery_errors:
+                error_detail += " Fehler: " + "; ".join(discovery_errors)
+            logger.warning(f"[Research] Discovery leer: {error_detail}")
+            await self._emit(ResearchProgress(phase="error", error=error_detail))
             return ""
 
         logger.info(f"[Research] Discovery: {len(all_pages)} Seiten gefunden")
@@ -214,26 +219,44 @@ class ResearchOrchestrator:
         topic: str,
         root_id: Optional[str],
         max_depth: int,
+        space_key: Optional[str] = None,
     ) -> List[PageNode]:
-        """Parallel Discovery über alle Provider."""
+        """Parallel Discovery ueber alle Provider (ohne Fehler-Details)."""
+        pages, _ = await self._discover_all_with_errors(providers, topic, root_id, max_depth, space_key)
+        return pages
+
+    async def _discover_all_with_errors(
+        self,
+        providers: List[SourceProvider],
+        topic: str,
+        root_id: Optional[str],
+        max_depth: int,
+        space_key: Optional[str] = None,
+    ) -> tuple:
+        """Parallel Discovery ueber alle Provider mit Fehler-Details."""
         tasks = []
         for provider in providers:
-            # root_id nur für Confluence relevant
             rid = root_id if provider.name == "confluence" else None
-            tasks.append(self._discover_with_events(provider, topic, rid, max_depth))
+            tasks.append(self._discover_with_events(provider, topic, rid, max_depth, space_key))
 
         results = await asyncio.gather(*tasks, return_exceptions=True)
 
         all_pages: List[PageNode] = []
+        errors: List[str] = []
         for provider, result in zip(providers, results):
             if isinstance(result, Exception):
-                logger.warning(f"[Research] Discovery fehlgeschlagen für {provider.name}: {result}")
+                err_msg = f"{provider.name}: {result}"
+                logger.error(f"[Research] Discovery fehlgeschlagen fuer {provider.name}: {result}", exc_info=result)
+                errors.append(err_msg)
                 continue
-            # Baum flach machen
+            flat_count = 0
             for node in result:
-                all_pages.extend(node.flat_list())
+                flat = node.flat_list()
+                all_pages.extend(flat)
+                flat_count += len(flat)
+            logger.info(f"[Research] {provider.name}: {flat_count} Seiten entdeckt")
 
-        return all_pages
+        return all_pages, errors
 
     async def _discover_with_events(
         self,
@@ -241,9 +264,10 @@ class ResearchOrchestrator:
         topic: str,
         root_id: Optional[str],
         max_depth: int,
+        space_key: Optional[str] = None,
     ) -> List[PageNode]:
         """Discovery mit Fortschritts-Events."""
-        nodes = await provider.discover(topic, root_id=root_id, max_depth=max_depth)
+        nodes = await provider.discover(topic, root_id=root_id, max_depth=max_depth, space_key=space_key)
 
         # Events für jede entdeckte Seite
         flat = []

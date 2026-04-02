@@ -43,16 +43,21 @@ class ConfluenceProvider(SourceProvider):
         topic: str,
         root_id: Optional[str] = None,
         max_depth: int = 3,
+        space_key: Optional[str] = None,
     ) -> List[PageNode]:
         from app.services.confluence_client import ConfluenceClient
 
         client = ConfluenceClient()
         nodes: List[PageNode] = []
 
+        logger.info(f"[ConfluenceProvider] discover: topic='{topic}', root_id={root_id}, max_depth={max_depth}")
+        logger.info(f"[ConfluenceProvider] base_url={settings.confluence.base_url}, default_space={settings.confluence.default_space}")
+
         if root_id:
             # Strategie 1: Root-Seite + Unterseiten rekursiv
             try:
                 root_page = await client.get_page_by_id(root_id)
+                logger.info(f"[ConfluenceProvider] Root-Seite geladen: '{root_page.get('title', '?')}'")
                 root_node = PageNode(
                     page_id=root_page["id"],
                     title=root_page["title"],
@@ -67,13 +72,17 @@ class ConfluenceProvider(SourceProvider):
                 )
                 nodes.append(root_node)
             except Exception as e:
-                logger.warning(f"[ConfluenceProvider] Root-Seite {root_id} nicht abrufbar: {e}")
+                logger.error(f"[ConfluenceProvider] Root-Seite {root_id} nicht abrufbar: {e}", exc_info=True)
+                raise  # Nicht schlucken — Fehler nach oben propagieren
         else:
             # Strategie 2: Suche nach Thema, dann Unterseiten der Top-Treffer
-            space_key = settings.confluence.default_space or None
+            search_space = space_key or settings.confluence.default_space or None  # User-space_key hat Vorrang
+            logger.info(f"[ConfluenceProvider] Suche nach '{topic}' in space={search_space}")
             try:
-                search_results = await client.search(topic, space_key=space_key, limit=10)
-                for result in search_results[:5]:  # Top 5 Treffer
+                search_results = await client.search(topic, space_key=search_space, limit=10)
+                logger.info(f"[ConfluenceProvider] Suche ergab {len(search_results)} Treffer")
+                for i, result in enumerate(search_results[:5]):
+                    logger.info(f"[ConfluenceProvider] Treffer {i+1}: '{result.get('title', '?')}' (ID: {result.get('id', '?')})")
                     node = PageNode(
                         page_id=result["id"],
                         title=result["title"],
@@ -83,15 +92,17 @@ class ConfluenceProvider(SourceProvider):
                         source_provider="confluence",
                         source_type="page",
                     )
-                    # Unterseiten nur für Top-3 (Budget)
+                    # Unterseiten nur fuer Top-3 (Budget)
                     if len(nodes) < 3 and max_depth > 0:
                         node.children = await self._get_children_recursive(
                             client, result["id"], result.get("space", ""), 1, max_depth
                         )
                     nodes.append(node)
             except Exception as e:
-                logger.warning(f"[ConfluenceProvider] Suche fehlgeschlagen: {e}")
+                logger.error(f"[ConfluenceProvider] Suche fehlgeschlagen: {e}", exc_info=True)
+                raise  # Nicht schlucken — Fehler nach oben propagieren
 
+        logger.info(f"[ConfluenceProvider] Ergebnis: {len(nodes)} Seiten entdeckt")
         return nodes
 
     async def _get_children_recursive(

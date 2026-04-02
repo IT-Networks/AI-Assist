@@ -65,6 +65,7 @@ class SourceProvider(ABC):
         topic: str,
         root_id: Optional[str] = None,
         max_depth: int = 3,
+        space_key: Optional[str] = None,
     ) -> List[PageNode]:
         """
         Entdeckt durchsuchbare Einheiten zu einem Thema.
@@ -73,6 +74,7 @@ class SourceProvider(ABC):
             topic: Das zu recherchierende Thema
             root_id: Optional: Start-ID (z.B. Confluence page_id)
             max_depth: Max. Rekursionstiefe für Baumstrukturen
+            space_key: Optional: Space/Bereich für die Suche
 
         Returns:
             Liste von PageNode-Objekten (flach oder als Baum via .children)

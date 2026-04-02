@@ -44,6 +44,7 @@ class HandbookProvider(SourceProvider):
         topic: str,
         root_id: Optional[str] = None,
         max_depth: int = 3,
+        space_key: Optional[str] = None,
     ) -> List[PageNode]:
         try:
             from app.services.handbook_indexer import get_handbook_indexer
