@@ -129,7 +129,8 @@ def _sanitize_messages_for_mistral(messages: List[Dict]) -> List[Dict]:
                 ]
                 prev_had_tool_calls = True
             else:
-                msg_out["content"] = content if content is not None else ""
+                # Mistral lehnt content="" ohne tool_calls ab → Platzhalter
+                msg_out["content"] = content if content else "(Verarbeitung)"
                 prev_had_tool_calls = False
 
             if content and tool_calls:
@@ -163,8 +164,9 @@ def _sanitize_messages_for_mistral(messages: List[Dict]) -> List[Dict]:
             content = msg.get("content", "")
 
             # Insert bridge assistant if needed (tool → user transition)
+            # Mistral lehnt content="" ohne tool_calls ab → Platzhalter verwenden
             if prev_role == "tool":
-                result.append({"role": "assistant", "content": ""})
+                result.append({"role": "assistant", "content": "(Verarbeitung der Tool-Ergebnisse)"})
                 logger.debug("[llm] Mistral: Inserted bridge assistant between tool and user")
 
             # Merge consecutive user messages

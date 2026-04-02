@@ -179,6 +179,16 @@ async def lifespan(app: FastAPI):
                 print(f"[startup] Shell-Tools registriert: {shell_count}")
         except Exception as e:
             print(f"[startup] Shell-Tools-Registrierung fehlgeschlagen: {e}")
+
+        # Knowledge Collector Tools registrieren (research_topic, search_knowledge, list_knowledge)
+        try:
+            from app.agent.knowledge_tools import register_knowledge_collector_tools
+            kc_count = register_knowledge_collector_tools(registry)
+            if kc_count:
+                print(f"[startup] Knowledge Collector Tools registriert: {kc_count}")
+        except Exception as e:
+            print(f"[startup] Knowledge Collector Tools fehlgeschlagen: {e}")
+
     except Exception as e:
         print(f"[startup] Agent-Initialisierung fehlgeschlagen: {e}")
 
