@@ -384,7 +384,7 @@ def register_standard_services(registry: ServiceRegistry) -> None:
             kc_count = register_knowledge_collector_tools(registry)
             logger.info(f"Knowledge Collector Tools registriert: {kc_count}")
         except Exception as e:
-            logger.debug(f"Knowledge Collector Tools nicht verfügbar: {e}")
+            logger.error(f"Knowledge Collector Tools Registrierung fehlgeschlagen: {e}", exc_info=True)
 
         return {"registry": registry, "orchestrator": orchestrator}
 

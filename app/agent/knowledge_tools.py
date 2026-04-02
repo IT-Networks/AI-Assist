@@ -265,7 +265,7 @@ def register_knowledge_collector_tools(registry: ToolRegistry) -> int:
             ToolParameter("confluence_url", "string", "URL einer Confluence-Seite als Startpunkt", required=False),
             ToolParameter("max_depth", "integer", "Max. Tiefe für Unterseiten (Standard: 3)", required=False, default=3),
         ],
-        is_write_operation=True,
+        is_write_operation=False,  # Keine Bestätigung nötig — erstellt nur MD in knowledge-base/
         handler=_handle_research_topic,
     ))
 
