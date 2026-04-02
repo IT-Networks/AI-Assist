@@ -1043,9 +1043,10 @@ class AgentOrchestrator:
                 "WICHTIG - Recherche-Anfragen:\n"
                 "Wenn der User eine RECHERCHE oder WISSENSSAMMLUNG anfordert "
                 "(z.B. 'recherchiere', 'sammle Wissen', 'Knowledge-Base aufbauen', 'research'):\n"
-                "→ IMMER research_topic(topic='...') verwenden!\n"
+                "→ IMMER research_topic(topic='KURZER SUCHBEGRIFF') verwenden!\n"
+                "→ topic muss 2-4 Schluesselwoerter sein, KEIN ganzer Satz!\n"
                 "→ NICHT manuell einzelne Confluence-Seiten lesen!\n"
-                "research_topic macht das automatisch, parallel und speichert die Ergebnisse.\n"
+                "→ Nach research_topic: Ergebnis dem User mitteilen, FERTIG.\n"
             )
 
         # Tool-Definitionen

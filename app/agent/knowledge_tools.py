@@ -290,9 +290,10 @@ def register_knowledge_collector_tools(registry: ToolRegistry) -> int:
             "WICHTIG: Nutze dieses Tool wenn der User eine Recherche, Wissenssammlung oder Knowledge-Base-Aufbau anfordert. "
             "Startet eine automatische, systematische Recherche zu einem Thema. "
             "Durchsucht Confluence-Seiten inkl. ALLER Unterseiten und PDFs sowie das Handbuch AUTOMATISCH. "
-            "Extrahiert Fakten und Erkenntnisse und speichert sie als Knowledge-MD. "
             "NICHT manuell einzelne Confluence-Seiten lesen — dieses Tool macht das automatisch und parallel. "
-            "Keywords: recherchiere, sammle Wissen, Knowledge-Base, research, Wissensbasis aufbauen."
+            "WICHTIG: 'topic' muss ein KURZER Suchbegriff sein (2-4 Woerter), KEIN ganzer Satz! "
+            "Beispiel: topic='Dyns Prozesse PGV' statt topic='Pruefung von Dyns Prozessen fuer PGVs...' "
+            "Nach Aufruf: Ergebnis dem User mitteilen und KEINE weiteren Tools aufrufen."
         ),
         category=ToolCategory.KNOWLEDGE,
         parameters=[

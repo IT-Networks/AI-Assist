@@ -77,10 +77,28 @@ class ConfluenceProvider(SourceProvider):
         else:
             # Strategie 2: Suche nach Thema, dann Unterseiten der Top-Treffer
             search_space = space_key or settings.confluence.default_space or None  # User-space_key hat Vorrang
-            logger.info(f"[ConfluenceProvider] Suche nach '{topic}' in space={search_space}")
+
+            # Topic fuer Confluence-Suche optimieren:
+            # Lange Saetze auf die ersten 3-5 Kern-Woerter reduzieren
+            search_query = self._optimize_search_query(topic)
+            logger.info(f"[ConfluenceProvider] Suche: original='{topic}' → optimiert='{search_query}', space={search_space}")
             try:
-                search_results = await client.search(topic, space_key=search_space, limit=10)
+                search_results = await client.search(search_query, space_key=search_space, limit=10)
                 logger.info(f"[ConfluenceProvider] Suche ergab {len(search_results)} Treffer")
+
+                # Fallback: Wenn keine Treffer, versuche mit nur den ersten 2 Woertern
+                if not search_results and len(search_query.split()) > 2:
+                    fallback_query = " ".join(search_query.split()[:2])
+                    logger.info(f"[ConfluenceProvider] Fallback-Suche mit: '{fallback_query}'")
+                    search_results = await client.search(fallback_query, space_key=search_space, limit=10)
+                    logger.info(f"[ConfluenceProvider] Fallback ergab {len(search_results)} Treffer")
+
+                # Fallback 2: Suche ohne Space-Filter
+                if not search_results and search_space:
+                    logger.info(f"[ConfluenceProvider] Fallback ohne Space-Filter")
+                    search_results = await client.search(search_query, space_key=None, limit=10)
+                    logger.info(f"[ConfluenceProvider] Ohne Space ergab {len(search_results)} Treffer")
+
                 for i, result in enumerate(search_results[:5]):
                     logger.info(f"[ConfluenceProvider] Treffer {i+1}: '{result.get('title', '?')}' (ID: {result.get('id', '?')})")
                     node = PageNode(
@@ -140,6 +158,51 @@ class ConfluenceProvider(SourceProvider):
             nodes.append(node)
 
         return nodes
+
+    @staticmethod
+    def _optimize_search_query(topic: str) -> str:
+        """
+        Optimiert einen langen Topic-String fuer die Confluence CQL-Suche.
+
+        Problem: LLMs uebergeben oft ganze Saetze als topic.
+        Confluence CQL funktioniert besser mit 2-4 Schluesselwoertern.
+
+        Beispiel:
+        "Pruefung von Dyns Prozessen fuer PGVs neue Prozesse auf Inhalte pruefen"
+        → "Dyns Prozesse PGV Pruefung"
+        """
+        import re
+
+        # Stoppwoerter entfernen (deutsch + allgemein)
+        stopwords = {
+            "von", "fuer", "für", "und", "oder", "auf", "in", "im", "an", "am",
+            "zu", "zum", "zur", "das", "der", "die", "den", "dem", "des", "ein",
+            "eine", "einen", "einem", "einer", "es", "er", "sie", "ist", "sind",
+            "wird", "werden", "wurde", "wurden", "hat", "haben", "kann", "muss",
+            "soll", "neue", "neuen", "neuer", "neues", "neue", "bestimmte",
+            "alle", "diese", "dieser", "diesem", "diesen", "with", "the", "and",
+            "for", "from", "that", "this", "nicht", "kein", "keine", "prüfen",
+            "prufen", "pruefen", "suche", "suchen", "recherche", "recherchiere",
+            "darauf", "baust", "müssen", "muessen",
+        }
+
+        # Woerter extrahieren (alphanumerisch + Umlaute, mind. 2 Zeichen)
+        # Min 2 statt 3: Abkuerzungen wie "PGV", "CI" sollen erhalten bleiben
+        words = re.findall(r'[a-zA-ZäöüÄÖÜß0-9]{2,}', topic)
+
+        # Stoppwoerter filtern
+        keywords = [w for w in words if w.lower() not in stopwords]
+
+        if not keywords:
+            # Fallback: erste 3 Woerter des Originals
+            keywords = words[:3]
+
+        # Max 5 Schluesselwoerter, die laengsten/spezifischsten zuerst
+        keywords = sorted(set(keywords), key=lambda w: -len(w))[:5]
+
+        result = " ".join(keywords)
+        logger.debug(f"[ConfluenceProvider] Query optimiert: '{topic}' → '{result}'")
+        return result if result else topic[:50]
 
     def get_research_agent_tools(self) -> List[str]:
         return [
