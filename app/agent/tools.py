@@ -1393,29 +1393,84 @@ async def search_pdf(
     # Formatierte Ausgabe
     output = f"Gefundene PDF-Inhalte für '{query}':\n\n"
     for r in results[:top_k]:
-        output += f"=== {r['filename']} ===\n"
+        output += f"=== {r['filename']} (Pfad: {r['path']}) ===\n"
         for match in r['matches']:
             output += f"[Seite {match['page']}] {match['snippet']}\n\n"
 
     return ToolResult(success=True, data=output)
 
 
-async def get_pdf_info(filename: str) -> ToolResult:
-    """Gibt Metadaten und Seitenanzahl einer PDF-Datei zurück."""
+def _resolve_pdf_path(filename: str) -> "tuple[Optional[Path], Optional[str]]":
+    """
+    Loest einen PDF-Dateinamen, Pfad oder Teilnamen zu einem vollstaendigen Pfad auf.
+
+    Akzeptiert:
+    - Vollstaendiger Pfad: "C:/uploads/abc123_doc.pdf" oder "/path/to/file.pdf"
+    - Relativer Pfad: "uploads/abc123_doc.pdf", "./uploads/file.pdf"
+    - Nur Dateiname: "abc123_doc.pdf"
+    - Teilname: "doc.pdf" oder "abc123"
+
+    Returns:
+        (Path, None) bei Erfolg, (None, error_message) bei Fehler
+    """
     from app.core.config import settings
     from pathlib import Path
+
+    if not filename:
+        return None, "Kein Dateiname angegeben"
+
+    uploads_dir = Path(settings.uploads.directory).resolve()
+    if not uploads_dir.exists():
+        return None, "Upload-Verzeichnis nicht gefunden"
+
+    # 1. Versuch: Direkter Pfad (absolut oder relativ)
+    direct = Path(filename)
+    if direct.is_absolute() and direct.exists() and direct.suffix.lower() == ".pdf":
+        return direct, None
+
+    # Relativ zum CWD
+    if direct.exists() and direct.suffix.lower() == ".pdf":
+        return direct.resolve(), None
+
+    # Relativ zum uploads-Verzeichnis
+    relative_to_uploads = uploads_dir / filename
+    if relative_to_uploads.exists() and relative_to_uploads.suffix.lower() == ".pdf":
+        return relative_to_uploads, None
+
+    # 2. Versuch: Dateiname-Matching im uploads-Verzeichnis
+    pdf_files = list(uploads_dir.glob("**/*.pdf"))
+
+    # Exakter Dateiname-Match
+    exact = next((f for f in pdf_files if f.name.lower() == filename.lower()), None)
+    if exact:
+        return exact, None
+
+    # Teilname-Match (filename enthalten im Dateinamen)
+    partial = next((f for f in pdf_files if filename.lower() in f.name.lower()), None)
+    if partial:
+        return partial, None
+
+    # Teilname-Match (filename enthalten im vollen Pfad — fuer relative Pfade wie "subdir/file.pdf")
+    filename_normalized = filename.replace("\\", "/").lower()
+    path_match = next(
+        (f for f in pdf_files if filename_normalized in str(f).replace("\\", "/").lower()),
+        None
+    )
+    if path_match:
+        return path_match, None
+
+    available = ", ".join(f.name for f in pdf_files[:10]) or "keine"
+    return None, f"PDF '{filename}' nicht gefunden. Verfuegbare PDFs: {available}"
+
+
+async def get_pdf_info(filename: str) -> ToolResult:
+    """Gibt Metadaten und Seitenanzahl einer PDF-Datei zurück."""
     from app.services.pdf_reader import PDFReader
     from app.core.exceptions import PDFReadError
 
-    uploads_dir = Path(settings.uploads.directory)
-    if not uploads_dir.exists():
-        return ToolResult(success=False, error="Upload-Verzeichnis nicht gefunden")
-
-    pdf_files = list(uploads_dir.glob("**/*.pdf"))
-    match = next((f for f in pdf_files if filename.lower() in f.name.lower()), None)
-    if not match:
-        available = ", ".join(f.name for f in pdf_files[:10]) or "keine"
-        return ToolResult(success=False, error=f"PDF '{filename}' nicht gefunden. Verfügbare PDFs: {available}")
+    match, error = _resolve_pdf_path(filename)
+    if error:
+        return ToolResult(success=False, error=error)
 
     try:
         reader = PDFReader()
@@ -1428,7 +1483,7 @@ async def get_pdf_info(filename: str) -> ToolResult:
             output += f"Autor: {meta['author']}\n"
         if meta.get("subject"):
             output += f"Betreff: {meta['subject']}\n"
-        output += f"\nDateipfad: {match.name}"
+        output += f"\nDateipfad: {match}"
         return ToolResult(success=True, data=output)
     except PDFReadError as e:
         return ToolResult(success=False, error=str(e))
@@ -1438,20 +1493,12 @@ async def get_pdf_info(filename: str) -> ToolResult:
 
 async def read_pdf_pages(filename: str, start_page: int, end_page: int) -> ToolResult:
     """Liest einen Seitenbereich einer PDF (1-basiert, inklusiv, max 30 Seiten pro Aufruf)."""
-    from app.core.config import settings
-    from pathlib import Path
     from app.services.pdf_reader import PDFReader
     from app.core.exceptions import PDFReadError
 
-    uploads_dir = Path(settings.uploads.directory)
-    if not uploads_dir.exists():
-        return ToolResult(success=False, error="Upload-Verzeichnis nicht gefunden")
-
-    pdf_files = list(uploads_dir.glob("**/*.pdf"))
-    match = next((f for f in pdf_files if filename.lower() in f.name.lower()), None)
-    if not match:
-        available = ", ".join(f.name for f in pdf_files[:10]) or "keine"
-        return ToolResult(success=False, error=f"PDF '{filename}' nicht gefunden. Verfügbare PDFs: {available}")
+    match, error = _resolve_pdf_path(filename)
+    if error:
+        return ToolResult(success=False, error=error)
 
     # Eingabe validieren
     if start_page < 1:
