@@ -196,7 +196,7 @@ class _LogLinkParser(HTMLParser):
         super().__init__()
         self._current_href: Optional[str] = None
         self._in_a = False
-        self.file_id: Optional[str] = None
+        self.log_href: Optional[str] = None
 
     def handle_starttag(self, tag, attrs):
         if tag == "a":
@@ -210,7 +210,7 @@ class _LogLinkParser(HTMLParser):
 
     def handle_data(self, data):
         if self._in_a and "ospe_ope.log" in data.strip() and self._current_href:
-            self.file_id = self._current_href
+            self.log_href = self._current_href
 
 
 class _FetchResult:
@@ -271,18 +271,28 @@ async def _fetch_server_logs(server: LogServer, tail: int) -> _FetchResult:
 
             parser = _LogLinkParser()
             parser.feed(log_page_resp.text)
-            if not parser.file_id:
+            if not parser.log_href:
                 # Ersten 500 Zeichen der Seite für Diagnose mitgeben
                 preview = log_page_resp.text[:500].replace("\n", " ")
                 return _FetchResult(error=f"fileId nicht gefunden: kein Link mit Text 'ospe_ope.log' auf log.jsp. Seiten-Preview: {preview}")
 
-            # 3. Log-Datei mit fileId und tail downloaden
-            log_resp = await client.get(
-                f"{base}/jsp/ospe/debug/log.jsp",
-                params={"file": parser.file_id, "tail": f"tail{tail}"},
-            )
+            # 3. Log-Datei downloaden
+            # href kann relativ (/log.jsp?file=xyz) oder absolut sein
+            log_href = parser.log_href
+            if log_href.startswith("http"):
+                download_url = log_href
+            elif log_href.startswith("/"):
+                download_url = f"{base}{log_href}"
+            else:
+                download_url = f"{base}/{log_href}"
+
+            # tail-Parameter anhängen
+            sep = "&" if "?" in download_url else "?"
+            download_url = f"{download_url}{sep}tail=tail{tail}"
+
+            log_resp = await client.get(download_url)
             if log_resp.status_code >= 400:
-                return _FetchResult(error=f"Log-Download fehlgeschlagen: HTTP {log_resp.status_code} für file={parser.file_id}")
+                return _FetchResult(error=f"Log-Download fehlgeschlagen: HTTP {log_resp.status_code} für {download_url}")
 
             return _FetchResult(content=log_resp.text)
     except httpx.ConnectError as e:
