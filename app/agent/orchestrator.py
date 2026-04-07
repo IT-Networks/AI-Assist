@@ -1049,6 +1049,22 @@ class AgentOrchestrator:
                 "→ Nach research_topic: Ergebnis dem User mitteilen, FERTIG.\n"
             )
 
+        # Multi-Agent Team Anweisungen (wenn aktiviert)
+        if settings.multi_agent.enabled and settings.multi_agent.teams:
+            team_names = [t.name for t in settings.multi_agent.teams]
+            system_prompt += (
+                "\n\n## Multi-Agent Teams\n"
+                f"Du hast Zugriff auf konfigurierte Agenten-Teams: {', '.join(team_names)}\n\n"
+                "REGELN:\n"
+                "Wenn der User ein TEAM erwaehnt oder eine KOMPLEXE AUFGABE stellt "
+                "die mehrere Perspektiven erfordert (z.B. Code-Review, Sicherheitsanalyse, "
+                "umfassende Recherche):\n"
+                "→ IMMER run_team(goal='...', team='team-name') verwenden!\n"
+                "→ NICHT manuell einzelne Tools aufrufen (search_code, read_file etc.)!\n"
+                "→ Das Team zerlegt die Aufgabe automatisch in parallele Tasks.\n"
+                "→ Nach run_team: Ergebnis dem User mitteilen, FERTIG.\n"
+            )
+
         # Tool-Definitionen
         tool_schemas = self.tools.get_openai_schemas(include_write_ops=include_write_ops)
 
@@ -1298,10 +1314,29 @@ class AgentOrchestrator:
         # === SUB-AGENT PHASE ===
         # Spezialisierte Sub-Agenten erkunden Datenquellen parallel,
         # bevor der Main-Agent seinen Loop startet.
+        # SKIP wenn: Team-Anfrage erkannt (run_team soll vom LLM direkt aufgerufen werden)
+        # SKIP wenn: Research-Anfrage erkannt (research_topic soll vom LLM aufgerufen werden)
+        _skip_sub_agents = False
+        if settings.multi_agent.enabled:
+            _team_keywords = {"team", "agenten-team", "code-review-team", "research-team",
+                              "run_team", "multi-agent", "mit dem team"}
+            _msg_lower = user_message.lower()
+            # Pruefen ob User explizit ein Team anfordert
+            if any(kw in _msg_lower for kw in _team_keywords):
+                _skip_sub_agents = True
+                logger.info("[agent] Team-Anfrage erkannt — Sub-Agents uebersprungen, LLM entscheidet ueber run_team")
+            # Oder ob ein konfigurierter Team-Name erwaehnt wird
+            for team_cfg in settings.multi_agent.teams:
+                if team_cfg.name and team_cfg.name.lower() in _msg_lower:
+                    _skip_sub_agents = True
+                    logger.info(f"[agent] Team '{team_cfg.name}' in Anfrage erkannt — Sub-Agents uebersprungen")
+                    break
+
         if (
             settings.sub_agents.enabled
             and len(user_message) >= settings.sub_agents.min_query_length
             and not forced_capability  # Skip sub-agents when forcing capability
+            and not _skip_sub_agents   # Skip sub-agents for team requests
         ):
             async for event in self._run_sub_agents_phase(
                 user_message, model, messages, budget

@@ -111,15 +111,18 @@ def register_team_tools(registry: ToolRegistry) -> int:
         logger.info("[MultiAgent] Deaktiviert (multi_agent.enabled=false)")
         return 0
 
+    team_names = [t.name for t in settings.multi_agent.teams] if settings.multi_agent.teams else []
+    teams_hint = f" Verfuegbare Teams: {', '.join(team_names)}." if team_names else ""
+
     registry.register(Tool(
         name="run_team",
         description=(
-            "Startet ein Multi-Agent-Team fuer eine komplexe Aufgabe. "
-            "Das Team zerlegt das Ziel automatisch in parallele Tasks "
-            "und weist sie spezialisierten Agenten zu. "
-            "Nutze dieses Tool bei komplexen Aufgaben die mehrere Perspektiven erfordern "
-            "(z.B. Code-Review, umfassende Analyse, Multi-Source-Recherche). "
-            "Nach Aufruf: Ergebnis dem User mitteilen."
+            "WICHTIG: Nutze dieses Tool wenn der User ein TEAM erwaehnt oder eine komplexe "
+            "Aufgabe stellt die mehrere Perspektiven braucht (Code-Review, Analyse, Recherche). "
+            "Startet ein Multi-Agent-Team das die Aufgabe automatisch in parallele Tasks zerlegt. "
+            "NICHT manuell search_code oder read_file aufrufen — das Team macht das automatisch! "
+            f"{teams_hint} "
+            "Nach Aufruf: Ergebnis dem User mitteilen und KEINE weiteren Tools aufrufen."
         ),
         category=ToolCategory.ANALYSIS,
         parameters=[
