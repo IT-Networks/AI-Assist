@@ -85,11 +85,23 @@ class MultiAgentOrchestrator:
         ordered = self._scheduler.schedule(tasks, self._team.agents)
 
         # Phase 3: Execution Loop
-        await self._execute_loop(ordered)
+        try:
+            await self._execute_loop(ordered)
+        except Exception as e:
+            logger.error(f"[MultiAgent] Execution-Loop Fehler: {e}", exc_info=True)
+            await self._emit({"phase": "task_failed", "error": f"Execution-Fehler: {e}"})
 
         # Phase 4: Synthesis
         await self._emit({"phase": "synthesizing", "message": "Fasse Ergebnisse zusammen..."})
-        summary = await self._synthesize_results(goal, tasks)
+        try:
+            summary = await self._synthesize_results(goal, tasks)
+        except Exception as e:
+            logger.error(f"[MultiAgent] Synthesis Fehler: {e}", exc_info=True)
+            # Fallback: Einfache Auflistung
+            summary = "\n\n".join([
+                f"{'OK' if t.status == 'completed' else 'FEHLER'}: {t.title} ({t.assignee})\n{(t.result or t.error or '')[:500]}"
+                for t in tasks
+            ])
 
         # Statistiken
         completed = sum(1 for t in tasks if t.status == "completed")
@@ -259,11 +271,21 @@ class MultiAgentOrchestrator:
                 assignments.append((task.assignee, task, dep_context))
 
             # Parallel ausfuehren
-            results = await self._pool.execute_batch(assignments, timeout=self._timeout)
+            try:
+                results = await self._pool.execute_batch(assignments, timeout=self._timeout)
+            except Exception as e:
+                logger.error(f"[MultiAgent] Batch-Execution Fehler in Runde {round_num+1}: {e}", exc_info=True)
+                for task in ready:
+                    task.status = "failed"
+                    task.error = f"Batch-Fehler: {e}"
+                break
 
             # Ergebnisse verarbeiten
             for task in ready:
                 result = results.get(task.id, "")
+
+                if not result:
+                    result = "FEHLER: Leere Antwort vom Agent (kein Ergebnis)"
 
                 if result.startswith("FEHLER:"):
                     task.status = "failed"
@@ -332,7 +354,9 @@ class MultiAgentOrchestrator:
         results_text = []
         for task in tasks:
             status_icon = "OK" if task.status == "completed" else "FEHLER"
-            results_text.append(f"[{status_icon}] {task.title} ({task.assignee}):\n{task.result or task.error}")
+            # Ergebnisse auf max 1500 Zeichen pro Task begrenzen (Token-Budget)
+            task_output = (task.result or task.error or "(kein Ergebnis)")[:1500]
+            results_text.append(f"[{status_icon}] {task.title} ({task.assignee}):\n{task_output}")
 
         prompt = (
             f"Fasse die Ergebnisse dieses Team-Runs zusammen.\n\n"
@@ -343,6 +367,8 @@ class MultiAgentOrchestrator:
             f"2. Offene Punkte oder Fehler\n"
             f"3. Empfehlungen\n"
         )
+
+        logger.info(f"[MultiAgent] Synthesis: {len(tasks)} Tasks, Prompt {len(prompt)} Zeichen")
 
         try:
             return await default_llm_client.chat_quick(
