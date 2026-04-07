@@ -6630,7 +6630,8 @@ function updateTeamCard(card, type, data) {
         const item = document.createElement('div');
         item.className = 'team-task-item running';
         item.dataset.task = data.task;
-        item.innerHTML = `<span class="team-task-icon">&#9654;</span> ${escapeHtml(data.task)} <span class="team-task-agent">${escapeHtml(data.agent || '')}</span>`;
+        const parallelHint = (data.parallel && data.parallel > 1) ? `<span class="team-task-parallel" title="${data.parallel} Tasks parallel">&#8644; ${data.parallel_index}/${data.parallel}</span>` : '';
+        item.innerHTML = `<span class="team-task-icon">&#9654;</span> ${escapeHtml(data.task)} <span class="team-task-agent">${escapeHtml(data.agent || '')}</span>${parallelHint}`;
         taskList.appendChild(item);
       }
       // Agent-Badge aktualisieren

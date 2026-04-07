@@ -159,11 +159,15 @@ class MultiAgentOrchestrator:
             f"- Jeder Task muss einem Agenten zugewiesen sein (assignee)\n"
             f"- Tasks koennen von anderen Tasks abhaengen (dependsOn: [task-id])\n"
             f"- IDs muessen mit 't' beginnen: t1, t2, t3, ...\n"
-            f"- Unabhaengige Tasks koennen parallel laufen\n"
-            f"- Der letzte Task sollte die Ergebnisse zusammenfassen\n\n"
+            f"- WICHTIG: Tasks die NICHT voneinander abhaengen MUESSEN dependsOn:[] haben!\n"
+            f"  Nur wenn ein Task das ERGEBNIS eines anderen Tasks braucht, setze dependsOn.\n"
+            f"  Analyse und Security-Check z.B. koennen PARALLEL laufen (beide dependsOn:[]).\n"
+            f"- Der letzte Task (Zusammenfassung/Review) sollte von den anderen abhaengen\n"
+            f"- Die Reihenfolge der Agenten in der Liste oben entspricht der gewuenschten Prioritaet\n\n"
             f"Antworte NUR mit JSON-Array:\n"
-            f'[{{"id":"t1","title":"...","description":"...","assignee":"agent_name","dependsOn":[]}},'
-            f'{{"id":"t2","title":"...","description":"...","assignee":"agent_name","dependsOn":["t1"]}}]'
+            f'[{{"id":"t1","title":"...","description":"...","assignee":"agent1","dependsOn":[]}},'
+            f'{{"id":"t2","title":"...","description":"...","assignee":"agent2","dependsOn":[]}},'
+            f'{{"id":"t3","title":"Zusammenfassung","description":"...","assignee":"agent3","dependsOn":["t1","t2"]}}]'
         )
 
         try:
@@ -262,7 +266,8 @@ class MultiAgentOrchestrator:
 
             # Batch-Assignments erstellen
             assignments = []
-            for task in ready:
+            parallel_count = len(ready)
+            for idx, task in enumerate(ready):
                 task.status = "in_progress"
                 # Context aus Dependencies zusammenbauen
                 dep_context = self._build_dependency_context(task)
@@ -272,6 +277,8 @@ class MultiAgentOrchestrator:
                     "task": task.title,
                     "agent": task.assignee,
                     "round": round_num + 1,
+                    "parallel": parallel_count,
+                    "parallel_index": idx + 1,
                     "completed": len(completed_ids),
                     "total": len(tasks),
                 })

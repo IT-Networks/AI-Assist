@@ -1278,6 +1278,7 @@ body {
 .team-task-item.error { color: var(--danger); }
 .team-task-icon { width: 14px; text-align: center; }
 .team-task-agent { margin-left: auto; font-size: 0.65rem; color: var(--text-tertiary, #666); }
+.team-task-parallel { margin-left: 6px; font-size: 0.6rem; color: #7c4dff; background: #7c4dff22; padding: 1px 5px; border-radius: 3px; }
 
 /* ── Multi-Agent Teams Settings ── */
 
