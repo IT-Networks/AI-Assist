@@ -328,6 +328,13 @@ def truncate_result(raw: str, max_chars: int = 20000, tool_name: str = "") -> st
     if not raw:
         return raw
 
+    # Streaming tools (run_team, research_topic): Kompaktere Ergebnisse
+    # Diese Tools liefern bereits synthetisierte Ergebnisse, brauchen weniger Context
+    if tool_name in ("run_team", "research_topic"):
+        if len(raw) > 5000:
+            return raw[:4500] + f"\n\n[...{len(raw) - 4500} Zeichen gekuerzt ({tool_name})...]"
+        return raw
+
     # PR tools: Minimal info for main LLM (analysis runs in workspace panel)
     if tool_name in ("github_pr_details", "github_pr_diff"):
         lines = raw.split("\n")[:15]  # First 15 lines (metadata only)

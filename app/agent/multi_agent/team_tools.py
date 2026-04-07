@@ -85,6 +85,11 @@ async def _handle_run_team(
     try:
         result = await orchestrator.run(goal)
 
+        # Ergebnis kompakt halten damit der Main-Orchestrator nicht am Token-Limit scheitert
+        summary = result.final_summary or "(Keine Zusammenfassung)"
+        if len(summary) > 4000:
+            summary = summary[:4000] + "\n\n[...Zusammenfassung gekuerzt...]"
+
         return ToolResult(
             success=True,
             data=(
@@ -92,7 +97,8 @@ async def _handle_run_team(
                 f"Tasks: {result.completed_tasks}/{result.total_tasks} erfolgreich"
                 f"{f', {result.failed_tasks} fehlgeschlagen' if result.failed_tasks else ''}\n"
                 f"Dauer: {result.duration_seconds:.1f}s\n\n"
-                f"{result.final_summary}"
+                f"Teile dem User folgendes Ergebnis mit:\n\n"
+                f"{summary}"
             ),
         )
     except Exception as e:

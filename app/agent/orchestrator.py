@@ -1982,6 +1982,12 @@ class AgentOrchestrator:
                         finally:
                             self._event_bridge.unsubscribe(streaming_queue)
 
+                        # Logging: Streaming-Tool abgeschlossen
+                        logger.info(
+                            f"[agent] Streaming-Tool '{tool_call.name}' abgeschlossen in {_duration_ms}ms. "
+                            f"Result: success={result.success}, data_len={len(str(result.data or ''))} chars"
+                        )
+
                     elif tool_call.name.startswith("mcp_") or tool_call.name in MCP_CAPABILITY_TOOLS:
                         # MCP-Tool über Bridge ausführen mit Live-Event-Streaming
                         if self._mcp_bridge is None:
