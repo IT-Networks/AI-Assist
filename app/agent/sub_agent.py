@@ -398,13 +398,24 @@ class SubAgent:
 
         if final_result is None:
             # Kein sauberes JSON-Finish → Freitext-Fallback
-            last_assistant = next(
-                (m["content"] for m in reversed(messages) if m.get("role") == "assistant"),
-                ""
+            # Sammle ALLE assistant-Antworten (nicht nur die letzte)
+            assistant_texts = []
+            for m in messages:
+                if m.get("role") == "assistant" and m.get("content"):
+                    text = m["content"]
+                    if text and text != "(Tool-Aufrufe werden verarbeitet)":
+                        assistant_texts.append(text)
+            last_assistant = assistant_texts[-1] if assistant_texts else ""
+
+            # Wenn der Agent Tool-Calls gemacht hat, ist das ein Teilerfolg
+            had_tool_calls = any(
+                m.get("role") in ("tool",) or (m.get("role") == "user" and "Tool-Ergebnisse" in m.get("content", ""))
+                for m in messages
             )
+
             final_result = SubAgentResult(
                 agent_name=self.display_name,
-                success=bool(last_assistant),
+                success=bool(last_assistant) or had_tool_calls,
                 summary=last_assistant[:500] if last_assistant else "",
                 key_findings=[],
                 sources=[],

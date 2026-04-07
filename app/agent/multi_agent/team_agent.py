@@ -79,16 +79,24 @@ class TeamAgent(SubAgent):
             conversation_context=context,
         )
 
-        if result.success:
-            logger.info(f"[TeamAgent:{self.name}] Task '{task.title}' abgeschlossen ({len(result.key_findings)} Findings)")
-            # Ergebnis als Broadcast an andere Agenten senden
-            if self._message_bus and result.summary:
+        # Ergebnis auswerten — auch "unvollstaendige" Ergebnisse als Erfolg behandeln
+        # Der SubAgent gibt success=False wenn kein JSON-Finish kam, aber der Agent
+        # hat trotzdem gearbeitet (Tool-Calls gemacht, Ergebnisse erhalten).
+        # In dem Fall nutzen wir den summary/key_findings als Ergebnis.
+        summary = result.summary or ""
+        if not summary and result.key_findings:
+            summary = "\n".join(f"- {f}" for f in result.key_findings)
+
+        if result.success or summary:
+            logger.info(f"[TeamAgent:{self.name}] Task '{task.title}' abgeschlossen "
+                       f"(success={result.success}, {len(result.key_findings)} Findings, {len(summary)} chars)")
+            if self._message_bus and summary:
                 self._message_bus.broadcast(
                     self.name,
-                    f"Ergebnis von '{task.title}': {result.summary[:300]}"
+                    f"Ergebnis von '{task.title}': {summary[:300]}"
                 )
-            return result.summary
+            return summary if summary else "(Agent hat gearbeitet aber kein Ergebnis formuliert)"
         else:
-            error_msg = result.error or "Unbekannter Fehler"
+            error_msg = result.error or "Agent konnte keine Ergebnisse liefern (max_iterations erreicht)"
             logger.warning(f"[TeamAgent:{self.name}] Task '{task.title}' fehlgeschlagen: {error_msg}")
             return f"FEHLER: {error_msg}"
