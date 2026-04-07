@@ -11,16 +11,19 @@ Routes:
   PUT    /api/log-servers/stages/{stage_id}/servers/{id}   – Server aktualisieren
   DELETE /api/log-servers/stages/{stage_id}/servers/{id}   – Server löschen
 
-  POST   /api/log-servers/download           – Logs von einem Server herunterladen
+  POST   /api/log-servers/download           – Logs von allen Servern einer Stage herunterladen
   POST   /api/log-servers/find-server        – Passenden Server sequentiell suchen (Early-Exit)
   POST   /api/log-servers/read-window        – Logs im Zeitfenster lesen (Early-Exit je Server)
+
+  PUT    /api/log-servers/config             – Globale Log-Server-Config (credential_ref, default_tail)
 """
 
 import uuid
 import re
 import httpx
-from datetime import datetime, timedelta
+from datetime import datetime
 from typing import Any, Dict, List, Optional
+from html.parser import HTMLParser
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
@@ -40,25 +43,26 @@ class ServerRequest(BaseModel):
     name: str
     url: str
     description: str = ""
-    headers: Dict[str, str] = {}
     verify_ssl: bool = True
+
+
+class LogServerConfigRequest(BaseModel):
+    credential_ref: str = ""
+    default_tail: int = 4
 
 
 class DownloadRequest(BaseModel):
     stage_id: str
-    server_id: str
-    tail_lines: Optional[int] = None
-    extra_headers: Dict[str, str] = {}
+    tail: Optional[int] = None  # 0-4, None = default_tail
 
 
 class FindServerRequest(BaseModel):
     """Sucht den passenden Server sequentiell – bricht ab sobald ein guter Treffer gefunden."""
     stage_id: str
     reference_time: str                # ISO-8601
-    search_term: Optional[str] = None  # Optionaler Log-Inhalt zur Verifikation
-    # Score ≥ min_score → sofortiger Abbruch (Early-Exit)
+    search_term: Optional[str] = None
     min_score: float = 60.0
-    tail_lines: Optional[int] = None
+    tail: Optional[int] = None
 
 
 class ReadWindowRequest(BaseModel):
@@ -66,10 +70,22 @@ class ReadWindowRequest(BaseModel):
     stage_id: str
     time_start: str                    # ISO-8601 – Beginn des Zeitfensters
     time_end: str                      # ISO-8601 – Ende des Zeitfensters
-    search_term: Optional[str] = None  # Muss im gefilterten Abschnitt vorkommen
-    tail_lines: Optional[int] = None   # Anzahl Zeilen vom Server laden
-    # Mindest-Anzahl passender Zeilen damit Server als Treffer gilt
+    search_term: Optional[str] = None
+    tail: Optional[int] = None
     min_matching_lines: int = 1
+
+
+# ── Global Config ────────────────────────────────────────────────────────────
+
+@router.put("/config")
+async def update_config(req: LogServerConfigRequest) -> Dict[str, Any]:
+    """Globale Log-Server-Konfiguration aktualisieren (credential_ref, default_tail)."""
+    settings.log_servers.credential_ref = req.credential_ref
+    settings.log_servers.default_tail = max(0, min(4, req.default_tail))
+    return {
+        "credential_ref": settings.log_servers.credential_ref,
+        "default_tail": settings.log_servers.default_tail,
+    }
 
 
 # ── Stage Management ──────────────────────────────────────────────────────────
@@ -79,7 +95,8 @@ async def list_stages() -> Dict[str, Any]:
     return {
         "stages": [s.model_dump() for s in settings.log_servers.stages],
         "enabled": settings.log_servers.enabled,
-        "default_tail_lines": settings.log_servers.default_tail_lines,
+        "credential_ref": settings.log_servers.credential_ref,
+        "default_tail": settings.log_servers.default_tail,
     }
 
 
@@ -125,7 +142,6 @@ async def add_server(stage_id: str, req: ServerRequest) -> Dict[str, Any]:
         name=req.name,
         url=req.url,
         description=req.description,
-        headers=req.headers,
         verify_ssl=req.verify_ssl,
     )
     stage.servers.append(srv)
@@ -142,7 +158,6 @@ async def update_server(stage_id: str, server_id: str, req: ServerRequest) -> Di
                 name=req.name,
                 url=req.url,
                 description=req.description,
-                headers=req.headers,
                 verify_ssl=req.verify_ssl,
             )
             return {"updated": stage.servers[i].model_dump()}
@@ -159,50 +174,135 @@ async def delete_server(stage_id: str, server_id: str) -> Dict[str, Any]:
     return {"deleted": server_id}
 
 
-# ── Log Download ──────────────────────────────────────────────────────────────
+# ── Login + Log-Fetch Helpers ────────────────────────────────────────────────
+
+def _get_credentials() -> tuple:
+    """Holt username/password aus der credential_ref der Log-Server-Config."""
+    ref = settings.log_servers.credential_ref
+    if not ref:
+        raise HTTPException(status_code=400, detail="Kein credential_ref in Log-Server-Config gesetzt")
+    cred = settings.credentials.get(ref)
+    if not cred:
+        raise HTTPException(status_code=400, detail=f"Credential '{ref}' nicht gefunden")
+    if cred.type != "basic":
+        raise HTTPException(status_code=400, detail=f"Credential '{ref}' muss Typ 'basic' sein (ist '{cred.type}')")
+    return cred.username, cred.password
+
+
+class _LogLinkParser(HTMLParser):
+    """Parst die log.jsp-Seite und extrahiert den href des Links mit Text 'ospe_ope.log'."""
+    def __init__(self):
+        super().__init__()
+        self._current_href: Optional[str] = None
+        self._in_a = False
+        self.file_id: Optional[str] = None
+
+    def handle_starttag(self, tag, attrs):
+        if tag == "a":
+            self._in_a = True
+            self._current_href = dict(attrs).get("href", "")
+
+    def handle_endtag(self, tag):
+        if tag == "a":
+            self._in_a = False
+            self._current_href = None
+
+    def handle_data(self, data):
+        if self._in_a and "ospe_ope.log" in data.strip() and self._current_href:
+            self.file_id = self._current_href
+
+
+async def _fetch_server_logs(server: LogServer, tail: int) -> Optional[str]:
+    """
+    Kompletter Login-Flow für einen Log-Server:
+    1. POST /login mit form-urlencoded credentials → Cookies speichern
+    2. GET /jsp/ospe/debug/log.jsp → fileId aus href mit Text 'ospe_ope.log' parsen
+    3. GET /jsp/ospe/debug/log.jsp?file={fileId}&tail=tail{N} → Log-Inhalt
+    """
+    username, password = _get_credentials()
+    base = server.url.rstrip("/")
+
+    try:
+        async with httpx.AsyncClient(verify=server.verify_ssl, timeout=30) as client:
+            # 1. Login
+            login_resp = await client.post(
+                f"{base}/login",
+                data={"username": username, "password": password},
+                headers={"Content-Type": "application/x-www-form-urlencoded"},
+            )
+            if not login_resp.is_success:
+                return None
+
+            # 2. Log-Seite laden und fileId parsen
+            log_page_resp = await client.get(f"{base}/jsp/ospe/debug/log.jsp")
+            if not log_page_resp.is_success:
+                return None
+
+            parser = _LogLinkParser()
+            parser.feed(log_page_resp.text)
+            if not parser.file_id:
+                return None
+
+            # 3. Log-Datei mit fileId und tail downloaden
+            log_resp = await client.get(
+                f"{base}/jsp/ospe/debug/log.jsp",
+                params={"file": parser.file_id, "tail": f"tail{tail}"},
+            )
+            if not log_resp.is_success:
+                return None
+
+            return log_resp.text
+    except Exception:
+        return None
+
+
+# ── Log Download (alle Server einer Stage) ───────────────────────────────────
 
 @router.post("/download")
 async def download_logs(req: DownloadRequest) -> Dict[str, Any]:
-    """Lädt Logs von einem konfigurierten Server herunter."""
+    """Lädt Logs von ALLEN erreichbaren Servern einer Stage herunter."""
     stage = _get_stage(req.stage_id)
-    server = next((s for s in stage.servers if s.id == req.server_id), None)
-    if not server:
-        raise HTTPException(status_code=404, detail=f"Server '{req.server_id}' nicht gefunden")
+    if not stage.servers:
+        raise HTTPException(status_code=400, detail="Stage hat keine Server konfiguriert")
 
-    tail = req.tail_lines or settings.log_servers.default_tail_lines
-    headers = dict(server.headers)
-    headers.update(req.extra_headers)
+    tail = req.tail if req.tail is not None else settings.log_servers.default_tail
+    tail = max(0, min(4, tail))
 
-    url = server.url
-    sep = "&" if "?" in url else "?"
-    url_with_tail = f"{url}{sep}tail={tail}"
+    results = []
+    for server in stage.servers:
+        content = await _fetch_server_logs(server, tail)
+        if content is not None:
+            lines = content.splitlines()
+            results.append({
+                "server_id": server.id,
+                "server": server.name,
+                "success": True,
+                "lines_count": len(lines),
+                "content": content,
+                "lines": lines,
+            })
+        else:
+            results.append({
+                "server_id": server.id,
+                "server": server.name,
+                "success": False,
+                "error": "Login oder Download fehlgeschlagen",
+            })
 
-    try:
-        async with httpx.AsyncClient(verify=server.verify_ssl, timeout=60) as client:
-            resp = await client.get(url_with_tail, headers=headers)
-        resp.raise_for_status()
-        content = resp.text
-        lines = content.splitlines()
-
-        return {
-            "success": True,
-            "server": server.name,
-            "stage": stage.name,
-            "url": url_with_tail,
-            "lines_count": len(lines),
-            "content": content,
-            "lines": lines[-tail:] if len(lines) > tail else lines,
-        }
-    except httpx.HTTPStatusError as e:
-        raise HTTPException(status_code=e.response.status_code, detail=f"HTTP-Fehler: {e}")
-    except Exception as e:
-        raise HTTPException(status_code=502, detail=str(e))
+    successful = [r for r in results if r["success"]]
+    return {
+        "stage": stage.name,
+        "tail": tail,
+        "servers_total": len(stage.servers),
+        "servers_successful": len(successful),
+        "servers_failed": len(results) - len(successful),
+        "results": results,
+    }
 
 
 # ── Timestamp Helpers ─────────────────────────────────────────────────────────
 
 _TS_PATTERNS = [
-    # (regex, strptime-Format)
     (r"\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}", "%Y-%m-%dT%H:%M:%S"),
     (r"\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}", "%Y-%m-%d %H:%M:%S"),
     (r"\d{2}\.\d{2}\.\d{4} \d{2}:\d{2}:\d{2}",  "%d.%m.%Y %H:%M:%S"),
@@ -227,7 +327,7 @@ def _parse_line_timestamp(line: str) -> Optional[datetime]:
 
 
 def _extract_timestamps(text: str) -> List[datetime]:
-    """Extrahiert alle Zeitstempel aus einem Log-Text (für find-server)."""
+    """Extrahiert alle Zeitstempel aus einem Log-Text."""
     results = []
     for line in text.splitlines():
         ts = _parse_line_timestamp(line)
@@ -255,29 +355,12 @@ def _filter_lines_to_window(
 
         effective_ts = last_ts
         if effective_ts is None:
-            # Noch kein Zeitstempel gesehen – Zeile überspringen
             continue
 
         if time_start <= effective_ts <= time_end:
             result.append(line)
 
     return result
-
-
-async def _fetch_server_logs(server: LogServer, tail: int) -> Optional[str]:
-    """Lädt Log-Inhalt von einem Server. Gibt None bei Fehler zurück."""
-    try:
-        headers = dict(server.headers)
-        url = server.url
-        sep = "&" if "?" in url else "?"
-        url_with_tail = f"{url}{sep}tail={tail}"
-        async with httpx.AsyncClient(verify=server.verify_ssl, timeout=30) as client:
-            resp = await client.get(url_with_tail, headers=headers)
-        if resp.is_success:
-            return resp.text
-    except Exception:
-        pass
-    return None
 
 
 # ── Sequential Find-Server (Early-Exit) ───────────────────────────────────────
@@ -287,7 +370,6 @@ async def find_server(req: FindServerRequest) -> Dict[str, Any]:
     """
     Sucht den passenden Log-Server SEQUENTIELL – bricht sofort ab wenn
     ein Server mit Score ≥ min_score gefunden wird.
-    Server werden in konfigurierter Reihenfolge geprüft.
     """
     stage = _get_stage(req.stage_id)
     if not stage.servers:
@@ -299,14 +381,15 @@ async def find_server(req: FindServerRequest) -> Dict[str, Any]:
     except Exception:
         raise HTTPException(status_code=400, detail=f"Ungültiges Zeitformat: {req.reference_time}")
 
-    tail = req.tail_lines or settings.log_servers.default_tail_lines
+    tail = req.tail if req.tail is not None else settings.log_servers.default_tail
+    tail = max(0, min(4, tail))
     tried = []
 
     for server in stage.servers:
         content = await _fetch_server_logs(server, tail)
 
         if content is None:
-            tried.append({"server_id": server.id, "server": server.name, "score": -1, "error": "Download fehlgeschlagen"})
+            tried.append({"server_id": server.id, "server": server.name, "score": -1, "error": "Login/Download fehlgeschlagen"})
             continue
 
         timestamps = _extract_timestamps(content)
@@ -330,7 +413,6 @@ async def find_server(req: FindServerRequest) -> Dict[str, Any]:
         }
         tried.append(entry)
 
-        # Early-Exit: Guter Treffer gefunden
         if score >= req.min_score:
             return {
                 "stage": stage.name,
@@ -342,7 +424,6 @@ async def find_server(req: FindServerRequest) -> Dict[str, Any]:
                 "servers_skipped": len(stage.servers) - len(tried),
             }
 
-    # Kein Early-Exit – bestes Ergebnis aus allen Versuchen
     tried_valid = [r for r in tried if r.get("score", -1) >= 0]
     best = max(tried_valid, key=lambda r: r["score"]) if tried_valid else None
 
@@ -364,14 +445,11 @@ async def read_window(req: ReadWindowRequest) -> Dict[str, Any]:
     """
     Lädt Logs von jedem Server der Stage SEQUENTIELL und filtert auf das
     angegebene Zeitfenster. Bricht ab, sobald ein Server passende Zeilen liefert.
-
-    Rückgabe: Gefilterte Log-Zeilen des passenden Servers + Metadaten.
     """
     stage = _get_stage(req.stage_id)
     if not stage.servers:
         raise HTTPException(status_code=400, detail="Stage hat keine Server konfiguriert")
 
-    # Zeitfenster parsen
     try:
         t_start = datetime.fromisoformat(req.time_start.replace("Z", "+00:00")).replace(tzinfo=None)
         t_end   = datetime.fromisoformat(req.time_end.replace("Z", "+00:00")).replace(tzinfo=None)
@@ -381,19 +459,19 @@ async def read_window(req: ReadWindowRequest) -> Dict[str, Any]:
     if t_end < t_start:
         raise HTTPException(status_code=400, detail="time_end muss nach time_start liegen")
 
-    tail = req.tail_lines or settings.log_servers.default_tail_lines
+    tail = req.tail if req.tail is not None else settings.log_servers.default_tail
+    tail = max(0, min(4, tail))
     tried = []
 
     for server in stage.servers:
         content = await _fetch_server_logs(server, tail)
         if content is None:
-            tried.append({"server_id": server.id, "server": server.name, "result": "download_failed"})
+            tried.append({"server_id": server.id, "server": server.name, "result": "login_or_download_failed"})
             continue
 
         all_lines = content.splitlines()
         window_lines = _filter_lines_to_window(all_lines, t_start, t_end)
 
-        # Suchbegriff innerhalb des Zeitfensters prüfen
         if req.search_term:
             term_lower = req.search_term.lower()
             matching = [l for l in window_lines if term_lower in l.lower()]
@@ -408,7 +486,6 @@ async def read_window(req: ReadWindowRequest) -> Dict[str, Any]:
             "matching_lines": len(matching),
         })
 
-        # Early-Exit: Genug passende Zeilen gefunden
         if len(matching) >= req.min_matching_lines:
             return {
                 "stage": stage.name,
@@ -426,7 +503,6 @@ async def read_window(req: ReadWindowRequest) -> Dict[str, Any]:
                 "content": "\n".join(window_lines),
             }
 
-    # Kein Treffer – bestes Ergebnis zurückgeben (Server mit meisten Fenster-Zeilen)
     best_try = max(tried, key=lambda t: t.get("window_lines", 0)) if tried else None
 
     return {

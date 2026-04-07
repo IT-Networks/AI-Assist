@@ -14629,11 +14629,48 @@ async function soapSaveTemplate() {
 // ══════════════════════════════════════════════════════════════════════════════
 
 async function renderLogServersSection() {
+  // Credentials für Dropdown laden
+  let credOptions = '<option value="">-- Kein Credential --</option>';
+  try {
+    const credRes = await fetch('/api/settings/credentials');
+    if (credRes.ok) {
+      const credData = await credRes.json();
+      (credData.credentials || []).filter(c => c.type === 'basic').forEach(c => {
+        credOptions += `<option value="${escapeHtml(c.name)}">${escapeHtml(c.name)} (${escapeHtml(c.description || c.type)})</option>`;
+      });
+    }
+  } catch (_) {}
+
+  // Aktuelle Config laden
+  let currentRef = '', currentTail = 4;
+  try {
+    const cfgRes = await fetch('/api/log-servers/stages');
+    if (cfgRes.ok) {
+      const cfgData = await cfgRes.json();
+      currentRef = cfgData.credential_ref || '';
+      currentTail = cfgData.default_tail ?? 4;
+    }
+  } catch (_) {}
+
   const form = document.getElementById('settings-form');
   form.innerHTML = `
     <div class="settings-section">
       <h3 class="settings-section-title">LOG-SERVER</h3>
-      <p class="settings-section-desc">URLs zum Log-Download je Stage und Server. Der Agent nutzt Zeitstempel-Abgleich um den richtigen Server für einen Testzeitpunkt zu finden.</p>
+      <p class="settings-section-desc">Base-URLs der Log-Server je Stage. Login erfolgt automatisch per Credential (POST /login). Beim Download werden alle Server einer Stage abgefragt.</p>
+    </div>
+    <div class="settings-add-form">
+      <h4>Globale Einstellungen</h4>
+      <div class="settings-field">
+        <label>Credential (Basic Auth):</label>
+        <select id="ls-credential-ref" class="settings-input" style="max-width:300px">${credOptions}</select>
+      </div>
+      <div class="settings-field">
+        <label>Standard Tail (0-4):</label>
+        <select id="ls-default-tail" class="settings-input" style="max-width:100px">
+          ${[0,1,2,3,4].map(i => `<option value="${i}" ${i === currentTail ? 'selected' : ''}>${i}</option>`).join('')}
+        </select>
+      </div>
+      <button class="btn btn-primary btn-sm" onclick="lsSaveConfig()">Speichern</button>
     </div>
     <div id="ls-stages-list"><div class="spinner-inline"></div></div>
     <div class="settings-add-form">
@@ -14651,13 +14688,28 @@ async function renderLogServersSection() {
       </div>
       <div class="settings-field-row">
         <input id="ls-new-srv-name" type="text" class="settings-input" placeholder="Server-Name">
-        <input id="ls-new-srv-url" type="text" class="settings-input" placeholder="Log-Download-URL">
+        <input id="ls-new-srv-url" type="text" class="settings-input" placeholder="Base-URL (z.B. http://host:port)">
         <button class="btn btn-primary btn-sm" onclick="lsAddServer()">+ Server</button>
       </div>
       <div class="settings-field"><label>Beschreibung:</label><input id="ls-new-srv-desc" type="text" class="settings-input" placeholder="Optionale Beschreibung"></div>
     </div>
   `;
+  // credential_ref im Dropdown vorselektieren
+  const credSel = document.getElementById('ls-credential-ref');
+  if (credSel && currentRef) credSel.value = currentRef;
   await lsLoadAll();
+}
+
+async function lsSaveConfig() {
+  const credential_ref = document.getElementById('ls-credential-ref')?.value || '';
+  const default_tail = parseInt(document.getElementById('ls-default-tail')?.value || '4', 10);
+  const res = await fetch('/api/log-servers/config', {
+    method: 'PUT',
+    headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({ credential_ref, default_tail })
+  });
+  if (res.ok) updateSettingsStatus('Log-Server Config gespeichert', 'success');
+  else updateSettingsStatus('Fehler beim Speichern', 'error');
 }
 
 async function lsLoadAll() {

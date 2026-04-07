@@ -573,9 +573,8 @@ class LogServer(BaseModel):
     """Ein einzelner Log-Server innerhalb einer Stage."""
     id: str = ""
     name: str = ""
-    url: str = ""                  # URL zum Log-Download (HTTP GET)
+    url: str = ""                  # Base-URL des Servers (z.B. http://host:port)
     description: str = ""
-    headers: Dict[str, str] = {}
     verify_ssl: bool = True
 
 
@@ -590,8 +589,8 @@ class LogServersConfig(BaseModel):
     """Log-Server Konfiguration pro Stage."""
     enabled: bool = False
     stages: List[LogStage] = []
-    # Anzahl der letzten Zeilen standardmäßig beim Download
-    default_tail_lines: int = 500
+    credential_ref: str = ""       # Referenz auf zentrale Credentials (basic auth)
+    default_tail: int = 4          # tail-Parameter 0-4 (4 = längster tail)
 
 
 # ══════════════════════════════════════════════════════════════════════════════

@@ -428,7 +428,8 @@ test_tool:
 log_servers:
   enabled: false
   stages: []
-  default_tail_lines: 500
+  credential_ref: ''
+  default_tail: 4
 
 wlp:
   enabled: false

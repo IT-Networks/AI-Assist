@@ -74,7 +74,7 @@ def register_log_tools(registry: ToolRegistry) -> int:
         except Exception:
             return ToolResult(success=False, error=f"Ungültiges Zeitformat: {reference_time}")
 
-        tail = settings.log_servers.default_tail_lines
+        tail = settings.log_servers.default_tail
         tried = []
 
         for server in stage.servers:
@@ -161,7 +161,7 @@ def register_log_tools(registry: ToolRegistry) -> int:
         except Exception:
             return ToolResult(success=False, error="Ungültiges Zeitformat – ISO-8601 erwartet")
 
-        tail = settings.log_servers.default_tail_lines
+        tail = settings.log_servers.default_tail
         servers_to_try = stage.servers
 
         # Wenn server_id angegeben: nur diesen Server versuchen
