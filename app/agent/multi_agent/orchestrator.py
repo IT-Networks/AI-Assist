@@ -161,9 +161,11 @@ class MultiAgentOrchestrator:
             f"- IDs muessen mit 't' beginnen: t1, t2, t3, ...\n"
             f"- WICHTIG: Tasks die NICHT voneinander abhaengen MUESSEN dependsOn:[] haben!\n"
             f"  Nur wenn ein Task das ERGEBNIS eines anderen Tasks braucht, setze dependsOn.\n"
-            f"  Analyse und Security-Check z.B. koennen PARALLEL laufen (beide dependsOn:[]).\n"
-            f"- Der letzte Task (Zusammenfassung/Review) sollte von den anderen abhaengen\n"
-            f"- Die Reihenfolge der Agenten in der Liste oben entspricht der gewuenschten Prioritaet\n\n"
+            f"- WICHTIG: Weise nur Agenten zu deren Tools zum Ziel PASSEN!\n"
+            f"  Wenn das Ziel 'Confluence durchsuchen' ist, braucht man KEINEN Code-Analysten.\n"
+            f"  Schaue auf die Tools jedes Agenten und pruefe ob sie fuer das Ziel relevant sind.\n"
+            f"  Nicht relevante Agenten WEGLASSEN statt ihnen sinnlose Tasks zu geben.\n"
+            f"- Der letzte Task (Zusammenfassung/Review) sollte von den anderen abhaengen\n\n"
             f"Antworte NUR mit JSON-Array:\n"
             f'[{{"id":"t1","title":"...","description":"...","assignee":"agent1","dependsOn":[]}},'
             f'{{"id":"t2","title":"...","description":"...","assignee":"agent2","dependsOn":[]}},'
@@ -253,11 +255,12 @@ class MultiAgentOrchestrator:
         """
         task_map = {t.id: t for t in tasks}
         completed_ids: set = set()
+        failed_ids: set = set()
         max_rounds = 20  # Sicherheits-Limit
 
         for round_num in range(max_rounds):
-            # Ready Tasks finden
-            ready = [t for t in tasks if t.is_ready(completed_ids)]
+            # Ready Tasks finden (inkl. Tasks deren Dependencies teilweise failed sind)
+            ready = [t for t in tasks if t.is_ready(completed_ids, failed_ids)]
             if not ready:
                 # Pruefen ob noch pending Tasks da sind (blockiert?)
                 pending = [t for t in tasks if t.status in ("pending", "blocked")]
@@ -314,9 +317,11 @@ class MultiAgentOrchestrator:
                 if result.startswith("FEHLER:"):
                     task.status = "failed"
                     task.error = result
+                    failed_ids.add(task.id)
                     logger.warning(f"[MultiAgent] Task '{task.title}' fehlgeschlagen: {result}")
-                    # Cascade: Abhaengige Tasks blockieren
-                    self._cascade_failure(task.id, tasks)
+                    # Soft-Cascade: Abhaengige Tasks nur blockieren wenn ALLE
+                    # ihrer Dependencies fehlgeschlagen sind
+                    self._cascade_failure_soft(task.id, tasks, completed_ids)
                     await self._emit({
                         "phase": "task_failed",
                         "task": task.title,
@@ -346,28 +351,45 @@ class MultiAgentOrchestrator:
 
     def _cascade_failure(self, failed_id: str, tasks: List[TeamTask]):
         """
-        Markiert alle transitiv abhaengigen Tasks als failed.
-
-        Performance: O(V+E) via Reverse-Adjacency-Map statt O(n^2) Loop.
+        DEPRECATED: Harte Cascade — blockiert ALLE abhaengigen Tasks.
+        Benutze _cascade_failure_soft() stattdessen.
         """
-        # Reverse-Adjacency: dep_id → [tasks die davon abhaengen]
-        from collections import defaultdict, deque
-        reverse_adj: Dict[str, List[TeamTask]] = defaultdict(list)
-        for task in tasks:
-            for dep in task.depends_on:
-                reverse_adj[dep].append(task)
+        self._cascade_failure_soft(failed_id, tasks, set())
 
-        # BFS ueber Reverse-Adjacency
-        affected: set = set()
-        queue = deque([failed_id])
-        while queue:
-            fid = queue.popleft()
-            for task in reverse_adj.get(fid, []):
-                if task.id not in affected and task.status in ("pending", "blocked"):
-                    task.status = "failed"
-                    task.error = f"Abhaengiger Task {fid} fehlgeschlagen"
-                    affected.add(task.id)
-                    queue.append(task.id)
+    def _cascade_failure_soft(self, failed_id: str, tasks: List[TeamTask], completed_ids: set):
+        """
+        Soft Cascade: Ein abhaengiger Task wird nur blockiert wenn ALLE seine
+        Dependencies fehlgeschlagen sind. Wenn mindestens eine Dependency
+        erfolgreich war, kann der Task trotzdem laufen.
+
+        Beispiel: Synthesizer haengt von wiki-researcher + code-analyst ab.
+        Wenn nur code-analyst fehlschlaegt, laeuft Synthesizer trotzdem
+        (mit den Ergebnissen von wiki-researcher).
+        """
+        failed_ids = {t.id for t in tasks if t.status == "failed"}
+        failed_ids.add(failed_id)
+
+        for task in tasks:
+            if task.status not in ("pending", "blocked"):
+                continue
+            if not task.depends_on:
+                continue
+
+            # Pruefen ob ALLE Dependencies dieses Tasks fehlgeschlagen sind
+            all_deps_failed = all(
+                dep_id in failed_ids
+                for dep_id in task.depends_on
+            )
+            # Oder: Mindestens eine Dependency ist noch pending/in_progress
+            has_pending_dep = any(
+                dep_id not in failed_ids and dep_id not in completed_ids
+                for dep_id in task.depends_on
+            )
+
+            if all_deps_failed and not has_pending_dep:
+                task.status = "failed"
+                task.error = f"Alle Dependencies fehlgeschlagen ({', '.join(task.depends_on)})"
+                logger.info(f"[MultiAgent] Soft-Cascade: Task '{task.title}' blockiert (alle Deps failed)")
 
     # ══════════════════════════════════════════════════════════════════════════
     # Phase 4: Synthesis

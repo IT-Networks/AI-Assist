@@ -44,11 +44,34 @@ class TeamTask:
     result: str = ""
     error: str = ""
 
-    def is_ready(self, completed_ids: set) -> bool:
-        """Prueft ob alle Dependencies erfuellt sind."""
+    def is_ready(self, completed_ids: set, failed_ids: set = None) -> bool:
+        """
+        Prueft ob der Task starten kann.
+
+        Ein Task ist ready wenn:
+        - Status == "pending"
+        - Alle Dependencies entweder completed ODER failed sind
+        - Mindestens EINE Dependency erfolgreich war (oder keine Dependencies)
+
+        So kann ein Synthesizer auch laufen wenn nur 2 von 3 Quellen
+        Ergebnisse geliefert haben.
+        """
         if self.status != "pending":
             return False
-        return all(dep in completed_ids for dep in self.depends_on)
+        if not self.depends_on:
+            return True
+
+        failed = failed_ids or set()
+        resolved = completed_ids | failed
+
+        # Alle Dependencies muessen abgeschlossen sein (egal ob success oder fail)
+        all_resolved = all(dep in resolved for dep in self.depends_on)
+        if not all_resolved:
+            return False
+
+        # Mindestens eine Dependency muss erfolgreich gewesen sein
+        has_success = any(dep in completed_ids for dep in self.depends_on)
+        return has_success
 
 
 @dataclass
