@@ -123,52 +123,56 @@ output:
         ```
 
     - type: component
-      format: ascii
+      format: mermaid
+      description: "Komponenten-Diagramm als Mermaid Flowchart mit Subgraphs"
       template: |
-        ```
-        ┌─────────────────────────────────────────────────────────────┐
-        │                      PRESENTATION LAYER                      │
-        │   ┌──────────────┐   ┌──────────────┐   ┌──────────────┐    │
-        │   │  Controller  │   │  Controller  │   │  Controller  │    │
-        │   └──────┬───────┘   └──────┬───────┘   └──────┬───────┘    │
-        └──────────┼──────────────────┼──────────────────┼────────────┘
-                   │                  │                  │
-        ┌──────────┼──────────────────┼──────────────────┼────────────┐
-        │          ▼                  ▼                  ▼            │
-        │                       SERVICE LAYER                          │
-        │   ┌──────────────┐   ┌──────────────┐   ┌──────────────┐    │
-        │   │   Service    │   │   Service    │   │   Service    │    │
-        │   └──────┬───────┘   └──────┬───────┘   └──────┬───────┘    │
-        └──────────┼──────────────────┼──────────────────┼────────────┘
-                   │                  │                  │
-        ┌──────────┼──────────────────┼──────────────────┼────────────┐
-        │          ▼                  ▼                  ▼            │
-        │                     PERSISTENCE LAYER                        │
-        │   ┌──────────────┐   ┌──────────────┐   ┌──────────────┐    │
-        │   │  Repository  │   │  Repository  │   │  Repository  │    │
-        │   └──────────────┘   └──────────────┘   └──────────────┘    │
-        └─────────────────────────────────────────────────────────────┘
+        ```mermaid
+        flowchart TD
+            subgraph Presentation["Presentation Layer"]
+                C1["Controller A"]
+                C2["Controller B"]
+                C3["Controller C"]
+            end
+            subgraph Service["Service Layer"]
+                S1["Service A"]
+                S2["Service B"]
+                S3["Service C"]
+            end
+            subgraph Persistence["Persistence Layer"]
+                R1["Repository A"]
+                R2["Repository B"]
+                R3["Repository C"]
+            end
+            C1 --> S1
+            C2 --> S2
+            C3 --> S3
+            S1 --> R1
+            S2 --> R2
+            S3 --> R3
         ```
 
     - type: erd
-      format: ascii
+      format: mermaid
+      description: "Entity-Relationship-Diagramm als Mermaid erDiagram"
       template: |
-        ```
-        ┌──────────────────┐         ┌──────────────────┐
-        │    {Entity1}     │         │    {Entity2}     │
-        ├──────────────────┤         ├──────────────────┤
-        │ PK id            │───┐     │ PK id            │
-        │    name          │   │     │ FK entity1_id    │◀──┐
-        │    created_at    │   └────▶│    attribute     │   │
-        │    updated_at    │         │    created_at    │   │
-        └──────────────────┘         └──────────────────┘   │
-                                                            │
-        ┌──────────────────┐                                │
-        │    {Entity3}     │                                │
-        ├──────────────────┤                                │
-        │ PK id            │────────────────────────────────┘
-        │    attribute     │
-        └──────────────────┘
+        ```mermaid
+        erDiagram
+            Entity1 ||--o{ Entity2 : "has"
+            Entity1 {
+                string id PK
+                string name
+                datetime created_at
+            }
+            Entity2 {
+                string id PK
+                string entity1_id FK
+                string attribute
+            }
+            Entity3 }o--|| Entity1 : "belongs to"
+            Entity3 {
+                string id PK
+                string attribute
+            }
         ```
 
   include_sources: true
@@ -197,10 +201,11 @@ system_prompt: |
   3. **Best Practices**: Web-Recherche für aktuelle Technologie-Standards (anonymisiert)
 
   ### Pflicht-Diagramme
-  Jedes Design MUSS mindestens enthalten:
-  1. **Sequenzdiagramm** (Mermaid) - Hauptablauf der Interaktionen
-  2. **Komponenten-Diagramm** (ASCII) - Architektur-Übersicht mit Layern
-  3. **ERD** (ASCII) - wenn Datenmodell relevant
+  Jedes Design MUSS mindestens enthalten (IMMER als ```mermaid Code-Bloecke):
+  1. **Sequenzdiagramm** (Mermaid `sequenceDiagram`) - Hauptablauf der Interaktionen
+  2. **Komponenten-Diagramm** (Mermaid `flowchart TD` mit Subgraphs) - Architektur-Uebersicht
+  3. **ERD** (Mermaid `erDiagram`) - wenn Datenmodell relevant
+  NIEMALS ASCII-Art verwenden — das Frontend rendert Mermaid-Bloecke automatisch als Grafiken.
 
   ### API-Design-Standards
   - **REST** mit OpenAPI 3.0 Spezifikation

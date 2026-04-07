@@ -90,43 +90,48 @@ output:
 
   diagrams:
     - type: context
-      format: ascii
+      format: mermaid
+      description: "Kontext-Diagramm als Mermaid Flowchart"
       template: |
-        ```
-        ┌─────────────────────────────────────────────────────────┐
-        │                    {SYSTEM_NAME}                         │
-        │                                                          │
-        │   ┌────────────┐   ┌────────────┐   ┌────────────┐      │
-        │   │ Komponente │───│ Komponente │───│ Komponente │      │
-        │   │     A      │   │     B      │   │     C      │      │
-        │   └────────────┘   └────────────┘   └────────────┘      │
-        │                                                          │
-        └────────────────────────┬────────────────────────────────┘
-                                 │
-                  ┌──────────────┼──────────────┐
-                  │              │              │
-                  ▼              ▼              ▼
-           ┌──────────┐   ┌──────────┐   ┌──────────┐
-           │ Externes │   │ Externes │   │ Externes │
-           │ System 1 │   │ System 2 │   │ System 3 │
-           └──────────┘   └──────────┘   └──────────┘
+        ```mermaid
+        flowchart TD
+            subgraph System["{SYSTEM_NAME}"]
+                A["Komponente A"]
+                B["Komponente B"]
+                C["Komponente C"]
+                A --> B
+                B --> C
+            end
+            E1["Externes System 1"] --> System
+            E2["Externes System 2"] --> System
+            E3["Externes System 3"] --> System
         ```
 
     - type: usecase
-      format: ascii
+      format: mermaid
+      description: "Use-Case-Diagramm als Mermaid Flowchart"
       template: |
+        ```mermaid
+        flowchart LR
+            A1["Akteur 1"] --> UC1["Use Case 1"]
+            A1 --> UC2["Use Case 2"]
+            A1 --> UC3["Use Case 3"]
+            A2["Akteur 2"] --> UC3
+            A2 --> UC4["Use Case 4"]
         ```
-                              ┌───────────────────────────┐
-                              │        {SYSTEM}           │
-                              │                           │
-        ┌─────────────┐       │   ○ Use Case 1            │
-        │   Akteur 1  │───────│   ○ Use Case 2            │
-        └─────────────┘       │   ○ Use Case 3            │
-                              │                           │
-        ┌─────────────┐       │   ○ Use Case 4            │
-        │   Akteur 2  │───────│   ○ Use Case 5            │
-        └─────────────┘       │                           │
-                              └───────────────────────────┘
+
+    - type: process
+      format: mermaid
+      description: "Prozess-/Ablaufdiagramm als Mermaid Flowchart"
+      template: |
+        ```mermaid
+        flowchart TD
+            Start["Start"] --> Step1["Schritt 1"]
+            Step1 --> Decision{"Entscheidung?"}
+            Decision -->|Ja| Step2["Schritt 2a"]
+            Decision -->|Nein| Step3["Schritt 2b"]
+            Step2 --> End["Ende"]
+            Step3 --> End
         ```
 
   include_sources: true
@@ -155,8 +160,12 @@ system_prompt: |
 
   ### Output-Anforderungen
   - **Mindestens 3 Use Cases** im vorgegebenen Format
-  - **Kontext-Diagramm** als ASCII-Art
-  - **Stakeholder-Tabelle** mit Einfluss-Bewertung
+  - **Diagramme als Mermaid** (werden im Frontend automatisch gerendert):
+    - Kontext-Diagramm: `flowchart TD` mit Subgraphs fuer Systemgrenzen
+    - Use-Case-Diagramm: `flowchart LR` mit Akteuren und Use Cases
+    - Prozess-Diagramm: `flowchart TD` mit Entscheidungen und Schritten
+    - IMMER in ```mermaid Code-Bloecken, NIEMALS als ASCII-Art
+  - **Stakeholder-Tabelle** mit Einfluss-Bewertung (Markdown-Tabelle)
   - **Risiken und Annahmen** explizit auflisten
   - **Quellen-Angabe** am Ende des Dokuments
 
