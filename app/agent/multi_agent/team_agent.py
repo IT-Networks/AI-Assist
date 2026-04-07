@@ -38,6 +38,9 @@ class TeamAgent(SubAgent):
         self._model = config.model or settings.llm.default_model
         # Token-Tracking: Letzte Run-Tokens (wird nach jedem run_task aktualisiert)
         self.last_token_usage: int = 0
+        # Diagramm: Letztes vom Agent generiertes Mermaid-Diagramm
+        self.last_diagram: str = ""
+        self.last_diagram_title: str = ""
 
     async def run_task(
         self,
@@ -90,8 +93,10 @@ class TeamAgent(SubAgent):
             conversation_context=context,
         )
 
-        # Token-Usage speichern
+        # Token-Usage + Diagramm speichern
         self.last_token_usage = result.token_usage
+        self.last_diagram = result.diagram or ""
+        self.last_diagram_title = result.diagram_title or ""
 
         # Ergebnis auswerten — auch "unvollstaendige" Ergebnisse als Erfolg behandeln
         # Der SubAgent gibt success=False wenn kein JSON-Finish kam, aber der Agent

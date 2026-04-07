@@ -164,6 +164,8 @@ class SubAgentResult:
     summary: str                         # 200–500 Wörter für Main-LLM
     key_findings: List[str]              # Bullet-Points
     sources: List[str]                   # Dateipfade, Page-IDs, Issue-Keys etc.
+    diagram: str = ""                    # Mermaid-Code (ohne Fences), optional
+    diagram_title: str = ""              # Titel fuer das Diagramm
     token_usage: int = 0
     duration_ms: int = 0
     error: Optional[str] = None
@@ -257,19 +259,23 @@ class SubAgent:
             "QUALITAETSREGELN fuer Findings:\n"
             "- SCHLECHT: 'Es wurden mehrere relevante Dateien gefunden'\n"
             "- GUT: 'In `src/auth/login.py:42` fehlt Input-Validierung fuer das email-Feld'\n"
-            "- SCHLECHT: 'Die Performance koennte verbessert werden'\n"
-            "- GUT: 'Die Funktion `process_batch()` in `worker.py:128` hat O(n^2) Komplexitaet bei 10k+ Eintraegen'\n"
             "- Jedes Finding MUSS mindestens einen konkreten Verweis enthalten (Datei, Funktion, Metrik, ID)\n"
             f"{context_section}\n\n"
             "Wenn du alle Informationen gesammelt hast, antworte NUR mit diesem JSON:\n"
             "{\n"
             '  "summary": "Was wurde gefunden? (3-5 Saetze mit konkreten Details)",\n'
-            '  "key_findings": [\n'
-            '    "Konkretes Finding mit `datei:zeile` oder Metrik",\n'
-            '    "Weiteres Finding mit Verweis auf konkrete Stelle"\n'
-            '  ],\n'
-            '  "sources": ["pfad/zur/datei.py", "JIRA-123", "wiki/page-id"]\n'
-            "}"
+            '  "key_findings": ["Konkretes Finding mit Verweis", "..."],\n'
+            '  "sources": ["pfad/datei.py", "JIRA-123", "wiki/page-id"],\n'
+            '  "diagram": "OPTIONAL: Mermaid-Code OHNE ```-Fences, z.B. sequenceDiagram\\n    A->>B: Request",\n'
+            '  "diagram_title": "OPTIONAL: Titel fuer das Diagramm"\n'
+            "}\n\n"
+            "DIAGRAMM-REGELN (nur wenn es zur Aufgabe passt, sonst weglassen):\n"
+            "- Service-Aufrufe/API-Calls gefunden → sequenceDiagram\n"
+            "- Komponenten/Module/Architektur → flowchart TD\n"
+            "- Datenbank-Tabellen/Entities → erDiagram\n"
+            "- Prozess-Ablaeufe/Workflows → flowchart TD mit Entscheidungen\n"
+            "- Kein passender Typ → diagram-Feld WEGLASSEN\n"
+            "- Der Mermaid-Code muss VALIDE sein (keine Umlaute in IDs, Quotes escapen)"
         )
 
         # Tool-Schemas nur für erlaubte Tools
@@ -511,11 +517,10 @@ class SubAgent:
                 "Antworte NUR mit diesem JSON (KEINE Tool-Calls, KEIN anderer Text):\n"
                 "{\n"
                 '  "summary": "Was wurde konkret gefunden? (3-5 Saetze, mit Dateinamen und Metriken)",\n'
-                '  "key_findings": [\n'
-                '    "Konkretes Finding mit `datei:zeile` oder Metrik — NICHT vage formulieren",\n'
-                '    "Weiteres Finding"\n'
-                '  ],\n'
-                '  "sources": ["pfad/datei.py", "ID-123"]\n'
+                '  "key_findings": ["Konkretes Finding mit Verweis", "..."],\n'
+                '  "sources": ["pfad/datei.py", "ID-123"],\n'
+                '  "diagram": "OPTIONAL: Mermaid-Code wenn passend, sonst weglassen",\n'
+                '  "diagram_title": "OPTIONAL: Titel"\n'
                 "}"
             ),
         })
@@ -627,6 +632,8 @@ class SubAgent:
                 summary=data.get("summary", ""),
                 key_findings=data.get("key_findings", []),
                 sources=data.get("sources", []),
+                diagram=data.get("diagram", ""),
+                diagram_title=data.get("diagram_title", ""),
             )
         except (json.JSONDecodeError, KeyError):
             # Kein valides JSON → Freitext als Summary

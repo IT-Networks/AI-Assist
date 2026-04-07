@@ -54,6 +54,8 @@ class MultiAgentOrchestrator:
         # Token-Tracking (aggregiert ueber alle LLM-Calls)
         self._total_tokens = 0
         self._total_llm_calls = 0
+        # Agent-Diagramme: agent_name → (diagram, title)
+        self._agent_diagrams: Dict[str, tuple] = {}
 
     async def run(self, goal: str) -> TeamRunResult:
         """Fuehrt den kompletten Team-Run aus."""
@@ -307,12 +309,17 @@ class MultiAgentOrchestrator:
                     task.error = f"Batch-Fehler: {e}"
                 break
 
-            # Token-Usage der Agents sammeln
+            # Token-Usage + Diagramme der Agents sammeln
             for agent_name, _, _ in assignments:
                 agent = self._pool.get(agent_name)
                 if agent and hasattr(agent, 'last_token_usage'):
                     self._total_tokens += agent.last_token_usage
                     self._total_llm_calls += 1
+                if agent and getattr(agent, 'last_diagram', ''):
+                    self._agent_diagrams[agent_name] = (
+                        agent.last_diagram,
+                        getattr(agent, 'last_diagram_title', '') or f"Diagramm von {agent_name}",
+                    )
 
             # Ergebnisse verarbeiten
             for task in ready:
@@ -465,14 +472,19 @@ class MultiAgentOrchestrator:
         # ── Alles zusammensetzen ──
         parts = [llm_summary]
 
+        # Agent-generierte Diagramme (inhaltlich, z.B. Architektur, Sequenz)
+        for agent_name, (diagram, title) in self._agent_diagrams.items():
+            if diagram and diagram.strip():
+                parts.append(f"\n\n### {title}\n\n```mermaid\n{diagram.strip()}\n```")
+
         if stats_table:
-            parts.append(f"\n\n---\n\n### 📊 Task-Statistik\n\n{stats_table}")
+            parts.append(f"\n\n---\n\n### Task-Statistik\n\n{stats_table}")
 
         if flow_chart:
-            parts.append(f"\n\n### 🔀 Task-Ablauf\n\n```mermaid\n{flow_chart}\n```")
+            parts.append(f"\n\n### Task-Ablauf\n\n```mermaid\n{flow_chart}\n```")
 
         if pie_chart:
-            parts.append(f"\n\n### 📈 Ergebnis\n\n```mermaid\n{pie_chart}\n```")
+            parts.append(f"\n\n### Ergebnis\n\n```mermaid\n{pie_chart}\n```")
 
         return "".join(parts)
 
