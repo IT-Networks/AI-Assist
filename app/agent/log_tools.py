@@ -1,5 +1,5 @@
 """
-Agent-Tools für Log-Server-Zugriff (sequentiell + Zeitfenster).
+Agent-Tools für Log-Server-Zugriff.
 Wird beim Startup registriert wenn log_servers aktiviert ist.
 """
 
@@ -40,7 +40,7 @@ def register_log_tools(registry: ToolRegistry) -> int:
         name="log_list_stages",
         description=(
             "Listet alle konfigurierten Log-Stages und ihre Server auf. "
-            "Zeigt Stage-IDs und Server-IDs für nachfolgende Log-Abfragen."
+            "Zeigt Stage-IDs für nachfolgende Log-Abfragen."
         ),
         category=ToolCategory.SEARCH,
         parameters=[],
@@ -48,203 +48,160 @@ def register_log_tools(registry: ToolRegistry) -> int:
     ))
     count += 1
 
-    # ── log_find_server ───────────────────────────────────────────────────────
-    async def log_find_server(**kwargs: Any) -> ToolResult:
-        from datetime import datetime
+    # ── log_download_stage ────────────────────────────────────────────────────
+    async def log_download_stage(**kwargs: Any) -> ToolResult:
+        from app.api.routes.log_servers import _fetch_server_logs
 
         stage_id: str = kwargs.get("stage_id", "")
-        reference_time: str = kwargs.get("reference_time", "")
         search_term: str = kwargs.get("search_term", "")
-
-        # min_score mit Range-Validierung (0-150)
-        try:
-            min_score_raw = float(kwargs.get("min_score", 60.0))
-            min_score: float = max(0.0, min(min_score_raw, 150.0))
-        except (ValueError, TypeError):
-            min_score = 60.0
 
         stage = next((s for s in settings.log_servers.stages if s.id == stage_id), None)
         if not stage:
             return ToolResult(success=False, error=f"Stage '{stage_id}' nicht gefunden")
-
-        if reference_time:
-            try:
-                ref_time = datetime.fromisoformat(reference_time.replace("Z", "+00:00")).replace(tzinfo=None)
-            except Exception:
-                return ToolResult(success=False, error=f"Ungültiges Zeitformat: {reference_time}")
-        else:
-            ref_time = datetime.now()
+        if not stage.servers:
+            return ToolResult(success=False, error="Stage hat keine Server konfiguriert")
 
         tail = settings.log_servers.default_tail
-        tried = []
+        results = []
 
         for server in stage.servers:
-            from app.api.routes.log_servers import _fetch_server_logs, _extract_timestamps
             content = await _fetch_server_logs(server, tail)
             if content is None:
-                tried.append({"server": server.name, "score": -1, "error": "Download fehlgeschlagen"})
+                results.append({
+                    "server_id": server.id,
+                    "server": server.name,
+                    "success": False,
+                    "error": "Login oder Download fehlgeschlagen",
+                })
                 continue
 
-            timestamps = _extract_timestamps(content)
-            if not timestamps:
-                tried.append({"server": server.name, "score": 0, "note": "Keine Zeitstempel gefunden"})
-                continue
+            lines = content.splitlines()
 
-            closest = min(timestamps, key=lambda t: abs((t - ref_time).total_seconds()))
-            delta_s = abs((closest - ref_time).total_seconds())
-            content_match = search_term.lower() in content.lower() if search_term else True
-            score = round(max(0, 100 - delta_s / 60) * (1.5 if content_match else 1.0), 1)
+            if search_term:
+                term_lower = search_term.lower()
+                matching = [l for l in lines if term_lower in l.lower()]
+            else:
+                matching = lines
 
-            entry = {
+            results.append({
                 "server_id": server.id,
                 "server": server.name,
-                "score": score,
-                "closest_timestamp": closest.isoformat(),
-                "delta_seconds": round(delta_s, 1),
-                "content_match": content_match,
-            }
-            tried.append(entry)
+                "success": True,
+                "lines_count": len(lines),
+                "matching_lines_count": len(matching),
+                "content": "\n".join(matching) if search_term else content,
+            })
 
-            if score >= min_score:
-                return ToolResult(success=True, data={
-                    "found": True,
-                    "early_exit": True,
-                    "best_match": entry,
-                    "servers_tried": tried,
-                    "servers_skipped": len(stage.servers) - len(tried),
-                })
-
-        tried_valid = [r for r in tried if r.get("score", -1) >= 0]
-        best = max(tried_valid, key=lambda r: r["score"]) if tried_valid else None
+        successful = [r for r in results if r["success"]]
         return ToolResult(
-            success=bool(best),
-            data={"found": bool(best), "early_exit": False, "best_match": best, "servers_tried": tried},
-            error=None if best else "Kein passender Server gefunden",
+            success=bool(successful),
+            data={
+                "stage": stage.name,
+                "servers_total": len(stage.servers),
+                "servers_successful": len(successful),
+                "results": results,
+            },
+            error=None if successful else "Kein Server erreichbar",
         )
 
     registry.register(Tool(
-        name="log_find_server",
+        name="log_download_stage",
         description=(
-            "Sucht SEQUENTIELL den passenden Log-Server für eine Stage anhand eines Referenz-Zeitpunkts. "
-            "Bricht sofort ab (Early-Exit) wenn ein Server mit Score ≥ min_score gefunden wird. "
-            "Nutze log_list_stages um stage_id zu ermitteln. "
-            "reference_time im ISO-8601-Format (z.B. '2024-01-15T14:30:00')."
+            "Lädt die aktuellen Logs von ALLEN Servern einer Stage herunter. "
+            "Jeder Server wird per Login authentifiziert und die ospe_ope.log geladen. "
+            "Optional kann ein Suchbegriff angegeben werden um nur relevante Zeilen zu erhalten. "
+            "Nutze log_list_stages um die stage_id zu ermitteln."
         ),
         category=ToolCategory.SEARCH,
         parameters=[
             ToolParameter(name="stage_id", type="string", description="ID der Stage", required=True),
-            ToolParameter(name="reference_time", type="string", description="Referenz-Zeitstempel ISO-8601 (leer = jetzt)", required=False),
-            ToolParameter(name="search_term", type="string", description="Optionaler Suchbegriff zur Verifikation", required=False),
-            ToolParameter(name="min_score", type="number", description="Mindest-Score für Early-Exit (0-150, Standard: 60)", required=False),
+            ToolParameter(name="search_term", type="string", description="Optionaler Suchbegriff – filtert Log-Zeilen", required=False),
         ],
-        handler=log_find_server,
+        handler=log_download_stage,
     ))
     count += 1
 
-    # ── log_read_window ───────────────────────────────────────────────────────
-    async def log_read_window(**kwargs: Any) -> ToolResult:
+    # ── log_search_stage ──────────────────────────────────────────────────────
+    async def log_search_stage(**kwargs: Any) -> ToolResult:
         from datetime import datetime
         from app.api.routes.log_servers import _fetch_server_logs, _filter_lines_to_window
 
         stage_id: str = kwargs.get("stage_id", "")
+        search_term: str = kwargs.get("search_term", "")
         time_start: str = kwargs.get("time_start", "")
         time_end: str = kwargs.get("time_end", "")
-        search_term: str = kwargs.get("search_term", "")
-        server_id: str = kwargs.get("server_id", "")  # Optional: direkt auf Server zugreifen
 
         stage = next((s for s in settings.log_servers.stages if s.id == stage_id), None)
         if not stage:
             return ToolResult(success=False, error=f"Stage '{stage_id}' nicht gefunden")
+        if not stage.servers:
+            return ToolResult(success=False, error="Stage hat keine Server konfiguriert")
 
-        try:
-            t_start = datetime.fromisoformat(time_start.replace("Z", "+00:00")).replace(tzinfo=None)
-            t_end   = datetime.fromisoformat(time_end.replace("Z", "+00:00")).replace(tzinfo=None)
-        except Exception:
-            return ToolResult(success=False, error="Ungültiges Zeitformat – ISO-8601 erwartet")
+        # Zeitfenster parsen (optional)
+        t_start = t_end = None
+        if time_start and time_end:
+            try:
+                t_start = datetime.fromisoformat(time_start.replace("Z", "+00:00")).replace(tzinfo=None)
+                t_end = datetime.fromisoformat(time_end.replace("Z", "+00:00")).replace(tzinfo=None)
+            except Exception:
+                return ToolResult(success=False, error="Ungültiges Zeitformat – ISO-8601 erwartet")
 
         tail = settings.log_servers.default_tail
-        servers_to_try = stage.servers
+        results = []
 
-        # Wenn server_id angegeben: nur diesen Server versuchen
-        if server_id:
-            srv = next((s for s in stage.servers if s.id == server_id), None)
-            if not srv:
-                return ToolResult(success=False, error=f"Server '{server_id}' nicht gefunden")
-            servers_to_try = [srv]
-
-        tried = []
-        for server in servers_to_try:
+        for server in stage.servers:
             content = await _fetch_server_logs(server, tail)
             if content is None:
-                tried.append({"server": server.name, "error": "Download fehlgeschlagen"})
+                results.append({"server": server.name, "success": False, "error": "Login/Download fehlgeschlagen"})
                 continue
 
-            all_lines = content.splitlines()
-            window_lines = _filter_lines_to_window(all_lines, t_start, t_end)
+            lines = content.splitlines()
 
+            # Zeitfenster-Filter (wenn angegeben)
+            if t_start and t_end:
+                lines = _filter_lines_to_window(lines, t_start, t_end)
+
+            # Suchbegriff-Filter
             if search_term:
                 term_lower = search_term.lower()
-                matching = [l for l in window_lines if term_lower in l.lower()]
-            else:
-                matching = window_lines
+                lines = [l for l in lines if term_lower in l.lower()]
 
-            tried.append({
+            results.append({
                 "server_id": server.id,
                 "server": server.name,
-                "total_lines": len(all_lines),
-                "window_lines": len(window_lines),
-                "matching_lines": len(matching),
+                "success": True,
+                "matching_lines": len(lines),
+                "content": "\n".join(lines) if lines else "",
             })
 
-            # Early-Exit bei Treffer
-            if matching:
-                return ToolResult(success=True, data={
-                    "stage": stage.name,
-                    "server_id": server.id,
-                    "server": server.name,
-                    "time_start": time_start,
-                    "time_end": time_end,
-                    "found": True,
-                    "early_exit": True,
-                    "window_lines": window_lines,
-                    "matching_lines": matching,
-                    "content": "\n".join(window_lines),
-                    "servers_tried": tried,
-                    "servers_skipped": len(servers_to_try) - len(tried),
-                })
-
-        # Kein Treffer
-        best_try = max(tried, key=lambda t: t.get("window_lines", 0)) if tried else None
+        found = [r for r in results if r["success"] and r.get("matching_lines", 0) > 0]
         return ToolResult(
-            success=False,
+            success=bool(found),
             data={
-                "found": False,
-                "servers_tried": tried,
-                "best_partial": best_try,
-                "time_start": time_start,
-                "time_end": time_end,
+                "stage": stage.name,
+                "servers_total": len(stage.servers),
+                "servers_with_matches": len(found),
+                "results": results,
             },
-            error="Keine passenden Log-Einträge im Zeitfenster gefunden",
+            error=None if found else "Keine Treffer in den Logs gefunden",
         )
 
     registry.register(Tool(
-        name="log_read_window",
+        name="log_search_stage",
         description=(
-            "Lädt Logs von Servern einer Stage und filtert auf ein Zeitfenster. "
-            "Probiert Server SEQUENTIELL und bricht sofort ab sobald ein Server "
-            "passende Zeilen im Zeitfenster liefert. "
-            "Optional: server_id direkt angeben um einen bestimmten Server zu nutzen. "
-            "Ideal nach log_find_server: erst Server finden, dann Fenster lesen."
+            "Durchsucht die Logs ALLER Server einer Stage nach einem Suchbegriff "
+            "und/oder in einem Zeitfenster. Sammelt Ergebnisse von allen erreichbaren Servern. "
+            "Mindestens search_term oder time_start+time_end muss angegeben werden. "
+            "Nutze log_list_stages um die stage_id zu ermitteln."
         ),
         category=ToolCategory.SEARCH,
         parameters=[
             ToolParameter(name="stage_id", type="string", description="ID der Stage", required=True),
-            ToolParameter(name="time_start", type="string", description="Beginn des Zeitfensters ISO-8601", required=True),
-            ToolParameter(name="time_end", type="string", description="Ende des Zeitfensters ISO-8601", required=True),
-            ToolParameter(name="search_term", type="string", description="Optionaler Suchbegriff im Zeitfenster", required=False),
-            ToolParameter(name="server_id", type="string", description="Optionale direkte Server-ID (überspringt Suche)", required=False),
+            ToolParameter(name="search_term", type="string", description="Suchbegriff in Log-Zeilen", required=False),
+            ToolParameter(name="time_start", type="string", description="Beginn des Zeitfensters ISO-8601 (optional)", required=False),
+            ToolParameter(name="time_end", type="string", description="Ende des Zeitfensters ISO-8601 (optional)", required=False),
         ],
-        handler=log_read_window,
+        handler=log_search_stage,
     ))
     count += 1
 
@@ -283,7 +240,6 @@ def register_log_tools(registry: ToolRegistry) -> int:
         loop = asyncio.get_event_loop()
         for fpath in ffdc_files[:max_files]:
             try:
-                # Async File I/O: Blocking read in Thread-Pool auslagern
                 content = await loop.run_in_executor(None, _read_file_sync, str(fpath))
                 results.append({
                     "file": fpath.name,
