@@ -522,13 +522,13 @@ class SubAgent:
 
         try:
             # Chat OHNE Tools — LLM muss Text produzieren
-            response_text = await default_llm_client.chat_quick(
+            response_text, p_tk, c_tk = await default_llm_client.chat_quick_with_usage(
                 messages=summary_messages,
                 model=self._model,
                 temperature=0.1,
                 max_tokens=1024,
             )
-            total_tokens += len(response_text or "") // 4  # Grobe Schätzung
+            total_tokens += p_tk + c_tk
 
             if response_text:
                 result = self._parse_final_response(response_text)

@@ -919,6 +919,32 @@ class LLMClient:
         )
         return response.content or ""
 
+    async def chat_quick_with_usage(
+        self,
+        messages: List[Dict],
+        model: Optional[str] = None,
+        temperature: float = 0.0,
+        max_tokens: int = 256,
+    ) -> tuple:
+        """
+        Wie chat_quick(), gibt aber auch Token-Usage zurueck.
+
+        Returns:
+            Tuple (content: str, prompt_tokens: int, completion_tokens: int)
+        """
+        response = await self.chat_with_tools(
+            messages=messages,
+            model=model,
+            temperature=temperature,
+            max_tokens=max_tokens,
+            timeout=TIMEOUT_QUICK,
+        )
+        return (
+            response.content or "",
+            getattr(response, "prompt_tokens", 0),
+            getattr(response, "completion_tokens", 0),
+        )
+
 
 llm_client = LLMClient()
 

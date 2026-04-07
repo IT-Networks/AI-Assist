@@ -171,12 +171,14 @@ class MultiAgentOrchestrator:
         )
 
         try:
-            text = await default_llm_client.chat_quick(
+            text, p_tk, c_tk = await default_llm_client.chat_quick_with_usage(
                 messages=[{"role": "user", "content": prompt}],
                 model=self._model,
                 temperature=0.1,
                 max_tokens=2048,
             )
+            self._total_tokens += p_tk + c_tk
+            self._total_llm_calls += 1
             return self._parse_tasks(text)
         except Exception as e:
             logger.error(f"[MultiAgent] Coordinator fehlgeschlagen: {e}")
@@ -412,12 +414,14 @@ class MultiAgentOrchestrator:
         logger.info(f"[MultiAgent] Synthesis: {len(tasks)} Tasks, Prompt {len(prompt)} Zeichen")
 
         try:
-            llm_summary = await default_llm_client.chat_quick(
+            llm_summary, p_tk, c_tk = await default_llm_client.chat_quick_with_usage(
                 messages=[{"role": "user", "content": prompt}],
                 model=self._model,
                 temperature=0.2,
                 max_tokens=2048,
             )
+            self._total_tokens += p_tk + c_tk
+            self._total_llm_calls += 1
         except Exception as e:
             logger.error(f"[MultiAgent] Synthesis fehlgeschlagen: {e}")
             llm_summary = "\n\n".join(results_text)
