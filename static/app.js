@@ -5515,14 +5515,18 @@ function countTokensApprox(text) {
  * - New: marked.parse(newParagraph) only for new content = O(n)
  */
 /**
- * Splittet Text in Paragraphen (auf \n\n), aber bewahrt Fenced Code Blocks
- * als ganzes Segment. Ohne dies werden ```mermaid und andere Code-Bloecke
- * zerstoert wenn sie leere Zeilen enthalten.
+ * Splittet Text in Paragraphen (auf \n\n), aber bewahrt:
+ * 1. Fenced Code Blocks (```...```) als ganzes Segment
+ * 2. Plaintext-Mermaid-Bloecke (flowchart TD\n...) als ganzes Segment
+ *    (das LLM gibt Mermaid-Code oft ohne Fences aus)
  */
+const _MERMAID_START_RE = /^(flowchart|graph|sequenceDiagram|classDiagram|stateDiagram|erDiagram|gantt|pie|gitgraph|mindmap|timeline|sankey|xychart|block)\b/;
+
 function splitPreservingCodeBlocks(text) {
   const segments = [];
   let current = '';
   let inCodeBlock = false;
+  let inMermaidBlock = false;
 
   const lines = text.split('\n');
   for (let i = 0; i < lines.length; i++) {
@@ -5531,18 +5535,13 @@ function splitPreservingCodeBlocks(text) {
     // Fenced Code Block Start/Ende erkennen
     if (line.trimStart().startsWith('```')) {
       if (!inCodeBlock) {
-        // Code-Block beginnt — vorherigen Text als Segments ablegen
         if (current.trim()) {
-          // Normalen Text auf \n\n splitten
-          const parts = current.split(/\n\n+/);
-          for (const p of parts) {
-            if (p.trim()) segments.push(p.trim());
-          }
+          _flushText(current, segments);
         }
         current = line;
         inCodeBlock = true;
+        inMermaidBlock = false;
       } else {
-        // Code-Block endet — ganzen Block als ein Segment
         current += '\n' + line;
         segments.push(current);
         current = '';
@@ -5553,25 +5552,68 @@ function splitPreservingCodeBlocks(text) {
 
     if (inCodeBlock) {
       current += '\n' + line;
-    } else {
-      current += (current ? '\n' : '') + line;
+      continue;
     }
+
+    // Plaintext-Mermaid-Block Erkennung:
+    // Beginnt mit Mermaid-Keyword, endet bei Leerzeile gefolgt von Nicht-Mermaid-Text
+    if (!inMermaidBlock && _MERMAID_START_RE.test(line.trim())) {
+      if (current.trim()) {
+        _flushText(current, segments);
+      }
+      current = line;
+      inMermaidBlock = true;
+      continue;
+    }
+
+    if (inMermaidBlock) {
+      if (line.trim() === '') {
+        // Leerzeile in Mermaid — koennte Ende sein oder Teil des Blocks
+        // Schaue voraus: wenn naechste nicht-leere Zeile eingerueckt ist oder
+        // typische Mermaid-Syntax hat, gehoert sie noch dazu
+        let nextNonEmpty = '';
+        for (let j = i + 1; j < lines.length; j++) {
+          if (lines[j].trim()) { nextNonEmpty = lines[j]; break; }
+        }
+        if (nextNonEmpty && (nextNonEmpty.startsWith('    ') || nextNonEmpty.startsWith('\t') ||
+            /^\s*(style|class|click|subgraph|end|"|\w+\[|%%|-->|---|\|)/.test(nextNonEmpty))) {
+          current += '\n' + line;
+          continue;
+        }
+        // Ende des Mermaid-Blocks
+        segments.push('```mermaid\n' + current.trim() + '\n```');
+        current = '';
+        inMermaidBlock = false;
+        continue;
+      }
+      current += '\n' + line;
+      continue;
+    }
+
+    current += (current ? '\n' : '') + line;
   }
 
-  // Rest (offener Code-Block oder normaler Text)
+  // Rest verarbeiten
   if (current.trim()) {
-    if (inCodeBlock) {
-      // Ungeschlossener Code-Block — als ganzes Segment
-      segments.push(current);
-    } else {
-      const parts = current.split(/\n\n+/);
-      for (const p of parts) {
-        if (p.trim()) segments.push(p.trim());
+    if (inCodeBlock || inMermaidBlock) {
+      if (inMermaidBlock) {
+        segments.push('```mermaid\n' + current.trim() + '\n```');
+      } else {
+        segments.push(current);
       }
+    } else {
+      _flushText(current, segments);
     }
   }
 
   return segments;
+}
+
+function _flushText(text, segments) {
+  const parts = text.split(/\n\n+/);
+  for (const p of parts) {
+    if (p.trim()) segments.push(p.trim());
+  }
 }
 
 function renderMarkdownStreaming(fullText, bubble) {
@@ -7671,17 +7713,19 @@ async function loadMermaid() {
   }
 }
 
+// Mermaid-Syntax-Schluesselwoerter die am Zeilenanfang stehen muessen
+const _MERMAID_KEYWORDS = /^(flowchart|graph|sequenceDiagram|classDiagram|stateDiagram|erDiagram|gantt|pie|gitgraph|mindmap|timeline|sankey|xychart|block)\b/;
+
 async function renderMermaidBlocks(container) {
   // Strategie 1: Vom Renderer-Hook erzeugte .mermaid-block Divs
-  let blocks = container.querySelectorAll('.mermaid-block:not(.mermaid-rendered)');
+  // (funktioniert wenn marked.Renderer.code() Hook greift)
 
-  // Strategie 2: Fallback — marked hat normales <pre><code class="language-mermaid"> erzeugt
-  // (passiert wenn der renderer.code Hook nicht greift, z.B. bei neuen marked-Versionen)
+  // Strategie 2: <pre><code class="language-mermaid"> Fallback
+  // (funktioniert wenn marked den Code-Block normal rendert)
   const codeBlocks = container.querySelectorAll('code.language-mermaid, code[class*="mermaid"]');
   for (const code of codeBlocks) {
     const pre = code.parentElement;
     if (pre && pre.tagName === 'PRE' && !pre.classList.contains('mermaid-rendered')) {
-      // <pre><code class="language-mermaid">...</code></pre> → <div class="mermaid-block">...</div>
       const div = document.createElement('div');
       div.className = 'mermaid-block';
       div.id = 'mermaid-' + Math.random().toString(36).substr(2, 9);
@@ -7690,8 +7734,13 @@ async function renderMermaidBlocks(container) {
     }
   }
 
-  // Nochmal alle .mermaid-block sammeln (inkl. gerade konvertierter)
-  blocks = container.querySelectorAll('.mermaid-block:not(.mermaid-rendered)');
+  // Strategie 3: Plaintext-Erkennung — das LLM hat die ```mermaid Fences entfernt
+  // und den Mermaid-Code als normalen Text ausgegeben.
+  // Suche in <p> und <code> Elementen nach Mermaid-Syntax-Mustern.
+  _detectPlaintextMermaid(container);
+
+  // Alle .mermaid-block sammeln (inkl. gerade konvertierter)
+  const blocks = container.querySelectorAll('.mermaid-block:not(.mermaid-rendered)');
   if (blocks.length === 0) return;
 
   await loadMermaid();
@@ -7712,6 +7761,50 @@ async function renderMermaidBlocks(container) {
       block.innerHTML = `<pre class="mermaid-error"><code>${escapeHtml(source)}</code></pre>`;
       block.classList.add('mermaid-rendered');
     }
+  }
+}
+
+/**
+ * Erkennt Mermaid-Syntax in Plaintext-Elementen (p, code, pre ohne language-mermaid).
+ * Das LLM gibt Mermaid-Code oft ohne ```mermaid Fences aus — dieser Code
+ * landet dann als normaler Text im HTML. Wir erkennen ihn anhand der
+ * Schluesselwoerter (flowchart, pie, sequenceDiagram, etc.) und wrappen ihn.
+ */
+function _detectPlaintextMermaid(container) {
+  // Suche in <pre><code> Bloecke die KEIN language-mermaid haben aber Mermaid-Syntax enthalten
+  const allCodeBlocks = container.querySelectorAll('pre > code');
+  for (const code of allCodeBlocks) {
+    if (code.className && code.className.includes('mermaid')) continue; // Bereits erkannt
+    const pre = code.parentElement;
+    if (pre.classList.contains('mermaid-rendered')) continue;
+
+    const text = code.textContent.trim();
+    if (_MERMAID_KEYWORDS.test(text)) {
+      const div = document.createElement('div');
+      div.className = 'mermaid-block';
+      div.id = 'mermaid-' + Math.random().toString(36).substr(2, 9);
+      div.textContent = text;
+      pre.replaceWith(div);
+    }
+  }
+
+  // Suche in <p> Tags — das LLM hat den Mermaid-Code als normalen Absatz ausgegeben
+  // Wir suchen nach Absaetzen die mit einem Mermaid-Keyword beginnen und
+  // typische Mermaid-Struktur haben (Einrueckungen, Pfeile, Klammern)
+  const paragraphs = container.querySelectorAll('p');
+  for (const p of paragraphs) {
+    if (p.classList.contains('mermaid-rendered')) continue;
+
+    const text = p.textContent.trim();
+    // Muss mit Mermaid-Keyword beginnen UND mindestens 2 Zeilen haben
+    if (!_MERMAID_KEYWORDS.test(text)) continue;
+    if (text.split('\n').length < 2) continue;
+
+    const div = document.createElement('div');
+    div.className = 'mermaid-block';
+    div.id = 'mermaid-' + Math.random().toString(36).substr(2, 9);
+    div.textContent = text;
+    p.replaceWith(div);
   }
 }
 
