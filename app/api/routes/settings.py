@@ -210,8 +210,33 @@ def _get_section_description(section: str) -> str:
         "internal_fetch": "Intranet-URLs abrufen (internes HTTP-Fetch-Tool)",
         "docker_sandbox": "Container-Sandbox für sichere Code-Ausführung (Docker/Podman)",
         "alm": "HP ALM/Quality Center Testmanagement-Integration",
+        "multi_agent": "Multi-Agent Team System mit konfigurierbaren Agenten-Teams",
+        "knowledge_base": "Knowledge Collector - Wissenserfassung aus Confluence/Handbuch",
     }
     return descriptions.get(section, "")
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Available Tools API (fuer Multi-Agent Team Settings)
+# ══════════════════════════════════════════════════════════════════════════════
+
+@router.get("/available-tools")
+async def get_available_tools() -> Dict[str, Any]:
+    """Gibt alle registrierten Tool-Namen zurueck (fuer Team-Agent Tool-Auswahl)."""
+    try:
+        from app.agent import get_tool_registry
+        registry = get_tool_registry()
+        tools = []
+        for tool in sorted(registry.tools.values(), key=lambda t: t.name):
+            tools.append({
+                "name": tool.name,
+                "description": tool.description[:80] if tool.description else "",
+                "category": tool.category.value if tool.category else "",
+                "is_write": tool.is_write_operation,
+            })
+        return {"tools": tools, "count": len(tools)}
+    except Exception as e:
+        return {"tools": [], "count": 0, "error": str(e)}
 
 
 # ══════════════════════════════════════════════════════════════════════════════

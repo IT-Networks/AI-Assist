@@ -10858,6 +10858,11 @@ function renderSettingsSection() {
     return;
   }
 
+  if (section === 'multi_agent') {
+    renderMultiAgentSection();
+    return;
+  }
+
   if (section === 'java' || section === 'python') {
     renderReposSection(section);
     return;
@@ -11698,6 +11703,205 @@ function removeArrayItem(fieldId, idx) {
   }
 }
 
+// ══════════════════════════════════════════════════════════════════════════════
+// Multi-Agent Teams Settings
+// ══════════════════════════════════════════════════════════════════════════════
+
+let _maAvailableTools = null; // Cache
+
+async function _loadAvailableTools() {
+  if (_maAvailableTools) return _maAvailableTools;
+  try {
+    const res = await fetch('/api/settings/available-tools');
+    const data = await res.json();
+    _maAvailableTools = (data.tools || []).filter(t => !t.is_write).map(t => t.name);
+  } catch (e) { _maAvailableTools = []; }
+  return _maAvailableTools;
+}
+
+async function renderMultiAgentSection() {
+  const form = document.getElementById('settings-form');
+  const cfg = settingsState.settings.multi_agent || {};
+  const tools = await _loadAvailableTools();
+
+  const strategies = ['dependency-first', 'capability-match'];
+  const strategyOpts = strategies.map(s => `<option value="${s}" ${s === (cfg.default_strategy || 'dependency-first') ? 'selected' : ''}>${s}</option>`).join('');
+
+  let teamsHtml = '';
+  const teams = cfg.teams || [];
+  teams.forEach((team, ti) => {
+    let agentsHtml = '';
+    (team.agents || []).forEach((agent, ai) => {
+      const toolCheckboxes = tools.map(t => {
+        const checked = (agent.tools || []).includes(t) ? 'checked' : '';
+        return `<label class="ma-tool-checkbox"><input type="checkbox" data-team="${ti}" data-agent="${ai}" data-tool="${escapeHtml(t)}" ${checked} onchange="markSettingsModified()">${escapeHtml(t)}</label>`;
+      }).join('');
+
+      agentsHtml += `
+        <div class="ma-agent-card" data-team="${ti}" data-agent="${ai}">
+          <div class="ma-agent-header">
+            <span class="ma-agent-name">${escapeHtml(agent.name || 'Neuer Agent')}</span>
+            <button class="btn btn-xs btn-danger" onclick="maRemoveAgent(${ti},${ai})">X</button>
+          </div>
+          <div class="settings-field"><label>Name</label>
+            <input type="text" class="ma-input" data-team="${ti}" data-agent="${ai}" data-key="name" value="${escapeHtml(agent.name || '')}" onchange="markSettingsModified()">
+          </div>
+          <div class="settings-field"><label>System-Prompt</label>
+            <textarea class="ma-input" data-team="${ti}" data-agent="${ai}" data-key="system_prompt" rows="2" onchange="markSettingsModified()">${escapeHtml(agent.system_prompt || '')}</textarea>
+          </div>
+          <div class="settings-field"><label>Max Turns</label>
+            <input type="number" class="ma-input" data-team="${ti}" data-agent="${ai}" data-key="max_turns" value="${agent.max_turns || 10}" min="1" max="30" onchange="markSettingsModified()">
+          </div>
+          <div class="settings-field"><label>Tools</label>
+            <div class="ma-tool-grid">${toolCheckboxes}</div>
+          </div>
+        </div>`;
+    });
+
+    const teamStratOpts = strategies.map(s => `<option value="${s}" ${s === (team.strategy || 'dependency-first') ? 'selected' : ''}>${s}</option>`).join('');
+
+    teamsHtml += `
+      <div class="ma-team-card" data-team="${ti}">
+        <div class="ma-team-header" onclick="maToggleTeam(${ti})">
+          <span class="ma-team-arrow" id="ma-arrow-${ti}">&#9660;</span>
+          <span class="ma-team-name">${escapeHtml(team.name || 'Neues Team')}</span>
+          <span class="ma-team-agent-count">${(team.agents || []).length} Agenten</span>
+          <button class="btn btn-xs btn-danger" onclick="event.stopPropagation(); maRemoveTeam(${ti})">Loeschen</button>
+        </div>
+        <div class="ma-team-body" id="ma-team-body-${ti}">
+          <div class="settings-field"><label>Name</label>
+            <input type="text" class="ma-input" data-team="${ti}" data-key="name" value="${escapeHtml(team.name || '')}" onchange="markSettingsModified()">
+          </div>
+          <div class="settings-field"><label>Beschreibung</label>
+            <input type="text" class="ma-input" data-team="${ti}" data-key="description" value="${escapeHtml(team.description || '')}" onchange="markSettingsModified()">
+          </div>
+          <div class="settings-field"><label>Strategie</label>
+            <select class="ma-input" data-team="${ti}" data-key="strategy" onchange="markSettingsModified()">${teamStratOpts}</select>
+          </div>
+          <div class="settings-field"><label>Max Parallel</label>
+            <input type="number" class="ma-input" data-team="${ti}" data-key="max_parallel" value="${team.max_parallel || 3}" min="1" max="10" onchange="markSettingsModified()">
+          </div>
+          <div class="ma-agents-section">
+            <div class="ma-agents-header">
+              <strong>Agenten</strong>
+              <button class="btn btn-xs btn-primary" onclick="maAddAgent(${ti})">+ Agent</button>
+            </div>
+            ${agentsHtml}
+          </div>
+        </div>
+      </div>`;
+  });
+
+  form.innerHTML = `
+    <div class="settings-section">
+      <h3 class="settings-section-title">MULTI-AGENT TEAMS</h3>
+      <p class="settings-section-desc">Konfigurierbare Agenten-Teams fuer komplexe Aufgaben. Jedes Team zerlegt Ziele automatisch in parallele Tasks.</p>
+    </div>
+    <div class="settings-field">
+      <label><input type="checkbox" id="ma-enabled" ${cfg.enabled ? 'checked' : ''} onchange="markSettingsModified()"> Multi-Agent System aktivieren</label>
+    </div>
+    <div class="settings-section-group">
+      <h4>Globale Einstellungen</h4>
+      <div class="settings-field"><label>Max parallele Agenten</label>
+        <input type="number" id="ma-max-concurrent" value="${cfg.max_concurrent_agents || 3}" min="1" max="10" onchange="markSettingsModified()">
+      </div>
+      <div class="settings-field"><label>Task-Timeout (Sekunden)</label>
+        <input type="number" id="ma-timeout" value="${cfg.task_timeout_seconds || 120}" min="10" max="600" onchange="markSettingsModified()">
+      </div>
+      <div class="settings-field"><label>Standard-Strategie</label>
+        <select id="ma-strategy" onchange="markSettingsModified()">${strategyOpts}</select>
+      </div>
+    </div>
+    <div class="settings-section-group">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+        <h4>Teams</h4>
+        <button class="btn btn-xs btn-primary" onclick="maAddTeam()">+ Neues Team</button>
+      </div>
+      <div id="ma-teams-container">${teamsHtml || '<p style="color:var(--text-secondary);font-size:0.8rem">Keine Teams konfiguriert. Klicke "+ Neues Team" um ein Team zu erstellen.</p>'}</div>
+    </div>`;
+}
+
+function collectMultiAgentValues() {
+  const teams = [];
+  document.querySelectorAll('.ma-team-card').forEach(teamEl => {
+    const ti = parseInt(teamEl.dataset.team);
+    const team = {
+      name: teamEl.querySelector(`.ma-input[data-team="${ti}"][data-key="name"]:not([data-agent])`)?.value || '',
+      description: teamEl.querySelector(`.ma-input[data-team="${ti}"][data-key="description"]`)?.value || '',
+      strategy: teamEl.querySelector(`.ma-input[data-team="${ti}"][data-key="strategy"]`)?.value || 'dependency-first',
+      max_parallel: parseInt(teamEl.querySelector(`.ma-input[data-team="${ti}"][data-key="max_parallel"]`)?.value) || 3,
+      agents: [],
+    };
+    teamEl.querySelectorAll('.ma-agent-card').forEach(agentEl => {
+      const ai = parseInt(agentEl.dataset.agent);
+      const selectedTools = [...agentEl.querySelectorAll('input[data-tool]:checked')].map(cb => cb.dataset.tool);
+      team.agents.push({
+        name: agentEl.querySelector(`.ma-input[data-key="name"]`)?.value || '',
+        system_prompt: agentEl.querySelector(`.ma-input[data-key="system_prompt"]`)?.value || '',
+        model: '',
+        tools: selectedTools,
+        max_turns: parseInt(agentEl.querySelector(`.ma-input[data-key="max_turns"]`)?.value) || 10,
+      });
+    });
+    teams.push(team);
+  });
+  return {
+    enabled: document.getElementById('ma-enabled')?.checked ?? false,
+    coordinator_model: '',
+    max_concurrent_agents: parseInt(document.getElementById('ma-max-concurrent')?.value) || 3,
+    task_timeout_seconds: parseInt(document.getElementById('ma-timeout')?.value) || 120,
+    default_strategy: document.getElementById('ma-strategy')?.value || 'dependency-first',
+    teams: teams,
+  };
+}
+
+function maToggleTeam(ti) {
+  const body = document.getElementById(`ma-team-body-${ti}`);
+  const arrow = document.getElementById(`ma-arrow-${ti}`);
+  if (body) {
+    const hidden = body.style.display === 'none';
+    body.style.display = hidden ? 'block' : 'none';
+    if (arrow) arrow.innerHTML = hidden ? '&#9660;' : '&#9654;';
+  }
+}
+
+function maAddTeam() {
+  const cfg = settingsState.settings.multi_agent || {};
+  if (!cfg.teams) cfg.teams = [];
+  cfg.teams.push({ name: 'neues-team', description: '', strategy: 'dependency-first', max_parallel: 3, agents: [] });
+  settingsState.settings.multi_agent = cfg;
+  renderMultiAgentSection();
+  markSettingsModified();
+}
+
+function maRemoveTeam(ti) {
+  if (!confirm('Team wirklich loeschen?')) return;
+  const cfg = settingsState.settings.multi_agent || {};
+  if (cfg.teams) cfg.teams.splice(ti, 1);
+  renderMultiAgentSection();
+  markSettingsModified();
+}
+
+function maAddAgent(ti) {
+  const cfg = settingsState.settings.multi_agent || {};
+  if (cfg.teams && cfg.teams[ti]) {
+    if (!cfg.teams[ti].agents) cfg.teams[ti].agents = [];
+    cfg.teams[ti].agents.push({ name: 'neuer-agent', system_prompt: '', model: '', tools: [], max_turns: 10 });
+    renderMultiAgentSection();
+    markSettingsModified();
+  }
+}
+
+function maRemoveAgent(ti, ai) {
+  if (!confirm('Agent wirklich loeschen?')) return;
+  const cfg = settingsState.settings.multi_agent || {};
+  if (cfg.teams && cfg.teams[ti] && cfg.teams[ti].agents) {
+    cfg.teams[ti].agents.splice(ai, 1);
+    renderMultiAgentSection();
+    markSettingsModified();
+  }
+}
+
 async function renderTaskAgentsSection() {
   const form = document.getElementById('settings-form');
   const cfg = settingsState.settings.task_agents || {};
@@ -12391,6 +12595,25 @@ async function saveCurrentSection() {
       if (!res.ok) throw new Error(data.detail || 'Fehler');
       settingsState.settings.sub_agents = data.values;
       updateSettingsStatus('Sub-Agenten-Einstellungen angewendet', 'success');
+    } catch (err) {
+      updateSettingsStatus('Fehler: ' + err.message, 'error');
+    }
+    return;
+  }
+
+  // Multi-Agent Teams haben eigene Felder
+  if (section === 'multi_agent') {
+    const values = collectMultiAgentValues();
+    try {
+      const res = await fetch('/api/settings/section/multi_agent', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(values),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.detail || 'Fehler');
+      settingsState.settings.multi_agent = data.values;
+      updateSettingsStatus('Multi-Agent Einstellungen angewendet (Server-Neustart noetig)', 'success');
     } catch (err) {
       updateSettingsStatus('Fehler: ' + err.message, 'error');
     }
