@@ -51,6 +51,10 @@ class MultiAgentOrchestrator:
             agent = TeamAgent(agent_config, self._message_bus)
             self._pool.register(agent)
 
+        # Token-Tracking (aggregiert ueber alle LLM-Calls)
+        self._total_tokens = 0
+        self._total_llm_calls = 0
+
     async def run(self, goal: str) -> TeamRunResult:
         """Fuehrt den kompletten Team-Run aus."""
         start = time.time()
@@ -118,6 +122,8 @@ class MultiAgentOrchestrator:
             "duration": round(duration, 1),
         })
 
+        logger.info(f"[MultiAgent] Token-Usage: {self._total_tokens} Tokens in {self._total_llm_calls} LLM-Calls")
+
         return TeamRunResult(
             team_name=self._team.name,
             goal=goal,
@@ -128,6 +134,8 @@ class MultiAgentOrchestrator:
             completed_tasks=completed,
             failed_tasks=failed,
             duration_seconds=duration,
+            total_tokens=self._total_tokens,
+            total_llm_calls=self._total_llm_calls,
         )
 
     # ══════════════════════════════════════════════════════════════════════════
@@ -279,6 +287,13 @@ class MultiAgentOrchestrator:
                     task.status = "failed"
                     task.error = f"Batch-Fehler: {e}"
                 break
+
+            # Token-Usage der Agents sammeln
+            for agent_name, _, _ in assignments:
+                agent = self._pool.get(agent_name)
+                if agent and hasattr(agent, 'last_token_usage'):
+                    self._total_tokens += agent.last_token_usage
+                    self._total_llm_calls += 1
 
             # Ergebnisse verarbeiten
             for task in ready:

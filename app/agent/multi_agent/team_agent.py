@@ -36,6 +36,8 @@ class TeamAgent(SubAgent):
         self._message_bus = message_bus
         # TeamAgents brauchen das groessere Modell fuer Tool-Calls (nicht das kleine tool_model)
         self._model = config.model or settings.llm.default_model
+        # Token-Tracking: Letzte Run-Tokens (wird nach jedem run_task aktualisiert)
+        self.last_token_usage: int = 0
 
     async def run_task(
         self,
@@ -78,6 +80,9 @@ class TeamAgent(SubAgent):
             tool_registry=get_tool_registry(),
             conversation_context=context,
         )
+
+        # Token-Usage speichern
+        self.last_token_usage = result.token_usage
 
         # Ergebnis auswerten — auch "unvollstaendige" Ergebnisse als Erfolg behandeln
         # Der SubAgent gibt success=False wenn kein JSON-Finish kam, aber der Agent

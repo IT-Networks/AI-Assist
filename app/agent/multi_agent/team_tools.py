@@ -90,13 +90,15 @@ async def _handle_run_team(
         if len(summary) > 4000:
             summary = summary[:4000] + "\n\n[...Zusammenfassung gekuerzt...]"
 
+        token_info = f", {result.total_tokens} Tokens in {result.total_llm_calls} LLM-Calls" if result.total_tokens else ""
+
         return ToolResult(
             success=True,
             data=(
                 f"Team-Run '{result.team_name}' abgeschlossen.\n"
                 f"Tasks: {result.completed_tasks}/{result.total_tasks} erfolgreich"
                 f"{f', {result.failed_tasks} fehlgeschlagen' if result.failed_tasks else ''}\n"
-                f"Dauer: {result.duration_seconds:.1f}s\n\n"
+                f"Dauer: {result.duration_seconds:.1f}s{token_info}\n\n"
                 f"Teile dem User folgendes Ergebnis mit:\n\n"
                 f"{summary}"
             ),

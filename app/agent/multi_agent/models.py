@@ -72,3 +72,6 @@ class TeamRunResult:
     completed_tasks: int = 0
     failed_tasks: int = 0
     duration_seconds: float = 0
+    # Token-Tracking (ueber alle Agents aggregiert)
+    total_tokens: int = 0
+    total_llm_calls: int = 0

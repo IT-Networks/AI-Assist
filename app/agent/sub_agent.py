@@ -298,10 +298,11 @@ class SubAgent:
         for iteration in range(max_iterations):
             logger.debug(f"[sub_agent:{self.name}] Iteration {iteration + 1}/{max_iterations}")
             try:
-                response_text, tool_calls_raw = await self._call_llm(
+                response_text, tool_calls_raw, _prompt_tk, _compl_tk = await self._call_llm(
                     llm_client, messages, tool_schemas
                 )
-                logger.debug(f"[sub_agent:{self.name}] LLM response: {len(tool_calls_raw)} tool_calls, {len(response_text or '')} chars text")
+                total_tokens += _prompt_tk + _compl_tk
+                logger.debug(f"[sub_agent:{self.name}] LLM response: {len(tool_calls_raw)} tool_calls, {len(response_text or '')} chars, {_prompt_tk}+{_compl_tk} tokens")
             except Exception as e:
                 logger.error(f"[sub_agent:{self.name}] LLM-Fehler in Iteration {iteration + 1}: {e}")
                 return SubAgentResult(
@@ -439,7 +440,7 @@ class SubAgent:
         Nutzt zentralen LLM-Client für Connection-Pooling und Retry.
 
         Returns:
-            Tuple (response_text, tool_calls_raw)
+            Tuple (response_text, tool_calls_raw, prompt_tokens, completion_tokens)
         """
         # Sub-Agenten nutzen tool_temperature (deterministischer)
         temperature = settings.llm.tool_temperature if settings.llm.tool_temperature >= 0 else 0.0
@@ -463,7 +464,12 @@ class SubAgent:
             if response.content:
                 logger.debug(f"  Content (erste 300 Zeichen): {response.content[:300]}")
 
-        return response.content or "", response.tool_calls
+        return (
+            response.content or "",
+            response.tool_calls,
+            getattr(response, "prompt_tokens", 0),
+            getattr(response, "completion_tokens", 0),
+        )
 
     async def _process_tool_result(
         self,
