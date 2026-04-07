@@ -59,7 +59,7 @@ class DownloadRequest(BaseModel):
 class FindServerRequest(BaseModel):
     """Sucht den passenden Server sequentiell – bricht ab sobald ein guter Treffer gefunden."""
     stage_id: str
-    reference_time: str                # ISO-8601
+    reference_time: Optional[str] = None  # ISO-8601, leer = jetzt
     search_term: Optional[str] = None
     min_score: float = 60.0
     tail: Optional[int] = None
@@ -381,11 +381,14 @@ async def find_server(req: FindServerRequest) -> Dict[str, Any]:
     if not stage.servers:
         raise HTTPException(status_code=400, detail="Stage hat keine Server konfiguriert")
 
-    try:
-        ref_time = datetime.fromisoformat(req.reference_time.replace("Z", "+00:00"))
-        ref_time = ref_time.replace(tzinfo=None)
-    except Exception:
-        raise HTTPException(status_code=400, detail=f"Ungültiges Zeitformat: {req.reference_time}")
+    if req.reference_time:
+        try:
+            ref_time = datetime.fromisoformat(req.reference_time.replace("Z", "+00:00"))
+            ref_time = ref_time.replace(tzinfo=None)
+        except Exception:
+            raise HTTPException(status_code=400, detail=f"Ungültiges Zeitformat: {req.reference_time}")
+    else:
+        ref_time = datetime.now()
 
     tail = req.tail if req.tail is not None else settings.log_servers.default_tail
     tail = max(0, min(4, tail))

@@ -67,10 +67,13 @@ def register_log_tools(registry: ToolRegistry) -> int:
         if not stage:
             return ToolResult(success=False, error=f"Stage '{stage_id}' nicht gefunden")
 
-        try:
-            ref_time = datetime.fromisoformat(reference_time.replace("Z", "+00:00")).replace(tzinfo=None)
-        except Exception:
-            return ToolResult(success=False, error=f"Ungültiges Zeitformat: {reference_time}")
+        if reference_time:
+            try:
+                ref_time = datetime.fromisoformat(reference_time.replace("Z", "+00:00")).replace(tzinfo=None)
+            except Exception:
+                return ToolResult(success=False, error=f"Ungültiges Zeitformat: {reference_time}")
+        else:
+            ref_time = datetime.now()
 
         tail = settings.log_servers.default_tail
         tried = []
@@ -130,7 +133,7 @@ def register_log_tools(registry: ToolRegistry) -> int:
         category=ToolCategory.SEARCH,
         parameters=[
             ToolParameter(name="stage_id", type="string", description="ID der Stage", required=True),
-            ToolParameter(name="reference_time", type="string", description="Referenz-Zeitstempel ISO-8601", required=True),
+            ToolParameter(name="reference_time", type="string", description="Referenz-Zeitstempel ISO-8601 (leer = jetzt)", required=False),
             ToolParameter(name="search_term", type="string", description="Optionaler Suchbegriff zur Verifikation", required=False),
             ToolParameter(name="min_score", type="number", description="Mindest-Score für Early-Exit (0-150, Standard: 60)", required=False),
         ],
