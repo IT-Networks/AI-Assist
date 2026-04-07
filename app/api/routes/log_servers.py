@@ -216,27 +216,41 @@ class _LogLinkParser(HTMLParser):
 async def _fetch_server_logs(server: LogServer, tail: int) -> Optional[str]:
     """
     Kompletter Login-Flow für einen Log-Server:
-    1. POST /login mit form-urlencoded credentials → Cookies speichern
-    2. GET /jsp/ospe/debug/log.jsp → fileId aus href mit Text 'ospe_ope.log' parsen
-    3. GET /jsp/ospe/debug/log.jsp?file={fileId}&tail=tail{N} → Log-Inhalt
+    1. POST /login mit form-urlencoded credentials → JSESSIONID-Cookie erhalten
+    2. GET /jsp/ospe/debug/log.jsp mit Cookie → fileId aus href 'ospe_ope.log' parsen
+    3. GET /jsp/ospe/debug/log.jsp?file={fileId}&tail=tail{N} mit Cookie → Log-Inhalt
     """
     base = server.url.rstrip("/")
 
     try:
         username, password = _get_credentials()
-        async with httpx.AsyncClient(verify=server.verify_ssl, timeout=30) as client:
-            # 1. Login
+        jar = httpx.Cookies()
+        async with httpx.AsyncClient(
+            verify=server.verify_ssl,
+            timeout=30,
+            follow_redirects=True,
+            cookies=jar,
+        ) as client:
+            # 1. Login – JSESSIONID-Cookie wird automatisch in jar gespeichert
             login_resp = await client.post(
                 f"{base}/login",
                 data={"username": username, "password": password},
                 headers={"Content-Type": "application/x-www-form-urlencoded"},
             )
-            if not login_resp.is_success:
+            # Login kann 200 oder 302→200 sein, beides OK
+            if login_resp.status_code >= 400:
                 return None
+
+            # Sicherstellen dass JSESSIONID vorhanden ist
+            if not any("JSESSIONID" in name.upper() for name in client.cookies.keys()):
+                # Fallback: Cookies aus allen Responses der Redirect-Kette prüfen
+                for resp in login_resp.history + [login_resp]:
+                    for name, value in resp.cookies.items():
+                        jar.set(name, value)
 
             # 2. Log-Seite laden und fileId parsen
             log_page_resp = await client.get(f"{base}/jsp/ospe/debug/log.jsp")
-            if not log_page_resp.is_success:
+            if log_page_resp.status_code >= 400:
                 return None
 
             parser = _LogLinkParser()
@@ -249,7 +263,7 @@ async def _fetch_server_logs(server: LogServer, tail: int) -> Optional[str]:
                 f"{base}/jsp/ospe/debug/log.jsp",
                 params={"file": parser.file_id, "tail": f"tail{tail}"},
             )
-            if not log_resp.is_success:
+            if log_resp.status_code >= 400:
                 return None
 
             return log_resp.text
