@@ -7637,7 +7637,10 @@ function appendMessageToPane(pane, role, text) {
   bubble.className = 'message-bubble';
 
   if (role === 'assistant') {
-    bubble.innerHTML = text ? marked.parse(text) : '';
+    // splitPreservingCodeBlocks wrappt Plaintext-Mermaid in ```mermaid Fences
+    // damit marked.parse() sie als Code-Bloecke erkennt (wie beim Streaming)
+    const segments = text ? splitPreservingCodeBlocks(text) : [];
+    bubble.innerHTML = segments.map(s => marked.parse(s)).join('');
     applyHighlight(bubble);
     renderMermaidBlocks(bubble);
   } else {
