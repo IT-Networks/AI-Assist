@@ -11,6 +11,9 @@ import re
 from collections import defaultdict, deque
 from typing import Dict, List, Optional, Set
 
+# Pre-compiled regex (vermeidet Recompilation pro Agent/Task)
+_RE_WORDS = re.compile(r'\w{3,}')
+
 from app.agent.multi_agent.models import TeamAgentConfig, TeamTask
 
 logger = logging.getLogger(__name__)
@@ -99,23 +102,34 @@ class TaskScheduler:
         ordered: List[TeamTask],
         all_tasks: List[TeamTask],
     ) -> List[TeamTask]:
-        """Priorisiert Tasks die die meisten anderen transitiv blockieren."""
+        """
+        Priorisiert Tasks die die meisten anderen transitiv blockieren.
+
+        Performance: Reverse-topologische Berechnung in O(V+E) statt O(V*(V+E)).
+        Nutzt Bottom-Up-Zaehlung: Blattnoten haben 0 Abhaengige,
+        jeder Elternknoten hat Summe(Kinder) + direkte Kinder.
+        """
         adjacency: Dict[str, List[str]] = defaultdict(list)
         for task in all_tasks:
             for dep in task.depends_on:
                 adjacency[dep].append(task.id)
 
-        # Zaehle transitive Abhaengige pro Task (BFS)
+        # Bottom-Up: Blocker-Count via memoized DFS (O(V+E) gesamt)
         blocker_count: Dict[str, int] = {}
+        visited_memo: Dict[str, int] = {}
+
+        def count_descendants(tid: str) -> int:
+            if tid in visited_memo:
+                return visited_memo[tid]
+            children = adjacency.get(tid, [])
+            total = len(children)
+            for child in children:
+                total += count_descendants(child)
+            visited_memo[tid] = total
+            return total
+
         for task in all_tasks:
-            visited: Set[str] = set()
-            queue = deque(adjacency.get(task.id, []))
-            while queue:
-                tid = queue.popleft()
-                if tid not in visited:
-                    visited.add(tid)
-                    queue.extend(adjacency.get(tid, []))
-            blocker_count[task.id] = len(visited)
+            blocker_count[task.id] = count_descendants(task.id)
 
         # Sortiere: Mehr Blocker → hoehere Prioritaet (innerhalb jeder Tiefe)
         return sorted(ordered, key=lambda t: -blocker_count.get(t.id, 0))
@@ -129,14 +143,13 @@ class TaskScheduler:
         if not agents:
             return ""
 
-        task_words = set(re.findall(r'\w{3,}', f"{task.title} {task.description}".lower()))
+        task_words = set(_RE_WORDS.findall(f"{task.title} {task.description}".lower()))
 
         best_agent = agents[0].name
         best_score = -1
 
         for agent in agents:
-            agent_words = set(re.findall(
-                r'\w{3,}',
+            agent_words = set(_RE_WORDS.findall(
                 f"{agent.name} {agent.system_prompt}".lower()
             ))
             overlap = len(task_words & agent_words)

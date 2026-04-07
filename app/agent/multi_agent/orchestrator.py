@@ -293,18 +293,29 @@ class MultiAgentOrchestrator:
         return "\n\n".join(parts)
 
     def _cascade_failure(self, failed_id: str, tasks: List[TeamTask]):
-        """Markiert alle transitiv abhaengigen Tasks als failed."""
-        affected = set()
-        queue = [failed_id]
+        """
+        Markiert alle transitiv abhaengigen Tasks als failed.
+
+        Performance: O(V+E) via Reverse-Adjacency-Map statt O(n^2) Loop.
+        """
+        # Reverse-Adjacency: dep_id → [tasks die davon abhaengen]
+        from collections import defaultdict, deque
+        reverse_adj: Dict[str, List[TeamTask]] = defaultdict(list)
+        for task in tasks:
+            for dep in task.depends_on:
+                reverse_adj[dep].append(task)
+
+        # BFS ueber Reverse-Adjacency
+        affected: set = set()
+        queue = deque([failed_id])
         while queue:
-            fid = queue.pop(0)
-            for task in tasks:
-                if fid in task.depends_on and task.id not in affected:
-                    if task.status in ("pending", "blocked"):
-                        task.status = "failed"
-                        task.error = f"Abhaengiger Task {fid} fehlgeschlagen"
-                        affected.add(task.id)
-                        queue.append(task.id)
+            fid = queue.popleft()
+            for task in reverse_adj.get(fid, []):
+                if task.id not in affected and task.status in ("pending", "blocked"):
+                    task.status = "failed"
+                    task.error = f"Abhaengiger Task {fid} fehlgeschlagen"
+                    affected.add(task.id)
+                    queue.append(task.id)
 
     # ══════════════════════════════════════════════════════════════════════════
     # Phase 4: Synthesis
