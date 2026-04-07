@@ -177,15 +177,16 @@ async def delete_server(stage_id: str, server_id: str) -> Dict[str, Any]:
 # ── Login + Log-Fetch Helpers ────────────────────────────────────────────────
 
 def _get_credentials() -> tuple:
-    """Holt username/password aus der credential_ref der Log-Server-Config."""
+    """Holt username/password aus der credential_ref der Log-Server-Config.
+    Wirft ValueError statt HTTPException – sicher für Agent- und API-Kontext."""
     ref = settings.log_servers.credential_ref
     if not ref:
-        raise HTTPException(status_code=400, detail="Kein credential_ref in Log-Server-Config gesetzt")
+        raise ValueError("Kein credential_ref in Log-Server-Config gesetzt")
     cred = settings.credentials.get(ref)
     if not cred:
-        raise HTTPException(status_code=400, detail=f"Credential '{ref}' nicht gefunden")
+        raise ValueError(f"Credential '{ref}' nicht gefunden")
     if cred.type != "basic":
-        raise HTTPException(status_code=400, detail=f"Credential '{ref}' muss Typ 'basic' sein (ist '{cred.type}')")
+        raise ValueError(f"Credential '{ref}' muss Typ 'basic' sein (ist '{cred.type}')")
     return cred.username, cred.password
 
 
@@ -219,10 +220,10 @@ async def _fetch_server_logs(server: LogServer, tail: int) -> Optional[str]:
     2. GET /jsp/ospe/debug/log.jsp → fileId aus href mit Text 'ospe_ope.log' parsen
     3. GET /jsp/ospe/debug/log.jsp?file={fileId}&tail=tail{N} → Log-Inhalt
     """
-    username, password = _get_credentials()
     base = server.url.rstrip("/")
 
     try:
+        username, password = _get_credentials()
         async with httpx.AsyncClient(verify=server.verify_ssl, timeout=30) as client:
             # 1. Login
             login_resp = await client.post(
@@ -264,6 +265,11 @@ async def download_logs(req: DownloadRequest) -> Dict[str, Any]:
     stage = _get_stage(req.stage_id)
     if not stage.servers:
         raise HTTPException(status_code=400, detail="Stage hat keine Server konfiguriert")
+
+    try:
+        _get_credentials()
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
 
     tail = req.tail if req.tail is not None else settings.log_servers.default_tail
     tail = max(0, min(4, tail))

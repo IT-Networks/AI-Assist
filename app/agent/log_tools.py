@@ -50,9 +50,7 @@ def register_log_tools(registry: ToolRegistry) -> int:
 
     # ── log_find_server ───────────────────────────────────────────────────────
     async def log_find_server(**kwargs: Any) -> ToolResult:
-        import httpx, re, logging
         from datetime import datetime
-        logger = logging.getLogger(__name__)
 
         stage_id: str = kwargs.get("stage_id", "")
         reference_time: str = kwargs.get("reference_time", "")
