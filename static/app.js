@@ -5513,9 +5513,71 @@ function countTokensApprox(text) {
  * - Old: marked.parse(fullText) on every chunk = O(n²)
  * - New: marked.parse(newParagraph) only for new content = O(n)
  */
+/**
+ * Splittet Text in Paragraphen (auf \n\n), aber bewahrt Fenced Code Blocks
+ * als ganzes Segment. Ohne dies werden ```mermaid und andere Code-Bloecke
+ * zerstoert wenn sie leere Zeilen enthalten.
+ */
+function splitPreservingCodeBlocks(text) {
+  const segments = [];
+  let current = '';
+  let inCodeBlock = false;
+
+  const lines = text.split('\n');
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+
+    // Fenced Code Block Start/Ende erkennen
+    if (line.trimStart().startsWith('```')) {
+      if (!inCodeBlock) {
+        // Code-Block beginnt — vorherigen Text als Segments ablegen
+        if (current.trim()) {
+          // Normalen Text auf \n\n splitten
+          const parts = current.split(/\n\n+/);
+          for (const p of parts) {
+            if (p.trim()) segments.push(p.trim());
+          }
+        }
+        current = line;
+        inCodeBlock = true;
+      } else {
+        // Code-Block endet — ganzen Block als ein Segment
+        current += '\n' + line;
+        segments.push(current);
+        current = '';
+        inCodeBlock = false;
+      }
+      continue;
+    }
+
+    if (inCodeBlock) {
+      current += '\n' + line;
+    } else {
+      current += (current ? '\n' : '') + line;
+    }
+  }
+
+  // Rest (offener Code-Block oder normaler Text)
+  if (current.trim()) {
+    if (inCodeBlock) {
+      // Ungeschlossener Code-Block — als ganzes Segment
+      segments.push(current);
+    } else {
+      const parts = current.split(/\n\n+/);
+      for (const p of parts) {
+        if (p.trim()) segments.push(p.trim());
+      }
+    }
+  }
+
+  return segments;
+}
+
 function renderMarkdownStreaming(fullText, bubble) {
   // Split into paragraphs (separated by double newlines)
-  const paragraphs = fullText.split(/\n\n+/);
+  // WICHTIG: Fenced Code Blocks (```...```) duerfen NICHT gesplittet werden,
+  // sonst werden Mermaid-Diagramme und mehrzeilige Code-Bloecke zerstoert.
+  const paragraphs = splitPreservingCodeBlocks(fullText);
 
   // Initialize cache if needed
   if (!bubble._markdownCache) {
@@ -7608,7 +7670,26 @@ async function loadMermaid() {
 }
 
 async function renderMermaidBlocks(container) {
-  const blocks = container.querySelectorAll('.mermaid-block:not(.mermaid-rendered)');
+  // Strategie 1: Vom Renderer-Hook erzeugte .mermaid-block Divs
+  let blocks = container.querySelectorAll('.mermaid-block:not(.mermaid-rendered)');
+
+  // Strategie 2: Fallback — marked hat normales <pre><code class="language-mermaid"> erzeugt
+  // (passiert wenn der renderer.code Hook nicht greift, z.B. bei neuen marked-Versionen)
+  const codeBlocks = container.querySelectorAll('code.language-mermaid, code[class*="mermaid"]');
+  for (const code of codeBlocks) {
+    const pre = code.parentElement;
+    if (pre && pre.tagName === 'PRE' && !pre.classList.contains('mermaid-rendered')) {
+      // <pre><code class="language-mermaid">...</code></pre> → <div class="mermaid-block">...</div>
+      const div = document.createElement('div');
+      div.className = 'mermaid-block';
+      div.id = 'mermaid-' + Math.random().toString(36).substr(2, 9);
+      div.textContent = code.textContent;
+      pre.replaceWith(div);
+    }
+  }
+
+  // Nochmal alle .mermaid-block sammeln (inkl. gerade konvertierter)
+  blocks = container.querySelectorAll('.mermaid-block:not(.mermaid-rendered)');
   if (blocks.length === 0) return;
 
   await loadMermaid();
