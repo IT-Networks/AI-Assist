@@ -61,10 +61,16 @@ class MultiAgentOrchestrator:
         tasks = await self._decompose_goal(goal)
 
         if not tasks:
+            logger.warning(f"[MultiAgent] Coordinator konnte keine Tasks erstellen fuer: {goal[:100]}")
             return TeamRunResult(
                 team_name=self._team.name,
                 goal=goal,
-                final_summary="Konnte die Aufgabe nicht in Tasks zerlegen.",
+                final_summary=(
+                    "Konnte die Aufgabe nicht in Tasks zerlegen.\n"
+                    f"Coordinator-Modell: {self._model}\n"
+                    "Moeglicherweise konnte das LLM-Modell das Ziel nicht in ein JSON-Task-Array umwandeln.\n"
+                    "Tipp: Versuche ein einfacheres Ziel oder pruefe ob das LLM-Modell verfuegbar ist."
+                ),
                 duration_seconds=time.time() - start,
             )
 

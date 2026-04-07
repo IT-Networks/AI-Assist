@@ -34,7 +34,8 @@ class TeamAgent(SubAgent):
         self.allowed_tools = list(config.tools)
         self.max_iterations = config.max_turns
         self._message_bus = message_bus
-        self._model = config.model or settings.llm.tool_model or settings.llm.default_model
+        # TeamAgents brauchen das groessere Modell fuer Tool-Calls (nicht das kleine tool_model)
+        self._model = config.model or settings.llm.default_model
 
     async def run_task(
         self,

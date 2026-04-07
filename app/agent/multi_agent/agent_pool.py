@@ -85,8 +85,8 @@ class AgentPool:
                 return f"FEHLER: Timeout nach {timeout}s"
             except Exception as e:
                 self._failed += 1
-                logger.error(f"[AgentPool] {agent_name} Fehler: {e}")
-                return f"FEHLER: {e}"
+                logger.error(f"[AgentPool] {agent_name} Fehler bei '{task.title}': {e}", exc_info=True)
+                return f"FEHLER: {type(e).__name__}: {e}"
             finally:
                 self._running.pop(agent_name, None)
 
