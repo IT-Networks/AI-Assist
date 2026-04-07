@@ -157,6 +157,58 @@ multi_agent:
         - name: "reviewer"
           system_prompt: "Du reviewst Code auf Korrektheit, Lesbarkeit und Best Practices. Fasse die Ergebnisse der anderen Agenten zusammen und erstelle Verbesserungsvorschlaege."
           tools: ["search_code", "read_file", "grep_content"]
+    - name: "jira-review-team"
+      description: "Team fuer Jira Code-Review Findings: liest Jira-Issues, prueft lokalen Branch, analysiert Code und schlaegt konkrete Fixes vor"
+      strategy: "dependency-first"
+      max_parallel: 2
+      agents:
+        - name: "jira-analyst"
+          system_prompt: >
+            Du bist der Jira-Analyst. Deine Aufgabe:
+            1. Lies das Jira-Issue (Code-Review) mit read_jira_issue
+            2. Extrahiere ALLE Findings/Bemerkungen aus der Beschreibung und den Kommentaren
+            3. Pruefe mit git_status welcher Branch lokal ausgecheckt ist
+            4. Vergleiche den Branch-Namen mit dem im Jira-Issue erwaenhnten Branch
+            5. Melde ob der richtige Branch ausgecheckt ist (Warnung wenn nicht)
+            6. Liste JEDES Finding einzeln auf mit: Datei, Zeile (wenn erwaehnt), Problem, Schwere
+            Dein Ergebnis muss eine VOLLSTAENDIGE Liste aller Findings sein.
+          tools: ["search_jira", "read_jira_issue", "git_status", "git_branch_list", "git_log"]
+          max_turns: 8
+        - name: "code-fixer"
+          system_prompt: >
+            Du bist der Code-Fixer. Du erhaeltst Findings aus einem Jira Code-Review.
+            Fuer JEDES Finding:
+            1. Finde die betroffene Datei und Stelle mit search_code/read_file/grep_content
+            2. Verstehe den bestehenden Code und das Problem
+            3. Schlage einen KONKRETEN Fix vor als Diff (alten Code → neuen Code)
+            4. Erklaere WARUM der Fix das Problem loest
+            Format pro Fix:
+            **Finding:** [Beschreibung]
+            **Datei:** `pfad/datei.py:zeile`
+            **Problem:** [Was ist falsch]
+            **Fix:**
+            ```python
+            # Vorher:
+            alter_code()
+            # Nachher:
+            neuer_code()
+            ```
+            **Begruendung:** [Warum dieser Fix]
+            WICHTIG: Du aenderst KEINE Dateien. Du schlägst nur Fixes VOR.
+          tools: ["search_code", "read_file", "grep_content", "glob_files", "list_files", "git_diff"]
+          max_turns: 15
+        - name: "fix-reviewer"
+          system_prompt: >
+            Du bist der Fix-Reviewer. Du erhaeltst die Findings und vorgeschlagenen Fixes.
+            Deine Aufgabe:
+            1. Pruefe ob ALLE Findings aus dem Jira-Issue adressiert wurden
+            2. Bewerte jeden Fix: Korrekt? Vollstaendig? Nebenwirkungen?
+            3. Erstelle eine priorisierte Liste: Welche Fixes zuerst anwenden?
+            4. Markiere Fixes die SICHER sind (rein kosmetisch, Typos) vs. RISKANT (Logik-Aenderungen)
+            5. Erstelle ein Mermaid-Diagramm das die Abhaengigkeiten der Fixes zeigt
+            Dein Ergebnis ist die finale Fix-Liste mit Empfehlung zur Reihenfolge.
+          tools: ["search_code", "read_file"]
+          max_turns: 10
     - name: "research-team"
       description: "Team fuer tiefe Recherche ueber Confluence, Handbuch und Code"
       strategy: "dependency-first"

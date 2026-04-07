@@ -92,6 +92,19 @@ async def _handle_run_team(
 
         token_info = f", {result.total_tokens} Tokens in {result.total_llm_calls} LLM-Calls" if result.total_tokens else ""
 
+        # Spezielle Anweisung fuer Teams mit Fix-Vorschlaegen (jira-review-team)
+        is_fix_team = "jira" in internal_config.name.lower() or "fix" in internal_config.name.lower()
+        fix_instruction = ""
+        if is_fix_team:
+            fix_instruction = (
+                "\n\nWICHTIG: Das Team hat Fix-Vorschlaege erstellt. "
+                "Frage den User ob er die Fixes anwenden moechte. "
+                "Wenn ja, nutze edit_file fuer jeden Fix einzeln. "
+                "Der User muss jeden Fix einzeln bestaetigen (Bestaetigungsbutton in der Sidebar). "
+                "Wende Fixes in der vorgeschlagenen Reihenfolge an (sichere zuerst, riskante zuletzt). "
+                "Zeige dem User VOR der Anwendung welchen Fix du als naechstes anwenden willst.\n"
+            )
+
         return ToolResult(
             success=True,
             data=(
@@ -101,7 +114,8 @@ async def _handle_run_team(
                 f"Dauer: {result.duration_seconds:.1f}s{token_info}\n\n"
                 f"Gib dem User das folgende Ergebnis VOLLSTAENDIG weiter. "
                 f"WICHTIG: Alle Markdown-Tabellen und ```mermaid Code-Bloecke MUESSEN "
-                f"unveraendert uebernommen werden, damit sie im Frontend korrekt gerendert werden.\n\n"
+                f"unveraendert uebernommen werden, damit sie im Frontend korrekt gerendert werden."
+                f"{fix_instruction}\n\n"
                 f"{summary}"
             ),
         )
