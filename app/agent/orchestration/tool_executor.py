@@ -328,11 +328,11 @@ def truncate_result(raw: str, max_chars: int = 20000, tool_name: str = "") -> st
     if not raw:
         return raw
 
-    # Streaming tools (run_team, research_topic): Kompaktere Ergebnisse
-    # Diese Tools liefern bereits synthetisierte Ergebnisse, brauchen weniger Context
+    # Streaming tools (run_team, research_topic): Bereits synthetisierte Ergebnisse
+    # run_team liefert Markdown-Tabellen + Mermaid-Diagramme die nicht gekuerzt werden duerfen
     if tool_name in ("run_team", "research_topic"):
-        if len(raw) > 5000:
-            return raw[:4500] + f"\n\n[...{len(raw) - 4500} Zeichen gekuerzt ({tool_name})...]"
+        if len(raw) > 8000:
+            return raw[:7500] + f"\n\n[...{len(raw) - 7500} Zeichen gekuerzt ({tool_name})...]"
         return raw
 
     # PR tools: Minimal info for main LLM (analysis runs in workspace panel)

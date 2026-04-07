@@ -5499,8 +5499,9 @@ function updateChatStatusBar(chat) {
 }
 
 function countTokensApprox(text) {
-  // Grobe Schätzung: ~4 Zeichen pro Token (für Deutsch/Englisch)
-  return Math.ceil(text.length / 4);
+  // Token-Schaetzung: ~6 Zeichen pro Token (korrigiert; 4 war zu aggressiv
+  // und fuehrte zu ~500k Anzeige die dann auf ~65k echte Tokens fiel)
+  return Math.ceil(text.length / 6);
 }
 
 /**
