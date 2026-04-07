@@ -249,15 +249,26 @@ class SubAgent:
         system_prompt = (
             f"Du bist ein spezialisierter Such-Agent: {self.display_name}.\n"
             f"{self.description}\n\n"
-            "Deine Aufgabe: Suche alle relevanten Informationen zur Anfrage des Nutzers. "
-            "Führe mehrere gezielte Suchen durch. "
-            "Fasse am Ende deine wichtigsten Findings kompakt zusammen."
+            "ARBEITSWEISE:\n"
+            "1. Fuehre mehrere gezielte Tool-Aufrufe durch (nicht nur einen!)\n"
+            "2. Sammle KONKRETE Daten: Dateinamen, Zeilennummern, Metriken, Code-Snippets\n"
+            "3. Wenn ein Suchergebnis nicht spezifisch genug ist, suche gezielter nach\n"
+            "4. Wenn du fertig bist, fasse deine Ergebnisse als JSON zusammen\n\n"
+            "QUALITAETSREGELN fuer Findings:\n"
+            "- SCHLECHT: 'Es wurden mehrere relevante Dateien gefunden'\n"
+            "- GUT: 'In `src/auth/login.py:42` fehlt Input-Validierung fuer das email-Feld'\n"
+            "- SCHLECHT: 'Die Performance koennte verbessert werden'\n"
+            "- GUT: 'Die Funktion `process_batch()` in `worker.py:128` hat O(n^2) Komplexitaet bei 10k+ Eintraegen'\n"
+            "- Jedes Finding MUSS mindestens einen konkreten Verweis enthalten (Datei, Funktion, Metrik, ID)\n"
             f"{context_section}\n\n"
-            "Antworte abschließend NUR mit diesem JSON-Format:\n"
+            "Wenn du alle Informationen gesammelt hast, antworte NUR mit diesem JSON:\n"
             "{\n"
-            '  "summary": "Kurze Zusammenfassung der Findings (3-5 Sätze)",\n'
-            '  "key_findings": ["Finding 1", "Finding 2", ...],\n'
-            '  "sources": ["Pfad/ID/Key 1", "Pfad/ID/Key 2", ...]\n'
+            '  "summary": "Was wurde gefunden? (3-5 Saetze mit konkreten Details)",\n'
+            '  "key_findings": [\n'
+            '    "Konkretes Finding mit `datei:zeile` oder Metrik",\n'
+            '    "Weiteres Finding mit Verweis auf konkrete Stelle"\n'
+            '  ],\n'
+            '  "sources": ["pfad/zur/datei.py", "JIRA-123", "wiki/page-id"]\n'
             "}"
         )
 
@@ -398,30 +409,10 @@ class SubAgent:
                 })
 
         if final_result is None:
-            # Kein sauberes JSON-Finish → Freitext-Fallback
-            # Sammle ALLE assistant-Antworten (nicht nur die letzte)
-            assistant_texts = []
-            for m in messages:
-                if m.get("role") == "assistant" and m.get("content"):
-                    text = m["content"]
-                    if text and text != "(Tool-Aufrufe werden verarbeitet)":
-                        assistant_texts.append(text)
-            last_assistant = assistant_texts[-1] if assistant_texts else ""
-
-            # Wenn der Agent Tool-Calls gemacht hat, ist das ein Teilerfolg
-            had_tool_calls = any(
-                m.get("role") in ("tool",) or (m.get("role") == "user" and "Tool-Ergebnisse" in m.get("content", ""))
-                for m in messages
-            )
-
-            final_result = SubAgentResult(
-                agent_name=self.display_name,
-                success=bool(last_assistant) or had_tool_calls,
-                summary=last_assistant[:500] if last_assistant else "",
-                key_findings=[],
-                sources=[],
-                token_usage=total_tokens,
-                duration_ms=int(time.time() * 1000) - start_ms,
+            # Kein sauberes JSON-Finish nach max_iterations
+            # → Finaler LLM-Call OHNE Tools erzwingt eine Zusammenfassung
+            final_result = await self._force_summary(
+                messages, llm_client, total_tokens, start_ms
             )
         else:
             final_result.token_usage = total_tokens
@@ -469,6 +460,111 @@ class SubAgent:
             response.tool_calls,
             getattr(response, "prompt_tokens", 0),
             getattr(response, "completion_tokens", 0),
+        )
+
+    async def _force_summary(
+        self,
+        messages: List[Dict],
+        llm_client,
+        total_tokens: int,
+        start_ms: int,
+    ) -> SubAgentResult:
+        """
+        Erzwingt eine Zusammenfassung wenn der Agent max_iterations erreicht hat,
+        ohne ein JSON-Finish zu liefern.
+
+        Macht einen finalen LLM-Call OHNE Tools — das LLM kann dann nur noch
+        Text produzieren und muss die gesammelten Tool-Ergebnisse zusammenfassen.
+        """
+        # Prüfen ob überhaupt Tool-Ergebnisse vorliegen
+        had_tool_calls = any(
+            m.get("role") in ("tool",)
+            or (m.get("role") == "user" and "Tool-Ergebnisse" in m.get("content", ""))
+            for m in messages
+        )
+
+        if not had_tool_calls:
+            # Kein einziger Tool-Call → nichts zum Zusammenfassen
+            return SubAgentResult(
+                agent_name=self.display_name,
+                success=False,
+                summary="",
+                key_findings=[],
+                sources=[],
+                error="Keine Tool-Ergebnisse (max_iterations erreicht ohne Tool-Calls)",
+                token_usage=total_tokens,
+                duration_ms=int(time.time() * 1000) - start_ms,
+            )
+
+        logger.info(f"[sub_agent:{self.name}] max_iterations erreicht — erzwinge Summary-Call ohne Tools")
+
+        # Finaler Call: Nachrichten + explizite Aufforderung zur Zusammenfassung
+        summary_messages = list(messages)
+        summary_messages.append({
+            "role": "user",
+            "content": (
+                "STOPP — keine weiteren Tool-Aufrufe. Fasse JETZT deine Ergebnisse zusammen.\n\n"
+                "Schaue dir die Tool-Ergebnisse oben an und extrahiere die KONKRETEN Informationen:\n"
+                "- Welche Dateien/Funktionen/Klassen hast du gefunden?\n"
+                "- Welche Metriken, Zahlen, Versionen?\n"
+                "- Welche konkreten Probleme oder Erkenntnisse?\n\n"
+                "Antworte NUR mit diesem JSON (KEINE Tool-Calls, KEIN anderer Text):\n"
+                "{\n"
+                '  "summary": "Was wurde konkret gefunden? (3-5 Saetze, mit Dateinamen und Metriken)",\n'
+                '  "key_findings": [\n'
+                '    "Konkretes Finding mit `datei:zeile` oder Metrik — NICHT vage formulieren",\n'
+                '    "Weiteres Finding"\n'
+                '  ],\n'
+                '  "sources": ["pfad/datei.py", "ID-123"]\n'
+                "}"
+            ),
+        })
+
+        try:
+            # Chat OHNE Tools — LLM muss Text produzieren
+            response_text = await default_llm_client.chat_quick(
+                messages=summary_messages,
+                model=self._model,
+                temperature=0.1,
+                max_tokens=1024,
+            )
+            total_tokens += len(response_text or "") // 4  # Grobe Schätzung
+
+            if response_text:
+                result = self._parse_final_response(response_text)
+                result.token_usage = total_tokens
+                result.duration_ms = int(time.time() * 1000) - start_ms
+                # Wenn der Agent gearbeitet hat, ist es ein Erfolg auch ohne perfektes JSON
+                if not result.success and had_tool_calls:
+                    result.success = True
+                    if not result.summary:
+                        result.summary = response_text[:500]
+                logger.info(
+                    f"[sub_agent:{self.name}] Force-Summary erfolgreich: "
+                    f"{len(result.key_findings)} Findings, {len(result.summary)} chars"
+                )
+                return result
+
+        except Exception as e:
+            logger.warning(f"[sub_agent:{self.name}] Force-Summary LLM-Call fehlgeschlagen: {e}")
+
+        # Letzter Fallback: Assistant-Texte aus dem Loop sammeln
+        assistant_texts = []
+        for m in messages:
+            if m.get("role") == "assistant" and m.get("content"):
+                text = m["content"]
+                if text and text != "(Tool-Aufrufe werden verarbeitet)":
+                    assistant_texts.append(text)
+        last_assistant = assistant_texts[-1] if assistant_texts else ""
+
+        return SubAgentResult(
+            agent_name=self.display_name,
+            success=bool(last_assistant) or had_tool_calls,
+            summary=last_assistant[:500] if last_assistant else "",
+            key_findings=[],
+            sources=[],
+            token_usage=total_tokens,
+            duration_ms=int(time.time() * 1000) - start_ms,
         )
 
     async def _process_tool_result(

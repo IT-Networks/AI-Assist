@@ -365,28 +365,47 @@ class MultiAgentOrchestrator:
     # ══════════════════════════════════════════════════════════════════════════
 
     async def _synthesize_results(self, goal: str, tasks: List[TeamTask]) -> str:
-        """LLM fasst alle Task-Ergebnisse zusammen."""
+        """
+        Fasst alle Task-Ergebnisse zusammen mit:
+        1. LLM-generierte inhaltliche Zusammenfassung (strukturiertes Markdown)
+        2. Statistik-Tabelle (Tasks, Agents, Status)
+        3. Mermaid-Flowchart (Task-Dependencies)
+        4. Mermaid Pie-Chart (Erfolgsquote)
+        """
+        # ── LLM-Synthesis: Inhaltliche Zusammenfassung ──
         results_text = []
         for task in tasks:
-            status_icon = "OK" if task.status == "completed" else "FEHLER"
-            # Ergebnisse auf max 1500 Zeichen pro Task begrenzen (Token-Budget)
+            status_icon = "✅" if task.status == "completed" else "❌"
             task_output = (task.result or task.error or "(kein Ergebnis)")[:1500]
-            results_text.append(f"[{status_icon}] {task.title} ({task.assignee}):\n{task_output}")
+            results_text.append(f"{status_icon} **{task.title}** ({task.assignee}):\n{task_output}")
 
         prompt = (
             f"Fasse die Ergebnisse dieses Team-Runs zusammen.\n\n"
             f"URSPRUENGLICHES ZIEL: {goal}\n\n"
             f"TASK-ERGEBNISSE:\n" + "\n\n---\n\n".join(results_text) + "\n\n"
-            f"Erstelle eine strukturierte Zusammenfassung mit:\n"
-            f"1. Erreichte Ergebnisse\n"
-            f"2. Offene Punkte oder Fehler\n"
-            f"3. Empfehlungen\n"
+            f"Erstelle eine strukturierte Zusammenfassung im Markdown-Format.\n\n"
+            f"## Ergebnisse\n"
+            f"- Extrahiere KONKRETE Daten aus den Task-Ergebnissen oben\n"
+            f"- Jeder Bullet-Point MUSS einen konkreten Verweis enthalten: "
+            f"`dateiname`, Funktionsname, Metrik, Issue-ID, etc.\n"
+            f"- Nutze `code-formatting` fuer Dateien und Funktionen\n\n"
+            f"## Offene Punkte\n"
+            f"- Nur auflisten wenn tatsaechlich Fehler oder Luecken aufgetreten sind\n"
+            f"- Fehlgeschlagene Tasks mit konkretem Fehlergrund\n\n"
+            f"## Empfehlungen\n"
+            f"- Konkrete naechste Schritte (was genau tun, in welcher Datei/welchem System)\n\n"
+            f"ANTI-PATTERNS (diese Formulierungen sind VERBOTEN):\n"
+            f"- 'Es wurden relevante Informationen gefunden' → stattdessen: WAS genau?\n"
+            f"- 'Die Analyse wurde durchgefuehrt' → stattdessen: WAS ergab die Analyse?\n"
+            f"- 'Weitere Untersuchungen empfohlen' → stattdessen: WAS genau untersuchen?\n"
+            f"- 'Verschiedene Aspekte wurden betrachtet' → stattdessen: WELCHE Aspekte, WELCHE Ergebnisse?\n\n"
+            f"Nutze Markdown: ##, **, -, `code`. Maximal 2000 Zeichen."
         )
 
         logger.info(f"[MultiAgent] Synthesis: {len(tasks)} Tasks, Prompt {len(prompt)} Zeichen")
 
         try:
-            return await default_llm_client.chat_quick(
+            llm_summary = await default_llm_client.chat_quick(
                 messages=[{"role": "user", "content": prompt}],
                 model=self._model,
                 temperature=0.2,
@@ -394,8 +413,104 @@ class MultiAgentOrchestrator:
             )
         except Exception as e:
             logger.error(f"[MultiAgent] Synthesis fehlgeschlagen: {e}")
-            # Fallback: Einfache Auflistung
-            return "\n\n".join(results_text)
+            llm_summary = "\n\n".join(results_text)
+
+        # ── Statistik-Tabelle ──
+        stats_table = self._build_stats_table(tasks)
+
+        # ── Mermaid-Diagramme ──
+        flow_chart = self._build_dependency_flowchart(tasks)
+        pie_chart = self._build_result_pie_chart(tasks)
+
+        # ── Alles zusammensetzen ──
+        parts = [llm_summary]
+
+        if stats_table:
+            parts.append(f"\n\n---\n\n### 📊 Task-Statistik\n\n{stats_table}")
+
+        if flow_chart:
+            parts.append(f"\n\n### 🔀 Task-Ablauf\n\n```mermaid\n{flow_chart}\n```")
+
+        if pie_chart:
+            parts.append(f"\n\n### 📈 Ergebnis\n\n```mermaid\n{pie_chart}\n```")
+
+        return "".join(parts)
+
+    def _build_stats_table(self, tasks: List[TeamTask]) -> str:
+        """Generiert eine Markdown-Statistik-Tabelle."""
+        if not tasks:
+            return ""
+
+        lines = [
+            "| # | Task | Agent | Status | Ergebnis |",
+            "|---|------|-------|--------|----------|",
+        ]
+        for i, task in enumerate(tasks, 1):
+            status = "✅" if task.status == "completed" else "❌"
+            # Ergebnis kuerzen fuer Tabelle
+            result_preview = (task.result or task.error or "-")[:80].replace("\n", " ").replace("|", "\\|")
+            title = task.title[:40].replace("|", "\\|")
+            lines.append(f"| {i} | {title} | `{task.assignee}` | {status} | {result_preview} |")
+
+        return "\n".join(lines)
+
+    def _build_dependency_flowchart(self, tasks: List[TeamTask]) -> str:
+        """Generiert einen Mermaid-Flowchart aus Task-Dependencies."""
+        if not tasks:
+            return ""
+
+        lines = ["flowchart TD"]
+
+        # Node-Definitionen mit Status-Styling
+        for task in tasks:
+            label = task.title[:30].replace('"', "'")
+            agent = task.assignee
+            lines.append(f'    {task.id}["{label}<br/><small>{agent}</small>"]')
+
+        # Dependency-Pfeile
+        has_edges = False
+        for task in tasks:
+            for dep_id in task.depends_on:
+                lines.append(f"    {dep_id} --> {task.id}")
+                has_edges = True
+
+        # Wenn keine Dependencies: Tasks einfach auflisten (kein Flowchart noetig)
+        if not has_edges and len(tasks) <= 2:
+            return ""
+
+        # Styling nach Status
+        completed = [t.id for t in tasks if t.status == "completed"]
+        failed = [t.id for t in tasks if t.status == "failed"]
+
+        if completed:
+            lines.append(f"    style {','.join(completed)} fill:#4caf50,color:#fff")
+        if failed:
+            lines.append(f"    style {','.join(failed)} fill:#f44336,color:#fff")
+
+        return "\n".join(lines)
+
+    def _build_result_pie_chart(self, tasks: List[TeamTask]) -> str:
+        """Generiert ein Mermaid Pie-Chart fuer die Erfolgsquote."""
+        if not tasks or len(tasks) < 2:
+            return ""
+
+        completed = sum(1 for t in tasks if t.status == "completed")
+        failed = sum(1 for t in tasks if t.status == "failed")
+        other = len(tasks) - completed - failed
+
+        # Nur anzeigen wenn es etwas Interessantes zu zeigen gibt (nicht 100% Erfolg bei wenigen Tasks)
+        if failed == 0 and other == 0 and len(tasks) <= 3:
+            return ""
+
+        lines = ['pie title Task-Ergebnisse']
+        if completed:
+            lines.append(f'    "Erfolgreich ({completed})" : {completed}')
+        if failed:
+            lines.append(f'    "Fehlgeschlagen ({failed})" : {failed}')
+        if other:
+            lines.append(f'    "Sonstige ({other})" : {other}')
+
+        return "\n".join(lines)
 
     # ══════════════════════════════════════════════════════════════════════════
     # Helpers

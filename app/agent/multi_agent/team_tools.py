@@ -85,10 +85,10 @@ async def _handle_run_team(
     try:
         result = await orchestrator.run(goal)
 
-        # Ergebnis kompakt halten damit der Main-Orchestrator nicht am Token-Limit scheitert
+        # Ergebnis inkl. Diagramme weiterreichen (erhoehtes Limit fuer Mermaid-Bloecke)
         summary = result.final_summary or "(Keine Zusammenfassung)"
-        if len(summary) > 4000:
-            summary = summary[:4000] + "\n\n[...Zusammenfassung gekuerzt...]"
+        if len(summary) > 6000:
+            summary = summary[:6000] + "\n\n[...Zusammenfassung gekuerzt...]"
 
         token_info = f", {result.total_tokens} Tokens in {result.total_llm_calls} LLM-Calls" if result.total_tokens else ""
 
@@ -99,7 +99,9 @@ async def _handle_run_team(
                 f"Tasks: {result.completed_tasks}/{result.total_tasks} erfolgreich"
                 f"{f', {result.failed_tasks} fehlgeschlagen' if result.failed_tasks else ''}\n"
                 f"Dauer: {result.duration_seconds:.1f}s{token_info}\n\n"
-                f"Teile dem User folgendes Ergebnis mit:\n\n"
+                f"Gib dem User das folgende Ergebnis VOLLSTAENDIG weiter. "
+                f"WICHTIG: Alle Markdown-Tabellen und ```mermaid Code-Bloecke MUESSEN "
+                f"unveraendert uebernommen werden, damit sie im Frontend korrekt gerendert werden.\n\n"
                 f"{summary}"
             ),
         )

@@ -1394,7 +1394,7 @@ class MultiAgentTeamAgentConfig(BaseModel):
     model: str = ""
     system_prompt: str = ""
     tools: List[str] = []
-    max_turns: int = 10
+    max_turns: int = 15
 
 
 class MultiAgentTeamConfig(BaseModel):

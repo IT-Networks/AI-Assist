@@ -3624,13 +3624,26 @@ function detectLanguage(filePath) {
 
 // ── Initialization ──
 document.addEventListener('DOMContentLoaded', async () => {
-  // Marked.js konfigurieren - Links öffnen in neuem Tab
+  // Marked.js konfigurieren - Links öffnen in neuem Tab + Mermaid-Support
   const renderer = new marked.Renderer();
   const originalLinkRenderer = renderer.link.bind(renderer);
   renderer.link = (href, title, text) => {
     const html = originalLinkRenderer(href, title, text);
-    // Füge target="_blank" und rel="noopener noreferrer" hinzu
     return html.replace(/^<a /, '<a target="_blank" rel="noopener noreferrer" ');
+  };
+  // Mermaid-Code-Blöcke als Platzhalter rendern statt <pre><code>
+  const originalCodeRenderer = renderer.code.bind(renderer);
+  renderer.code = function(codeOrObj, langArg, escapedArg) {
+    // marked v5+ uebergibt ein Objekt { text, lang, escaped }
+    // marked v4 und aelter uebergibt (code, lang, escaped) als einzelne Argumente
+    const text = (typeof codeOrObj === 'object' && codeOrObj !== null) ? (codeOrObj.text || '') : (codeOrObj || '');
+    const lang = (typeof codeOrObj === 'object' && codeOrObj !== null) ? (codeOrObj.lang || '') : (langArg || '');
+
+    if (lang === 'mermaid') {
+      const id = 'mermaid-' + Math.random().toString(36).substr(2, 9);
+      return `<div class="mermaid-block" id="${id}">${escapeHtml(text)}</div>`;
+    }
+    return originalCodeRenderer(codeOrObj, langArg, escapedArg);
   };
   marked.setOptions({ breaks: true, gfm: true, renderer: renderer });
 
@@ -5413,6 +5426,7 @@ async function sendAgentChat(message, abortSignal, chat) {
   if (fullText) {
     renderMarkdownStreaming(fullText, bubble);
     applyHighlight(bubble);
+    renderMermaidBlocks(bubble);
     clearMarkdownCache(bubble);
   }
   if (document.contains(chat.pane)) scrollToBottom();
@@ -7519,6 +7533,7 @@ function appendMessageToPane(pane, role, text) {
   if (role === 'assistant') {
     bubble.innerHTML = text ? marked.parse(text) : '';
     applyHighlight(bubble);
+    renderMermaidBlocks(bubble);
   } else {
     bubble.textContent = text;
   }
@@ -7534,6 +7549,87 @@ function applyHighlight(el) {
   el.querySelectorAll('pre code').forEach(block => {
     hljs.highlightElement(block);
   });
+}
+
+// ── Mermaid.js Lazy-Load + Rendering ──
+let _mermaidLoaded = false;
+let _mermaidLoading = false;
+let _mermaidQueue = [];
+
+async function loadMermaid() {
+  if (_mermaidLoaded) return;
+  if (_mermaidLoading) {
+    return new Promise(resolve => _mermaidQueue.push(resolve));
+  }
+  _mermaidLoading = true;
+  try {
+    const script = document.createElement('script');
+    script.src = 'https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js';
+    script.onload = () => {
+      window.mermaid.initialize({
+        startOnLoad: false,
+        theme: 'dark',
+        themeVariables: {
+          primaryColor: '#7c4dff',
+          primaryTextColor: '#e0e0e0',
+          primaryBorderColor: '#9c27b0',
+          lineColor: '#aaa',
+          secondaryColor: '#333',
+          tertiaryColor: '#222',
+          background: '#1e1e2e',
+          mainBkg: '#2a2a3e',
+          nodeBorder: '#7c4dff',
+          clusterBkg: '#1e1e2e',
+          titleColor: '#e0e0e0',
+          edgeLabelBackground: '#1e1e2e',
+          pieStrokeColor: '#444',
+          pieSectionTextColor: '#e0e0e0',
+          pieLegendTextColor: '#e0e0e0',
+        },
+        flowchart: { curve: 'basis', padding: 10 },
+        pie: { textPosition: 0.75 },
+      });
+      _mermaidLoaded = true;
+      _mermaidLoading = false;
+      _mermaidQueue.forEach(fn => fn());
+      _mermaidQueue = [];
+    };
+    script.onerror = () => {
+      console.warn('Mermaid.js konnte nicht geladen werden');
+      _mermaidLoading = false;
+      _mermaidQueue.forEach(fn => fn());
+      _mermaidQueue = [];
+    };
+    document.head.appendChild(script);
+  } catch (e) {
+    console.warn('Mermaid load error:', e);
+    _mermaidLoading = false;
+  }
+}
+
+async function renderMermaidBlocks(container) {
+  const blocks = container.querySelectorAll('.mermaid-block:not(.mermaid-rendered)');
+  if (blocks.length === 0) return;
+
+  await loadMermaid();
+  if (!_mermaidLoaded) return;
+
+  for (const block of blocks) {
+    const source = block.textContent.trim();
+    if (!source) continue;
+
+    try {
+      const id = block.id || ('mermaid-' + Math.random().toString(36).substr(2, 9));
+      const { svg } = await window.mermaid.render(id + '-svg', source);
+      block.innerHTML = svg;
+      block.classList.add('mermaid-rendered');
+    } catch (e) {
+      // Rendering fehlgeschlagen — zeige Source als Code-Block
+      console.warn('Mermaid render error:', e);
+      block.innerHTML = `<pre class="mermaid-error"><code>${escapeHtml(source)}</code></pre>`;
+      block.classList.add('mermaid-rendered');
+    }
+  }
 }
 
 function scrollToBottom() {
@@ -11750,7 +11846,7 @@ async function renderMultiAgentSection() {
             <textarea class="ma-input" data-team="${ti}" data-agent="${ai}" data-key="system_prompt" rows="2" onchange="markSettingsModified()">${escapeHtml(agent.system_prompt || '')}</textarea>
           </div>
           <div class="settings-field"><label>Max Turns</label>
-            <input type="number" class="ma-input" data-team="${ti}" data-agent="${ai}" data-key="max_turns" value="${agent.max_turns || 10}" min="1" max="30" onchange="markSettingsModified()">
+            <input type="number" class="ma-input" data-team="${ti}" data-agent="${ai}" data-key="max_turns" value="${agent.max_turns || 15}" min="1" max="30" onchange="markSettingsModified()">
           </div>
           <div class="settings-field"><label>Tools</label>
             <div class="ma-tool-grid">${toolCheckboxes}</div>
@@ -11840,7 +11936,7 @@ function collectMultiAgentValues() {
         system_prompt: agentEl.querySelector(`.ma-input[data-key="system_prompt"]`)?.value || '',
         model: '',
         tools: selectedTools,
-        max_turns: parseInt(agentEl.querySelector(`.ma-input[data-key="max_turns"]`)?.value) || 10,
+        max_turns: parseInt(agentEl.querySelector(`.ma-input[data-key="max_turns"]`)?.value) || 15,
       });
     });
     teams.push(team);
@@ -11886,7 +11982,7 @@ function maAddAgent(ti) {
   const cfg = settingsState.settings.multi_agent || {};
   if (cfg.teams && cfg.teams[ti]) {
     if (!cfg.teams[ti].agents) cfg.teams[ti].agents = [];
-    cfg.teams[ti].agents.push({ name: 'neuer-agent', system_prompt: '', model: '', tools: [], max_turns: 10 });
+    cfg.teams[ti].agents.push({ name: 'neuer-agent', system_prompt: '', model: '', tools: [], max_turns: 15 });
     renderMultiAgentSection();
     markSettingsModified();
   }

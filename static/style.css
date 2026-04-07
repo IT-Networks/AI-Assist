@@ -1491,6 +1491,38 @@ textarea.ma-input { resize: vertical; font-family: inherit; }
   color: var(--accent);
 }
 
+/* Mermaid Diagrams */
+.mermaid-block {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 16px;
+  margin: 12px 0;
+  text-align: center;
+  overflow-x: auto;
+  min-height: 40px;
+}
+
+.mermaid-block:not(.mermaid-rendered) {
+  color: var(--muted);
+  font-family: var(--font-mono);
+  font-size: 0.8em;
+  text-align: left;
+  white-space: pre;
+}
+
+.mermaid-block.mermaid-rendered svg {
+  max-width: 100%;
+  height: auto;
+}
+
+.mermaid-error {
+  border: 1px solid #f4433666;
+  border-radius: 6px;
+  padding: 8px;
+  font-size: 0.8em;
+}
+
 /* Input Area */
 #input-area {
   background: var(--bg-secondary);

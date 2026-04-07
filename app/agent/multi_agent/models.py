@@ -13,7 +13,7 @@ class TeamAgentConfig:
     model: str = ""                    # Leer = default_model
     system_prompt: str = ""
     tools: List[str] = field(default_factory=list)
-    max_turns: int = 10
+    max_turns: int = 15
 
 
 @dataclass
