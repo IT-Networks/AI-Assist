@@ -213,7 +213,15 @@ class _LogLinkParser(HTMLParser):
             self.file_id = self._current_href
 
 
-async def _fetch_server_logs(server: LogServer, tail: int) -> Optional[str]:
+class _FetchResult:
+    """Ergebnis von _fetch_server_logs: entweder content oder error."""
+    def __init__(self, content: Optional[str] = None, error: Optional[str] = None):
+        self.content = content
+        self.error = error
+        self.success = content is not None
+
+
+async def _fetch_server_logs(server: LogServer, tail: int) -> _FetchResult:
     """
     Kompletter Login-Flow für einen Log-Server:
     1. POST /login mit form-urlencoded credentials → JSESSIONID-Cookie erhalten
@@ -224,6 +232,10 @@ async def _fetch_server_logs(server: LogServer, tail: int) -> Optional[str]:
 
     try:
         username, password = _get_credentials()
+    except ValueError as e:
+        return _FetchResult(error=f"Credentials: {e}")
+
+    try:
         jar = httpx.Cookies()
         async with httpx.AsyncClient(
             verify=server.verify_ssl,
@@ -237,26 +249,32 @@ async def _fetch_server_logs(server: LogServer, tail: int) -> Optional[str]:
                 data={"username": username, "password": password},
                 headers={"Content-Type": "application/x-www-form-urlencoded"},
             )
-            # Login kann 200 oder 302→200 sein, beides OK
             if login_resp.status_code >= 400:
-                return None
+                return _FetchResult(error=f"Login fehlgeschlagen: HTTP {login_resp.status_code} auf {base}/login")
 
             # Sicherstellen dass JSESSIONID vorhanden ist
-            if not any("JSESSIONID" in name.upper() for name in client.cookies.keys()):
+            all_cookies = dict(client.cookies)
+            if not any("JSESSIONID" in name.upper() for name in all_cookies):
                 # Fallback: Cookies aus allen Responses der Redirect-Kette prüfen
                 for resp in login_resp.history + [login_resp]:
                     for name, value in resp.cookies.items():
                         jar.set(name, value)
+                        all_cookies[name] = value
+
+            if not any("JSESSIONID" in name.upper() for name in all_cookies):
+                return _FetchResult(error=f"Login OK aber kein JSESSIONID-Cookie erhalten. Cookies: {list(all_cookies.keys())}")
 
             # 2. Log-Seite laden und fileId parsen
             log_page_resp = await client.get(f"{base}/jsp/ospe/debug/log.jsp")
             if log_page_resp.status_code >= 400:
-                return None
+                return _FetchResult(error=f"Log-Seite nicht erreichbar: HTTP {log_page_resp.status_code} auf {base}/jsp/ospe/debug/log.jsp")
 
             parser = _LogLinkParser()
             parser.feed(log_page_resp.text)
             if not parser.file_id:
-                return None
+                # Ersten 500 Zeichen der Seite für Diagnose mitgeben
+                preview = log_page_resp.text[:500].replace("\n", " ")
+                return _FetchResult(error=f"fileId nicht gefunden: kein Link mit Text 'ospe_ope.log' auf log.jsp. Seiten-Preview: {preview}")
 
             # 3. Log-Datei mit fileId und tail downloaden
             log_resp = await client.get(
@@ -264,11 +282,15 @@ async def _fetch_server_logs(server: LogServer, tail: int) -> Optional[str]:
                 params={"file": parser.file_id, "tail": f"tail{tail}"},
             )
             if log_resp.status_code >= 400:
-                return None
+                return _FetchResult(error=f"Log-Download fehlgeschlagen: HTTP {log_resp.status_code} für file={parser.file_id}")
 
-            return log_resp.text
-    except Exception:
-        return None
+            return _FetchResult(content=log_resp.text)
+    except httpx.ConnectError as e:
+        return _FetchResult(error=f"Verbindung fehlgeschlagen: {base} – {e}")
+    except httpx.TimeoutException:
+        return _FetchResult(error=f"Timeout nach 30s: {base}")
+    except Exception as e:
+        return _FetchResult(error=f"Unerwarteter Fehler: {type(e).__name__}: {e}")
 
 
 # ── Log Download (alle Server einer Stage) ───────────────────────────────────
@@ -290,15 +312,15 @@ async def download_logs(req: DownloadRequest) -> Dict[str, Any]:
 
     results = []
     for server in stage.servers:
-        content = await _fetch_server_logs(server, tail)
-        if content is not None:
-            lines = content.splitlines()
+        result = await _fetch_server_logs(server, tail)
+        if result.success:
+            lines = result.content.splitlines()
             results.append({
                 "server_id": server.id,
                 "server": server.name,
                 "success": True,
                 "lines_count": len(lines),
-                "content": content,
+                "content": result.content,
                 "lines": lines,
             })
         else:
@@ -306,7 +328,7 @@ async def download_logs(req: DownloadRequest) -> Dict[str, Any]:
                 "server_id": server.id,
                 "server": server.name,
                 "success": False,
-                "error": "Login oder Download fehlgeschlagen",
+                "error": result.error,
             })
 
     successful = [r for r in results if r["success"]]
@@ -409,20 +431,20 @@ async def find_server(req: FindServerRequest) -> Dict[str, Any]:
     tried = []
 
     for server in stage.servers:
-        content = await _fetch_server_logs(server, tail)
+        result = await _fetch_server_logs(server, tail)
 
-        if content is None:
-            tried.append({"server_id": server.id, "server": server.name, "score": -1, "error": "Login/Download fehlgeschlagen"})
+        if not result.success:
+            tried.append({"server_id": server.id, "server": server.name, "score": -1, "error": result.error})
             continue
 
-        timestamps = _extract_timestamps(content)
+        timestamps = _extract_timestamps(result.content)
         if not timestamps:
             tried.append({"server_id": server.id, "server": server.name, "score": 0, "note": "Keine Zeitstempel"})
             continue
 
         closest = min(timestamps, key=lambda t: abs((t - ref_time).total_seconds()))
         delta_s = abs((closest - ref_time).total_seconds())
-        content_match = req.search_term.lower() in content.lower() if req.search_term else True
+        content_match = req.search_term.lower() in result.content.lower() if req.search_term else True
         score = max(0, 100 - delta_s / 60) * (1.5 if content_match else 1.0)
         score = round(score, 1)
 
@@ -487,12 +509,12 @@ async def read_window(req: ReadWindowRequest) -> Dict[str, Any]:
     tried = []
 
     for server in stage.servers:
-        content = await _fetch_server_logs(server, tail)
-        if content is None:
-            tried.append({"server_id": server.id, "server": server.name, "result": "login_or_download_failed"})
+        result = await _fetch_server_logs(server, tail)
+        if not result.success:
+            tried.append({"server_id": server.id, "server": server.name, "result": "failed", "error": result.error})
             continue
 
-        all_lines = content.splitlines()
+        all_lines = result.content.splitlines()
         window_lines = _filter_lines_to_window(all_lines, t_start, t_end)
 
         if req.search_term:

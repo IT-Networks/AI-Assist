@@ -65,17 +65,17 @@ def register_log_tools(registry: ToolRegistry) -> int:
         results = []
 
         for server in stage.servers:
-            content = await _fetch_server_logs(server, tail)
-            if content is None:
+            result = await _fetch_server_logs(server, tail)
+            if not result.success:
                 results.append({
                     "server_id": server.id,
                     "server": server.name,
                     "success": False,
-                    "error": "Login oder Download fehlgeschlagen",
+                    "error": result.error,
                 })
                 continue
 
-            lines = content.splitlines()
+            lines = result.content.splitlines()
 
             if search_term:
                 term_lower = search_term.lower()
@@ -89,10 +89,11 @@ def register_log_tools(registry: ToolRegistry) -> int:
                 "success": True,
                 "lines_count": len(lines),
                 "matching_lines_count": len(matching),
-                "content": "\n".join(matching) if search_term else content,
+                "content": "\n".join(matching) if search_term else result.content,
             })
 
         successful = [r for r in results if r["success"]]
+        all_errors = [r["error"] for r in results if not r["success"]]
         return ToolResult(
             success=bool(successful),
             data={
@@ -101,7 +102,7 @@ def register_log_tools(registry: ToolRegistry) -> int:
                 "servers_successful": len(successful),
                 "results": results,
             },
-            error=None if successful else "Kein Server erreichbar",
+            error=None if successful else f"Kein Server erreichbar: {'; '.join(all_errors)}",
         )
 
     registry.register(Tool(
@@ -150,12 +151,12 @@ def register_log_tools(registry: ToolRegistry) -> int:
         results = []
 
         for server in stage.servers:
-            content = await _fetch_server_logs(server, tail)
-            if content is None:
-                results.append({"server": server.name, "success": False, "error": "Login/Download fehlgeschlagen"})
+            result = await _fetch_server_logs(server, tail)
+            if not result.success:
+                results.append({"server": server.name, "success": False, "error": result.error})
                 continue
 
-            lines = content.splitlines()
+            lines = result.content.splitlines()
 
             # Zeitfenster-Filter (wenn angegeben)
             if t_start and t_end:
