@@ -351,17 +351,15 @@ file_operations:
 data_sources:
   sources: []
 
+# Sub-Agents: DEPRECATED in v2.31.5 — ersetzt durch Multi-Agent Team System
+# Die SubAgent-Basisklasse bleibt erhalten (TeamAgent + ResearchAgent erben davon)
 sub_agents:
-  enabled: true
+  enabled: false
   timeout_seconds: 120
   max_iterations: 15
   min_query_length: 10
-  routing_model: qwen-7b
-  agents:
-  - code_explorer
-  - wiki_agent
-  - knowledge_agent
-  - datasource_agent
+  routing_model: ''
+  agents: []
 
 mq:
   enabled: false

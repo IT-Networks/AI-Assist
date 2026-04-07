@@ -41,6 +41,8 @@ def should_auto_research(query: str) -> bool:
     Returns:
         True if research should be triggered
     """
+    # Sub-Agents deaktiviert in v2.31.5 — ersetzt durch Multi-Agent Teams
+    return False
     if not settings.sub_agents.enabled:
         return False
 

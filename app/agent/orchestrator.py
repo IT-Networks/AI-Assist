@@ -109,10 +109,6 @@ from app.agent.result_validator import (
     get_result_validator,
     ValidationResult,
 )
-from app.agent.sub_agent_coordinator import (
-    SubAgentCoordinator,
-    CoordinatedResult,
-)
 from app.core.config import settings
 from app.mcp.tool_bridge import get_tool_bridge, MCPToolBridge
 from app.mcp.event_bridge import MCPEventBridge, get_event_bridge, create_event_callback
@@ -463,125 +459,11 @@ class AgentOrchestrator:
 
     # Note: _extract_conversation_context is now imported from context_builder module
 
-    async def _run_sub_agents_phase(
-        self,
-        user_message: str,
-        model: Optional[str],
-        messages: List[Dict],
-        budget,
-    ) -> AsyncGenerator[AgentEvent, None]:
-        """
-        Führt die parallele Sub-Agent-Erkundungsphase aus.
-
-        Sub-Agenten durchsuchen ihre spezialisierten Datenquellen parallel
-        und liefern komprimierte Zusammenfassungen zurück.
-        Diese werden als System-Message in den Main-Context injiziert,
-        bevor der Main-Agent-Loop startet.
-
-        Yieldet SUBAGENT_START / SUBAGENT_DONE / SUBAGENT_ERROR Events.
-        """
-        from app.agent.sub_agents import get_sub_agent_dispatcher
-        from app.agent.sub_agent import format_sub_agent_results
-        from app.services.llm_client import llm_client
-        from app.utils.token_counter import estimate_tokens
-
-        try:
-            dispatcher = get_sub_agent_dispatcher()
-        except Exception as e:
-            logger.debug("[sub_agents] Dispatcher nicht verfügbar: {e}")
-            return
-
-        routing_model = (
-            settings.sub_agents.routing_model
-            or settings.llm.tool_model
-            or settings.llm.default_model
-        )
-
-        # Phase 1: Routing läuft – noch keine Agenten bekannt
-        yield AgentEvent(AgentEventType.SUBAGENT_START, {
-            "message": "Intent-Routing läuft...",
-            "routing_model": routing_model,
-        })
-
-        # Routing: welche Agenten werden benötigt?
-        try:
-            selected_agents = await dispatcher.classify_intent(user_message, llm_client)
-        except Exception as e:
-            logger.debug("[sub_agents] Routing fehlgeschlagen: {e}")
-            yield AgentEvent(AgentEventType.SUBAGENT_ERROR, {"error": f"Routing: {e}"})
-            return
-
-        # Phase 2: Routing fertig – ausgewählte Agenten bekannt
-        yield AgentEvent(AgentEventType.SUBAGENT_ROUTING, {
-            "agents": selected_agents,
-            "routing_model": routing_model,
-        })
-
-        if not selected_agents:
-            logger.debug("[sub_agents] Keine relevanten Agenten ermittelt – überspringe Phase")
-            return
-
-        # Konversations-Kontext für Sub-Agenten extrahieren
-        # Letzte 3-4 User/Assistant-Nachrichten als Kurzkontext
-        conversation_context = _extract_conversation_context(messages)
-
-        # Phase 3: Ausgewählte Agenten parallel ausführen
-        try:
-            results = await dispatcher.dispatch_selected(
-                query=user_message,
-                agents=selected_agents,
-                llm_client=llm_client,
-                tool_registry=self.tools,
-                conversation_context=conversation_context,
-            )
-        except Exception as e:
-            logger.debug("[sub_agents] Dispatch fehlgeschlagen: {e}")
-            yield AgentEvent(AgentEventType.SUBAGENT_ERROR, {"error": str(e)})
-            return
-
-        # Events für jeden Sub-Agenten emittieren
-        for result in results:
-            if result.success:
-                yield AgentEvent(AgentEventType.SUBAGENT_DONE, {
-                    "agent": result.agent_name,
-                    "findings_count": len(result.key_findings),
-                    "sources_count": len(result.sources),
-                    "duration_ms": result.duration_ms,
-                })
-            else:
-                yield AgentEvent(AgentEventType.SUBAGENT_ERROR, {
-                    "agent": result.agent_name,
-                    "error": result.error,
-                })
-
-        # ── SubAgentCoordinator: Deduplizierung und Ranking ──
-        coordinator = SubAgentCoordinator()
-        try:
-            coordinated = await coordinator.process_results(results, user_message)
-            logger.debug(
-                f"[sub_agents] Coordination: {coordinated.total_findings} total → "
-                f"{coordinated.unique_findings} unique ({coordinated.duplicates_removed} dupes removed)"
-            )
-            # Verwende koordinierten Context-Block
-            context_block = coordinated.to_context_block()
-        except Exception as e:
-            logger.debug(f"[sub_agents] Coordination failed, using fallback: {e}")
-            # Fallback auf einfache Formatierung
-            context_block = format_sub_agent_results(results)
-        if context_block:
-            context_tokens = estimate_tokens(context_block)
-            # Nur injizieren wenn Token-Budget ausreicht
-            if budget.can_add("context", context_tokens):
-                # Nach dem ersten System-Message (Haupt-Prompt) einfügen
-                insert_pos = 1
-                messages.insert(insert_pos, {
-                    "role": "system",
-                    "content": context_block,
-                })
-                budget.add("context", context_tokens)
-                logger.debug("[sub_agents] Context injiziert: {context_tokens} Tokens")
-            else:
-                logger.debug("[sub_agents] Context zu groß ({context_tokens} Tokens), übersprungen")
+    # NOTE: _run_sub_agents_phase wurde in v2.31.5 entfernt.
+    # Das alte Sub-Agent-Dispatching-System (automatische Vorab-Recherche mit
+    # code_explorer, wiki_agent, jira_agent etc.) ist durch das Multi-Agent
+    # Team System (run_team) ersetzt worden.
+    # Die SubAgent-Basis-Klasse bleibt erhalten (TeamAgent + ResearchAgent erben davon).
 
     async def process(
         self,
@@ -1313,35 +1195,8 @@ class AgentOrchestrator:
 
         # === SUB-AGENT PHASE ===
         # Spezialisierte Sub-Agenten erkunden Datenquellen parallel,
-        # bevor der Main-Agent seinen Loop startet.
-        # SKIP wenn: Team-Anfrage erkannt (run_team soll vom LLM direkt aufgerufen werden)
-        # SKIP wenn: Research-Anfrage erkannt (research_topic soll vom LLM aufgerufen werden)
-        _skip_sub_agents = False
-        if settings.multi_agent.enabled:
-            _team_keywords = {"team", "agenten-team", "code-review-team", "research-team",
-                              "run_team", "multi-agent", "mit dem team"}
-            _msg_lower = user_message.lower()
-            # Pruefen ob User explizit ein Team anfordert
-            if any(kw in _msg_lower for kw in _team_keywords):
-                _skip_sub_agents = True
-                logger.info("[agent] Team-Anfrage erkannt — Sub-Agents uebersprungen, LLM entscheidet ueber run_team")
-            # Oder ob ein konfigurierter Team-Name erwaehnt wird
-            for team_cfg in settings.multi_agent.teams:
-                if team_cfg.name and team_cfg.name.lower() in _msg_lower:
-                    _skip_sub_agents = True
-                    logger.info(f"[agent] Team '{team_cfg.name}' in Anfrage erkannt — Sub-Agents uebersprungen")
-                    break
-
-        if (
-            settings.sub_agents.enabled
-            and len(user_message) >= settings.sub_agents.min_query_length
-            and not forced_capability  # Skip sub-agents when forcing capability
-            and not _skip_sub_agents   # Skip sub-agents for team requests
-        ):
-            async for event in self._run_sub_agents_phase(
-                user_message, model, messages, budget
-            ):
-                yield event
+        # NOTE: Sub-Agent-Phase wurde in v2.31.5 entfernt.
+        # Das Multi-Agent Team System (run_team) ersetzt die automatische Vorab-Recherche.
 
         # === FORCED CAPABILITY EXECUTION ===
         # Wenn User /brainstorm, /design etc. nutzt, direkt ausführen

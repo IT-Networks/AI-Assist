@@ -51,7 +51,7 @@ from app.agent.orchestration.context_builder import (
 from app.agent.orchestration.phase_runner import (
     should_auto_research,
     run_research_phase,
-    run_sub_agents_phase,
+    # run_sub_agents_phase removed in v2.31.5
     run_task_decomposition,
     run_forced_capability,
 )
@@ -137,7 +137,7 @@ __all__ = [
     # Phase Runner
     "should_auto_research",
     "run_research_phase",
-    "run_sub_agents_phase",
+    # "run_sub_agents_phase",  # removed in v2.31.5
     "run_task_decomposition",
     "run_forced_capability",
     # Tool Executor
