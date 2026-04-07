@@ -43,6 +43,7 @@ class TeamAgent(SubAgent):
         self,
         task: TeamTask,
         shared_context: str = "",
+        original_goal: str = "",
     ) -> str:
         """
         Fuehrt einen Task aus mit Team-Kontext.
@@ -50,6 +51,7 @@ class TeamAgent(SubAgent):
         Args:
             task: Der auszufuehrende Task
             shared_context: Ergebnisse von Dependency-Tasks
+            original_goal: Die urspruengliche Nutzer-Frage (fuer Kontext)
 
         Returns:
             Ergebnis-Text (summary)
@@ -57,8 +59,15 @@ class TeamAgent(SubAgent):
         from app.agent import get_tool_registry
         from app.services.llm_client import llm_client as default_llm_client
 
-        # Kontext zusammenbauen
-        context_parts = [f"DEINE ROLLE: {self.description}"]
+        # Kontext zusammenbauen — Original-Frage IMMER mitgeben
+        context_parts = []
+        if original_goal:
+            context_parts.append(
+                f"URSPRUENGLICHE NUTZER-FRAGE: {original_goal}\n"
+                f"Dein Task ist ein Teil dieser Gesamtaufgabe. "
+                f"Deine Ergebnisse muessen zur Beantwortung DIESER Frage beitragen."
+            )
+        context_parts.append(f"DEINE ROLLE: {self.description}")
 
         if shared_context:
             context_parts.append(f"\nKONTEXT VON VORHERIGEN TASKS:\n{shared_context}")

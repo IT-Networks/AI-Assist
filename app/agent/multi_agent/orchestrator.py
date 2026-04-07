@@ -58,6 +58,7 @@ class MultiAgentOrchestrator:
     async def run(self, goal: str) -> TeamRunResult:
         """Fuehrt den kompletten Team-Run aus."""
         start = time.time()
+        self._goal = goal  # Fuer Durchreichung an Agents
         logger.info(f"[MultiAgent] Team '{self._team.name}' startet: {goal[:100]}")
 
         # Phase 1: Coordinator zerlegt Ziel in Tasks
@@ -162,14 +163,18 @@ class MultiAgentOrchestrator:
             f"- WICHTIG: Tasks die NICHT voneinander abhaengen MUESSEN dependsOn:[] haben!\n"
             f"  Nur wenn ein Task das ERGEBNIS eines anderen Tasks braucht, setze dependsOn.\n"
             f"- WICHTIG: Weise nur Agenten zu deren Tools zum Ziel PASSEN!\n"
-            f"  Wenn das Ziel 'Confluence durchsuchen' ist, braucht man KEINEN Code-Analysten.\n"
             f"  Schaue auf die Tools jedes Agenten und pruefe ob sie fuer das Ziel relevant sind.\n"
             f"  Nicht relevante Agenten WEGLASSEN statt ihnen sinnlose Tasks zu geben.\n"
-            f"- Der letzte Task (Zusammenfassung/Review) sollte von den anderen abhaengen\n\n"
+            f"- Der letzte Task (Zusammenfassung/Review) sollte von den anderen abhaengen\n"
+            f"- WICHTIG fuer Task-Beschreibungen:\n"
+            f"  Die 'description' MUSS die SPEZIFISCHE Frage/Aufgabe enthalten, NICHT generisch!\n"
+            f"  SCHLECHT: 'Suche Dokumentation zu Authentication'\n"
+            f"  GUT: 'Suche in Confluence wie die Authentication in unseren Microservices funktioniert, "
+            f"insbesondere Token-Handling und Service-to-Service Auth'\n"
+            f"  Die description soll dem Agent genau sagen WAS er finden soll.\n\n"
             f"Antworte NUR mit JSON-Array:\n"
-            f'[{{"id":"t1","title":"...","description":"...","assignee":"agent1","dependsOn":[]}},'
-            f'{{"id":"t2","title":"...","description":"...","assignee":"agent2","dependsOn":[]}},'
-            f'{{"id":"t3","title":"Zusammenfassung","description":"...","assignee":"agent3","dependsOn":["t1","t2"]}}]'
+            f'[{{"id":"t1","title":"...","description":"SPEZIFISCHE Aufgabe bezogen auf das Ziel","assignee":"agent1","dependsOn":[]}},'
+            f'{{"id":"t2","title":"Zusammenfassung","description":"Fasse Ergebnisse zusammen und beantworte: {goal[:80]}","assignee":"agent2","dependsOn":["t1"]}}]'
         )
 
         try:
@@ -292,7 +297,9 @@ class MultiAgentOrchestrator:
 
             # Parallel ausfuehren
             try:
-                results = await self._pool.execute_batch(assignments, timeout=self._timeout)
+                results = await self._pool.execute_batch(
+                    assignments, timeout=self._timeout, original_goal=self._goal
+                )
             except Exception as e:
                 logger.error(f"[MultiAgent] Batch-Execution Fehler in Runde {round_num+1}: {e}", exc_info=True)
                 for task in ready:
@@ -411,25 +418,25 @@ class MultiAgentOrchestrator:
             results_text.append(f"{status_icon} **{task.title}** ({task.assignee}):\n{task_output}")
 
         prompt = (
-            f"Fasse die Ergebnisse dieses Team-Runs zusammen.\n\n"
-            f"URSPRUENGLICHES ZIEL: {goal}\n\n"
+            f"Der User hat folgende Frage gestellt:\n"
+            f">>> {goal} <<<\n\n"
+            f"Ein Team aus Agenten hat dazu recherchiert. Hier sind die Ergebnisse:\n\n"
             f"TASK-ERGEBNISSE:\n" + "\n\n---\n\n".join(results_text) + "\n\n"
-            f"Erstelle eine strukturierte Zusammenfassung im Markdown-Format.\n\n"
-            f"## Ergebnisse\n"
-            f"- Extrahiere KONKRETE Daten aus den Task-Ergebnissen oben\n"
-            f"- Jeder Bullet-Point MUSS einen konkreten Verweis enthalten: "
-            f"`dateiname`, Funktionsname, Metrik, Issue-ID, etc.\n"
-            f"- Nutze `code-formatting` fuer Dateien und Funktionen\n\n"
+            f"DEINE AUFGABE: Beantworte die Frage des Users basierend auf den Ergebnissen.\n\n"
+            f"Format (Markdown):\n\n"
+            f"## Antwort\n"
+            f"Beantworte die Frage DIREKT und KONKRET basierend auf den gefundenen Daten.\n"
+            f"Nenne Confluence-Seiten, Dateipfade, Funktionsnamen, IDs wo verfuegbar.\n\n"
+            f"## Details\n"
+            f"- Konkrete Findings mit Verweisen (`dateiname`, Page-ID, Funktionsname)\n"
+            f"- Nur Informationen die zur Beantwortung der Frage relevant sind\n\n"
             f"## Offene Punkte\n"
-            f"- Nur auflisten wenn tatsaechlich Fehler oder Luecken aufgetreten sind\n"
-            f"- Fehlgeschlagene Tasks mit konkretem Fehlergrund\n\n"
-            f"## Empfehlungen\n"
-            f"- Konkrete naechste Schritte (was genau tun, in welcher Datei/welchem System)\n\n"
-            f"ANTI-PATTERNS (diese Formulierungen sind VERBOTEN):\n"
-            f"- 'Es wurden relevante Informationen gefunden' → stattdessen: WAS genau?\n"
-            f"- 'Die Analyse wurde durchgefuehrt' → stattdessen: WAS ergab die Analyse?\n"
-            f"- 'Weitere Untersuchungen empfohlen' → stattdessen: WAS genau untersuchen?\n"
-            f"- 'Verschiedene Aspekte wurden betrachtet' → stattdessen: WELCHE Aspekte, WELCHE Ergebnisse?\n\n"
+            f"- Nur wenn die Frage nicht vollstaendig beantwortet werden konnte\n"
+            f"- Was fehlt noch und wo koennte man es finden?\n\n"
+            f"ANTI-PATTERNS (VERBOTEN):\n"
+            f"- 'Es wurden relevante Informationen gefunden' → WAS genau?\n"
+            f"- 'Die Analyse wurde durchgefuehrt' → WAS ergab sie?\n"
+            f"- Informationen die NICHT zur Frage passen → WEGLASSEN\n\n"
             f"Nutze Markdown: ##, **, -, `code`. Maximal 2000 Zeichen."
         )
 

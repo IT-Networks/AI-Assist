@@ -50,6 +50,7 @@ class AgentPool:
         task: TeamTask,
         context: str = "",
         timeout: float = 120.0,
+        original_goal: str = "",
     ) -> str:
         """
         Fuehrt einen Task mit Semaphore-Guard aus.
@@ -59,6 +60,7 @@ class AgentPool:
             task: Der Task
             context: SharedContext-String
             timeout: Max. Ausfuehrungszeit in Sekunden
+            original_goal: Urspruengliche Nutzer-Frage
 
         Returns:
             Ergebnis-String oder Fehler-Nachricht
@@ -72,7 +74,7 @@ class AgentPool:
             start = time.time()
             try:
                 result = await asyncio.wait_for(
-                    agent.run_task(task, context),
+                    agent.run_task(task, context, original_goal=original_goal),
                     timeout=timeout,
                 )
                 self._completed += 1
@@ -94,6 +96,7 @@ class AgentPool:
         self,
         assignments: List[Tuple[str, TeamTask, str]],
         timeout: float = 120.0,
+        original_goal: str = "",
     ) -> Dict[str, str]:
         """
         Fuehrt mehrere Tasks parallel aus (bis Semaphore-Limit).
@@ -101,12 +104,13 @@ class AgentPool:
         Args:
             assignments: Liste von (agent_name, task, context)
             timeout: Max. Ausfuehrungszeit pro Task
+            original_goal: Urspruengliche Nutzer-Frage
 
         Returns:
             Dict task_id → Ergebnis-String
         """
         tasks = [
-            self.execute(agent_name, task, context, timeout)
+            self.execute(agent_name, task, context, timeout, original_goal=original_goal)
             for agent_name, task, context in assignments
         ]
 
