@@ -198,6 +198,24 @@ class _LogLinkParser(HTMLParser):
             self.log_href = self._current_href
 
 
+def _strip_html(text: str) -> str:
+    """Entfernt HTML-Tags aus dem Text und gibt reinen Plaintext zurück."""
+    if not text or "<" not in text:
+        return text
+    # Nur bereinigen wenn es tatsächlich HTML ist
+    if not re.search(r"<(html|body|pre|table|div|tr|td)\b", text, re.IGNORECASE):
+        return text
+    # <pre>-Inhalt extrahieren falls vorhanden (häufigstes Log-Format)
+    pre_match = re.search(r"<pre[^>]*>(.*?)</pre>", text, re.DOTALL | re.IGNORECASE)
+    if pre_match:
+        text = pre_match.group(1)
+    # Alle HTML-Tags entfernen
+    text = re.sub(r"<[^>]+>", "", text)
+    # HTML-Entities decodieren
+    text = text.replace("&lt;", "<").replace("&gt;", ">").replace("&amp;", "&").replace("&nbsp;", " ").replace("&quot;", '"')
+    return text.strip()
+
+
 class _FetchResult:
     """Ergebnis von _fetch_server_logs: entweder content oder error."""
     def __init__(self, content: Optional[str] = None, error: Optional[str] = None):
@@ -283,7 +301,9 @@ async def _fetch_server_logs(
             if log_resp.status_code >= 400:
                 return _FetchResult(error=f"Log-Download fehlgeschlagen: HTTP {log_resp.status_code} für {download_url}")
 
-            return _FetchResult(content=log_resp.text)
+            # HTML-Response zu Plaintext konvertieren (log.jsp kann HTML-Wrapper liefern)
+            content = _strip_html(log_resp.text)
+            return _FetchResult(content=content)
     except httpx.ConnectError as e:
         return _FetchResult(error=f"Verbindung fehlgeschlagen: {base} – {e}")
     except httpx.TimeoutException:

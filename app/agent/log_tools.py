@@ -213,16 +213,18 @@ def register_log_tools(registry: ToolRegistry) -> int:
         name="log_download_stage",
         description=(
             "Lädt die ospe_ope.log von Remote-OSPE-Servern herunter (NICHT lokale WLP-Server). "
-            "Authentifizierung und Login erfolgen vollautomatisch – der User muss KEINE Zugangsdaten angeben. "
-            "Standardmäßig werden ALLE Server einer Stage parallel abgefragt – offline Server werden übersprungen. "
-            "Optional: server_id für einen einzelnen Server, search_term zum Filtern. "
+            "Authentifizierung erfolgt vollautomatisch – KEINE Zugangsdaten nötig. "
+            "Lädt den KOMPLETTEN Log (tail4) von ALLEN Servern einer Stage parallel herunter. "
+            "Die Logs werden lokal durchsucht – search_term filtert ALLE Zeilen (case-insensitive), "
+            "nicht nur Fehler. Findet auch INFO, DEBUG oder beliebige Textfragmente. "
+            "Optional: server_id für einen einzelnen Server. "
             "Voraussetzung: log_list_stages aufrufen um stage_id zu erhalten."
         ),
         category=ToolCategory.SEARCH,
         parameters=[
             ToolParameter(name="stage_id", type="string", description="ID der Stage (aus log_list_stages)", required=True),
             ToolParameter(name="server_id", type="string", description="Einzelnen Server abfragen statt alle (ID aus log_list_stages)", required=False),
-            ToolParameter(name="search_term", type="string", description="Filtert Log-Zeilen auf diesen Suchbegriff", required=False),
+            ToolParameter(name="search_term", type="string", description="Beliebiger Suchbegriff – durchsucht ALLE Log-Zeilen case-insensitive (nicht nur Fehler)", required=False),
         ],
         handler=log_download_stage,
     ))
@@ -353,17 +355,18 @@ def register_log_tools(registry: ToolRegistry) -> int:
         name="log_search_stage",
         description=(
             "Durchsucht die ospe_ope.log auf Remote-OSPE-Servern (NICHT lokale WLP-Server). "
-            "Authentifizierung erfolgt automatisch – keine Zugangsdaten vom User nötig. "
-            "Fragt ALLE Server einer Stage parallel ab – offline Server werden übersprungen. "
-            "Optional: server_id für einen einzelnen Server. "
-            "Filtert nach Suchbegriff und/oder Zeitfenster. Mindestens search_term oder "
-            "time_start+time_end angeben. Voraussetzung: log_list_stages für stage_id."
+            "Authentifizierung erfolgt automatisch – KEINE Zugangsdaten nötig. "
+            "Lädt den KOMPLETTEN Log (tail4) von ALLEN Servern parallel herunter und "
+            "durchsucht lokal ALLE Zeilen (nicht nur Fehler). Findet auch INFO, DEBUG "
+            "oder beliebige Textfragmente. Case-insensitive Suche. "
+            "Optional: Zeitfenster-Filter zusätzlich zum Suchbegriff. "
+            "Voraussetzung: log_list_stages aufrufen um stage_id zu erhalten."
         ),
         category=ToolCategory.SEARCH,
         parameters=[
             ToolParameter(name="stage_id", type="string", description="ID der Stage (aus log_list_stages)", required=True),
             ToolParameter(name="server_id", type="string", description="Einzelnen Server durchsuchen statt alle (ID aus log_list_stages)", required=False),
-            ToolParameter(name="search_term", type="string", description="Suchbegriff in Log-Zeilen", required=False),
+            ToolParameter(name="search_term", type="string", description="Beliebiger Suchbegriff – durchsucht ALLE Log-Zeilen case-insensitive", required=False),
             ToolParameter(name="time_start", type="string", description="Beginn des Zeitfensters ISO-8601 (optional)", required=False),
             ToolParameter(name="time_end", type="string", description="Ende des Zeitfensters ISO-8601 (optional)", required=False),
         ],
