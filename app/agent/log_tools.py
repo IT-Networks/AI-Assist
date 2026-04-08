@@ -85,8 +85,7 @@ def register_log_tools(registry: ToolRegistry) -> int:
         description=(
             "Listet alle konfigurierten Remote-Log-Server-Stages auf (OSPE-Server, NICHT lokale WLP-Server). "
             "Gibt Stage-IDs und Server-IDs zurück. Diese IDs werden für log_download_stage und "
-            "log_search_stage benötigt. Jede Stage enthält mehrere Remote-Server die per HTTP "
-            "Login (JSESSIONID) abgefragt werden."
+            "log_search_stage benötigt. Authentifizierung erfolgt automatisch – keine Zugangsdaten nötig."
         ),
         category=ToolCategory.SEARCH,
         parameters=[],
@@ -213,11 +212,10 @@ def register_log_tools(registry: ToolRegistry) -> int:
         name="log_download_stage",
         description=(
             "Lädt die ospe_ope.log von Remote-OSPE-Servern herunter (NICHT lokale WLP-Server). "
-            "Standardmäßig werden ALLE Server einer Stage abgefragt – offline Server werden "
-            "übersprungen und die restlichen trotzdem abgefragt. "
-            "Optional: server_id angeben um gezielt einen einzelnen Server abzufragen. "
-            "Optional: search_term zum Filtern der Log-Zeilen. "
-            "Voraussetzung: log_list_stages aufrufen um stage_id (und ggf. server_id) zu erhalten."
+            "Authentifizierung und Login erfolgen vollautomatisch – der User muss KEINE Zugangsdaten angeben. "
+            "Standardmäßig werden ALLE Server einer Stage parallel abgefragt – offline Server werden übersprungen. "
+            "Optional: server_id für einen einzelnen Server, search_term zum Filtern. "
+            "Voraussetzung: log_list_stages aufrufen um stage_id zu erhalten."
         ),
         category=ToolCategory.SEARCH,
         parameters=[
@@ -358,11 +356,11 @@ def register_log_tools(registry: ToolRegistry) -> int:
         name="log_search_stage",
         description=(
             "Durchsucht die ospe_ope.log auf Remote-OSPE-Servern (NICHT lokale WLP-Server). "
-            "Fragt ALLE Server einer Stage ab – offline Server werden übersprungen. "
-            "Optional: server_id um gezielt einen Server zu durchsuchen. "
+            "Authentifizierung erfolgt automatisch – keine Zugangsdaten vom User nötig. "
+            "Fragt ALLE Server einer Stage parallel ab – offline Server werden übersprungen. "
+            "Optional: server_id für einen einzelnen Server. "
             "Filtert nach Suchbegriff und/oder Zeitfenster. Mindestens search_term oder "
-            "time_start+time_end muss angegeben werden. "
-            "Voraussetzung: log_list_stages aufrufen um stage_id zu erhalten."
+            "time_start+time_end angeben. Voraussetzung: log_list_stages für stage_id."
         ),
         category=ToolCategory.SEARCH,
         parameters=[
