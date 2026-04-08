@@ -201,25 +201,34 @@ class _FetchResult:
         self.success = content is not None
 
 
-async def _fetch_server_logs(server: LogServer, tail: int) -> _FetchResult:
+async def _fetch_server_logs(
+    server: LogServer,
+    tail: int,
+    credentials: Optional[tuple] = None,
+) -> _FetchResult:
     """
     Kompletter Login-Flow für einen Log-Server:
     1. POST /login mit form-urlencoded credentials → JSESSIONID-Cookie erhalten
     2. GET /jsp/ospe/debug/log.jsp mit Cookie → fileId aus href 'ospe_ope.log' parsen
-    3. GET /jsp/ospe/debug/log.jsp?file={fileId}&tail=tail{N} mit Cookie → Log-Inhalt
+    3. GET /jsp/ospe/debug/{href}&tail=tail{N} mit Cookie → Log-Inhalt
+
+    credentials: (username, password) – wenn None, wird aus Config geladen.
     """
     base = server.url.rstrip("/")
 
-    try:
-        username, password = _get_credentials()
-    except ValueError as e:
-        return _FetchResult(error=f"Credentials: {e}")
+    if credentials:
+        username, password = credentials
+    else:
+        try:
+            username, password = _get_credentials()
+        except ValueError as e:
+            return _FetchResult(error=f"Credentials: {e}")
 
     try:
         jar = httpx.Cookies()
         async with httpx.AsyncClient(
             verify=server.verify_ssl,
-            timeout=30,
+            timeout=15,
             follow_redirects=True,
             cookies=jar,
         ) as client:

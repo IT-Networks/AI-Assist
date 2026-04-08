@@ -96,7 +96,7 @@ def register_log_tools(registry: ToolRegistry) -> int:
 
     # ── log_download_stage ────────────────────────────────────────────────────
     async def log_download_stage(**kwargs: Any) -> ToolResult:
-        from app.api.routes.log_servers import _fetch_server_logs
+        from app.api.routes.log_servers import _fetch_server_logs, _get_credentials
 
         stage_id: str = kwargs.get("stage_id", "")
         server_id: str = kwargs.get("server_id", "")
@@ -108,6 +108,12 @@ def register_log_tools(registry: ToolRegistry) -> int:
         if not stage.servers:
             return ToolResult(success=False, error="Stage hat keine Server konfiguriert")
 
+        # Credentials einmal vorab laden
+        try:
+            creds = _get_credentials()
+        except ValueError as e:
+            return ToolResult(success=False, error=f"Credentials: {e}")
+
         # Server-Auswahl: einzelner Server oder alle
         if server_id:
             servers_to_try = [s for s in stage.servers if s.id == server_id]
@@ -117,57 +123,62 @@ def register_log_tools(registry: ToolRegistry) -> int:
             servers_to_try = stage.servers
 
         tail = settings.log_servers.default_tail
+
+        # Alle Server parallel abfragen
+        fetch_results = await asyncio.gather(
+            *[_fetch_server_logs(s, tail, credentials=creds) for s in servers_to_try],
+            return_exceptions=True,
+        )
+
         results = []
-
-        for server in servers_to_try:
-            try:
-                result = await _fetch_server_logs(server, tail)
-                if not result.success:
-                    results.append({
-                        "server_id": server.id,
-                        "server": server.name,
-                        "success": False,
-                        "error": result.error,
-                    })
-                    continue
-
-                lines = result.content.splitlines()
-                total_lines = len(lines)
-
-                if search_term:
-                    term_lower = search_term.lower()
-                    lines = [l for l in lines if term_lower in l.lower()]
-
-                truncated = len(lines) > _MAX_LINES_PER_SERVER
-                if truncated:
-                    lines = lines[-_MAX_LINES_PER_SERVER:]
-
-                content = "\n".join(lines)
-                if len(content) > _MAX_CONTENT_CHARS:
-                    content = content[-_MAX_CONTENT_CHARS:]
-                    truncated = True
-
-                # Fehler-Zusammenfassung extrahieren
-                err_summary = _extract_error_summary(result.content, server.name)
-
-                results.append({
-                    "server_id": server.id,
-                    "server": server.name,
-                    "success": True,
-                    "total_lines": total_lines,
-                    "returned_lines": len(lines),
-                    "truncated": truncated,
-                    "error_summary": err_summary,
-                    "content": content,
-                })
-            except Exception as e:
+        for server, fetch_result in zip(servers_to_try, fetch_results):
+            # asyncio.gather mit return_exceptions=True: Exceptions als Werte
+            if isinstance(fetch_result, BaseException):
                 results.append({
                     "server_id": server.id,
                     "server": server.name,
                     "success": False,
-                    "error": f"Unerwarteter Fehler: {type(e).__name__}: {e}",
+                    "error": f"{type(fetch_result).__name__}: {fetch_result}",
                 })
                 continue
+
+            if not fetch_result.success:
+                results.append({
+                    "server_id": server.id,
+                    "server": server.name,
+                    "success": False,
+                    "error": fetch_result.error,
+                })
+                continue
+
+            lines = fetch_result.content.splitlines()
+            total_lines = len(lines)
+
+            if search_term:
+                term_lower = search_term.lower()
+                lines = [l for l in lines if term_lower in l.lower()]
+
+            truncated = len(lines) > _MAX_LINES_PER_SERVER
+            if truncated:
+                lines = lines[-_MAX_LINES_PER_SERVER:]
+
+            content = "\n".join(lines)
+            if len(content) > _MAX_CONTENT_CHARS:
+                content = content[-_MAX_CONTENT_CHARS:]
+                truncated = True
+
+            err_summary = _extract_error_summary(fetch_result.content, server.name)
+
+            results.append({
+                "server_id": server.id,
+                "server": server.name,
+                "success": True,
+                "total_lines": total_lines,
+                "returned_lines": len(lines),
+                "truncated": truncated,
+                "error_summary": err_summary,
+                "content": content,
+            })
 
         successful = [r for r in results if r["success"]]
         all_errors = [r["error"] for r in results if not r["success"]]
@@ -221,7 +232,7 @@ def register_log_tools(registry: ToolRegistry) -> int:
     # ── log_search_stage ──────────────────────────────────────────────────────
     async def log_search_stage(**kwargs: Any) -> ToolResult:
         from datetime import datetime
-        from app.api.routes.log_servers import _fetch_server_logs, _filter_lines_to_window
+        from app.api.routes.log_servers import _fetch_server_logs, _get_credentials, _filter_lines_to_window
 
         stage_id: str = kwargs.get("stage_id", "")
         server_id: str = kwargs.get("server_id", "")
@@ -234,6 +245,12 @@ def register_log_tools(registry: ToolRegistry) -> int:
             return ToolResult(success=False, error=f"Stage '{stage_id}' nicht gefunden")
         if not stage.servers:
             return ToolResult(success=False, error="Stage hat keine Server konfiguriert")
+
+        # Credentials einmal vorab laden
+        try:
+            creds = _get_credentials()
+        except ValueError as e:
+            return ToolResult(success=False, error=f"Credentials: {e}")
 
         # Server-Auswahl: einzelner Server oder alle
         if server_id:
@@ -253,53 +270,58 @@ def register_log_tools(registry: ToolRegistry) -> int:
                 return ToolResult(success=False, error="Ungültiges Zeitformat – ISO-8601 erwartet")
 
         tail = settings.log_servers.default_tail
+
+        # Alle Server parallel abfragen
+        fetch_results = await asyncio.gather(
+            *[_fetch_server_logs(s, tail, credentials=creds) for s in servers_to_try],
+            return_exceptions=True,
+        )
+
         results = []
-
-        for server in servers_to_try:
-            try:
-                result = await _fetch_server_logs(server, tail)
-                if not result.success:
-                    results.append({"server_id": server.id, "server": server.name, "success": False, "error": result.error})
-                    continue
-
-                all_lines = result.content.splitlines()
-                total_lines = len(all_lines)
-                lines = all_lines
-
-                # Zeitfenster-Filter (wenn angegeben)
-                if t_start and t_end:
-                    lines = _filter_lines_to_window(lines, t_start, t_end)
-
-                # Suchbegriff-Filter
-                if search_term:
-                    term_lower = search_term.lower()
-                    lines = [l for l in lines if term_lower in l.lower()]
-
-                truncated = len(lines) > _MAX_LINES_PER_SERVER
-                if truncated:
-                    lines = lines[-_MAX_LINES_PER_SERVER:]
-
-                content = "\n".join(lines) if lines else ""
-                if len(content) > _MAX_CONTENT_CHARS:
-                    content = content[-_MAX_CONTENT_CHARS:]
-                    truncated = True
-
-                # Error-Summary auf Original-Content (nicht gefiltert)
-                err_summary = _extract_error_summary(result.content, server.name)
-
-                results.append({
-                    "server_id": server.id,
-                    "server": server.name,
-                    "success": True,
-                    "total_lines": total_lines,
-                    "matching_lines": len(lines),
-                    "truncated": truncated,
-                    "error_summary": err_summary,
-                    "content": content,
-                })
-            except Exception as e:
-                results.append({"server_id": server.id, "server": server.name, "success": False, "error": f"{type(e).__name__}: {e}"})
+        for server, fetch_result in zip(servers_to_try, fetch_results):
+            if isinstance(fetch_result, BaseException):
+                results.append({"server_id": server.id, "server": server.name, "success": False, "error": f"{type(fetch_result).__name__}: {fetch_result}"})
                 continue
+
+            if not fetch_result.success:
+                results.append({"server_id": server.id, "server": server.name, "success": False, "error": fetch_result.error})
+                continue
+
+            all_lines = fetch_result.content.splitlines()
+            total_lines = len(all_lines)
+            lines = all_lines
+
+            # Zeitfenster-Filter (wenn angegeben)
+            if t_start and t_end:
+                lines = _filter_lines_to_window(lines, t_start, t_end)
+
+            # Suchbegriff-Filter
+            if search_term:
+                term_lower = search_term.lower()
+                lines = [l for l in lines if term_lower in l.lower()]
+
+            truncated = len(lines) > _MAX_LINES_PER_SERVER
+            if truncated:
+                lines = lines[-_MAX_LINES_PER_SERVER:]
+
+            content = "\n".join(lines) if lines else ""
+            if len(content) > _MAX_CONTENT_CHARS:
+                content = content[-_MAX_CONTENT_CHARS:]
+                truncated = True
+
+            # Error-Summary auf Original-Content (nicht gefiltert)
+            err_summary = _extract_error_summary(fetch_result.content, server.name)
+
+            results.append({
+                "server_id": server.id,
+                "server": server.name,
+                "success": True,
+                "total_lines": total_lines,
+                "matching_lines": len(lines),
+                "truncated": truncated,
+                "error_summary": err_summary,
+                "content": content,
+            })
 
         found = [r for r in results if r["success"] and r.get("matching_lines", 0) > 0]
         all_errors = [r["error"] for r in results if not r["success"]]
