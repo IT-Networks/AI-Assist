@@ -9,6 +9,10 @@ from typing import Any
 
 from app.agent.tools import Tool, ToolCategory, ToolParameter, ToolResult, ToolRegistry
 
+# Max Zeichen pro Server-Content im Tool-Result (verhindert Kontextfenster-Überflutung)
+_MAX_CONTENT_CHARS = 30_000
+_MAX_LINES_PER_SERVER = 2000
+
 
 def _read_file_sync(path: str) -> str:
     """Synchrones Datei-Lesen für run_in_executor."""
@@ -89,20 +93,29 @@ def register_log_tools(registry: ToolRegistry) -> int:
                     continue
 
                 lines = result.content.splitlines()
+                total_lines = len(lines)
 
                 if search_term:
                     term_lower = search_term.lower()
-                    matching = [l for l in lines if term_lower in l.lower()]
-                else:
-                    matching = lines
+                    lines = [l for l in lines if term_lower in l.lower()]
+
+                truncated = len(lines) > _MAX_LINES_PER_SERVER
+                if truncated:
+                    lines = lines[-_MAX_LINES_PER_SERVER:]
+
+                content = "\n".join(lines)
+                if len(content) > _MAX_CONTENT_CHARS:
+                    content = content[-_MAX_CONTENT_CHARS:]
+                    truncated = True
 
                 results.append({
                     "server_id": server.id,
                     "server": server.name,
                     "success": True,
-                    "lines_count": len(lines),
-                    "matching_lines_count": len(matching),
-                    "content": "\n".join(matching) if search_term else result.content,
+                    "total_lines": total_lines,
+                    "returned_lines": len(lines),
+                    "truncated": truncated,
+                    "content": content,
                 })
             except Exception as e:
                 results.append({
@@ -190,7 +203,9 @@ def register_log_tools(registry: ToolRegistry) -> int:
                     results.append({"server_id": server.id, "server": server.name, "success": False, "error": result.error})
                     continue
 
-                lines = result.content.splitlines()
+                all_lines = result.content.splitlines()
+                total_lines = len(all_lines)
+                lines = all_lines
 
                 # Zeitfenster-Filter (wenn angegeben)
                 if t_start and t_end:
@@ -201,12 +216,23 @@ def register_log_tools(registry: ToolRegistry) -> int:
                     term_lower = search_term.lower()
                     lines = [l for l in lines if term_lower in l.lower()]
 
+                truncated = len(lines) > _MAX_LINES_PER_SERVER
+                if truncated:
+                    lines = lines[-_MAX_LINES_PER_SERVER:]
+
+                content = "\n".join(lines) if lines else ""
+                if len(content) > _MAX_CONTENT_CHARS:
+                    content = content[-_MAX_CONTENT_CHARS:]
+                    truncated = True
+
                 results.append({
                     "server_id": server.id,
                     "server": server.name,
                     "success": True,
+                    "total_lines": total_lines,
                     "matching_lines": len(lines),
-                    "content": "\n".join(lines) if lines else "",
+                    "truncated": truncated,
+                    "content": content,
                 })
             except Exception as e:
                 results.append({"server_id": server.id, "server": server.name, "success": False, "error": f"{type(e).__name__}: {e}"})

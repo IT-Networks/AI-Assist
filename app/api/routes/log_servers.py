@@ -317,23 +317,31 @@ async def download_logs(req: DownloadRequest) -> Dict[str, Any]:
 
     results = []
     for server in stage.servers:
-        result = await _fetch_server_logs(server, tail)
-        if result.success:
-            lines = result.content.splitlines()
-            results.append({
-                "server_id": server.id,
-                "server": server.name,
-                "success": True,
-                "lines_count": len(lines),
-                "content": result.content,
-                "lines": lines,
-            })
-        else:
+        try:
+            result = await _fetch_server_logs(server, tail)
+            if result.success:
+                lines = result.content.splitlines()
+                results.append({
+                    "server_id": server.id,
+                    "server": server.name,
+                    "success": True,
+                    "lines_count": len(lines),
+                    "content": result.content,
+                    "lines": lines,
+                })
+            else:
+                results.append({
+                    "server_id": server.id,
+                    "server": server.name,
+                    "success": False,
+                    "error": result.error,
+                })
+        except Exception as e:
             results.append({
                 "server_id": server.id,
                 "server": server.name,
                 "success": False,
-                "error": result.error,
+                "error": f"Unerwarteter Fehler: {type(e).__name__}: {e}",
             })
 
     successful = [r for r in results if r["success"]]
