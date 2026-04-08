@@ -479,6 +479,15 @@ class MQQueue(BaseModel):
     verify_ssl: bool = True
     timeout_seconds: int = 30
 
+    @property
+    def effective_url(self) -> str:
+        """URL mit http:// Prefix falls kein Schema angegeben."""
+        if not self.url:
+            return self.url
+        if self.url.startswith(("http://", "https://")):
+            return self.url
+        return f"http://{self.url}"
+
 
 class MQConfig(BaseModel):
     """MQ-Series Konfiguration."""
@@ -573,9 +582,18 @@ class LogServer(BaseModel):
     """Ein einzelner Log-Server innerhalb einer Stage."""
     id: str = ""
     name: str = ""
-    url: str = ""                  # Base-URL des Servers (z.B. http://host:port)
+    url: str = ""                  # Base-URL des Servers (z.B. host:port oder http://host:port)
     description: str = ""
     verify_ssl: bool = True
+
+    @property
+    def effective_url(self) -> str:
+        """URL mit http:// Prefix falls kein Schema angegeben."""
+        if not self.url:
+            return self.url
+        if self.url.startswith(("http://", "https://")):
+            return self.url
+        return f"http://{self.url}"
 
 
 class LogStage(BaseModel):

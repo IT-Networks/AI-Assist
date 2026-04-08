@@ -69,7 +69,7 @@ def register_mq_tools(registry: ToolRegistry) -> int:
         merged_headers.update(extra_headers)
         try:
             client = get_mq_client(queue.verify_ssl, queue.timeout_seconds)
-            resp = await client.get(queue.url, headers=merged_headers)
+            resp = await client.get(queue.effective_url, headers=merged_headers)
             text = resp.text
             try:
                 data = resp.json()
@@ -142,7 +142,7 @@ def register_mq_tools(registry: ToolRegistry) -> int:
             client = get_mq_client(queue.verify_ssl, queue.timeout_seconds)
             resp = await client.request(
                 method=method,
-                url=queue.url,
+                url=queue.effective_url,
                 headers=merged_headers,
                 content=body.encode() if body else None,
             )

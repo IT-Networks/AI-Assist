@@ -68,7 +68,7 @@ async def _http_request(
     async with httpx.AsyncClient(verify=queue.verify_ssl, timeout=timeout) as client:
         resp = await client.request(
             method=method,
-            url=queue.url,
+            url=queue.effective_url,
             headers=headers,
             content=content,
         )

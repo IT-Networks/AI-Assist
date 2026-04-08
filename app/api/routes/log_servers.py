@@ -219,7 +219,7 @@ async def _fetch_server_logs(
 
     credentials: (username, password) – wenn None, wird aus Config geladen.
     """
-    base = server.url.rstrip("/")
+    base = server.effective_url.rstrip("/")
 
     if credentials:
         username, password = credentials
