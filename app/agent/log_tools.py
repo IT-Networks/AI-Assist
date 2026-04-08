@@ -11,9 +11,6 @@ from typing import Any, Dict, List
 
 from app.agent.tools import Tool, ToolCategory, ToolParameter, ToolResult, ToolRegistry
 
-# Max Zeichen pro Server-Content im Tool-Result (verhindert Kontextfenster-Überflutung)
-_MAX_CONTENT_CHARS = 30_000
-_MAX_LINES_PER_SERVER = 2000
 
 # Regex für Log-Level-Erkennung
 _LOG_LEVEL_RE = re.compile(r"\b(FATAL|ERROR|WARN(?:ING)?|SEVERE|EXCEPTION)\b", re.IGNORECASE)
@@ -157,15 +154,7 @@ def register_log_tools(registry: ToolRegistry) -> int:
                 term_lower = search_term.lower()
                 lines = [l for l in lines if term_lower in l.lower()]
 
-            truncated = len(lines) > _MAX_LINES_PER_SERVER
-            if truncated:
-                lines = lines[-_MAX_LINES_PER_SERVER:]
-
-            content = "\n".join(lines)
-            if len(content) > _MAX_CONTENT_CHARS:
-                content = content[-_MAX_CONTENT_CHARS:]
-                truncated = True
-
+            content = "\n".join(lines) if search_term else fetch_result.content
             err_summary = _extract_error_summary(fetch_result.content, server.name)
 
             results.append({
@@ -174,7 +163,6 @@ def register_log_tools(registry: ToolRegistry) -> int:
                 "success": True,
                 "total_lines": total_lines,
                 "returned_lines": len(lines),
-                "truncated": truncated,
                 "error_summary": err_summary,
                 "content": content,
             })
@@ -298,14 +286,7 @@ def register_log_tools(registry: ToolRegistry) -> int:
                 term_lower = search_term.lower()
                 lines = [l for l in lines if term_lower in l.lower()]
 
-            truncated = len(lines) > _MAX_LINES_PER_SERVER
-            if truncated:
-                lines = lines[-_MAX_LINES_PER_SERVER:]
-
             content = "\n".join(lines) if lines else ""
-            if len(content) > _MAX_CONTENT_CHARS:
-                content = content[-_MAX_CONTENT_CHARS:]
-                truncated = True
 
             # Error-Summary auf Original-Content (nicht gefiltert)
             err_summary = _extract_error_summary(fetch_result.content, server.name)
@@ -316,7 +297,6 @@ def register_log_tools(registry: ToolRegistry) -> int:
                 "success": True,
                 "total_lines": total_lines,
                 "matching_lines": len(lines),
-                "truncated": truncated,
                 "error_summary": err_summary,
                 "content": content,
             })
