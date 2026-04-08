@@ -81,22 +81,24 @@ class TestStripHtml:
         assert "INFO" in matching[0]
 
 
-# ── _extract_error_summary Tests ──────────────────────────────────────────────
+# ── _extract_log_summary Tests ──────────────────────────────────────────────
 
-class TestExtractErrorSummary:
-    """Tests für _extract_error_summary – zählt Log-Level im Content."""
+class TestExtractLogSummary:
+    """Tests für _extract_log_summary – zählt ALLE Log-Levels im Content."""
 
     def _extract(self, content: str, server: str = "test-srv") -> dict:
-        from app.agent.log_tools import _extract_error_summary
-        return _extract_error_summary(content, server)
+        from app.agent.log_tools import _extract_log_summary
+        return _extract_log_summary(content, server)
 
-    def test_counts_error_levels(self):
+    def test_counts_all_levels(self):
         content = "10:15 ERROR fail1\n10:16 ERROR fail2\n10:17 WARN slow\n10:18 INFO ok"
         result = self._extract(content)
         assert result["level_counts"]["ERROR"] == 2
         assert result["level_counts"]["WARN"] == 1
+        assert result["level_counts"]["INFO"] == 1
         assert result["total_errors"] == 2
         assert result["total_warnings"] == 1
+        assert result["total_info"] == 1
 
     def test_case_insensitive(self):
         content = "10:15 error lowercase\n10:16 Error mixed\n10:17 ERROR upper"
@@ -108,7 +110,7 @@ class TestExtractErrorSummary:
         result = self._extract(content)
         assert result["total_errors"] == 0
         assert result["total_warnings"] == 0
-        assert len(result["error_entries"]) == 0
+        assert len(result["notable_entries"]) == 0
 
     def test_fatal_and_severe(self):
         content = "10:15 FATAL crash\n10:16 SEVERE bad"
@@ -125,22 +127,31 @@ class TestExtractErrorSummary:
     def test_error_entries_have_timestamp(self):
         content = "2026-04-08 10:15:03 ERROR fail with timestamp"
         result = self._extract(content)
-        assert len(result["error_entries"]) == 1
-        assert result["error_entries"][0]["timestamp"] == "2026-04-08 10:15:03"
-        assert result["error_entries"][0]["server"] == "test-srv"
+        assert len(result["notable_entries"]) == 1
+        assert result["notable_entries"][0]["timestamp"] == "2026-04-08 10:15:03"
+        assert result["notable_entries"][0]["server"] == "test-srv"
 
     def test_max_50_error_entries(self):
         content = "\n".join(f"10:{i:02d} ERROR err{i}" for i in range(100))
         result = self._extract(content)
-        assert len(result["error_entries"]) == 50
+        assert len(result["notable_entries"]) == 50
         assert result["level_counts"]["ERROR"] == 100  # Counts sind korrekt
 
-    def test_info_lines_not_in_error_entries(self):
-        """INFO-Zeilen werden NICHT als error_entries erfasst."""
+    def test_info_lines_not_in_notable_entries(self):
+        """INFO-Zeilen werden gezählt aber NICHT als notable_entries erfasst."""
         content = "10:15 INFO normal\n10:16 ERROR bad"
         result = self._extract(content)
-        assert len(result["error_entries"]) == 1
-        assert "ERROR" in result["error_entries"][0]["level"]
+        assert result["level_counts"]["INFO"] == 1
+        assert result["total_info"] == 1
+        assert len(result["notable_entries"]) == 1
+        assert "ERROR" in result["notable_entries"][0]["level"]
+
+    def test_debug_counted(self):
+        """DEBUG-Zeilen werden gezählt."""
+        content = "10:15 DEBUG detail\n10:16 INFO normal\n10:17 DEBUG more"
+        result = self._extract(content)
+        assert result["total_debug"] == 2
+        assert result["total_info"] == 1
 
     def test_empty_content(self):
         result = self._extract("")

@@ -16,18 +16,22 @@ _MAX_CONTENT_CHARS = 30_000
 _MAX_CONTENT_LINES = 2000
 
 
-# Regex für Log-Level-Erkennung
-_LOG_LEVEL_RE = re.compile(r"\b(FATAL|ERROR|WARN(?:ING)?|SEVERE|EXCEPTION)\b", re.IGNORECASE)
+# Regex für Log-Level-Erkennung – ALLE Levels, nicht nur Fehler
+_LOG_LEVEL_RE = re.compile(
+    r"\b(FATAL|ERROR|WARN(?:ING)?|SEVERE|EXCEPTION|INFO|DEBUG|TRACE|AUDIT|CONFIG)\b",
+    re.IGNORECASE,
+)
+_ERROR_LEVELS = {"FATAL", "ERROR", "SEVERE", "EXCEPTION"}
 _TIMESTAMP_RE = re.compile(
     r"(\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}|\d{2}\.\d{2}\.\d{4} \d{2}:\d{2}:\d{2})"
 )
 
 
-def _extract_error_summary(content: str, server_name: str) -> Dict[str, Any]:
-    """Extrahiert eine Fehler-Zusammenfassung aus Log-Content."""
+def _extract_log_summary(content: str, server_name: str) -> Dict[str, Any]:
+    """Extrahiert eine Zusammenfassung ALLER Log-Levels aus dem Content."""
     lines = content.splitlines()
     level_counts: Counter = Counter()
-    errors: List[Dict[str, str]] = []
+    notable_entries: List[Dict[str, str]] = []
 
     for line in lines:
         m = _LOG_LEVEL_RE.search(line)
@@ -38,19 +42,21 @@ def _extract_error_summary(content: str, server_name: str) -> Dict[str, Any]:
             level = "WARN"
         level_counts[level] += 1
 
-        # Nur ERROR/FATAL/SEVERE/EXCEPTION als Fehler-Einträge sammeln (max 50)
-        if level in ("ERROR", "FATAL", "SEVERE", "EXCEPTION") and len(errors) < 50:
+        # ERROR/FATAL/SEVERE/EXCEPTION als notable entries (max 50)
+        if level in _ERROR_LEVELS and len(notable_entries) < 50:
             ts_match = _TIMESTAMP_RE.search(line)
             timestamp = ts_match.group(1) if ts_match else ""
-            # Erste 200 Zeichen der Zeile als Message
             msg = line.strip()[:200]
-            errors.append({"timestamp": timestamp, "server": server_name, "level": level, "message": msg})
+            notable_entries.append({"timestamp": timestamp, "server": server_name, "level": level, "message": msg})
 
     return {
         "level_counts": dict(level_counts),
-        "total_errors": sum(v for k, v in level_counts.items() if k in ("ERROR", "FATAL", "SEVERE", "EXCEPTION")),
+        "total_lines": len(lines),
+        "total_errors": sum(v for k, v in level_counts.items() if k in _ERROR_LEVELS),
         "total_warnings": level_counts.get("WARN", 0),
-        "error_entries": errors,
+        "total_info": level_counts.get("INFO", 0),
+        "total_debug": level_counts.get("DEBUG", 0),
+        "notable_entries": notable_entries,
     }
 
 
@@ -155,7 +161,7 @@ def register_log_tools(registry: ToolRegistry) -> int:
             total_lines = len(all_lines)
 
             # Analyse auf VOLLEM Content
-            err_summary = _extract_error_summary(fetch_result.content, server.name)
+            err_summary = _extract_log_summary(fetch_result.content, server.name)
 
             # Filter (optional)
             lines = all_lines
@@ -176,21 +182,21 @@ def register_log_tools(registry: ToolRegistry) -> int:
                 "total_lines": total_lines,
                 "returned_lines": len(lines),
                 "content_truncated": len(lines) > _MAX_CONTENT_LINES,
-                "error_summary": err_summary,
+                "log_summary": err_summary,
                 "content": content,
             })
 
         successful = [r for r in results if r["success"]]
         all_errors = [r["error"] for r in results if not r["success"]]
 
-        # Gesamt-Fehler-Übersicht über alle Server
+        # Gesamt-Übersicht über alle Server (ALLE Log-Levels)
         total_level_counts: Counter = Counter()
-        all_error_entries: list = []
+        all_notable: list = []
         for r in successful:
-            summary = r.get("error_summary", {})
+            summary = r.get("log_summary", {})
             for level, cnt in summary.get("level_counts", {}).items():
                 total_level_counts[level] += cnt
-            all_error_entries.extend(summary.get("error_entries", []))
+            all_notable.extend(summary.get("notable_entries", []))
 
         return ToolResult(
             success=bool(successful),
@@ -198,11 +204,13 @@ def register_log_tools(registry: ToolRegistry) -> int:
                 "stage": stage.name,
                 "servers_total": len(servers_to_try),
                 "servers_successful": len(successful),
-                "error_overview": {
+                "log_overview": {
                     "level_counts": dict(total_level_counts),
-                    "total_errors": sum(v for k, v in total_level_counts.items() if k in ("ERROR", "FATAL", "SEVERE", "EXCEPTION")),
+                    "total_errors": sum(v for k, v in total_level_counts.items() if k in _ERROR_LEVELS),
                     "total_warnings": total_level_counts.get("WARN", 0),
-                    "error_entries": all_error_entries[:100],
+                    "total_info": total_level_counts.get("INFO", 0),
+                    "total_debug": total_level_counts.get("DEBUG", 0),
+                    "notable_entries": all_notable[:100],
                 },
                 "results": results,
             },
@@ -292,7 +300,7 @@ def register_log_tools(registry: ToolRegistry) -> int:
             total_lines = len(all_lines)
 
             # Analyse auf VOLLEM Content
-            err_summary = _extract_error_summary(fetch_result.content, server.name)
+            err_summary = _extract_log_summary(fetch_result.content, server.name)
 
             # Filter
             lines = all_lines
@@ -316,23 +324,23 @@ def register_log_tools(registry: ToolRegistry) -> int:
                 "total_lines": total_lines,
                 "matching_lines": matched_count,
                 "content_truncated": matched_count > _MAX_CONTENT_LINES,
-                "error_summary": err_summary,
+                "log_summary": err_summary,
                 "content": content,
             })
 
         found = [r for r in results if r["success"] and r.get("matching_lines", 0) > 0]
         all_errors = [r["error"] for r in results if not r["success"]]
 
-        # Gesamt-Fehler-Übersicht
+        # Gesamt-Übersicht (ALLE Log-Levels)
         total_level_counts: Counter = Counter()
-        all_error_entries: list = []
+        all_notable: list = []
         for r in results:
             if not r.get("success"):
                 continue
-            summary = r.get("error_summary", {})
+            summary = r.get("log_summary", {})
             for level, cnt in summary.get("level_counts", {}).items():
                 total_level_counts[level] += cnt
-            all_error_entries.extend(summary.get("error_entries", []))
+            all_notable.extend(summary.get("notable_entries", []))
 
         return ToolResult(
             success=bool(found),
@@ -340,11 +348,13 @@ def register_log_tools(registry: ToolRegistry) -> int:
                 "stage": stage.name,
                 "servers_total": len(servers_to_try),
                 "servers_with_matches": len(found),
-                "error_overview": {
+                "log_overview": {
                     "level_counts": dict(total_level_counts),
-                    "total_errors": sum(v for k, v in total_level_counts.items() if k in ("ERROR", "FATAL", "SEVERE", "EXCEPTION")),
+                    "total_errors": sum(v for k, v in total_level_counts.items() if k in _ERROR_LEVELS),
                     "total_warnings": total_level_counts.get("WARN", 0),
-                    "error_entries": all_error_entries[:100],
+                    "total_info": total_level_counts.get("INFO", 0),
+                    "total_debug": total_level_counts.get("DEBUG", 0),
+                    "notable_entries": all_notable[:100],
                 },
                 "results": results,
             },

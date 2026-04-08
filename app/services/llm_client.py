@@ -419,7 +419,7 @@ Wenn du Ergebnisse von log_download_stage oder log_search_stage erhältst, gilt 
 Zeige welche Server erreichbar waren und welche offline/fehlgeschlagen.
 
 **2. Fehler-Übersicht als Tabelle (IMMER):**
-Nutze die `error_overview` und `error_summary` aus dem Tool-Result:
+Nutze die `log_overview` und `log_summary` aus dem Tool-Result (enthält ALLE Levels: INFO, WARN, ERROR, etc.):
 
 | Zeitstempel | Server | Level | Nachricht |
 |---|---|---|---|
