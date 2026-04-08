@@ -199,21 +199,33 @@ class _LogLinkParser(HTMLParser):
 
 
 def _strip_html(text: str) -> str:
-    """Entfernt HTML-Tags aus dem Text und gibt reinen Plaintext zurück."""
+    """Extrahiert Log-Einträge aus der HTML-Log-Seite.
+
+    Die log.jsp liefert eine HTML-Seite mit einem <p class="logfilecontent">
+    Element. Darin sind Log-Einträge durch <br> getrennt.
+    """
     if not text or "<" not in text:
         return text
-    # Nur bereinigen wenn es tatsächlich HTML ist
-    if not re.search(r"<(html|body|pre|table|div|tr|td)\b", text, re.IGNORECASE):
-        return text
-    # <pre>-Inhalt extrahieren falls vorhanden (häufigstes Log-Format)
-    pre_match = re.search(r"<pre[^>]*>(.*?)</pre>", text, re.DOTALL | re.IGNORECASE)
-    if pre_match:
-        text = pre_match.group(1)
-    # Alle HTML-Tags entfernen
-    text = re.sub(r"<[^>]+>", "", text)
+
+    # <p class="logfilecontent"> Inhalt extrahieren
+    p_match = re.search(
+        r'<p[^>]*class=["\']logfilecontent["\'][^>]*>(.*?)</p>',
+        text, re.DOTALL | re.IGNORECASE,
+    )
+    if p_match:
+        content = p_match.group(1)
+    else:
+        # Fallback: ganzen Body nehmen wenn kein logfilecontent gefunden
+        body_match = re.search(r"<body[^>]*>(.*?)</body>", text, re.DOTALL | re.IGNORECASE)
+        content = body_match.group(1) if body_match else text
+
+    # <br> und <br/> als Zeilenumbrüche behandeln
+    content = re.sub(r"<br\s*/?>", "\n", content, flags=re.IGNORECASE)
+    # Restliche HTML-Tags entfernen
+    content = re.sub(r"<[^>]+>", "", content)
     # HTML-Entities decodieren
-    text = text.replace("&lt;", "<").replace("&gt;", ">").replace("&amp;", "&").replace("&nbsp;", " ").replace("&quot;", '"')
-    return text.strip()
+    content = content.replace("&lt;", "<").replace("&gt;", ">").replace("&amp;", "&").replace("&nbsp;", " ").replace("&quot;", '"')
+    return content.strip()
 
 
 class _FetchResult:
