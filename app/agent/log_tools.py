@@ -284,7 +284,8 @@ def register_log_tools(registry: ToolRegistry) -> int:
                     content = content[-_MAX_CONTENT_CHARS:]
                     truncated = True
 
-                err_summary = _extract_error_summary(content, server.name) if content else {}
+                # Error-Summary auf Original-Content (nicht gefiltert)
+                err_summary = _extract_error_summary(result.content, server.name)
 
                 results.append({
                     "server_id": server.id,
