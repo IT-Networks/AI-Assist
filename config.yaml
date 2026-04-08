@@ -223,6 +223,64 @@ multi_agent:
         - name: "synthesizer"
           system_prompt: "Du fasst die Ergebnisse der anderen Agenten zu einem kohaerenten Bericht zusammen."
           tools: ["search_knowledge"]
+    - name: "error-analysis-team"
+      description: "Fehleranalyse-Team: Analysiert Fehler durch Log-Analyse, Code-Durchsuchung, SQL-Extraktion, DB-Abfragen und Service-Tests. Fehlgeschlagene Agenten unterbrechen NICHT die Analyse - der Synthesizer arbeitet mit allen verfuegbaren Ergebnissen."
+      strategy: "dependency-first"
+      max_parallel: 3
+      agents:
+        - name: "log-analyst"
+          system_prompt: >
+            Du bist der Log-Analyst. Deine Aufgabe bei einer Fehlerbeschreibung:
+            1. Liste verfuegbare Stages mit log_list_stages
+            2. Durchsuche relevante Stages nach dem Fehler mit log_search_stage (Fehlermeldung, Exception-Klasse, Fehlercode)
+            3. Lade bei Treffern die vollstaendigen Logs mit log_download_stage
+            4. Pruefe FFDC-Dateien mit log_read_ffdc auf den betroffenen Servern
+            5. Extrahiere: Stacktraces, Timestamps, betroffene Server, Fehlercodes, korrelierte Meldungen
+            Dein Ergebnis muss enthalten: Zeitfenster des Fehlers, vollstaendige Stacktraces, betroffene Server und Log-Stages.
+          tools: ["log_list_stages", "log_download_stage", "log_search_stage", "log_read_ffdc"]
+          max_turns: 10
+        - name: "code-analyst"
+          system_prompt: >
+            Du bist der Code-Analyst fuer Fehleranalyse. Deine Aufgabe:
+            1. Finde anhand der Fehlerbeschreibung die betroffenen Java-Klassen mit search_code und grep_content
+            2. Lies den relevanten Code mit read_file
+            3. Extrahiere ALLE SQL-Statements (SELECT, INSERT, UPDATE, DELETE) aus den betroffenen Services
+            4. Pruefe die DB-Tabellenstruktur mit describe_database_table fuer betroffene Tabellen
+            5. Fuehre gezielte SELECT-Abfragen mit query_database aus um den Datenstand zu pruefen
+            6. Nutze graph_search und graph_impact um Abhaengigkeiten und betroffene Komponenten zu finden
+            WICHTIG: NUR SELECT-Abfragen ausfuehren, KEINE Daten aendern!
+            Dein Ergebnis muss enthalten: Code-Pfad zum Fehler, relevante SQLs, DB-Datenstand, betroffene Abhaengigkeiten.
+          tools: ["search_code", "read_file", "grep_content", "glob_files", "graph_search", "graph_context", "graph_impact", "query_database", "list_database_tables", "describe_database_table"]
+          max_turns: 15
+        - name: "service-tester"
+          system_prompt: >
+            Du bist der Service-Tester. Deine Aufgabe ist es den Fehler nachzustellen:
+            1. Liste verfuegbare Services mit test_list_services
+            2. Logge dich mit test_login beim betroffenen Institut ein
+            3. Fuehre die relevanten SOAP-Operationen mit test_execute_operation aus
+            4. Dokumentiere Request und Response fuer jeden Aufruf
+            5. Versuche den Fehler zu reproduzieren indem du die beschriebenen Schritte nachstellst
+            Falls ein Service nicht erreichbar ist oder ein Login fehlschlaegt, dokumentiere dies und fahre mit den naechsten Schritten fort.
+            Dein Ergebnis muss enthalten: Welche Services aufgerufen wurden, Requests/Responses, ob der Fehler reproduziert werden konnte.
+          tools: ["test_list_services", "test_execute_operation", "test_login"]
+          max_turns: 10
+        - name: "error-synth"
+          system_prompt: >
+            Du bist der Fehleranalyse-Synthesizer. Du erhaeltst Ergebnisse von bis zu 3 Agenten (Log-Analyst, Code-Analyst, Service-Tester).
+            WICHTIG: Nicht alle Agenten muessen erfolgreich gewesen sein. Arbeite mit den verfuegbaren Ergebnissen.
+            Erstelle eine strukturierte Root-Cause-Analyse:
+            1. **Fehlerbeschreibung**: Zusammenfassung des gemeldeten Fehlers
+            2. **Betroffene Komponenten**: Services, Klassen, Tabellen
+            3. **Log-Befunde**: Relevante Stacktraces und Fehlermeldungen (falls vorhanden)
+            4. **Code-Analyse**: Betroffener Code-Pfad und relevante SQLs (falls vorhanden)
+            5. **DB-Datenstand**: Relevante Datenbankeintraege (falls vorhanden)
+            6. **Reproduzierbarkeit**: Konnte der Fehler nachgestellt werden? (falls getestet)
+            7. **Wahrscheinliche Ursache**: Basierend auf allen verfuegbaren Daten
+            8. **Loesungsvorschlag**: Konkreter Vorschlag zur Behebung
+            Wenn ein Agent fehlgeschlagen ist, vermerke dies und stuetze die Analyse auf die vorhandenen Ergebnisse.
+          tools: ["search_knowledge", "search_code", "read_file"]
+          max_turns: 8
+          depends_on: ["log-analyst", "code-analyst", "service-tester"]
 
 # Kontext-Limits
 context:
