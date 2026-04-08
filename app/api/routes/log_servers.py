@@ -62,6 +62,11 @@ async def update_config(req: LogServerConfigRequest) -> Dict[str, Any]:
     """Globale Log-Server-Konfiguration aktualisieren (credential_ref, default_tail)."""
     settings.log_servers.credential_ref = req.credential_ref
     settings.log_servers.default_tail = max(0, min(4, req.default_tail))
+
+    # Config persistieren
+    from app.api.routes.settings import _save_config
+    _save_config()
+
     return {
         "credential_ref": settings.log_servers.credential_ref,
         "default_tail": settings.log_servers.default_tail,
