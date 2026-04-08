@@ -276,14 +276,12 @@ async def _fetch_server_logs(server: LogServer, tail: int) -> _FetchResult:
                 preview = log_page_resp.text[:500].replace("\n", " ")
                 return _FetchResult(error=f"fileId nicht gefunden: kein Link mit Text 'ospe_ope.log' auf log.jsp. Seiten-Preview: {preview}")
 
-            # 3. Log-Datei downloaden – href mit base-URL kombinieren
+            # 3. Log-Datei downloaden – href ist relativ zu /jsp/ospe/debug/
             log_href = parser.log_href
             if log_href.startswith("http"):
                 download_url = log_href
-            elif log_href.startswith("/"):
-                download_url = f"{base}{log_href}"
             else:
-                download_url = f"{base}/{log_href}"
+                download_url = f"{base}/jsp/ospe/debug/{log_href.lstrip('/')}"
             sep = "&" if "?" in download_url else "?"
             download_url = f"{download_url}{sep}tail=tail{tail}"
 
