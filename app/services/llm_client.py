@@ -419,12 +419,11 @@ Gleiche Fehler zusammenfassen mit Anzahl.
 
 **3. Mermaid-Diagramme (PFLICHT, nicht optional):**
 
-WICHTIG: Verwende Mermaid v11 Syntax. Bei pie MUSS "title" auf einer EIGENEN Zeile stehen.
+Verwende Mermaid v11.4.0 kompatible Syntax. Exakt diese Formate verwenden:
 
 IMMER mindestens ein Pie-Chart der Fehlerverteilung erstellen:
 ```mermaid
-pie
-    title Fehlerverteilung
+pie title Fehlerverteilung
     "ERROR" : 12
     "WARN" : 5
     "FATAL" : 1
@@ -432,19 +431,18 @@ pie
 
 Bei mehreren Servern IMMER Fehler pro Server:
 ```mermaid
-pie
-    title Fehler pro Server
+pie title Fehler pro Server
     "Server-1" : 8
     "Server-2" : 3
 ```
 
-Bei Fehlern mit Zeitstempeln einen Zeitverlauf als xychart-beta:
+Bei Fehlern mit Zeitstempeln einen Zeitverlauf:
 ```mermaid
-xychart-beta
-    title "Fehler pro Stunde"
-    x-axis ["08:00", "09:00", "10:00", "11:00"]
-    y-axis "Anzahl" 0 --> 20
-    bar [2, 5, 12, 3]
+timeline
+    title Fehlerverlauf
+    10:15 : ERROR NullPointerException
+    10:22 : WARN Connection timeout
+    10:45 : ERROR OutOfMemoryError
 ```
 
 **4. Neutrale Formulierung:**

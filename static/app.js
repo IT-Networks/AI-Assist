@@ -7673,7 +7673,7 @@ async function loadMermaid() {
   _mermaidLoading = true;
   try {
     const script = document.createElement('script');
-    script.src = 'https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js';
+    script.src = 'https://cdn.jsdelivr.net/npm/mermaid@11.4.0/dist/mermaid.min.js';
     script.onload = () => {
       window.mermaid.initialize({
         startOnLoad: false,
