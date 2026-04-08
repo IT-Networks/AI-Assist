@@ -5,13 +5,52 @@ Wird beim Startup registriert wenn log_servers aktiviert ist.
 """
 
 import asyncio
-from typing import Any
+import re
+from collections import Counter
+from typing import Any, Dict, List
 
 from app.agent.tools import Tool, ToolCategory, ToolParameter, ToolResult, ToolRegistry
 
 # Max Zeichen pro Server-Content im Tool-Result (verhindert Kontextfenster-Überflutung)
 _MAX_CONTENT_CHARS = 30_000
 _MAX_LINES_PER_SERVER = 2000
+
+# Regex für Log-Level-Erkennung
+_LOG_LEVEL_RE = re.compile(r"\b(FATAL|ERROR|WARN(?:ING)?|SEVERE|EXCEPTION)\b", re.IGNORECASE)
+_TIMESTAMP_RE = re.compile(
+    r"(\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}|\d{2}\.\d{2}\.\d{4} \d{2}:\d{2}:\d{2})"
+)
+
+
+def _extract_error_summary(content: str, server_name: str) -> Dict[str, Any]:
+    """Extrahiert eine Fehler-Zusammenfassung aus Log-Content."""
+    lines = content.splitlines()
+    level_counts: Counter = Counter()
+    errors: List[Dict[str, str]] = []
+
+    for line in lines:
+        m = _LOG_LEVEL_RE.search(line)
+        if not m:
+            continue
+        level = m.group(1).upper()
+        if level == "WARNING":
+            level = "WARN"
+        level_counts[level] += 1
+
+        # Nur ERROR/FATAL/SEVERE/EXCEPTION als Fehler-Einträge sammeln (max 50)
+        if level in ("ERROR", "FATAL", "SEVERE", "EXCEPTION") and len(errors) < 50:
+            ts_match = _TIMESTAMP_RE.search(line)
+            timestamp = ts_match.group(1) if ts_match else ""
+            # Erste 200 Zeichen der Zeile als Message
+            msg = line.strip()[:200]
+            errors.append({"timestamp": timestamp, "server": server_name, "level": level, "message": msg})
+
+    return {
+        "level_counts": dict(level_counts),
+        "total_errors": sum(v for k, v in level_counts.items() if k in ("ERROR", "FATAL", "SEVERE", "EXCEPTION")),
+        "total_warnings": level_counts.get("WARN", 0),
+        "error_entries": errors,
+    }
 
 
 def _read_file_sync(path: str) -> str:
@@ -108,6 +147,9 @@ def register_log_tools(registry: ToolRegistry) -> int:
                     content = content[-_MAX_CONTENT_CHARS:]
                     truncated = True
 
+                # Fehler-Zusammenfassung extrahieren
+                err_summary = _extract_error_summary(result.content, server.name)
+
                 results.append({
                     "server_id": server.id,
                     "server": server.name,
@@ -115,6 +157,7 @@ def register_log_tools(registry: ToolRegistry) -> int:
                     "total_lines": total_lines,
                     "returned_lines": len(lines),
                     "truncated": truncated,
+                    "error_summary": err_summary,
                     "content": content,
                 })
             except Exception as e:
@@ -128,12 +171,28 @@ def register_log_tools(registry: ToolRegistry) -> int:
 
         successful = [r for r in results if r["success"]]
         all_errors = [r["error"] for r in results if not r["success"]]
+
+        # Gesamt-Fehler-Übersicht über alle Server
+        total_level_counts: Counter = Counter()
+        all_error_entries: list = []
+        for r in successful:
+            summary = r.get("error_summary", {})
+            for level, cnt in summary.get("level_counts", {}).items():
+                total_level_counts[level] += cnt
+            all_error_entries.extend(summary.get("error_entries", []))
+
         return ToolResult(
             success=bool(successful),
             data={
                 "stage": stage.name,
                 "servers_total": len(servers_to_try),
                 "servers_successful": len(successful),
+                "error_overview": {
+                    "level_counts": dict(total_level_counts),
+                    "total_errors": sum(v for k, v in total_level_counts.items() if k in ("ERROR", "FATAL", "SEVERE", "EXCEPTION")),
+                    "total_warnings": total_level_counts.get("WARN", 0),
+                    "error_entries": all_error_entries[:100],
+                },
                 "results": results,
             },
             error=None if successful else f"Kein Server erreichbar: {'; '.join(all_errors)}",
@@ -225,6 +284,8 @@ def register_log_tools(registry: ToolRegistry) -> int:
                     content = content[-_MAX_CONTENT_CHARS:]
                     truncated = True
 
+                err_summary = _extract_error_summary(content, server.name) if content else {}
+
                 results.append({
                     "server_id": server.id,
                     "server": server.name,
@@ -232,6 +293,7 @@ def register_log_tools(registry: ToolRegistry) -> int:
                     "total_lines": total_lines,
                     "matching_lines": len(lines),
                     "truncated": truncated,
+                    "error_summary": err_summary,
                     "content": content,
                 })
             except Exception as e:
@@ -240,12 +302,30 @@ def register_log_tools(registry: ToolRegistry) -> int:
 
         found = [r for r in results if r["success"] and r.get("matching_lines", 0) > 0]
         all_errors = [r["error"] for r in results if not r["success"]]
+
+        # Gesamt-Fehler-Übersicht
+        total_level_counts: Counter = Counter()
+        all_error_entries: list = []
+        for r in results:
+            if not r.get("success"):
+                continue
+            summary = r.get("error_summary", {})
+            for level, cnt in summary.get("level_counts", {}).items():
+                total_level_counts[level] += cnt
+            all_error_entries.extend(summary.get("error_entries", []))
+
         return ToolResult(
             success=bool(found),
             data={
                 "stage": stage.name,
                 "servers_total": len(servers_to_try),
                 "servers_with_matches": len(found),
+                "error_overview": {
+                    "level_counts": dict(total_level_counts),
+                    "total_errors": sum(v for k, v in total_level_counts.items() if k in ("ERROR", "FATAL", "SEVERE", "EXCEPTION")),
+                    "total_warnings": total_level_counts.get("WARN", 0),
+                    "error_entries": all_error_entries[:100],
+                },
                 "results": results,
             },
             error=None if found else f"Keine Treffer: {'; '.join(all_errors)}" if all_errors else "Keine Treffer in den Logs gefunden",
