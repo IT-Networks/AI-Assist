@@ -394,8 +394,16 @@ class EmailAutomationService:
                         self._create_todo(store, email_data, rule, result)
                         store.mark_processed(process_key)
                         match_info["todo_created"] = True
+
+                    # Bei 5+ Treffern abbrechen (spart LLM-Aufrufe)
+                    if len(matches) >= 5:
+                        logger.info("Regel-Test '%s': 5 Treffer erreicht, beende früh", rule.name)
+                        break
             except Exception as e:
                 logger.error("Test-Regel Fehler: %s", e)
+
+            if len(matches) >= 5:
+                break
 
         return matches
 
