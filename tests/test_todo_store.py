@@ -167,3 +167,8 @@ class TestTodoStorePersistence:
         store.update_last_poll("2026-04-09T12:00:00")
         data = store.load()
         assert data.last_poll == "2026-04-09T12:00:00"
+
+    def test_update_last_webex_poll(self, store):
+        store.update_last_webex_poll("2026-04-09T13:00:00")
+        data = store.load()
+        assert data.last_webex_poll == "2026-04-09T13:00:00"

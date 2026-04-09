@@ -1482,6 +1482,8 @@ class WebexConfig(BaseModel):
     credential_ref: str = ""           # Alternativ: Zentrale Credentials
     base_url: str = "https://webexapis.com/v1"
     timeout_seconds: int = 30
+    use_proxy: bool = True             # Zentralen Proxy verwenden
+    verify_ssl: bool = True            # SSL-Zertifikate prüfen
     # Automation (Polling)
     polling_enabled: bool = False
     polling_interval_minutes: int = 5  # 1-60 Minuten

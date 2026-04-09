@@ -1035,6 +1035,8 @@ webex:
   credential_ref: ''             # Alternativ: Zentrale Credentials
   base_url: 'https://webexapis.com/v1'
   timeout_seconds: 30
+  use_proxy: true                # Zentralen Proxy verwenden
+  verify_ssl: true               # SSL-Zertifikate prüfen
   polling_enabled: false         # Automatisches Polling für Todo-Erkennung
   polling_interval_minutes: 5    # Intervall 1-60 Minuten
   max_messages_per_poll: 100

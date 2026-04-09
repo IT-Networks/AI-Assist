@@ -30,10 +30,10 @@ class WebexClient:
             if not token:
                 raise ValueError("Kein Webex Access-Token konfiguriert")
 
-            # Proxy-Konfiguration
+            # Proxy-Konfiguration (zentraler Proxy)
             proxy = None
-            if settings.proxy.enabled and settings.proxy.url:
-                proxy = settings.proxy.url
+            if settings.webex.use_proxy and settings.proxy.enabled:
+                proxy = settings.proxy.get_proxy_url()
 
             self._client = httpx.AsyncClient(
                 base_url=settings.webex.base_url.rstrip("/"),
@@ -42,7 +42,7 @@ class WebexClient:
                     "Content-Type": "application/json",
                 },
                 timeout=settings.webex.timeout_seconds,
-                verify=True,
+                verify=settings.webex.verify_ssl,
                 proxy=proxy,
             )
         return self._client
