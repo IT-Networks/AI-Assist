@@ -12,7 +12,7 @@ from pathlib import Path
 if sys.platform == 'win32':
     asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())
 
-from app.api.routes import chat, java, logs, pdf, confluence, models, python_routes, handbook, skills, agent, settings, database, datasources, mq, log_servers, wlp, maven, search, jenkins, iq_server, alm, github, internal_fetch, docker_sandbox, access_logs, servicenow, testtool, analytics, patterns, tokens, healing, agents, reviews, arena, files, research, output, designs, llm_diagnostics, update, tasks, graph, tests, scripts
+from app.api.routes import chat, java, logs, pdf, confluence, models, python_routes, handbook, skills, agent, settings, database, datasources, mq, log_servers, wlp, maven, search, jenkins, iq_server, alm, github, internal_fetch, docker_sandbox, access_logs, servicenow, testtool, analytics, patterns, tokens, healing, agents, reviews, arena, files, research, output, designs, llm_diagnostics, update, tasks, graph, tests, scripts, email
 
 
 @asynccontextmanager
@@ -198,8 +198,27 @@ async def lifespan(app: FastAPI):
         except Exception as e:
             print(f"[startup] Multi-Agent Team Tools fehlgeschlagen: {e}")
 
+        # Email-Tools registrieren (email_search, email_read, email_draft, email_list_folders)
+        try:
+            from app.agent.email_tools import register_email_tools
+            email_count = register_email_tools(registry)
+            if email_count:
+                print(f"[startup] Email-Tools registriert: {email_count}")
+        except Exception as e:
+            print(f"[startup] Email-Tools-Registrierung fehlgeschlagen: {e}")
+
     except Exception as e:
         print(f"[startup] Agent-Initialisierung fehlgeschlagen: {e}")
+
+    # Email-Automation starten (wenn aktiviert)
+    if settings.email.enabled and settings.email.polling_enabled:
+        try:
+            from app.services.email_automation import get_email_automation
+            automation = get_email_automation()
+            await automation.start()
+            print(f"[startup] Email-Automation gestartet (Intervall: {settings.email.polling_interval_minutes} Min)")
+        except Exception as e:
+            print(f"[startup] Email-Automation fehlgeschlagen: {e}")
 
     # External Access Logging initialisieren
     try:
@@ -287,6 +306,24 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         print(f"[shutdown] Jira-Client-Cleanup fehlgeschlagen: {e}")
 
+    # Email-Automation stoppen
+    try:
+        from app.services.email_automation import get_email_automation
+        automation = get_email_automation()
+        if automation.is_running:
+            await automation.stop()
+            print("[shutdown] Email-Automation gestoppt")
+    except Exception as e:
+        print(f"[shutdown] Email-Automation-Cleanup fehlgeschlagen: {e}")
+
+    # Email-Client schließen
+    try:
+        from app.services.email_client import close_email_client
+        await close_email_client()
+        print("[shutdown] Email-Client geschlossen")
+    except Exception as e:
+        print(f"[shutdown] Email-Client-Cleanup fehlgeschlagen: {e}")
+
     # Docker-Sandbox: Alle Sessions beenden
     try:
         from app.agent.docker_tools import cleanup_all_sessions
@@ -301,7 +338,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="AI Code Assistant",
     description="Lokaler AI-Assistent für Java/Python-Entwicklung mit Handbuch-, WLP-Log-, PDF- und Confluence-Unterstützung",
-    version="2.34.31",
+    version="2.34.32",
     lifespan=lifespan,
 )
 
@@ -350,6 +387,7 @@ app.include_router(tasks.router)
 app.include_router(graph.router)
 app.include_router(tests.router)
 app.include_router(scripts.router)
+app.include_router(email.router)
 
 
 # ============================================================================

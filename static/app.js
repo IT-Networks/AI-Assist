@@ -7677,6 +7677,7 @@ async function loadMermaid() {
     script.onload = () => {
       window.mermaid.initialize({
         startOnLoad: false,
+        suppressErrorRendering: true,
         theme: 'dark',
         themeVariables: {
           primaryColor: '#7c4dff',
@@ -7755,16 +7756,24 @@ async function renderMermaidBlocks(container) {
 
     try {
       const id = block.id || ('mermaid-' + Math.random().toString(36).substr(2, 9));
+      // Pre-Validierung: parse() prueft Syntax ohne DOM-Seiteneffekte
+      const valid = await window.mermaid.parse(source, { suppressErrors: true });
+      if (!valid) {
+        console.warn('[Mermaid] Syntax ungueltig, ueberspringe:', source.substring(0, 120));
+        block.style.display = 'none';
+        block.classList.add('mermaid-rendered');
+        continue;
+      }
       const { svg } = await window.mermaid.render(id + '-svg', source);
       block.innerHTML = svg;
       block.classList.add('mermaid-rendered');
     } catch (e) {
-      // Rendering fehlgeschlagen — kompakte Fehlermeldung statt Rohtext
-      console.warn('Mermaid render error:', e);
-      block.innerHTML = `<div class="mermaid-error-msg" style="color:#999;font-size:0.85em;padding:4px 8px;border-left:3px solid #f44336;">Diagramm konnte nicht gerendert werden</div>`;
+      // Rendering fehlgeschlagen — leise loggen, Block verstecken
+      console.warn('[Mermaid] Render failed:', e.message || e);
+      block.innerHTML = '';
+      block.style.display = 'none';
       block.classList.add('mermaid-rendered');
     }
-  }
 }
 
 /**
@@ -10111,7 +10120,8 @@ const settingsState = {
     maven: 'Maven Build-Konfigurationen',
     sub_agents: 'Parallele Sub-Agenten für Recherche',
     search: 'Suche-Einstellungen',
-    database: 'DB2-Datenbankverbindung für Abfragen'
+    database: 'DB2-Datenbankverbindung für Abfragen',
+    email: 'Exchange E-Mail Integration (EWS/NTLM)'
   }
 };
 
@@ -11153,6 +11163,7 @@ function renderSettingsSection() {
     server: 'Konfiguration des FastAPI-Servers (Host, Port). Änderungen erfordern einen Neustart.',
     database: 'DB2-Datenbankverbindung für SQL-Abfragen. Der Agent kann Tabellen abfragen (nur SELECT).',
     llm: 'LLM-Verbindungseinstellungen. tool_model = schnelles Modell für Suche, analysis_model = großes Modell für Antworten.',
+    email: 'Exchange E-Mail über EWS (NTLM). Ermöglicht E-Mail-Suche, Lesen und Entwürfe im Chat sowie automatische Todo-Erkennung.',
   };
 
   let html = `
@@ -11182,7 +11193,42 @@ function renderSettingsSection() {
     `;
   }
 
+  if (section === 'email') {
+    html += `
+      <div class="settings-actions-section">
+        <button class="btn btn-secondary" onclick="testEmailConnection()">
+          📧 Verbindung testen
+        </button>
+        <span id="email-test-result" class="test-result"></span>
+      </div>
+    `;
+  }
+
   document.getElementById('settings-form').innerHTML = html;
+}
+
+async function testEmailConnection() {
+  const resultEl = document.getElementById('email-test-result');
+  resultEl.textContent = '⏳ Teste Verbindung...';
+  resultEl.className = 'test-result testing';
+
+  try {
+    // Zuerst aktuelle Werte speichern
+    await saveCurrentSection();
+    const res = await fetch('/api/email/test', { method: 'POST' });
+    const data = await res.json();
+
+    if (data.success) {
+      resultEl.textContent = `✓ ${data.message}`;
+      resultEl.className = 'test-result success';
+    } else {
+      resultEl.textContent = `✗ ${data.error}`;
+      resultEl.className = 'test-result error';
+    }
+  } catch (err) {
+    resultEl.textContent = `✗ Fehler: ${err.message}`;
+    resultEl.className = 'test-result error';
+  }
 }
 
 async function testDatabaseConnection() {
@@ -20339,3 +20385,548 @@ const taskProgressPanel = {
 
 // HINWEIS: taskProgressPanel.init() wird jetzt im Haupt-DOMContentLoaded-Handler
 // aufgerufen (vor loadPersistedChats), damit die SSE-Verbindung korrekt funktioniert.
+
+// ══════════════════════════════════════════════════════════════════════════════
+// E-Mail Automation & Todo System
+// ══════════════════════════════════════════════════════════════════════════════
+
+const emailModule = {
+  todoPanelOpen: false,
+  currentTodoId: null,
+  todoFilter: 'all',
+  sseSource: null,
+  automationData: null,
+
+  // ── Initialization ─────────────────────────────────────────────────────────
+
+  async init() {
+    try {
+      const res = await fetch('/api/settings');
+      const data = await res.json();
+      if (data.settings && data.settings.email && data.settings.email.enabled) {
+        document.getElementById('email-automation-btn').style.display = '';
+        document.getElementById('todo-btn').style.display = '';
+        this.connectSSE();
+        this.loadTodoCounts();
+      }
+    } catch (e) {
+      // Email not configured, buttons stay hidden
+    }
+  },
+
+  // ── SSE Connection ─────────────────────────────────────────────────────────
+
+  connectSSE() {
+    if (this.sseSource) {
+      this.sseSource.close();
+    }
+
+    this.sseSource = new EventSource('/api/email/todos/stream');
+
+    this.sseSource.addEventListener('todo_count', (e) => {
+      const counts = JSON.parse(e.data);
+      this.updateBadge(counts);
+    });
+
+    this.sseSource.addEventListener('new_todo', (e) => {
+      const data = JSON.parse(e.data);
+      this.updateBadge(data.counts);
+      if (this.todoPanelOpen) {
+        this.loadTodos();
+      }
+      showToast(`Neues Todo: ${data.subject}`, 'info');
+    });
+
+    this.sseSource.onerror = () => {
+      setTimeout(() => this.connectSSE(), 5000);
+    };
+  },
+
+  updateBadge(counts) {
+    const badge = document.getElementById('todo-count-badge');
+    if (counts && counts.new > 0) {
+      badge.textContent = counts.new;
+      badge.style.display = '';
+    } else {
+      badge.style.display = 'none';
+    }
+  },
+
+  async loadTodoCounts() {
+    try {
+      const res = await fetch('/api/email/todos');
+      const data = await res.json();
+      this.updateBadge(data.counts);
+    } catch (e) { /* ignore */ }
+  },
+
+  // ── Todo Panel ─────────────────────────────────────────────────────────────
+
+  async loadTodos() {
+    const statusParam = this.todoFilter === 'all' ? '' : `?status=${this.todoFilter}`;
+    try {
+      const res = await fetch(`/api/email/todos${statusParam}`);
+      const data = await res.json();
+      this.renderTodoList(data.todos || []);
+    } catch (e) {
+      document.getElementById('todo-list').innerHTML = '<p style="color:var(--text-muted);padding:16px;">Fehler beim Laden.</p>';
+    }
+  },
+
+  renderTodoList(todos) {
+    const container = document.getElementById('todo-list');
+    if (!todos.length) {
+      container.innerHTML = '<p style="color:var(--text-muted);padding:16px;text-align:center;">Keine Todos vorhanden.</p>';
+      return;
+    }
+
+    container.innerHTML = todos.map(t => `
+      <div class="todo-item status-${t.status}" onclick="emailModule.openTodoDetail('${t.id}')">
+        <div class="todo-item-subject">${escapeHtml(t.subject)}</div>
+        <div class="todo-item-meta">
+          <span>${escapeHtml(t.sender_name || t.sender)}</span>
+          <span>${t.received_at ? new Date(t.received_at).toLocaleDateString('de-DE') : ''}</span>
+          ${t.mail_snapshot && t.mail_snapshot.attachments && t.mail_snapshot.attachments.length ? '<span>&#128206;</span>' : ''}
+          ${t.priority === 'high' ? '<span style="color:var(--danger)">&#9650; Hoch</span>' : ''}
+        </div>
+        <div class="todo-item-todo">${escapeHtml(t.todo_text)}</div>
+      </div>
+    `).join('');
+  },
+
+  // ── Todo Detail ────────────────────────────────────────────────────────────
+
+  async openTodoDetail(todoId) {
+    this.currentTodoId = todoId;
+
+    try {
+      const res = await fetch(`/api/email/todos/${todoId}`);
+      const data = await res.json();
+      const todo = data.todo;
+
+      if (!todo) return;
+
+      // Mark as read if new
+      if (todo.status === 'new') {
+        fetch(`/api/email/todos/${todoId}/status`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ status: 'read' }),
+        });
+      }
+
+      const mail = todo.mail_snapshot || {};
+      const attachmentsHtml = (mail.attachments || []).map(a =>
+        `<div class="todo-attachment">
+          &#128206; <a href="/api/email/attachment/${todo.email_id}/${encodeURIComponent(a.name)}?folder=inbox" download>${escapeHtml(a.name)}</a>
+          <span style="color:var(--text-muted)">(${Math.round((a.size || 0) / 1024)} KB)</span>
+        </div>`
+      ).join('');
+
+      document.getElementById('todo-detail-content').innerHTML = `
+        <div class="todo-detail-section">
+          <h4>&#128204; Erkanntes Todo</h4>
+          <div class="todo-detail-box highlight">
+            <p style="font-size:0.9rem;margin-bottom:8px;">${escapeHtml(todo.todo_text)}</p>
+            <p style="font-size:0.78rem;color:var(--text-secondary);">${escapeHtml(todo.ai_analysis)}</p>
+            ${todo.deadline ? `<p style="font-size:0.78rem;margin-top:4px;">&#128197; Deadline: <strong>${todo.deadline}</strong></p>` : ''}
+            <p style="font-size:0.72rem;color:var(--text-muted);margin-top:4px;">Regel: ${escapeHtml(todo.rule_name)}</p>
+          </div>
+        </div>
+
+        <div class="todo-detail-section">
+          <h4>&#128231; Original-Email</h4>
+          <div class="todo-detail-box">
+            <div class="todo-detail-meta">
+              <strong>Von:</strong> ${escapeHtml(mail.sender_name || '')} &lt;${escapeHtml(mail.sender || '')}&gt;<br>
+              <strong>An:</strong> ${escapeHtml((mail.to || []).join(', '))}<br>
+              ${mail.cc && mail.cc.length ? `<strong>CC:</strong> ${escapeHtml(mail.cc.join(', '))}<br>` : ''}
+              <strong>Datum:</strong> ${mail.date ? new Date(mail.date).toLocaleString('de-DE') : ''}<br>
+              <strong>Betreff:</strong> ${escapeHtml(mail.subject || '')}
+            </div>
+          </div>
+          ${mail.body_html ? `
+            <div class="todo-mail-preview" style="margin-top:8px;">
+              <iframe id="todo-mail-iframe" sandbox="allow-same-origin" srcdoc="${escapeHtml(mail.body_html)}"></iframe>
+            </div>
+          ` : `
+            <div class="todo-detail-box" style="margin-top:8px;white-space:pre-wrap;font-size:0.82rem;">
+              ${escapeHtml(mail.body_text || '')}
+            </div>
+          `}
+          ${attachmentsHtml ? `<div style="margin-top:8px;">${attachmentsHtml}</div>` : ''}
+        </div>
+
+        <div class="todo-detail-section">
+          <button class="btn btn-primary" onclick="emailModule.generateDraftReply('${todoId}')">&#128221; Antwort-Entwurf erstellen</button>
+          <div id="todo-draft-area" style="margin-top:12px;"></div>
+        </div>
+      `;
+
+      document.getElementById('todo-panel').style.display = 'none';
+      document.getElementById('todo-detail-panel').style.display = 'flex';
+
+    } catch (e) {
+      console.error('Todo detail error:', e);
+    }
+  },
+
+  closeTodoDetail() {
+    document.getElementById('todo-detail-panel').style.display = 'none';
+    document.getElementById('todo-panel').style.display = 'flex';
+    this.loadTodos();
+  },
+
+  async markTodoDone() {
+    if (!this.currentTodoId) return;
+    try {
+      await fetch(`/api/email/todos/${this.currentTodoId}/status`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status: 'done' }),
+      });
+      showToast('Todo als erledigt markiert', 'success');
+      this.closeTodoDetail();
+    } catch (e) {
+      showToast('Fehler: ' + e.message, 'error');
+    }
+  },
+
+  // ── Draft Reply ────────────────────────────────────────────────────────────
+
+  async generateDraftReply(todoId) {
+    const area = document.getElementById('todo-draft-area');
+    area.innerHTML = '<p style="color:var(--text-muted);">&#9203; Generiere Antwort-Entwurf...</p>';
+
+    try {
+      const res = await fetch(`/api/email/todos/${todoId}/draft-reply`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({}),
+      });
+      const data = await res.json();
+
+      if (!data.success) {
+        area.innerHTML = `<p style="color:var(--danger);">Fehler: ${escapeHtml(data.error)}</p>`;
+        return;
+      }
+
+      area.innerHTML = `
+        <div class="todo-draft-editor">
+          <label style="font-size:0.78rem;color:var(--text-secondary);">Betreff:</label>
+          <input type="text" id="draft-reply-subject" value="${escapeHtml(data.draft_subject || '')}">
+          <label style="font-size:0.78rem;color:var(--text-secondary);margin-top:6px;">Inhalt:</label>
+          <textarea id="draft-reply-body">${escapeHtml(data.draft_body || '')}</textarea>
+          <div style="display:flex;gap:8px;margin-top:8px;">
+            <button class="btn btn-primary" onclick="emailModule.saveDraftReply()">&#128190; Als Entwurf speichern</button>
+            <span id="draft-reply-status" class="test-result"></span>
+          </div>
+        </div>
+      `;
+    } catch (e) {
+      area.innerHTML = `<p style="color:var(--danger);">Fehler: ${e.message}</p>`;
+    }
+  },
+
+  async saveDraftReply() {
+    const statusEl = document.getElementById('draft-reply-status');
+    statusEl.textContent = '&#9203; Speichere...';
+
+    // Get todo to find the sender (recipient of reply)
+    try {
+      const todoRes = await fetch(`/api/email/todos/${this.currentTodoId}`);
+      const todoData = await todoRes.json();
+      const sender = todoData.todo?.sender || todoData.todo?.mail_snapshot?.sender || '';
+
+      const res = await fetch('/api/email/draft', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          to: sender,
+          subject: document.getElementById('draft-reply-subject').value,
+          body: document.getElementById('draft-reply-body').value,
+        }),
+      });
+      const data = await res.json();
+
+      if (data.success) {
+        statusEl.textContent = '✓ Entwurf gespeichert';
+        statusEl.className = 'test-result success';
+      } else {
+        statusEl.textContent = '✗ ' + (data.error || 'Fehler');
+        statusEl.className = 'test-result error';
+      }
+    } catch (e) {
+      statusEl.textContent = '✗ ' + e.message;
+      statusEl.className = 'test-result error';
+    }
+  },
+
+  // ── Automation Modal ───────────────────────────────────────────────────────
+
+  async loadAutomationStatus() {
+    try {
+      const res = await fetch('/api/email/automation/status');
+      this.automationData = await res.json();
+      this.renderAutomationStatus();
+    } catch (e) { /* ignore */ }
+  },
+
+  renderAutomationStatus() {
+    const data = this.automationData || {};
+    const statusEl = document.getElementById('email-automation-status');
+    const toggleBtn = document.getElementById('email-auto-toggle-btn');
+
+    const dotClass = data.running ? 'running' : 'stopped';
+    const statusText = data.running ? 'Aktiv' : 'Gestoppt';
+    const lastPoll = data.last_poll ? new Date(data.last_poll).toLocaleString('de-DE') : 'Nie';
+
+    statusEl.innerHTML = `
+      <span class="status-dot ${dotClass}"></span>
+      <span><strong>${statusText}</strong> (Alle ${data.polling_interval_minutes || '?'} Min)</span>
+      <span style="color:var(--text-muted);font-size:0.75rem;">Letzte Pr&uuml;fung: ${lastPoll}</span>
+      <span style="color:var(--text-muted);font-size:0.75rem;">${data.active_rules || 0}/${data.rules_count || 0} Regeln aktiv</span>
+    `;
+
+    toggleBtn.textContent = data.running ? 'Stoppen' : 'Starten';
+    toggleBtn.className = data.running ? 'btn btn-danger' : 'btn btn-success';
+  },
+
+  async loadRules() {
+    try {
+      const res = await fetch('/api/email/rules');
+      const data = await res.json();
+      this.renderRules(data.rules || []);
+    } catch (e) {
+      document.getElementById('email-rules-list').innerHTML = '<p style="color:var(--danger);">Fehler beim Laden.</p>';
+    }
+  },
+
+  renderRules(rules) {
+    const container = document.getElementById('email-rules-list');
+    if (!rules.length) {
+      container.innerHTML = '<p style="color:var(--text-muted);text-align:center;padding:16px;">Keine Regeln definiert. Erstelle eine neue Regel.</p>';
+      return;
+    }
+
+    container.innerHTML = rules.map(r => `
+      <div class="rule-item">
+        <input type="checkbox" ${r.enabled ? 'checked' : ''}
+          onchange="emailModule.toggleRule('${r.id}', this.checked)"
+          title="Regel aktivieren/deaktivieren">
+        <div class="rule-item-info">
+          <div class="rule-item-name">${escapeHtml(r.name)}</div>
+          <div class="rule-item-desc">${escapeHtml(r.description)}</div>
+          ${r.sender_filter ? `<div class="rule-item-filter">Filter: ${escapeHtml(r.sender_filter)}</div>` : ''}
+        </div>
+        <div class="rule-item-actions">
+          <button onclick="emailModule.testRule('${r.id}')" title="Testen">&#128269;</button>
+          <button onclick="emailModule.editRule('${r.id}')" title="Bearbeiten">&#9998;</button>
+          <button onclick="emailModule.deleteRule('${r.id}')" title="L&ouml;schen">&#128465;</button>
+        </div>
+      </div>
+    `).join('');
+  },
+
+  async toggleRule(ruleId, enabled) {
+    try {
+      await fetch(`/api/email/rules/${ruleId}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ enabled }),
+      });
+    } catch (e) {
+      showToast('Fehler: ' + e.message, 'error');
+    }
+  },
+
+  async deleteRule(ruleId) {
+    if (!confirm('Regel wirklich löschen?')) return;
+    try {
+      await fetch(`/api/email/rules/${ruleId}`, { method: 'DELETE' });
+      this.loadRules();
+      showToast('Regel gelöscht', 'info');
+    } catch (e) {
+      showToast('Fehler: ' + e.message, 'error');
+    }
+  },
+
+  async testRule(ruleId) {
+    showToast('Teste Regel gegen letzte 10 Mails...', 'info');
+    try {
+      const res = await fetch(`/api/email/rules/${ruleId}/test`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ limit: 10 }),
+      });
+      const data = await res.json();
+      const matches = data.matches || [];
+      if (matches.length === 0) {
+        showToast('Keine Treffer gefunden.', 'info');
+      } else {
+        showToast(`${matches.length} Treffer: ${matches.map(m => m.subject).join(', ')}`, 'success');
+      }
+    } catch (e) {
+      showToast('Test fehlgeschlagen: ' + e.message, 'error');
+    }
+  },
+
+  addEmailRule() {
+    const editor = document.getElementById('email-rule-editor');
+    editor.style.display = 'block';
+    editor.innerHTML = `
+      <div class="rule-editor-form">
+        <label>Name:</label>
+        <input type="text" id="rule-edit-name" placeholder="z.B. Aufgaben von Chef">
+        <label>Beschreibung (LLM-Prompt):</label>
+        <textarea id="rule-edit-desc" placeholder="Pr&uuml;fe ob die E-Mail eine Aufgabe, Deadline oder Arbeitsanweisung enth&auml;lt"></textarea>
+        <label>Absender-Filter (optional):</label>
+        <input type="text" id="rule-edit-sender" placeholder="z.B. chef@example.com (leer = alle)">
+        <div class="rule-editor-actions">
+          <button class="btn btn-secondary" onclick="emailModule.cancelRuleEdit()">Abbrechen</button>
+          <button class="btn btn-primary" onclick="emailModule.saveNewRule()">Speichern</button>
+        </div>
+      </div>
+    `;
+  },
+
+  editRule(ruleId) {
+    // Find rule in DOM (simple approach: re-fetch)
+    fetch(`/api/email/rules`).then(r => r.json()).then(data => {
+      const rule = (data.rules || []).find(r => r.id === ruleId);
+      if (!rule) return;
+
+      const editor = document.getElementById('email-rule-editor');
+      editor.style.display = 'block';
+      editor.innerHTML = `
+        <div class="rule-editor-form">
+          <label>Name:</label>
+          <input type="text" id="rule-edit-name" value="${escapeHtml(rule.name)}">
+          <label>Beschreibung (LLM-Prompt):</label>
+          <textarea id="rule-edit-desc">${escapeHtml(rule.description)}</textarea>
+          <label>Absender-Filter (optional):</label>
+          <input type="text" id="rule-edit-sender" value="${escapeHtml(rule.sender_filter || '')}">
+          <div class="rule-editor-actions">
+            <button class="btn btn-secondary" onclick="emailModule.cancelRuleEdit()">Abbrechen</button>
+            <button class="btn btn-primary" onclick="emailModule.saveEditedRule('${ruleId}')">Speichern</button>
+          </div>
+        </div>
+      `;
+    });
+  },
+
+  cancelRuleEdit() {
+    document.getElementById('email-rule-editor').style.display = 'none';
+  },
+
+  async saveNewRule() {
+    const name = document.getElementById('rule-edit-name').value.trim();
+    const desc = document.getElementById('rule-edit-desc').value.trim();
+    const sender = document.getElementById('rule-edit-sender').value.trim();
+
+    if (!name || !desc) {
+      showToast('Name und Beschreibung sind erforderlich', 'error');
+      return;
+    }
+
+    try {
+      await fetch('/api/email/rules', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name, description: desc, sender_filter: sender }),
+      });
+      this.cancelRuleEdit();
+      this.loadRules();
+      showToast('Regel erstellt', 'success');
+    } catch (e) {
+      showToast('Fehler: ' + e.message, 'error');
+    }
+  },
+
+  async saveEditedRule(ruleId) {
+    const name = document.getElementById('rule-edit-name').value.trim();
+    const desc = document.getElementById('rule-edit-desc').value.trim();
+    const sender = document.getElementById('rule-edit-sender').value.trim();
+
+    try {
+      await fetch(`/api/email/rules/${ruleId}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name, description: desc, sender_filter: sender }),
+      });
+      this.cancelRuleEdit();
+      this.loadRules();
+      showToast('Regel aktualisiert', 'success');
+    } catch (e) {
+      showToast('Fehler: ' + e.message, 'error');
+    }
+  },
+};
+
+// ── Global Functions for HTML onclick ──────────────────────────────────────────
+
+function openEmailAutomation() {
+  const modal = document.getElementById('email-automation-modal');
+  modal.style.display = 'flex';
+  emailModule.loadAutomationStatus();
+  emailModule.loadRules();
+}
+
+function closeEmailAutomation() {
+  document.getElementById('email-automation-modal').style.display = 'none';
+  document.getElementById('email-rule-editor').style.display = 'none';
+}
+
+function addEmailRule() {
+  emailModule.addEmailRule();
+}
+
+async function toggleEmailPolling() {
+  const data = emailModule.automationData;
+  const endpoint = data && data.running ? '/api/email/automation/stop' : '/api/email/automation/start';
+  try {
+    await fetch(endpoint, { method: 'POST' });
+    emailModule.loadAutomationStatus();
+  } catch (e) {
+    showToast('Fehler: ' + e.message, 'error');
+  }
+}
+
+function toggleTodoPanel() {
+  const panel = document.getElementById('todo-panel');
+  const detailPanel = document.getElementById('todo-detail-panel');
+
+  if (emailModule.todoPanelOpen) {
+    panel.style.display = 'none';
+    detailPanel.style.display = 'none';
+    emailModule.todoPanelOpen = false;
+  } else {
+    panel.style.display = 'flex';
+    detailPanel.style.display = 'none';
+    emailModule.todoPanelOpen = true;
+    emailModule.loadTodos();
+  }
+}
+
+function filterTodos(filter) {
+  emailModule.todoFilter = filter;
+  document.querySelectorAll('.todo-filter').forEach(b => {
+    b.classList.toggle('active', b.dataset.filter === filter);
+  });
+  emailModule.loadTodos();
+}
+
+function closeTodoDetail() {
+  emailModule.closeTodoDetail();
+}
+
+function markTodoDone() {
+  emailModule.markTodoDone();
+}
+
+// Initialize email module after DOM is ready
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', () => emailModule.init());
+} else {
+  emailModule.init();
+}
