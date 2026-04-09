@@ -515,7 +515,11 @@ class MultiAgentOrchestrator:
 
         # Node-Definitionen mit Status-Styling
         for task in tasks:
-            label = task.title[:30].replace('"', "'")
+            label = (task.title[:30]
+                     .replace('"', "'")
+                     .replace('[', '&#91;').replace(']', '&#93;')
+                     .replace('(', '&#40;').replace(')', '&#41;')
+                     .replace('{', '&#123;').replace('}', '&#125;'))
             agent = task.assignee
             lines.append(f'    {task.id}["{label}<br/><small>{agent}</small>"]')
 

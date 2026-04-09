@@ -5520,7 +5520,7 @@ function countTokensApprox(text) {
  * 2. Plaintext-Mermaid-Bloecke (flowchart TD\n...) als ganzes Segment
  *    (das LLM gibt Mermaid-Code oft ohne Fences aus)
  */
-const _MERMAID_START_RE = /^(flowchart|graph|sequenceDiagram|classDiagram|stateDiagram|erDiagram|gantt|pie|gitgraph|mindmap|timeline|sankey|xychart|block)\b/;
+const _MERMAID_START_RE = /^(flowchart\s+(TD|TB|BT|RL|LR)|graph\s+(TD|TB|BT|RL|LR)|sequenceDiagram|classDiagram|stateDiagram|erDiagram|gantt|pie\s+title|gitgraph|mindmap|timeline|sankey|xychart|block-beta)\b/;
 
 function splitPreservingCodeBlocks(text) {
   const segments = [];
@@ -7717,7 +7717,7 @@ async function loadMermaid() {
 }
 
 // Mermaid-Syntax-Schluesselwoerter die am Zeilenanfang stehen muessen
-const _MERMAID_KEYWORDS = /^(flowchart|graph|sequenceDiagram|classDiagram|stateDiagram|erDiagram|gantt|pie|gitgraph|mindmap|timeline|sankey|xychart|block)\b/;
+const _MERMAID_KEYWORDS = /^(flowchart\s+(TD|TB|BT|RL|LR)|graph\s+(TD|TB|BT|RL|LR)|sequenceDiagram|classDiagram|stateDiagram|erDiagram|gantt|pie\s+title|gitgraph|mindmap|timeline|sankey|xychart|block-beta)\b/;
 
 async function renderMermaidBlocks(container) {
   // Strategie 1: Vom Renderer-Hook erzeugte .mermaid-block Divs
