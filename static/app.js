@@ -7779,6 +7779,7 @@ async function renderMermaidBlocks(container) {
       block.style.display = 'none';
       block.classList.add('mermaid-rendered');
     }
+  }
 }
 
 /**
@@ -20929,9 +20930,7 @@ function markTodoDone() {
   emailModule.markTodoDone();
 }
 
-// Initialize email module after DOM is ready
-if (document.readyState === 'loading') {
-  document.addEventListener('DOMContentLoaded', () => emailModule.init());
-} else {
-  emailModule.init();
-}
+// Initialize email module after DOM is ready (non-blocking)
+document.addEventListener('DOMContentLoaded', () => {
+  emailModule.init().catch(e => console.warn('[emailModule] Init failed:', e));
+});
