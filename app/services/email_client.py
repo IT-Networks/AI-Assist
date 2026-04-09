@@ -339,6 +339,9 @@ class ExchangeEmailClient:
                 from bs4 import BeautifulSoup
                 body_text = BeautifulSoup(body_html, 'html.parser').get_text(separator='\n', strip=True)
 
+            # Thread-Info: Prüfe ob Antworten/Weiterleitungen existieren
+            thread_info = self._get_thread_info(item, target_folder)
+
             return {
                 "email_id": item.id,
                 "subject": item.subject or "(Kein Betreff)",
@@ -353,6 +356,7 @@ class ExchangeEmailClient:
                 "attachments": attachments,
                 "is_read": item.is_read or False,
                 "importance": str(item.importance) if item.importance else "normal",
+                "thread": thread_info,
             }
 
         raise ValueError(f"E-Mail mit ID '{email_id}' nicht gefunden in '{folder_name}'.")
@@ -475,6 +479,9 @@ class ExchangeEmailClient:
                         "content_type": getattr(att, 'content_type', '') or "",
                     })
 
+            # Thread-Info für Automation
+            thread_info = self._get_thread_info(item, target_folder)
+
             results.append({
                 "email_id": item.id,
                 "subject": item.subject or "(Kein Betreff)",
@@ -486,11 +493,63 @@ class ExchangeEmailClient:
                 "to": [str(r.email_address) for r in (item.to_recipients or [])],
                 "cc": [str(r.email_address) for r in (item.cc_recipients or [])],
                 "attachments": attachments,
+                "thread": thread_info,
             })
 
         return results
 
     # ── Hilfsmethoden ──────────────────────────────────────────────────────────
+
+    def _get_thread_info(self, item, folder) -> Dict[str, Any]:
+        """Prüft ob es im selben Thread Antworten oder Weiterleitungen gibt."""
+        from exchangelib.items import Message
+
+        info = {
+            "has_replies": False,
+            "has_forwards": False,
+            "reply_count": 0,
+            "forward_count": 0,
+            "thread_messages": [],
+        }
+
+        try:
+            conv_id = getattr(item, 'conversation_id', None)
+            if not conv_id:
+                return info
+
+            # Suche alle Mails mit gleicher conversation_id
+            from exchangelib import Q
+            thread = folder.filter(conversation_id=conv_id).only(
+                'id', 'subject', 'sender', 'datetime_received'
+            ).order_by('datetime_received')
+
+            for msg in thread:
+                if not isinstance(msg, Message) or msg.id == item.id:
+                    continue
+                subj = (msg.subject or "").lower()
+                sender = str(msg.sender.email_address) if msg.sender else ""
+                entry = {
+                    "subject": msg.subject or "",
+                    "sender": sender,
+                    "date": msg.datetime_received.isoformat() if msg.datetime_received else "",
+                }
+
+                if subj.startswith(("re:", "aw:", "re[", "aw[")):
+                    info["has_replies"] = True
+                    info["reply_count"] += 1
+                    entry["type"] = "reply"
+                elif subj.startswith(("fw:", "wg:", "fwd:")):
+                    info["has_forwards"] = True
+                    info["forward_count"] += 1
+                    entry["type"] = "forward"
+                else:
+                    entry["type"] = "related"
+
+                info["thread_messages"].append(entry)
+        except Exception as e:
+            logger.debug("Thread-Info Fehler: %s", e)
+
+        return info
 
     def _get_folder(self, folder_name: str):
         """Gibt den Ordner anhand des Namens zurück."""

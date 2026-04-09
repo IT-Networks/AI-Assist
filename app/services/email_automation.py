@@ -272,19 +272,38 @@ class EmailAutomationService:
             system_prompt += f"Absender-Filter: {rule.sender_filter}\n"
 
         system_prompt += (
+            "\nWICHTIG: Berücksichtige den Thread-Status. Wenn bereits Antworten oder "
+            "Weiterleitungen existieren, ist das Todo möglicherweise schon bearbeitet. "
+            "Setze is_todo auf false wenn die Antworten darauf hindeuten dass das "
+            "Thema bereits erledigt ist.\n"
             "\nAntworte NUR im folgenden JSON-Format (kein anderer Text):\n"
             '{"is_todo": true/false, "todo_text": "Kurze Zusammenfassung der Aufgabe (1-2 Sätze)", '
             '"analysis": "Begründung", "priority": "high/medium/low", "deadline": "YYYY-MM-DD oder null"}'
         )
+
+        # Thread-Info aufbereiten
+        thread = email_data.get("thread", {})
+        thread_text = ""
+        if thread.get("has_replies") or thread.get("has_forwards"):
+            parts = []
+            if thread.get("reply_count"):
+                parts.append(f"{thread['reply_count']} Antwort(en)")
+            if thread.get("forward_count"):
+                parts.append(f"{thread['forward_count']} Weiterleitung(en)")
+            thread_text = f"Thread-Status: {', '.join(parts)}"
+            for msg in thread.get("thread_messages", [])[:5]:
+                thread_text += f"\n  - {msg.get('type','')}: {msg.get('subject','')} von {msg.get('sender','')} ({msg.get('date','')})"
 
         body_text = email_data.get("body_text", "")[:3000]
         user_prompt = (
             f"Von: {email_data.get('sender', '')} ({email_data.get('sender_name', '')})\n"
             f"Betreff: {email_data.get('subject', '')}\n"
             f"Datum: {email_data.get('date', '')}\n"
-            f"Anhänge: {att_text}\n\n"
-            f"Inhalt:\n{body_text}"
+            f"Anhänge: {att_text}\n"
         )
+        if thread_text:
+            user_prompt += f"\n{thread_text}\n"
+        user_prompt += f"\nInhalt:\n{body_text}"
 
         messages = [
             {"role": "system", "content": system_prompt},
