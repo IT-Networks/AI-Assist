@@ -445,7 +445,7 @@ class ExchangeEmailClient:
             return []
 
         tz = _get_ews_timezone()
-        since_ews = tz.localize(EWSDateTime.from_datetime(since))
+        since_ews = EWSDateTime.from_datetime(since).astimezone(tz)
 
         qs = target_folder.filter(
             Q(datetime_received__gt=since_ews)
