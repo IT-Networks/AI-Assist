@@ -20931,6 +20931,23 @@ function markTodoDone() {
   emailModule.markTodoDone();
 }
 
+async function deleteTodo() {
+  if (!emailModule.currentTodoId) return;
+  if (!confirm('Todo wirklich löschen?')) return;
+  try {
+    const res = await fetch(`/api/email/todos/${emailModule.currentTodoId}`, { method: 'DELETE' });
+    const data = await res.json();
+    if (data.success) {
+      showToast('Todo gelöscht', 'info');
+      emailModule.closeTodoDetail();
+    } else {
+      showToast('Fehler: ' + (data.detail || 'Unbekannt'), 'error');
+    }
+  } catch (e) {
+    showToast('Fehler: ' + e.message, 'error');
+  }
+}
+
 // Initialize email module after DOM is ready (non-blocking)
 document.addEventListener('DOMContentLoaded', () => {
   emailModule.init().catch(e => console.warn('[emailModule] Init failed:', e));
