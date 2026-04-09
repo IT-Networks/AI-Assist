@@ -474,9 +474,12 @@ class MultiAgentOrchestrator:
         parts = [llm_summary]
 
         # Agent-generierte Diagramme (inhaltlich, z.B. Architektur, Sequenz)
+        # Validierung: LLM-generierte Mermaid-Syntax kann kaputt sein
         for agent_name, (diagram, title) in self._agent_diagrams.items():
             if diagram and diagram.strip():
-                parts.append(f"\n\n### {title}\n\n```mermaid\n{diagram.strip()}\n```")
+                sanitized = self._sanitize_mermaid(diagram.strip())
+                if sanitized:
+                    parts.append(f"\n\n### {title}\n\n```mermaid\n{sanitized}\n```")
 
         if stats_table:
             parts.append(f"\n\n---\n\n### Task-Statistik\n\n{stats_table}")
@@ -573,6 +576,40 @@ class MultiAgentOrchestrator:
     # ══════════════════════════════════════════════════════════════════════════
     # Helpers
     # ══════════════════════════════════════════════════════════════════════════
+
+    @staticmethod
+    def _sanitize_mermaid(source: str) -> str:
+        """Bereinigt LLM-generierten Mermaid-Code. Gibt '' zurueck wenn nicht reparierbar."""
+        if not source or not source.strip():
+            return ""
+
+        lines = source.strip().split('\n')
+        first_line = lines[0].strip().lower()
+
+        # Muss mit gueltigem Mermaid-Keyword beginnen
+        valid_starts = (
+            'flowchart', 'graph', 'sequencediagram', 'classdiagram',
+            'statediagram', 'erdiagram', 'gantt', 'pie', 'gitgraph',
+            'mindmap', 'timeline', 'sankey', 'xychart', 'block-beta',
+        )
+        if not any(first_line.startswith(kw) for kw in valid_starts):
+            return ""
+
+        # Fuer Flowcharts: Node-Labels sanitizen
+        if first_line.startswith(('flowchart', 'graph')):
+            sanitized_lines = [lines[0]]
+            for line in lines[1:]:
+                # Labels in [...], (...), {...} sanitizen: Sonderzeichen in Quotes
+                # Unquoted Labels mit Sonderzeichen fixen
+                line = re.sub(
+                    r'\[([^\]"]*[(){}/<>][^\]"]*)\]',
+                    lambda m: '["' + re.sub(r'[(){}/<>]', ' ', m.group(1)).strip() + '"]',
+                    line,
+                )
+                sanitized_lines.append(line)
+            return '\n'.join(sanitized_lines)
+
+        return source.strip()
 
     async def _emit(self, data: Dict):
         """Emittiert ein Progress-Event."""

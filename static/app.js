@@ -7759,9 +7759,9 @@ async function renderMermaidBlocks(container) {
       block.innerHTML = svg;
       block.classList.add('mermaid-rendered');
     } catch (e) {
-      // Rendering fehlgeschlagen — zeige Source als Code-Block
+      // Rendering fehlgeschlagen — kompakte Fehlermeldung statt Rohtext
       console.warn('Mermaid render error:', e);
-      block.innerHTML = `<pre class="mermaid-error"><code>${escapeHtml(source)}</code></pre>`;
+      block.innerHTML = `<div class="mermaid-error-msg" style="color:#999;font-size:0.85em;padding:4px 8px;border-left:3px solid #f44336;">Diagramm konnte nicht gerendert werden</div>`;
       block.classList.add('mermaid-rendered');
     }
   }
