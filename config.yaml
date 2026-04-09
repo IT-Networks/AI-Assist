@@ -1020,6 +1020,21 @@ analytics:
   compress_after_days: 7           # GZIP nach X Tagen
 
 # App-Update Service (GitHub-basiert)
+# ═════════════════════════════════════════════════════════════════════
+# Exchange E-Mail Integration (EWS mit NTLM)
+# ═════════════════════════════════════════════════════════════════════
+email:
+  enabled: false
+  ews_url: ''                      # z.B. https://mail.example.com/EWS/Exchange.asmx
+  smtp_address: ''                 # E-Mail-Adresse (= Login-Name)
+  credential_ref: ''               # Referenz auf zentrale Credentials (bevorzugt)
+  password: ''                     # Direkt-Passwort (Fallback)
+  verify_ssl: true
+  timeout_seconds: 30
+  polling_enabled: false           # Automatisches Polling für Todo-Erkennung
+  polling_interval_minutes: 5      # Intervall 1-60 Minuten
+  max_emails_per_poll: 50
+
 update:
   enabled: false
   repo_url: ''                    # z.B. https://github.com/user/ai-assist-releases

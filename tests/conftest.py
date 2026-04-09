@@ -50,4 +50,14 @@ def reset_singletons():
     import app.services.script_manager as script_mgr_module
     script_mgr_module.ScriptManager._instance = None
 
+    # Reset email singletons
+    import app.services.todo_store as todo_store_module
+    todo_store_module._todo_store = None
+
+    import app.services.email_automation as email_auto_module
+    email_auto_module._automation = None
+
+    import app.services.email_client as email_client_module
+    email_client_module._email_client = None
+
     yield

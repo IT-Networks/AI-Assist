@@ -28,6 +28,9 @@ javalang==0.13.0
 # Web Search (ddgs = successor of duckduckgo-search)
 ddgs>=9.0.0
 
+# Exchange Web Services (EWS) für E-Mail-Integration
+exchangelib>=5.0.0
+
 # ══════════════════════════════════════════════════════════════════════════════
 # Optional Dependencies
 # ══════════════════════════════════════════════════════════════════════════════

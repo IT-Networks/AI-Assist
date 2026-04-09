@@ -7671,50 +7671,55 @@ async function loadMermaid() {
     return new Promise(resolve => _mermaidQueue.push(resolve));
   }
   _mermaidLoading = true;
-  try {
-    const script = document.createElement('script');
-    script.src = 'https://cdn.jsdelivr.net/npm/mermaid@11.4.0/dist/mermaid.min.js';
-    script.onload = () => {
-      window.mermaid.initialize({
-        startOnLoad: false,
-        suppressErrorRendering: true,
-        theme: 'dark',
-        themeVariables: {
-          primaryColor: '#7c4dff',
-          primaryTextColor: '#e0e0e0',
-          primaryBorderColor: '#9c27b0',
-          lineColor: '#aaa',
-          secondaryColor: '#333',
-          tertiaryColor: '#222',
-          background: '#1e1e2e',
-          mainBkg: '#2a2a3e',
-          nodeBorder: '#7c4dff',
-          clusterBkg: '#1e1e2e',
-          titleColor: '#e0e0e0',
-          edgeLabelBackground: '#1e1e2e',
-          pieStrokeColor: '#444',
-          pieSectionTextColor: '#e0e0e0',
-          pieLegendTextColor: '#e0e0e0',
-        },
-        flowchart: { curve: 'basis', padding: 10 },
-        pie: { textPosition: 0.75 },
-      });
-      _mermaidLoaded = true;
+  return new Promise((resolve) => {
+    try {
+      const script = document.createElement('script');
+      script.src = 'https://cdn.jsdelivr.net/npm/mermaid@11.4.0/dist/mermaid.min.js';
+      script.onload = () => {
+        window.mermaid.initialize({
+          startOnLoad: false,
+          suppressErrorRendering: true,
+          theme: 'dark',
+          themeVariables: {
+            primaryColor: '#7c4dff',
+            primaryTextColor: '#e0e0e0',
+            primaryBorderColor: '#9c27b0',
+            lineColor: '#aaa',
+            secondaryColor: '#333',
+            tertiaryColor: '#222',
+            background: '#1e1e2e',
+            mainBkg: '#2a2a3e',
+            nodeBorder: '#7c4dff',
+            clusterBkg: '#1e1e2e',
+            titleColor: '#e0e0e0',
+            edgeLabelBackground: '#1e1e2e',
+            pieStrokeColor: '#444',
+            pieSectionTextColor: '#e0e0e0',
+            pieLegendTextColor: '#e0e0e0',
+          },
+          flowchart: { curve: 'basis', padding: 10 },
+          pie: { textPosition: 0.75 },
+        });
+        _mermaidLoaded = true;
+        _mermaidLoading = false;
+        _mermaidQueue.forEach(fn => fn());
+        _mermaidQueue = [];
+        resolve();
+      };
+      script.onerror = () => {
+        console.warn('Mermaid.js konnte nicht geladen werden');
+        _mermaidLoading = false;
+        _mermaidQueue.forEach(fn => fn());
+        _mermaidQueue = [];
+        resolve();
+      };
+      document.head.appendChild(script);
+    } catch (e) {
+      console.warn('Mermaid load error:', e);
       _mermaidLoading = false;
-      _mermaidQueue.forEach(fn => fn());
-      _mermaidQueue = [];
-    };
-    script.onerror = () => {
-      console.warn('Mermaid.js konnte nicht geladen werden');
-      _mermaidLoading = false;
-      _mermaidQueue.forEach(fn => fn());
-      _mermaidQueue = [];
-    };
-    document.head.appendChild(script);
-  } catch (e) {
-    console.warn('Mermaid load error:', e);
-    _mermaidLoading = false;
-  }
+      resolve();
+    }
+  });
 }
 
 // Mermaid-Syntax-Schluesselwoerter die am Zeilenanfang stehen muessen

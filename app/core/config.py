@@ -1475,6 +1475,21 @@ class TaskAgentConfig(BaseModel):
     # Hinweis: Web-Suche wird über search.enabled gesteuert (in config.yaml)
 
 
+class EmailConfig(BaseModel):
+    """Exchange E-Mail Konfiguration (EWS mit NTLM)."""
+    enabled: bool = False
+    ews_url: str = ""                      # z.B. https://mail.example.com/EWS/Exchange.asmx
+    smtp_address: str = ""                 # E-Mail-Adresse = Login-Name
+    credential_ref: str = ""               # Zentrale Credentials (bevorzugt)
+    password: str = ""                     # SENSITIVE - Direkt (Fallback)
+    verify_ssl: bool = True
+    timeout_seconds: int = 30
+    # Automation (Polling)
+    polling_enabled: bool = False
+    polling_interval_minutes: int = 5      # 1-60 Minuten
+    max_emails_per_poll: int = 50
+
+
 class Settings(BaseModel):
     # Globale Einstellungen
     credentials: CredentialsConfig = Field(default_factory=CredentialsConfig)  # Zentrale Credentials
@@ -1525,6 +1540,7 @@ class Settings(BaseModel):
     servicenow: ServiceNowConfig = Field(default_factory=ServiceNowConfig)
     analytics: AnalyticsConfig = Field(default_factory=AnalyticsConfig)
     update: UpdateConfig = Field(default_factory=UpdateConfig)
+    email: EmailConfig = Field(default_factory=EmailConfig)
 
     def apply_env_overrides(self) -> "Settings":
         if os.getenv("LLM_BASE_URL"):
