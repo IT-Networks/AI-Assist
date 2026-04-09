@@ -215,13 +215,19 @@ multi_agent:
       max_parallel: 3
       agents:
         - name: "wiki-researcher"
-          system_prompt: "Du durchsuchst Confluence nach relevanter Dokumentation und extrahierst Fakten."
+          system_prompt: "Du durchsuchst Confluence nach relevanter Dokumentation und extrahierst Fakten. Die Kommunikation ist ueberwiegend auf Deutsch."
           tools: ["search_confluence", "read_confluence_page"]
         - name: "code-analyst"
-          system_prompt: "Du analysierst den Quellcode und findest relevante Implementierungen."
+          system_prompt: "Du analysierst den Quellcode und findest relevante Implementierungen. Die Kommunikation ist ueberwiegend auf Deutsch."
           tools: ["search_code", "read_file", "grep_content"]
+        - name: "email-researcher"
+          system_prompt: "Du durchsuchst Exchange-E-Mails nach relevanten Informationen. Nutze email_list_folders um verfuegbare Ordner zu finden, email_search um gezielt nach Betreff, Absender oder Inhalt zu suchen, und email_read um wichtige Mails im Detail zu lesen. Extrahiere Fakten, Absprachen, Termine und Entscheidungen aus dem E-Mail-Verkehr. Die Kommunikation ist ueberwiegend auf Deutsch."
+          tools: ["email_list_folders", "email_search", "email_read"]
+        - name: "webex-researcher"
+          system_prompt: "Du durchsuchst Webex-Raeume nach relevanten Informationen. Nutze webex_list_rooms um verfuegbare Raeume zu finden, webex_read_messages um Nachrichten aus einem Raum zu lesen, und webex_search_messages um gezielt nach Begriffen zu suchen. Extrahiere Fakten, Absprachen, Termine und Entscheidungen aus dem Webex-Nachrichtenverlauf. Die Kommunikation ist ueberwiegend auf Deutsch."
+          tools: ["webex_list_rooms", "webex_read_messages", "webex_search_messages"]
         - name: "synthesizer"
-          system_prompt: "Du fasst die Ergebnisse der anderen Agenten zu einem kohaerenten Bericht zusammen."
+          system_prompt: "Du fasst die Ergebnisse der anderen Agenten zu einem kohaerenten Bericht zusammen. Beruecksichtige dabei Ergebnisse aus Confluence, Code-Analyse, E-Mail-Recherche und Webex-Nachrichten gleichermassen. Die Kommunikation ist ueberwiegend auf Deutsch."
           tools: ["search_knowledge"]
     - name: "error-analysis-team"
       description: "Fehleranalyse-Team: Analysiert Fehler durch Log-Analyse, Code-Durchsuchung, SQL-Extraktion, DB-Abfragen und Service-Tests. Fehlgeschlagene Agenten unterbrechen NICHT die Analyse - der Synthesizer arbeitet mit allen verfuegbaren Ergebnissen."
@@ -1021,6 +1027,18 @@ analytics:
 
 # App-Update Service (GitHub-basiert)
 # ═════════════════════════════════════════════════════════════════════
+# Webex Messaging Integration
+# ═════════════════════════════════════════════════════════════════════
+webex:
+  enabled: false
+  access_token: ''               # Bot-Token oder Personal Access Token
+  credential_ref: ''             # Alternativ: Zentrale Credentials
+  base_url: 'https://webexapis.com/v1'
+  timeout_seconds: 30
+  polling_enabled: false         # Automatisches Polling für Todo-Erkennung
+  polling_interval_minutes: 5    # Intervall 1-60 Minuten
+  max_messages_per_poll: 100
+
 # Exchange E-Mail Integration (EWS mit NTLM)
 # ═════════════════════════════════════════════════════════════════════
 email:

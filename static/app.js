@@ -10127,7 +10127,8 @@ const settingsState = {
     sub_agents: 'Parallele Sub-Agenten für Recherche',
     search: 'Suche-Einstellungen',
     database: 'DB2-Datenbankverbindung für Abfragen',
-    email: 'Exchange E-Mail Integration (EWS/NTLM)'
+    email: 'Exchange E-Mail Integration (EWS/NTLM)',
+    webex: 'Webex Messaging Integration'
   }
 };
 
@@ -11170,6 +11171,7 @@ function renderSettingsSection() {
     database: 'DB2-Datenbankverbindung für SQL-Abfragen. Der Agent kann Tabellen abfragen (nur SELECT).',
     llm: 'LLM-Verbindungseinstellungen. tool_model = schnelles Modell für Suche, analysis_model = großes Modell für Antworten.',
     email: 'Exchange E-Mail über EWS (NTLM). Ermöglicht E-Mail-Suche, Lesen und Entwürfe im Chat sowie automatische Todo-Erkennung.',
+    webex: 'Webex Messaging Integration. Ermöglicht das Lesen und Durchsuchen von Webex-Räumen sowie automatische Todo-Erkennung aus Nachrichten.',
   };
 
   let html = `
@@ -11210,6 +11212,17 @@ function renderSettingsSection() {
     `;
   }
 
+  if (section === 'webex') {
+    html += `
+      <div class="settings-actions-section">
+        <button class="btn btn-secondary" onclick="testWebexConnection()">
+          💬 Verbindung testen
+        </button>
+        <span id="webex-test-result" class="test-result"></span>
+      </div>
+    `;
+  }
+
   document.getElementById('settings-form').innerHTML = html;
 }
 
@@ -11226,6 +11239,29 @@ async function testEmailConnection() {
 
     if (data.success) {
       resultEl.textContent = `✓ ${data.message}`;
+      resultEl.className = 'test-result success';
+    } else {
+      resultEl.textContent = `✗ ${data.error}`;
+      resultEl.className = 'test-result error';
+    }
+  } catch (err) {
+    resultEl.textContent = `✗ Fehler: ${err.message}`;
+    resultEl.className = 'test-result error';
+  }
+}
+
+async function testWebexConnection() {
+  const resultEl = document.getElementById('webex-test-result');
+  resultEl.textContent = '⏳ Teste Verbindung...';
+  resultEl.className = 'test-result testing';
+
+  try {
+    await saveCurrentSection();
+    const res = await fetch('/api/webex/test', { method: 'POST' });
+    const data = await res.json();
+
+    if (data.success) {
+      resultEl.textContent = `✓ Verbunden als ${data.display_name} (${data.email})`;
       resultEl.className = 'test-result success';
     } else {
       resultEl.textContent = `✗ ${data.error}`;
@@ -20400,6 +20436,7 @@ const emailModule = {
   todoPanelOpen: false,
   currentTodoId: null,
   todoFilter: 'all',
+  todoSourceFilter: 'all',
   sseSource: null,
   automationData: null,
 
@@ -20409,14 +20446,23 @@ const emailModule = {
     try {
       const res = await fetch('/api/settings');
       const data = await res.json();
-      if (data.settings && data.settings.email && data.settings.email.enabled) {
+      const s = data.settings || {};
+      if (s.email && s.email.enabled) {
         document.getElementById('email-automation-btn').style.display = '';
         document.getElementById('todo-btn').style.display = '';
         this.connectSSE();
         this.loadTodoCounts();
       }
+      if (s.webex && s.webex.enabled) {
+        document.getElementById('webex-automation-btn').style.display = '';
+        document.getElementById('todo-btn').style.display = '';
+        if (!this.sseSource) {
+          this.connectSSE();
+        }
+        this.loadTodoCounts();
+      }
     } catch (e) {
-      // Email not configured, buttons stay hidden
+      // Not configured, buttons stay hidden
     }
   },
 
@@ -20481,14 +20527,22 @@ const emailModule = {
 
   renderTodoList(todos) {
     const container = document.getElementById('todo-list');
+
+    // Source-Filter anwenden
+    if (this.todoSourceFilter && this.todoSourceFilter !== 'all') {
+      todos = todos.filter(t => (t.source || 'email') === this.todoSourceFilter);
+    }
+
     if (!todos.length) {
       container.innerHTML = '<p style="color:var(--text-muted);padding:16px;text-align:center;">Keine Todos vorhanden.</p>';
       return;
     }
 
-    container.innerHTML = todos.map(t => `
+    container.innerHTML = todos.map(t => {
+      const sourceIcon = (t.source || 'email') === 'webex' ? '&#128172;' : '&#128231;';
+      return `
       <div class="todo-item status-${t.status}" onclick="emailModule.openTodoDetail('${t.id}')">
-        <div class="todo-item-subject">${escapeHtml(t.subject)}</div>
+        <div class="todo-item-subject">${sourceIcon} ${escapeHtml(t.subject)}</div>
         <div class="todo-item-meta">
           <span>${escapeHtml(t.sender_name || t.sender)}</span>
           <span>${t.received_at ? new Date(t.received_at).toLocaleDateString('de-DE') : ''}</span>
@@ -20497,7 +20551,7 @@ const emailModule = {
         </div>
         <div class="todo-item-todo">${escapeHtml(t.todo_text)}</div>
       </div>
-    `).join('');
+    `}).join('');
   },
 
   // ── Todo Detail ────────────────────────────────────────────────────────────
@@ -20541,7 +20595,7 @@ const emailModule = {
         </div>
 
         <div class="todo-detail-section">
-          <h4>&#128231; Original-Email</h4>
+          <h4>${(todo.source || 'email') === 'webex' ? '&#128172; Webex-Nachricht' : '&#128231; Original-Email'}</h4>
           <div class="todo-detail-box">
             <div class="todo-detail-meta">
               <strong>Von:</strong> ${escapeHtml(mail.sender_name || '')} &lt;${escapeHtml(mail.sender || '')}&gt;<br>
@@ -20954,7 +21008,263 @@ async function deleteTodo() {
   }
 }
 
-// Initialize email module after DOM is ready (non-blocking)
+// ══════════════════════════════════════════════════════════════════════════════
+// Webex Automation Module
+// ══════════════════════════════════════════════════════════════════════════════
+
+const webexModule = {
+  automationData: null,
+
+  async loadAutomationStatus() {
+    try {
+      const res = await fetch('/api/webex/automation/status');
+      this.automationData = await res.json();
+      this.renderAutomationStatus();
+    } catch (e) { /* ignore */ }
+  },
+
+  renderAutomationStatus() {
+    const data = this.automationData || {};
+    const statusEl = document.getElementById('webex-automation-status');
+    const toggleBtn = document.getElementById('webex-auto-toggle-btn');
+
+    const dotClass = data.running ? 'running' : 'stopped';
+    const statusText = data.running ? 'Aktiv' : 'Gestoppt';
+    const configNote = (!data.running && data.polling_enabled) ? ' <span style="color:var(--warning);font-size:0.72rem;">(in Config aktiviert — Server-Neustart oder manuell starten)</span>' : '';
+    const lastPoll = data.last_poll ? new Date(data.last_poll).toLocaleString('de-DE') : 'Nie';
+
+    statusEl.innerHTML = `
+      <span class="status-dot ${dotClass}"></span>
+      <span><strong>${statusText}</strong>${configNote} (Alle ${data.polling_interval_minutes || '?'} Min)</span>
+      <span style="color:var(--text-muted);font-size:0.75rem;">Letzte Pr\u00fcfung: ${lastPoll}</span>
+      <span style="color:var(--text-muted);font-size:0.75rem;">${data.active_rules || 0}/${data.rules_count || 0} Regeln aktiv</span>
+    `;
+
+    toggleBtn.textContent = data.running ? 'Stoppen' : 'Starten';
+    toggleBtn.className = data.running ? 'btn btn-danger' : 'btn btn-success';
+  },
+
+  async loadRules() {
+    try {
+      const res = await fetch('/api/webex/rules');
+      const data = await res.json();
+      this.renderRules(data.rules || []);
+    } catch (e) {
+      document.getElementById('webex-rules-list').innerHTML = '<p style="color:var(--danger);">Fehler beim Laden.</p>';
+    }
+  },
+
+  renderRules(rules) {
+    const container = document.getElementById('webex-rules-list');
+    if (!rules.length) {
+      container.innerHTML = '<p style="color:var(--text-muted);text-align:center;padding:16px;">Keine Regeln definiert. Erstelle eine neue Regel.</p>';
+      return;
+    }
+
+    container.innerHTML = rules.map(r => `
+      <div class="rule-item">
+        <input type="checkbox" ${r.enabled ? 'checked' : ''}
+          onchange="webexModule.toggleRule('${r.id}', this.checked)"
+          title="Regel aktivieren/deaktivieren">
+        <div class="rule-item-info">
+          <div class="rule-item-name">${escapeHtml(r.name)}</div>
+          <div class="rule-item-desc">${escapeHtml(r.description)}</div>
+          ${r.room_filter ? `<div class="rule-item-filter">Raum: ${escapeHtml(r.room_filter)}</div>` : ''}
+          ${r.sender_filter ? `<div class="rule-item-filter">Absender: ${escapeHtml(r.sender_filter)}</div>` : ''}
+        </div>
+        <div class="rule-item-actions">
+          <button onclick="webexModule.testRule('${r.id}')" title="Testen">&#128269;</button>
+          <button onclick="webexModule.editRule('${r.id}')" title="Bearbeiten">&#9998;</button>
+          <button onclick="webexModule.deleteRule('${r.id}')" title="L\u00f6schen">&#128465;</button>
+        </div>
+      </div>
+    `).join('');
+  },
+
+  async toggleRule(ruleId, enabled) {
+    try {
+      await fetch(`/api/webex/rules/${ruleId}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ enabled }),
+      });
+    } catch (e) {
+      showToast('Fehler: ' + e.message, 'error');
+    }
+  },
+
+  async deleteRule(ruleId) {
+    if (!confirm('Regel wirklich l\u00f6schen?')) return;
+    try {
+      await fetch(`/api/webex/rules/${ruleId}`, { method: 'DELETE' });
+      this.loadRules();
+      showToast('Regel gel\u00f6scht', 'info');
+    } catch (e) {
+      showToast('Fehler: ' + e.message, 'error');
+    }
+  },
+
+  async testRule(ruleId) {
+    showToast('Teste Regel gegen Webex-Nachrichten der letzten 7 Tage...', 'info');
+    try {
+      const res = await fetch(`/api/webex/rules/${ruleId}/test`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ limit: 50 }),
+      });
+      const data = await res.json();
+      const matches = data.matches || [];
+      if (matches.length === 0) {
+        showToast('Keine Treffer. Regel-Beschreibung pr\u00fcfen.', 'info');
+      } else {
+        const created = data.created || 0;
+        if (created > 0) {
+          showToast(`${matches.length} Treffer, ${created} Todo(s) erstellt.`, 'success');
+          emailModule.loadTodoCounts();
+        } else {
+          showToast(`${matches.length} Treffer, aber bereits als Todo vorhanden.`, 'info');
+        }
+      }
+    } catch (e) {
+      showToast('Test fehlgeschlagen: ' + e.message, 'error');
+    }
+  },
+
+  addRule() {
+    const editor = document.getElementById('webex-rule-editor');
+    editor.style.display = 'block';
+    editor.innerHTML = `
+      <div class="rule-editor-form">
+        <label>Name:</label>
+        <input type="text" id="wxrule-edit-name" placeholder="z.B. Aufgaben aus Team-Chat">
+        <label>Beschreibung (LLM-Prompt):</label>
+        <textarea id="wxrule-edit-desc" placeholder="Pr\u00fcfe ob die Nachricht eine Aufgabe, Deadline oder Arbeitsanweisung enth\u00e4lt"></textarea>
+        <label>Raum-Filter (optional):</label>
+        <input type="text" id="wxrule-edit-room" placeholder="Raum-Name oder ID (leer = alle)">
+        <label>Absender-Filter (optional):</label>
+        <input type="text" id="wxrule-edit-sender" placeholder="z.B. user@example.com (leer = alle)">
+        <div class="rule-editor-actions">
+          <button class="btn btn-secondary" onclick="webexModule.cancelRuleEdit()">Abbrechen</button>
+          <button class="btn btn-primary" onclick="webexModule.saveNewRule()">Speichern</button>
+        </div>
+      </div>
+    `;
+  },
+
+  editRule(ruleId) {
+    fetch('/api/webex/rules').then(r => r.json()).then(data => {
+      const rule = (data.rules || []).find(r => r.id === ruleId);
+      if (!rule) return;
+
+      const editor = document.getElementById('webex-rule-editor');
+      editor.style.display = 'block';
+      editor.innerHTML = `
+        <div class="rule-editor-form">
+          <label>Name:</label>
+          <input type="text" id="wxrule-edit-name" value="${escapeHtml(rule.name)}">
+          <label>Beschreibung (LLM-Prompt):</label>
+          <textarea id="wxrule-edit-desc">${escapeHtml(rule.description)}</textarea>
+          <label>Raum-Filter (optional):</label>
+          <input type="text" id="wxrule-edit-room" value="${escapeHtml(rule.room_filter || '')}">
+          <label>Absender-Filter (optional):</label>
+          <input type="text" id="wxrule-edit-sender" value="${escapeHtml(rule.sender_filter || '')}">
+          <div class="rule-editor-actions">
+            <button class="btn btn-secondary" onclick="webexModule.cancelRuleEdit()">Abbrechen</button>
+            <button class="btn btn-primary" onclick="webexModule.saveEditedRule('${ruleId}')">Speichern</button>
+          </div>
+        </div>
+      `;
+    });
+  },
+
+  cancelRuleEdit() {
+    document.getElementById('webex-rule-editor').style.display = 'none';
+  },
+
+  async saveNewRule() {
+    const name = document.getElementById('wxrule-edit-name').value.trim();
+    const desc = document.getElementById('wxrule-edit-desc').value.trim();
+    const room = document.getElementById('wxrule-edit-room').value.trim();
+    const sender = document.getElementById('wxrule-edit-sender').value.trim();
+
+    if (!name || !desc) {
+      showToast('Name und Beschreibung sind erforderlich', 'error');
+      return;
+    }
+
+    try {
+      await fetch('/api/webex/rules', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name, description: desc, room_filter: room, sender_filter: sender }),
+      });
+      this.cancelRuleEdit();
+      this.loadRules();
+      showToast('Regel erstellt', 'success');
+    } catch (e) {
+      showToast('Fehler: ' + e.message, 'error');
+    }
+  },
+
+  async saveEditedRule(ruleId) {
+    const name = document.getElementById('wxrule-edit-name').value.trim();
+    const desc = document.getElementById('wxrule-edit-desc').value.trim();
+    const room = document.getElementById('wxrule-edit-room').value.trim();
+    const sender = document.getElementById('wxrule-edit-sender').value.trim();
+
+    try {
+      await fetch(`/api/webex/rules/${ruleId}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name, description: desc, room_filter: room, sender_filter: sender }),
+      });
+      this.cancelRuleEdit();
+      this.loadRules();
+      showToast('Regel aktualisiert', 'success');
+    } catch (e) {
+      showToast('Fehler: ' + e.message, 'error');
+    }
+  },
+};
+
+// ── Webex Global Functions ────────────────────────────────────────────────────
+
+function openWebexAutomation() {
+  const modal = document.getElementById('webex-automation-modal');
+  modal.style.display = 'flex';
+  webexModule.loadAutomationStatus();
+  webexModule.loadRules();
+}
+
+function closeWebexAutomation() {
+  document.getElementById('webex-automation-modal').style.display = 'none';
+  document.getElementById('webex-rule-editor').style.display = 'none';
+}
+
+function addWebexRule() {
+  webexModule.addRule();
+}
+
+async function toggleWebexPolling() {
+  const data = webexModule.automationData;
+  const endpoint = data && data.running ? '/api/webex/automation/stop' : '/api/webex/automation/start';
+  try {
+    await fetch(endpoint, { method: 'POST' });
+    webexModule.loadAutomationStatus();
+  } catch (e) {
+    showToast('Fehler: ' + e.message, 'error');
+  }
+}
+
+function filterTodoSource(source) {
+  emailModule.todoSourceFilter = source;
+  document.querySelectorAll('.todo-filter[data-source]').forEach(b => {
+    b.classList.toggle('active', b.dataset.source === source);
+  });
+  emailModule.loadTodos();
+}
+
+// Initialize email + webex module after DOM is ready (non-blocking)
 document.addEventListener('DOMContentLoaded', () => {
   emailModule.init().catch(e => console.warn('[emailModule] Init failed:', e));
 });

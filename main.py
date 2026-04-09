@@ -12,7 +12,7 @@ from pathlib import Path
 if sys.platform == 'win32':
     asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())
 
-from app.api.routes import chat, java, logs, pdf, confluence, models, python_routes, handbook, skills, agent, settings, database, datasources, mq, log_servers, wlp, maven, search, jenkins, iq_server, alm, github, internal_fetch, docker_sandbox, access_logs, servicenow, testtool, analytics, patterns, tokens, healing, agents, reviews, arena, files, research, output, designs, llm_diagnostics, update, tasks, graph, tests, scripts, email
+from app.api.routes import chat, java, logs, pdf, confluence, models, python_routes, handbook, skills, agent, settings, database, datasources, mq, log_servers, wlp, maven, search, jenkins, iq_server, alm, github, internal_fetch, docker_sandbox, access_logs, servicenow, testtool, analytics, patterns, tokens, healing, agents, reviews, arena, files, research, output, designs, llm_diagnostics, update, tasks, graph, tests, scripts, email, webex
 
 
 @asynccontextmanager
@@ -207,6 +207,15 @@ async def lifespan(app: FastAPI):
         except Exception as e:
             print(f"[startup] Email-Tools-Registrierung fehlgeschlagen: {e}")
 
+        # Webex-Tools registrieren (webex_list_rooms, webex_read_messages, webex_search_messages)
+        try:
+            from app.agent.webex_tools import register_webex_tools
+            webex_count = register_webex_tools(registry)
+            if webex_count:
+                print(f"[startup] Webex-Tools registriert: {webex_count}")
+        except Exception as e:
+            print(f"[startup] Webex-Tools-Registrierung fehlgeschlagen: {e}")
+
     except Exception as e:
         print(f"[startup] Agent-Initialisierung fehlgeschlagen: {e}")
 
@@ -219,6 +228,16 @@ async def lifespan(app: FastAPI):
             print(f"[startup] Email-Automation gestartet (Intervall: {settings.email.polling_interval_minutes} Min)")
         except Exception as e:
             print(f"[startup] Email-Automation fehlgeschlagen: {e}")
+
+    # Webex-Automation starten (wenn aktiviert)
+    if settings.webex.enabled and settings.webex.polling_enabled:
+        try:
+            from app.services.webex_automation import get_webex_automation
+            wx_automation = get_webex_automation()
+            await wx_automation.start()
+            print(f"[startup] Webex-Automation gestartet (Intervall: {settings.webex.polling_interval_minutes} Min)")
+        except Exception as e:
+            print(f"[startup] Webex-Automation fehlgeschlagen: {e}")
 
     # External Access Logging initialisieren
     try:
@@ -324,6 +343,24 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         print(f"[shutdown] Email-Client-Cleanup fehlgeschlagen: {e}")
 
+    # Webex-Automation stoppen
+    try:
+        from app.services.webex_automation import get_webex_automation
+        wx_automation = get_webex_automation()
+        if wx_automation.is_running:
+            await wx_automation.stop()
+            print("[shutdown] Webex-Automation gestoppt")
+    except Exception as e:
+        print(f"[shutdown] Webex-Automation-Cleanup fehlgeschlagen: {e}")
+
+    # Webex-Client schließen
+    try:
+        from app.services.webex_client import close_webex_client
+        await close_webex_client()
+        print("[shutdown] Webex-Client geschlossen")
+    except Exception as e:
+        print(f"[shutdown] Webex-Client-Cleanup fehlgeschlagen: {e}")
+
     # Docker-Sandbox: Alle Sessions beenden
     try:
         from app.agent.docker_tools import cleanup_all_sessions
@@ -338,7 +375,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="AI Code Assistant",
     description="Lokaler AI-Assistent für Java/Python-Entwicklung mit Handbuch-, WLP-Log-, PDF- und Confluence-Unterstützung",
-    version="2.34.48",
+    version="2.35.0",
     lifespan=lifespan,
 )
 
@@ -388,6 +425,7 @@ app.include_router(graph.router)
 app.include_router(tests.router)
 app.include_router(scripts.router)
 app.include_router(email.router)
+app.include_router(webex.router)
 
 
 # ============================================================================

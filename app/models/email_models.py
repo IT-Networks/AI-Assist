@@ -60,11 +60,11 @@ class EmailRulesStore(BaseModel):
 # ── Todo Items ─────────────────────────────────────────────────────────────────
 
 class TodoItem(BaseModel):
-    """Ein erkanntes Todo aus einer E-Mail."""
+    """Ein erkanntes Todo aus einer E-Mail oder Webex-Nachricht."""
     id: str = Field(default_factory=lambda: f"todo-{uuid4().hex[:6]}")
     rule_id: str
     rule_name: str
-    email_id: str
+    email_id: str                      # Bei Webex: Message-ID
     subject: str
     sender: str
     sender_name: str = ""
@@ -74,6 +74,7 @@ class TodoItem(BaseModel):
     priority: str = "medium"           # high, medium, low
     deadline: Optional[str] = None     # ISO-Datum oder None
     status: Literal["new", "read", "done"] = "new"
+    source: Literal["email", "webex"] = "email"  # Quelle des Todos
     created_at: str = Field(default_factory=lambda: datetime.now().isoformat())
     mail_snapshot: MailSnapshot
 
@@ -81,6 +82,7 @@ class TodoItem(BaseModel):
 class TodoStore(BaseModel):
     """Persistenz-Format für todos.json."""
     todos: List[TodoItem] = []
-    last_poll: Optional[str] = None
-    processed_email_ids: List[str] = []   # Duplikat-Schutz
+    last_poll: Optional[str] = None       # Letzter E-Mail-Poll
+    last_webex_poll: Optional[str] = None # Letzter Webex-Poll
+    processed_email_ids: List[str] = []   # Duplikat-Schutz (Email + Webex)
     version: int = 1

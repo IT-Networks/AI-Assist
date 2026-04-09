@@ -60,4 +60,11 @@ def reset_singletons():
     import app.services.email_client as email_client_module
     email_client_module._email_client = None
 
+    # Reset webex singletons
+    import app.services.webex_client as webex_client_module
+    webex_client_module._webex_client = None
+
+    import app.services.webex_automation as webex_auto_module
+    webex_auto_module._automation = None
+
     yield

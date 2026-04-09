@@ -155,9 +155,15 @@ class TodoStoreService:
             self.save()
 
     def update_last_poll(self, timestamp: str) -> None:
-        """Aktualisiert den letzten Poll-Zeitstempel."""
+        """Aktualisiert den letzten E-Mail-Poll-Zeitstempel."""
         store = self.load()
         store.last_poll = timestamp
+        self.save()
+
+    def update_last_webex_poll(self, timestamp: str) -> None:
+        """Aktualisiert den letzten Webex-Poll-Zeitstempel."""
+        store = self.load()
+        store.last_webex_poll = timestamp
         self.save()
 
     def _notify_safe(self, event: str, data: Any) -> None:

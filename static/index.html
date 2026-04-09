@@ -70,6 +70,9 @@
     <button class="header-btn" id="email-automation-btn" onclick="openEmailAutomation()" title="E-Mail Automationen" style="display:none">
       &#128231; <span class="badge badge-info" id="todo-badge" style="display:none">0</span>
     </button>
+    <button class="header-btn" id="webex-automation-btn" onclick="openWebexAutomation()" title="Webex Automationen" style="display:none">
+      &#128172; <span class="badge badge-info" id="webex-todo-badge" style="display:none">0</span>
+    </button>
     <button class="header-btn" id="todo-btn" onclick="toggleTodoPanel()" title="Todos" style="display:none">
       &#128203; Todos <span class="badge badge-info pulse" id="todo-count-badge" style="display:none">0</span>
     </button>
@@ -154,6 +157,7 @@
             <div class="settings-nav-category-items">
               <button class="settings-nav-item" data-section="database">Datenbank</button>
               <button class="settings-nav-item" data-section="email">E-Mail / Exchange</button>
+              <button class="settings-nav-item" data-section="webex">Webex</button>
               <button class="settings-nav-item" data-section="confluence">Confluence</button>
               <button class="settings-nav-item" data-section="handbook">Handbuch</button>
               <button class="settings-nav-item" data-section="jira">Jira</button>
@@ -1358,6 +1362,28 @@
   </div>
 </div>
 
+<!-- Webex Automation Modal -->
+<div id="webex-automation-modal" class="modal" style="display:none" role="dialog" aria-modal="true">
+  <div class="modal-overlay" onclick="closeWebexAutomation()"></div>
+  <div class="modal-content modal-large">
+    <div class="modal-header">
+      <h2>&#128172; Webex Automationen</h2>
+      <button class="modal-close" onclick="closeWebexAutomation()">&times;</button>
+    </div>
+    <div class="modal-body" style="display:flex; flex-direction:column; gap:16px;">
+      <div id="webex-automation-status" class="automation-status"></div>
+      <div id="webex-rules-list"></div>
+      <div id="webex-rule-editor" style="display:none;"></div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-secondary" id="webex-auto-toggle-btn" onclick="toggleWebexPolling()">Start</button>
+      <button class="btn btn-secondary" onclick="addWebexRule()">+ Neue Regel</button>
+      <span id="webex-auto-status-text" class="settings-status"></span>
+      <button class="btn btn-secondary" onclick="closeWebexAutomation()">Schlie&szlig;en</button>
+    </div>
+  </div>
+</div>
+
 <!-- Todo Panel (Sidebar overlay) -->
 <div id="todo-panel" class="todo-panel" style="display:none;">
   <div class="todo-panel-header">
@@ -1366,6 +1392,10 @@
       <button class="todo-filter active" data-filter="all" onclick="filterTodos('all')">Alle</button>
       <button class="todo-filter" data-filter="new" onclick="filterTodos('new')">Neu</button>
       <button class="todo-filter" data-filter="done" onclick="filterTodos('done')">Erledigt</button>
+      <span style="border-left:1px solid var(--border);margin:0 4px;"></span>
+      <button class="todo-filter" data-source="all" onclick="filterTodoSource('all')">&#128202;</button>
+      <button class="todo-filter" data-source="email" onclick="filterTodoSource('email')" title="Nur E-Mail">&#128231;</button>
+      <button class="todo-filter" data-source="webex" onclick="filterTodoSource('webex')" title="Nur Webex">&#128172;</button>
     </div>
     <button class="modal-close" onclick="toggleTodoPanel()">&times;</button>
   </div>

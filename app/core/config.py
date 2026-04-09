@@ -1475,6 +1475,19 @@ class TaskAgentConfig(BaseModel):
     # Hinweis: Web-Suche wird über search.enabled gesteuert (in config.yaml)
 
 
+class WebexConfig(BaseModel):
+    """Webex Messaging Konfiguration."""
+    enabled: bool = False
+    access_token: str = ""             # Bot-Token oder Personal Access Token
+    credential_ref: str = ""           # Alternativ: Zentrale Credentials
+    base_url: str = "https://webexapis.com/v1"
+    timeout_seconds: int = 30
+    # Automation (Polling)
+    polling_enabled: bool = False
+    polling_interval_minutes: int = 5  # 1-60 Minuten
+    max_messages_per_poll: int = 100
+
+
 class EmailConfig(BaseModel):
     """Exchange E-Mail Konfiguration (EWS mit NTLM)."""
     enabled: bool = False
@@ -1543,6 +1556,7 @@ class Settings(BaseModel):
     analytics: AnalyticsConfig = Field(default_factory=AnalyticsConfig)
     update: UpdateConfig = Field(default_factory=UpdateConfig)
     email: EmailConfig = Field(default_factory=EmailConfig)
+    webex: WebexConfig = Field(default_factory=WebexConfig)
 
     def apply_env_overrides(self) -> "Settings":
         if os.getenv("LLM_BASE_URL"):
