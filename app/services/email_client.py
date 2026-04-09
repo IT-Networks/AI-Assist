@@ -45,14 +45,9 @@ def _get_credentials():
     if cfg.credential_ref:
         cred = settings.credentials.get(cfg.credential_ref)
         if cred:
-            password = cred.password or cred.token
-            # credential_ref username kann bereits DOMAIN\user sein
             if cred.username:
-                if '\\' in cred.username:
-                    # Bereits im DOMAIN\user Format
-                    return cred.username, password
-                else:
-                    username = cred.username
+                username = cred.username
+            password = cred.password or cred.token
             logger.debug("Email: Verwende credential_ref '%s'", cfg.credential_ref)
 
     # NTLM erwartet DOMAIN\username
