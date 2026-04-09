@@ -429,11 +429,17 @@ class ExchangeEmailClient:
         }
 
     async def get_new_emails_since(
-        self, since: datetime, folder: str = "inbox", limit: int = 50
+        self, since: datetime, folder: str = "all", limit: int = 50
     ) -> List[Dict[str, Any]]:
-        """Holt neue E-Mails seit einem Zeitstempel (für Polling)."""
+        """Holt neue E-Mails seit einem Zeitstempel (für Polling).
+        folder='all' durchsucht alle Mail-Ordner (für Exchange-Regeln die Mails verschieben).
+        """
         await self._ensure_connected()
         loop = asyncio.get_event_loop()
+        if folder == "all":
+            return await loop.run_in_executor(
+                None, lambda: self._get_new_emails_all_folders_sync(since, limit)
+            )
         return await loop.run_in_executor(
             None, lambda: self._get_new_emails_since_sync(since, folder, limit)
         )
@@ -497,6 +503,36 @@ class ExchangeEmailClient:
             })
 
         return results
+
+    def _get_new_emails_all_folders_sync(self, since: datetime, limit: int) -> List[Dict[str, Any]]:
+        """Durchsucht alle Mail-Ordner nach neuen Mails seit einem Zeitstempel."""
+        from exchangelib import Folder
+
+        all_results = []
+        seen_ids = set()
+
+        for folder in self._account.root.walk():
+            if not isinstance(folder, Folder) or folder.folder_class != 'IPF.Note':
+                continue
+            try:
+                count = folder.total_count or 0
+                if count == 0:
+                    continue
+                results = self._get_new_emails_since_sync(since, folder.name, limit - len(all_results))
+                for r in results:
+                    eid = r.get("email_id", "")
+                    if eid and eid not in seen_ids:
+                        seen_ids.add(eid)
+                        all_results.append(r)
+                if len(all_results) >= limit:
+                    break
+            except Exception as e:
+                logger.debug("Ordner '%s' übersprungen: %s", folder.name, e)
+                continue
+
+        # Nach Datum sortieren (neueste zuerst)
+        all_results.sort(key=lambda x: x.get("date", ""), reverse=True)
+        return all_results[:limit]
 
     # ── Hilfsmethoden ──────────────────────────────────────────────────────────
 
