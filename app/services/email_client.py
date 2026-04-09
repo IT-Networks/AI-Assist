@@ -309,57 +309,57 @@ class ExchangeEmailClient:
 
     def _read_email_sync(self, email_id: str, folder_name: str) -> Dict[str, Any]:
         from exchangelib.items import Message
+        from exchangelib.properties import ItemId
 
         target_folder = self._get_folder(folder_name)
-        if target_folder is None:
-            raise ValueError(f"Ordner '{folder_name}' nicht gefunden.")
 
-        # Suche nach ID
-        for item in target_folder.filter(id=email_id):
-            if not isinstance(item, Message):
-                continue
+        # Per ItemId direkt laden (filter(id=) wird von EWS nicht unterstützt)
+        items = list(self._account.fetch(ids=[ItemId(id=email_id)]))
+        if not items or items[0] is None:
+            raise ValueError(f"E-Mail mit ID '{email_id}' nicht gefunden.")
 
-            # Attachments sammeln
-            attachments = []
-            if item.attachments:
-                for att in item.attachments:
-                    attachments.append({
-                        "name": att.name or "unnamed",
-                        "size": att.size or 0,
-                        "content_type": getattr(att, 'content_type', '') or "",
-                    })
+        item = items[0]
 
-            body_html = ""
-            body_text = ""
-            if item.body:
-                body_html = str(item.body)
-            if item.text_body:
-                body_text = item.text_body
-            elif body_html:
-                from bs4 import BeautifulSoup
-                body_text = BeautifulSoup(body_html, 'html.parser').get_text(separator='\n', strip=True)
+        # Attachments sammeln
+        attachments = []
+        if item.attachments:
+            for att in item.attachments:
+                attachments.append({
+                    "name": att.name or "unnamed",
+                    "size": att.size or 0,
+                    "content_type": getattr(att, 'content_type', '') or "",
+                })
 
-            # Thread-Info: Prüfe ob Antworten/Weiterleitungen existieren
-            thread_info = self._get_thread_info(item, target_folder)
+        body_html = ""
+        body_text = ""
+        if item.body:
+            body_html = str(item.body)
+        if item.text_body:
+            body_text = item.text_body
+        elif body_html:
+            from bs4 import BeautifulSoup
+            body_text = BeautifulSoup(body_html, 'html.parser').get_text(separator='\n', strip=True)
 
-            return {
-                "email_id": item.id,
-                "subject": item.subject or "(Kein Betreff)",
-                "sender": str(item.sender.email_address) if item.sender else "",
-                "sender_name": str(item.sender.name) if item.sender and item.sender.name else "",
-                "to": [str(r.email_address) for r in (item.to_recipients or [])],
-                "cc": [str(r.email_address) for r in (item.cc_recipients or [])],
-                "date": item.datetime_received.isoformat() if item.datetime_received else "",
-                "body_html": body_html,
-                "body_text": body_text,
-                "folder": folder_name,
-                "attachments": attachments,
-                "is_read": item.is_read or False,
-                "importance": str(item.importance) if item.importance else "normal",
-                "thread": thread_info,
-            }
+        # Thread-Info
+        search_folder = target_folder or self._account.inbox
+        thread_info = self._get_thread_info(item, search_folder)
 
-        raise ValueError(f"E-Mail mit ID '{email_id}' nicht gefunden in '{folder_name}'.")
+        return {
+            "email_id": item.id,
+            "subject": item.subject or "(Kein Betreff)",
+            "sender": str(item.sender.email_address) if item.sender else "",
+            "sender_name": str(item.sender.name) if item.sender and item.sender.name else "",
+            "to": [str(r.email_address) for r in (item.to_recipients or [])],
+            "cc": [str(r.email_address) for r in (item.cc_recipients or [])],
+            "date": item.datetime_received.isoformat() if item.datetime_received else "",
+            "body_html": body_html,
+            "body_text": body_text,
+            "folder": folder_name,
+            "attachments": attachments,
+            "is_read": item.is_read or False,
+            "importance": str(item.importance) if item.importance else "normal",
+            "thread": thread_info,
+        }
 
     async def get_attachment(self, email_id: str, attachment_name: str, folder: str = "inbox") -> Tuple[bytes, str]:
         """Lädt ein Attachment herunter. Returns (content_bytes, content_type)."""
@@ -371,16 +371,17 @@ class ExchangeEmailClient:
 
     def _get_attachment_sync(self, email_id: str, attachment_name: str, folder_name: str) -> Tuple[bytes, str]:
         from exchangelib import FileAttachment
+        from exchangelib.properties import ItemId
 
-        target_folder = self._get_folder(folder_name)
-        if target_folder is None:
-            raise ValueError(f"Ordner '{folder_name}' nicht gefunden.")
+        items = list(self._account.fetch(ids=[ItemId(id=email_id)]))
+        if not items or items[0] is None:
+            raise ValueError(f"E-Mail mit ID '{email_id}' nicht gefunden.")
 
-        for item in target_folder.filter(id=email_id):
-            if item.attachments:
-                for att in item.attachments:
-                    if isinstance(att, FileAttachment) and att.name == attachment_name:
-                        return att.content, getattr(att, 'content_type', 'application/octet-stream') or 'application/octet-stream'
+        item = items[0]
+        if item.attachments:
+            for att in item.attachments:
+                if isinstance(att, FileAttachment) and att.name == attachment_name:
+                    return att.content, getattr(att, 'content_type', 'application/octet-stream') or 'application/octet-stream'
 
         raise ValueError(f"Attachment '{attachment_name}' nicht gefunden.")
 
@@ -412,10 +413,10 @@ class ExchangeEmailClient:
 
         if reply_to_id:
             try:
-                # Versuche die Original-Mail zu finden und als Reply zu verknüpfen
-                for item in self._account.inbox.filter(id=reply_to_id):
-                    msg.in_reply_to = item.message_id
-                    break
+                from exchangelib.properties import ItemId
+                items = list(self._account.fetch(ids=[ItemId(id=reply_to_id)]))
+                if items and items[0] is not None:
+                    msg.in_reply_to = items[0].message_id
             except Exception:
                 pass
 
