@@ -90,18 +90,29 @@ class ExchangeEmailClient:
             urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
             BaseProtocol.HTTP_ADAPTER_CLS = _get_no_verify_adapter()
 
-        # Server-Hostname aus EWS-URL extrahieren
-        from urllib.parse import urlparse
-        parsed = urlparse(ews_url)
-        server = parsed.hostname
-
         credentials = Credentials(username=smtp_address, password=password)
-        config = Configuration(
-            server=server,
-            credentials=credentials,
-            auth_type=NTLM,
-            service_endpoint=ews_url,
-        )
+
+        # exchangelib erlaubt nur server ODER service_endpoint, nicht beides.
+        # Wenn die URL ein Pfad enthält (z.B. /EWS/Exchange.asmx) → service_endpoint
+        # Wenn nur Hostname → server (exchangelib baut die URL selbst)
+        from urllib.parse import urlparse
+        parsed = urlparse(ews_url if '://' in ews_url else f'https://{ews_url}')
+        has_path = parsed.path and parsed.path not in ('', '/')
+
+        if has_path:
+            # Vollständige EWS-URL angegeben
+            config = Configuration(
+                credentials=credentials,
+                auth_type=NTLM,
+                service_endpoint=ews_url if '://' in ews_url else f'https://{ews_url}',
+            )
+        else:
+            # Nur Hostname angegeben — exchangelib baut /EWS/Exchange.asmx selbst
+            config = Configuration(
+                server=parsed.hostname,
+                credentials=credentials,
+                auth_type=NTLM,
+            )
         account = Account(
             primary_smtp_address=smtp_address,
             config=config,
