@@ -20771,7 +20771,7 @@ const emailModule = {
       if (matches.length === 0) {
         showToast('Keine Treffer gefunden.', 'info');
       } else {
-        showToast(`${matches.length} Treffer: ${matches.map(m => m.subject).join(', ')}`, 'success');
+        showToast(`${matches.length} Treffer gefunden (Vorschau). Polling starten um Todos zu erstellen.`, 'success');
       }
     } catch (e) {
       showToast('Test fehlgeschlagen: ' + e.message, 'error');

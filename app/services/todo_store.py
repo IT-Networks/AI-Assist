@@ -106,11 +106,21 @@ class TodoStoreService:
         return False
 
     def delete(self, todo_id: str) -> bool:
-        """Todo löschen."""
+        """Todo löschen und email_id aus processed-Liste entfernen (erlaubt Re-Erkennung)."""
         store = self.load()
+        # Finde das Todo um die email_id zu bekommen
+        deleted_email_id = None
+        for todo in store.todos:
+            if todo.id == todo_id:
+                deleted_email_id = todo.email_id
+                break
+
         before = len(store.todos)
         store.todos = [t for t in store.todos if t.id != todo_id]
         if len(store.todos) < before:
+            # email_id aus processed entfernen damit die Mail erneut erkannt werden kann
+            if deleted_email_id and deleted_email_id in store.processed_email_ids:
+                store.processed_email_ids.remove(deleted_email_id)
             self.save()
             asyncio.ensure_future(self.notify("todo_count", self.get_counts()))
             return True

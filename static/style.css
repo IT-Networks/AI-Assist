@@ -11906,10 +11906,12 @@ a:visited {
 .todo-panel-header {
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 12px 16px;
+  gap: 6px;
+  padding: 10px 12px;
   border-bottom: 1px solid var(--border);
   flex-shrink: 0;
+  flex-wrap: wrap;
+  overflow: visible;
 }
 
 .todo-panel-header h3 {
