@@ -20685,11 +20685,12 @@ const emailModule = {
 
     const dotClass = data.running ? 'running' : 'stopped';
     const statusText = data.running ? 'Aktiv' : 'Gestoppt';
+    const configNote = (!data.running && data.polling_enabled) ? ' <span style="color:var(--warning);font-size:0.72rem;">(in Config aktiviert — Server-Neustart oder manuell starten)</span>' : '';
     const lastPoll = data.last_poll ? new Date(data.last_poll).toLocaleString('de-DE') : 'Nie';
 
     statusEl.innerHTML = `
       <span class="status-dot ${dotClass}"></span>
-      <span><strong>${statusText}</strong> (Alle ${data.polling_interval_minutes || '?'} Min)</span>
+      <span><strong>${statusText}</strong>${configNote} (Alle ${data.polling_interval_minutes || '?'} Min)</span>
       <span style="color:var(--text-muted);font-size:0.75rem;">Letzte Pr&uuml;fung: ${lastPoll}</span>
       <span style="color:var(--text-muted);font-size:0.75rem;">${data.active_rules || 0}/${data.rules_count || 0} Regeln aktiv</span>
     `;

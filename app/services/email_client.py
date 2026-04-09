@@ -222,7 +222,7 @@ class ExchangeEmailClient:
                 dt = datetime.fromisoformat(date_from)
                 from exchangelib import EWSDateTime, EWSTimeZone
                 tz = EWSTimeZone.localzone()
-                q_filter = self._and_q(q_filter, Q(datetime_received__gte=tz.localize(EWSDateTime.from_datetime(dt))))
+                q_filter = self._and_q(q_filter, Q(datetime_received__gte=EWSDateTime.from_datetime(dt).astimezone(tz)))
             except (ValueError, TypeError):
                 pass
         if date_to:
@@ -230,7 +230,7 @@ class ExchangeEmailClient:
                 dt = datetime.fromisoformat(date_to)
                 from exchangelib import EWSDateTime, EWSTimeZone
                 tz = EWSTimeZone.localzone()
-                q_filter = self._and_q(q_filter, Q(datetime_received__lte=tz.localize(EWSDateTime.from_datetime(dt))))
+                q_filter = self._and_q(q_filter, Q(datetime_received__lte=EWSDateTime.from_datetime(dt).astimezone(tz)))
             except (ValueError, TypeError):
                 pass
         if query:

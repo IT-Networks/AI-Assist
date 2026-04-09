@@ -141,6 +141,7 @@ class EmailAutomationService:
 
         return {
             "running": self._running,
+            "polling_enabled": settings.email.polling_enabled,
             "last_poll": data.last_poll,
             "polling_interval_minutes": settings.email.polling_interval_minutes,
             "rules_count": len(rules),
