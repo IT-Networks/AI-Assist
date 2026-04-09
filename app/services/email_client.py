@@ -17,6 +17,20 @@ logger = logging.getLogger(__name__)
 _exchangelib_available = None
 
 
+def _get_ews_timezone():
+    """Robuste Ermittlung der lokalen EWS-Timezone mit Fallback."""
+    from exchangelib import EWSTimeZone
+    try:
+        return EWSTimeZone.localzone()
+    except Exception:
+        pass
+    # Fallback: Europe/Berlin oder UTC
+    try:
+        return EWSTimeZone('Europe/Berlin')
+    except Exception:
+        return EWSTimeZone('UTC')
+
+
 def _check_exchangelib():
     global _exchangelib_available
     if _exchangelib_available is None:
@@ -220,16 +234,16 @@ class ExchangeEmailClient:
         if date_from:
             try:
                 dt = datetime.fromisoformat(date_from)
-                from exchangelib import EWSDateTime, EWSTimeZone
-                tz = EWSTimeZone.localzone()
+                from exchangelib import EWSDateTime
+                tz = _get_ews_timezone()
                 q_filter = self._and_q(q_filter, Q(datetime_received__gte=EWSDateTime.from_datetime(dt).astimezone(tz)))
             except (ValueError, TypeError):
                 pass
         if date_to:
             try:
                 dt = datetime.fromisoformat(date_to)
-                from exchangelib import EWSDateTime, EWSTimeZone
-                tz = EWSTimeZone.localzone()
+                from exchangelib import EWSDateTime
+                tz = _get_ews_timezone()
                 q_filter = self._and_q(q_filter, Q(datetime_received__lte=EWSDateTime.from_datetime(dt).astimezone(tz)))
             except (ValueError, TypeError):
                 pass
@@ -423,14 +437,14 @@ class ExchangeEmailClient:
     def _get_new_emails_since_sync(
         self, since: datetime, folder_name: str, limit: int
     ) -> List[Dict[str, Any]]:
-        from exchangelib import Q, EWSDateTime, EWSTimeZone
+        from exchangelib import Q, EWSDateTime
         from exchangelib.items import Message
 
         target_folder = self._get_folder(folder_name)
         if target_folder is None:
             return []
 
-        tz = EWSTimeZone.localzone()
+        tz = _get_ews_timezone()
         since_ews = tz.localize(EWSDateTime.from_datetime(since))
 
         qs = target_folder.filter(
