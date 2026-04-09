@@ -1476,9 +1476,18 @@ class TaskAgentConfig(BaseModel):
 
 
 class WebexConfig(BaseModel):
-    """Webex Messaging Konfiguration."""
+    """Webex Messaging Konfiguration (OAuth2 Authorization Code Flow)."""
     enabled: bool = False
-    access_token: str = ""             # Bot-Token oder Personal Access Token
+    # OAuth2 Integration (bevorzugt)
+    client_id: str = ""                # Integration Client-ID
+    client_secret: str = ""            # Integration Client-Secret
+    redirect_uri: str = "http://localhost:8000/api/webex/oauth/callback"
+    scopes: str = "spark:rooms_read spark:messages_read spark:people_read"
+    # Token-Speicher (werden automatisch befüllt nach OAuth)
+    access_token: str = ""             # OAuth Access-Token (14 Tage gültig)
+    refresh_token: str = ""            # OAuth Refresh-Token (90 Tage gültig)
+    token_expires_at: str = ""         # ISO-Zeitstempel wann access_token abläuft
+    # Allgemein
     credential_ref: str = ""           # Alternativ: Zentrale Credentials
     base_url: str = "https://webexapis.com/v1"
     timeout_seconds: int = 30

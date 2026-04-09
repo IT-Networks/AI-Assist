@@ -1,21 +1,77 @@
 """
 Webex Messaging Client - HTTP-Client für die Webex REST API.
 
+Unterstützt OAuth2 Authorization Code Flow mit automatischem Token-Refresh.
 Nutzt httpx für async HTTP-Aufrufe mit Proxy- und Rate-Limit-Support.
 """
 
 import asyncio
 import logging
-from datetime import datetime
+from datetime import datetime, timedelta
+from pathlib import Path
 from typing import Any, Dict, List, Optional
+from urllib.parse import urlencode
 
 import httpx
 
 logger = logging.getLogger(__name__)
 
+# Webex OAuth2 Endpoints
+WEBEX_AUTH_URL = "https://webexapis.com/v1/authorize"
+WEBEX_TOKEN_URL = "https://webexapis.com/v1/access_token"
+
+
+_TOKEN_FILE = Path(__file__).parent.parent.parent / "webex_tokens.json"
+
+
+def _apply_token_data(token_data: dict) -> None:
+    """Wendet Token-Daten auf Settings an und speichert in webex_tokens.json."""
+    from app.core.config import settings
+    import json
+
+    settings.webex.access_token = token_data["access_token"]
+    if token_data.get("refresh_token"):
+        settings.webex.refresh_token = token_data["refresh_token"]
+    expires_in = token_data.get("expires_in", 1209600)  # Default 14 Tage
+    settings.webex.token_expires_at = (
+        datetime.now() + timedelta(seconds=expires_in)
+    ).isoformat()
+
+    # In separate Token-Datei speichern (nicht config.yaml überschreiben)
+    try:
+        _TOKEN_FILE.write_text(json.dumps({
+            "access_token": settings.webex.access_token,
+            "refresh_token": settings.webex.refresh_token,
+            "token_expires_at": settings.webex.token_expires_at,
+        }, indent=2), encoding="utf-8")
+        logger.debug("Webex-Tokens in webex_tokens.json gespeichert")
+    except Exception as e:
+        logger.warning("Webex-Tokens in Memory gesetzt, Datei-Speichern fehlgeschlagen: %s", e)
+
+
+def _load_persisted_tokens() -> None:
+    """Lädt Token aus webex_tokens.json in Settings (Startup)."""
+    import json
+    from app.core.config import settings
+
+    if not _TOKEN_FILE.exists():
+        return
+
+    try:
+        data = json.loads(_TOKEN_FILE.read_text(encoding="utf-8"))
+        if data.get("access_token") and not settings.webex.access_token:
+            settings.webex.access_token = data["access_token"]
+        if data.get("refresh_token") and not settings.webex.refresh_token:
+            settings.webex.refresh_token = data["refresh_token"]
+        if data.get("token_expires_at") and not settings.webex.token_expires_at:
+            settings.webex.token_expires_at = data["token_expires_at"]
+        logger.debug("Webex-Tokens aus webex_tokens.json geladen")
+    except Exception as e:
+        logger.warning("Webex-Tokens laden fehlgeschlagen: %s", e)
+
 
 class WebexClient:
-    """Async HTTP-Client für Webex REST API."""
+    """Async HTTP-Client für Webex REST API mit OAuth2-Support."""
 
     def __init__(self):
         self._client: Optional[httpx.AsyncClient] = None
@@ -25,10 +81,13 @@ class WebexClient:
         if self._client is None or self._client.is_closed:
             from app.core.config import settings
 
-            # Token aus Config oder credential_ref
+            # Token holen (ggf. refreshen)
             token = self._get_token()
             if not token:
-                raise ValueError("Kein Webex Access-Token konfiguriert")
+                raise ValueError(
+                    "Kein Webex Access-Token vorhanden. "
+                    "Bitte OAuth-Anmeldung über Settings durchführen."
+                )
 
             # Proxy-Konfiguration (zentraler Proxy)
             proxy = None
@@ -48,8 +107,24 @@ class WebexClient:
         return self._client
 
     def _get_token(self) -> str:
-        """Holt den Access-Token aus Config oder credential_ref."""
+        """Holt den Access-Token, refresht automatisch wenn nötig."""
         from app.core.config import settings
+
+        # Persistierte Tokens laden (falls noch nicht in Memory)
+        if not settings.webex.access_token:
+            _load_persisted_tokens()
+
+        # Prüfe ob Token abgelaufen → Refresh
+        if settings.webex.access_token and settings.webex.token_expires_at:
+            try:
+                expires = datetime.fromisoformat(settings.webex.token_expires_at)
+                if datetime.now() >= expires - timedelta(minutes=10):
+                    # Token läuft bald ab oder ist abgelaufen → Refresh
+                    if settings.webex.refresh_token:
+                        logger.info("Webex Access-Token abgelaufen, refreshe...")
+                        self._refresh_token_sync()
+            except (ValueError, TypeError):
+                pass
 
         if settings.webex.access_token:
             return settings.webex.access_token
@@ -60,14 +135,168 @@ class WebexClient:
                     return cred.password or cred.token or ""
         return ""
 
+    def _refresh_token_sync(self) -> bool:
+        """Synchroner Token-Refresh (für Lazy-Init im _get_client)."""
+        from app.core.config import settings
+
+        if not settings.webex.refresh_token or not settings.webex.client_id:
+            return False
+
+        proxy = None
+        if settings.webex.use_proxy and settings.proxy.enabled:
+            proxy = settings.proxy.get_proxy_url()
+
+        try:
+            with httpx.Client(
+                timeout=30,
+                verify=settings.webex.verify_ssl,
+                proxy=proxy,
+            ) as client:
+                response = client.post(
+                    WEBEX_TOKEN_URL,
+                    data={
+                        "grant_type": "refresh_token",
+                        "client_id": settings.webex.client_id,
+                        "client_secret": settings.webex.client_secret,
+                        "refresh_token": settings.webex.refresh_token,
+                    },
+                    headers={"Content-Type": "application/x-www-form-urlencoded"},
+                )
+                response.raise_for_status()
+                token_data = response.json()
+
+                _apply_token_data(token_data)
+
+                # Client neu erstellen mit neuem Token
+                if self._client and not self._client.is_closed:
+                    asyncio.get_event_loop().create_task(self._client.aclose())
+                    self._client = None
+
+                logger.info("Webex Token erfolgreich erneuert (gültig %d Sek.)",
+                            token_data.get("expires_in", 0))
+                return True
+
+        except Exception as e:
+            logger.error("Webex Token-Refresh fehlgeschlagen: %s", e)
+            return False
+
+    async def refresh_token(self) -> bool:
+        """Async Token-Refresh."""
+        from app.core.config import settings
+
+        if not settings.webex.refresh_token or not settings.webex.client_id:
+            return False
+
+        proxy = None
+        if settings.webex.use_proxy and settings.proxy.enabled:
+            proxy = settings.proxy.get_proxy_url()
+
+        try:
+            async with httpx.AsyncClient(
+                timeout=30,
+                verify=settings.webex.verify_ssl,
+                proxy=proxy,
+            ) as client:
+                response = await client.post(
+                    WEBEX_TOKEN_URL,
+                    data={
+                        "grant_type": "refresh_token",
+                        "client_id": settings.webex.client_id,
+                        "client_secret": settings.webex.client_secret,
+                        "refresh_token": settings.webex.refresh_token,
+                    },
+                    headers={"Content-Type": "application/x-www-form-urlencoded"},
+                )
+                response.raise_for_status()
+                token_data = response.json()
+
+                _apply_token_data(token_data)
+                await self.close()  # Force reconnect with new token
+                logger.info("Webex Token erfolgreich erneuert (gültig %d Sek.)",
+                            token_data.get("expires_in", 0))
+                return True
+
+        except Exception as e:
+            logger.error("Webex Token-Refresh fehlgeschlagen: %s", e)
+            return False
+
+    # ── OAuth2 Flow Helpers ───────────────────────────────────────────────────
+
+    @staticmethod
+    def get_auth_url() -> str:
+        """Generiert die OAuth2 Authorization URL für den Browser."""
+        from app.core.config import settings
+
+        params = {
+            "client_id": settings.webex.client_id,
+            "response_type": "code",
+            "redirect_uri": settings.webex.redirect_uri,
+            "scope": settings.webex.scopes,
+            "state": "ai-assist-webex",
+        }
+        return f"{WEBEX_AUTH_URL}?{urlencode(params)}"
+
+    @staticmethod
+    async def exchange_code(code: str) -> dict:
+        """Tauscht Authorization Code gegen Access + Refresh Token."""
+        from app.core.config import settings
+
+        proxy = None
+        if settings.webex.use_proxy and settings.proxy.enabled:
+            proxy = settings.proxy.get_proxy_url()
+
+        async with httpx.AsyncClient(
+            timeout=30,
+            verify=settings.webex.verify_ssl,
+            proxy=proxy,
+        ) as client:
+            response = await client.post(
+                WEBEX_TOKEN_URL,
+                data={
+                    "grant_type": "authorization_code",
+                    "client_id": settings.webex.client_id,
+                    "client_secret": settings.webex.client_secret,
+                    "code": code,
+                    "redirect_uri": settings.webex.redirect_uri,
+                },
+                headers={"Content-Type": "application/x-www-form-urlencoded"},
+            )
+            response.raise_for_status()
+            token_data = response.json()
+
+            _apply_token_data(token_data)
+
+            expires_in = token_data.get("expires_in", 1209600)
+            logger.info("Webex OAuth erfolgreich: Token gültig %d Sek., Refresh %s",
+                        expires_in, "vorhanden" if settings.webex.refresh_token else "fehlt")
+
+            return {
+                "success": True,
+                "expires_in": expires_in,
+                "has_refresh": bool(settings.webex.refresh_token),
+            }
+
     async def _request(self, method: str, path: str, **kwargs) -> dict:
-        """Zentrale Request-Methode mit Rate-Limit-Retry."""
+        """Zentrale Request-Methode mit Rate-Limit-Retry und Auto-Refresh."""
         client = self._get_client()
         max_retries = 3
 
         for attempt in range(max_retries):
             try:
                 response = await client.request(method, path, **kwargs)
+
+                # 401 → Token abgelaufen → Refresh versuchen
+                if response.status_code == 401 and attempt == 0:
+                    logger.info("Webex 401 - versuche Token-Refresh...")
+                    refreshed = await self.refresh_token()
+                    if refreshed:
+                        client = self._get_client()  # Neuer Client mit neuem Token
+                        continue
+                    raise httpx.HTTPStatusError(
+                        "Token abgelaufen und Refresh fehlgeschlagen",
+                        request=response.request,
+                        response=response,
+                    )
 
                 if response.status_code == 429:
                     retry_after = int(response.headers.get("Retry-After", "5"))

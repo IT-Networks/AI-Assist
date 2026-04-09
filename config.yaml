@@ -1031,7 +1031,16 @@ analytics:
 # ═════════════════════════════════════════════════════════════════════
 webex:
   enabled: false
-  access_token: ''               # Bot-Token oder Personal Access Token
+  # OAuth2 Integration (App auf developer.webex.com anlegen)
+  client_id: ''                  # Integration Client-ID
+  client_secret: ''              # Integration Client-Secret
+  redirect_uri: 'http://localhost:8000/api/webex/oauth/callback'
+  scopes: 'spark:rooms_read spark:messages_read spark:people_read'
+  # Token (werden automatisch nach OAuth-Login befüllt)
+  access_token: ''               # Wird automatisch gesetzt (14 Tage gültig)
+  refresh_token: ''              # Wird automatisch gesetzt (90 Tage gültig)
+  token_expires_at: ''           # ISO-Zeitstempel
+  # Allgemein
   credential_ref: ''             # Alternativ: Zentrale Credentials
   base_url: 'https://webexapis.com/v1'
   timeout_seconds: 30

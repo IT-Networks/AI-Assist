@@ -11215,12 +11215,18 @@ function renderSettingsSection() {
   if (section === 'webex') {
     html += `
       <div class="settings-actions-section">
+        <button class="btn btn-primary" onclick="webexOAuthLogin()">
+          🔑 Mit Webex anmelden (OAuth)
+        </button>
         <button class="btn btn-secondary" onclick="testWebexConnection()">
           💬 Verbindung testen
         </button>
         <span id="webex-test-result" class="test-result"></span>
+        <div id="webex-oauth-status" style="font-size:0.78rem;margin-top:8px;color:var(--text-muted);"></div>
       </div>
     `;
+    // OAuth-Status laden
+    setTimeout(() => checkWebexOAuthStatus(), 100);
   }
 
   document.getElementById('settings-form').innerHTML = html;
@@ -11248,6 +11254,52 @@ async function testEmailConnection() {
     resultEl.textContent = `✗ Fehler: ${err.message}`;
     resultEl.className = 'test-result error';
   }
+}
+
+async function webexOAuthLogin() {
+  const resultEl = document.getElementById('webex-test-result');
+  resultEl.textContent = '⏳ Bereite OAuth vor...';
+
+  try {
+    // Zuerst Settings speichern (Client-ID + Secret)
+    await saveCurrentSection();
+
+    const res = await fetch('/api/webex/oauth/url');
+    const data = await res.json();
+
+    if (data.success) {
+      resultEl.textContent = '🔗 Browser-Fenster geöffnet - dort anmelden...';
+      resultEl.className = 'test-result testing';
+      window.open(data.auth_url, '_blank', 'width=600,height=700');
+    } else {
+      resultEl.textContent = `✗ ${data.error}`;
+      resultEl.className = 'test-result error';
+    }
+  } catch (err) {
+    resultEl.textContent = `✗ Fehler: ${err.message}`;
+    resultEl.className = 'test-result error';
+  }
+}
+
+async function checkWebexOAuthStatus() {
+  const el = document.getElementById('webex-oauth-status');
+  if (!el) return;
+
+  try {
+    const res = await fetch('/api/webex/oauth/status');
+    const data = await res.json();
+
+    if (data.has_token) {
+      const expires = data.expires_at ? new Date(data.expires_at).toLocaleString('de-DE') : '?';
+      const status = data.expired ? '⚠️ Abgelaufen' : '✓ Aktiv';
+      el.innerHTML = `Token: ${status} (bis ${expires})` +
+        (data.has_refresh ? ' | Refresh-Token vorhanden' : ' | <span style="color:var(--warning)">Kein Refresh-Token</span>');
+    } else if (data.has_client_credentials) {
+      el.innerHTML = 'Noch nicht angemeldet. Klicke "Mit Webex anmelden" oben.';
+    } else {
+      el.innerHTML = 'Client-ID und Client-Secret eintragen, dann OAuth-Login durchführen.';
+    }
+  } catch (e) { /* ignore */ }
 }
 
 async function testWebexConnection() {

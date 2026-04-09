@@ -33,6 +33,81 @@ class WebexRuleUpdateRequest(BaseModel):
     enabled: Optional[bool] = None
 
 
+# ── OAuth2 Flow ───────────────────────────────────────────────────────────────
+
+@router.get("/oauth/url")
+async def get_oauth_url():
+    """Generiert die OAuth2 Authorization URL für den Browser-Login."""
+    from app.core.config import settings
+    from app.services.webex_client import WebexClient
+
+    if not settings.webex.client_id or not settings.webex.client_secret:
+        return {"success": False, "error": "Client-ID und Client-Secret müssen in den Settings konfiguriert sein."}
+
+    url = WebexClient.get_auth_url()
+    return {"success": True, "auth_url": url}
+
+
+@router.get("/oauth/callback")
+async def oauth_callback(code: str = Query(""), state: str = Query(""), error: str = Query("")):
+    """OAuth2 Callback - empfängt den Authorization Code und tauscht ihn gegen Tokens."""
+    from fastapi.responses import HTMLResponse
+    from app.services.webex_client import WebexClient
+
+    if error:
+        return HTMLResponse(f"""<html><body>
+            <h2>Webex OAuth Fehler</h2><p>{error}</p>
+            <p>Fenster kann geschlossen werden.</p>
+        </body></html>""")
+
+    if not code:
+        return HTMLResponse("""<html><body>
+            <h2>Fehler</h2><p>Kein Authorization Code erhalten.</p>
+        </body></html>""")
+
+    try:
+        result = await WebexClient.exchange_code(code)
+        return HTMLResponse(f"""<html><body>
+            <h2>Webex Verbindung erfolgreich!</h2>
+            <p>Access-Token erhalten (gültig {result.get('expires_in', 0) // 86400} Tage).</p>
+            <p>Refresh-Token: {'vorhanden' if result.get('has_refresh') else 'nicht vorhanden'}</p>
+            <p><strong>Dieses Fenster kann geschlossen werden.</strong></p>
+            <script>setTimeout(() => window.close(), 3000);</script>
+        </body></html>""")
+    except Exception as e:
+        logger.error("Webex OAuth Token-Exchange fehlgeschlagen: %s", e)
+        return HTMLResponse(f"""<html><body>
+            <h2>Token-Exchange fehlgeschlagen</h2>
+            <p>{str(e)}</p>
+        </body></html>""")
+
+
+@router.get("/oauth/status")
+async def oauth_status():
+    """Prüft den OAuth-Token-Status."""
+    from app.core.config import settings
+    from datetime import datetime
+
+    has_token = bool(settings.webex.access_token)
+    has_refresh = bool(settings.webex.refresh_token)
+    expires_at = settings.webex.token_expires_at
+
+    expired = False
+    if expires_at:
+        try:
+            expired = datetime.now() >= datetime.fromisoformat(expires_at)
+        except (ValueError, TypeError):
+            pass
+
+    return {
+        "has_token": has_token,
+        "has_refresh": has_refresh,
+        "expires_at": expires_at,
+        "expired": expired,
+        "has_client_credentials": bool(settings.webex.client_id and settings.webex.client_secret),
+    }
+
+
 # ── Verbindungstest ────────────────────────────────────────────────────────────
 
 @router.post("/test")
