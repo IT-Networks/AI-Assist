@@ -184,7 +184,7 @@ class ExchangeEmailClient:
         from exchangelib import Folder
         folders = []
         for folder in self._account.root.walk():
-            if isinstance(folder, Folder) and folder.folder_class == 'IPF.Note':
+            if getattr(folder, 'folder_class', None) == 'IPF.Note':
                 try:
                     folders.append({
                         "name": folder.name,
@@ -447,12 +447,15 @@ class ExchangeEmailClient:
     def _get_new_emails_since_sync(
         self, since: datetime, folder_name: str, limit: int
     ) -> List[Dict[str, Any]]:
-        from exchangelib import Q, EWSDateTime
-        from exchangelib.items import Message
-
         target_folder = self._get_folder(folder_name)
         if target_folder is None:
             return []
+        return self._fetch_emails_from_folder(target_folder, since, limit)
+
+    def _fetch_emails_from_folder(self, target_folder, since: datetime, limit: int) -> List[Dict[str, Any]]:
+        """Holt E-Mails aus einem Folder-Objekt seit einem Zeitstempel."""
+        from exchangelib import Q, EWSDateTime
+        from exchangelib.items import Message
 
         tz = _get_ews_timezone()
         since_ews = EWSDateTime.from_datetime(since).astimezone(tz)
@@ -506,19 +509,26 @@ class ExchangeEmailClient:
 
     def _get_new_emails_all_folders_sync(self, since: datetime, limit: int) -> List[Dict[str, Any]]:
         """Durchsucht alle Mail-Ordner nach neuen Mails seit einem Zeitstempel."""
-        from exchangelib import Folder
-
         all_results = []
         seen_ids = set()
 
+        logger.info("Durchsuche alle Ordner nach Mails seit %s (Limit: %d)", since.isoformat(), limit)
+
         for folder in self._account.root.walk():
-            if not isinstance(folder, Folder) or folder.folder_class != 'IPF.Note':
+            # Nur Mail-Ordner (IPF.Note), keine Kalender/Kontakte/Aufgaben
+            if getattr(folder, 'folder_class', None) != 'IPF.Note':
                 continue
             try:
-                count = folder.total_count or 0
-                if count == 0:
+                # total_count kann None sein bei manchen Ordnern — trotzdem durchsuchen
+                count = getattr(folder, 'total_count', None)
+                if count is not None and count == 0:
                     continue
-                results = self._get_new_emails_since_sync(since, folder.name, limit - len(all_results))
+                # Folder-Objekt direkt nutzen (nicht per Name suchen)
+                remaining = limit - len(all_results)
+                if remaining <= 0:
+                    break
+                results = self._fetch_emails_from_folder(folder, since, remaining)
+                logger.debug("Ordner '%s': %d Mails gefunden (total_count=%s)", folder.name, len(results), count)
                 for r in results:
                     eid = r.get("email_id", "")
                     if eid and eid not in seen_ids:
@@ -532,6 +542,7 @@ class ExchangeEmailClient:
 
         # Nach Datum sortieren (neueste zuerst)
         all_results.sort(key=lambda x: x.get("date", ""), reverse=True)
+        logger.info("Alle Ordner durchsucht: %d Mails gefunden", len(all_results))
         return all_results[:limit]
 
     # ── Hilfsmethoden ──────────────────────────────────────────────────────────
