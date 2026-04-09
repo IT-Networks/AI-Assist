@@ -262,8 +262,9 @@ async def test_rule(rule_id: str, request: RuleTestRequest = RuleTestRequest()) 
     if not automation.get_rule(rule_id):
         raise HTTPException(status_code=404, detail=f"Regel '{rule_id}' nicht gefunden.")
 
-    matches = await automation.test_rule(rule_id, limit=request.limit)
-    return {"success": True, "matches": matches, "tested": request.limit}
+    matches = await automation.test_rule(rule_id, limit=request.limit, create_todos=True)
+    created = sum(1 for m in matches if m.get("todo_created"))
+    return {"success": True, "matches": matches, "created": created, "tested": request.limit}
 
 
 # ══════════════════════════════════════════════════════════════════════════════

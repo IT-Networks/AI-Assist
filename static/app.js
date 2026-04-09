@@ -20769,9 +20769,15 @@ const emailModule = {
       const data = await res.json();
       const matches = data.matches || [];
       if (matches.length === 0) {
-        showToast('Keine Treffer gefunden.', 'info');
+        showToast('Keine Treffer in den letzten 7 Tagen gefunden.', 'info');
       } else {
-        showToast(`${matches.length} Treffer gefunden (Vorschau). Polling starten um Todos zu erstellen.`, 'success');
+        const created = data.created || 0;
+        if (created > 0) {
+          showToast(`${matches.length} Treffer, ${created} Todo(s) erstellt.`, 'success');
+          emailModule.loadTodoCounts();
+        } else {
+          showToast(`${matches.length} Treffer, aber bereits als Todo vorhanden.`, 'info');
+        }
       }
     } catch (e) {
       showToast('Test fehlgeschlagen: ' + e.message, 'error');
