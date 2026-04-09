@@ -12,7 +12,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from app.models.webex_models import WebexRule, WebexRulesStore, WebexMessageSnapshot
+from app.models.webex_models import WebexRule, WebexRulesStore
 
 logger = logging.getLogger(__name__)
 
@@ -370,8 +370,11 @@ class WebexAutomationService:
             import re
             match = re.search(r'\{[^{}]*"is_todo"[^{}]*\}', response, re.DOTALL)
             if match:
-                result = json.loads(match.group())
-                return result
+                try:
+                    result = json.loads(match.group())
+                    return result
+                except json.JSONDecodeError:
+                    pass
             logger.warning("LLM-Antwort enthält kein gültiges JSON: %s", response[:200])
             return None
 

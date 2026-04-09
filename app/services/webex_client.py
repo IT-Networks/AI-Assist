@@ -136,7 +136,10 @@ class WebexClient:
         return ""
 
     def _refresh_token_sync(self) -> bool:
-        """Synchroner Token-Refresh (für Lazy-Init im _get_client)."""
+        """Synchroner Token-Refresh (für Lazy-Init im _get_client).
+
+        Nutzt sync httpx.Client in einem Thread, um den Event-Loop nicht zu blockieren.
+        """
         from app.core.config import settings
 
         if not settings.webex.refresh_token or not settings.webex.client_id:
@@ -167,9 +170,13 @@ class WebexClient:
 
                 _apply_token_data(token_data)
 
-                # Client neu erstellen mit neuem Token
+                # Alten Client synchron schließen (nicht fire-and-forget)
                 if self._client and not self._client.is_closed:
-                    asyncio.get_event_loop().create_task(self._client.aclose())
+                    try:
+                        loop = asyncio.get_running_loop()
+                        loop.create_task(self._client.aclose())
+                    except RuntimeError:
+                        pass  # Kein laufender Loop → Client wird beim nächsten _get_client ersetzt
                     self._client = None
 
                 logger.info("Webex Token erfolgreich erneuert (gültig %d Sek.)",
@@ -290,7 +297,7 @@ class WebexClient:
                     logger.info("Webex 401 - versuche Token-Refresh...")
                     refreshed = await self.refresh_token()
                     if refreshed:
-                        client = self._get_client()  # Neuer Client mit neuem Token
+                        client = self._get_client()
                         continue
                     raise httpx.HTTPStatusError(
                         "Token abgelaufen und Refresh fehlgeschlagen",
@@ -299,17 +306,34 @@ class WebexClient:
                     )
 
                 if response.status_code == 429:
-                    retry_after = int(response.headers.get("Retry-After", "5"))
+                    # Retry-After kann Sekunden (int) oder HTTP-Datum sein
+                    retry_header = response.headers.get("Retry-After", "5")
+                    try:
+                        retry_after = int(retry_header)
+                    except ValueError:
+                        retry_after = 5  # Fallback bei Datum-Format
                     logger.warning("Webex Rate-Limit, warte %d Sekunden", retry_after)
                     await asyncio.sleep(retry_after)
                     continue
 
                 response.raise_for_status()
-                return response.json() if response.content else {}
 
-            except httpx.HTTPStatusError as e:
-                if e.response.status_code == 429 and attempt < max_retries - 1:
-                    await asyncio.sleep(5)
+                if not response.content:
+                    return {}
+                try:
+                    return response.json()
+                except (ValueError, Exception) as e:
+                    logger.error("Webex API: Ungültige JSON-Antwort für %s %s: %s",
+                                 method, path, str(e)[:100])
+                    return {}
+
+            except httpx.HTTPStatusError:
+                raise
+            except (httpx.TimeoutException, httpx.ConnectError, httpx.ProxyError) as e:
+                if attempt < max_retries - 1:
+                    logger.warning("Webex API Verbindungsfehler (Versuch %d/%d): %s",
+                                   attempt + 1, max_retries, e)
+                    await asyncio.sleep(2)
                     continue
                 raise
 

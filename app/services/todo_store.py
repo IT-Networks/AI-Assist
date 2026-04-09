@@ -19,11 +19,16 @@ _TODO_FILE = Path(__file__).parent.parent.parent / "todos.json"
 
 
 class TodoStoreService:
-    """CRUD-Service für todos.json mit SSE-Support."""
+    """CRUD-Service für todos.json mit SSE-Support.
+
+    Thread-Safety: Alle Zugriffe laufen im selben asyncio Event-Loop.
+    Der In-Memory-State (_data) ist dadurch konsistent.
+    """
 
     def __init__(self):
         self._data: Optional[TodoStore] = None
         self._sse_subscribers: List[asyncio.Queue] = []
+        self._save_lock = asyncio.Lock()
 
     def load(self) -> TodoStore:
         """Lade todos.json (erstelle leer wenn nicht vorhanden)."""

@@ -51,12 +51,13 @@ async def get_oauth_url():
 @router.get("/oauth/callback")
 async def oauth_callback(code: str = Query(""), state: str = Query(""), error: str = Query("")):
     """OAuth2 Callback - empfängt den Authorization Code und tauscht ihn gegen Tokens."""
+    import html
     from fastapi.responses import HTMLResponse
     from app.services.webex_client import WebexClient
 
     if error:
         return HTMLResponse(f"""<html><body>
-            <h2>Webex OAuth Fehler</h2><p>{error}</p>
+            <h2>Webex OAuth Fehler</h2><p>{html.escape(error)}</p>
             <p>Fenster kann geschlossen werden.</p>
         </body></html>""")
 
@@ -67,10 +68,12 @@ async def oauth_callback(code: str = Query(""), state: str = Query(""), error: s
 
     try:
         result = await WebexClient.exchange_code(code)
+        days = result.get('expires_in', 0) // 86400
+        has_refresh = 'vorhanden' if result.get('has_refresh') else 'nicht vorhanden'
         return HTMLResponse(f"""<html><body>
             <h2>Webex Verbindung erfolgreich!</h2>
-            <p>Access-Token erhalten (gültig {result.get('expires_in', 0) // 86400} Tage).</p>
-            <p>Refresh-Token: {'vorhanden' if result.get('has_refresh') else 'nicht vorhanden'}</p>
+            <p>Access-Token erhalten (g&uuml;ltig {days} Tage).</p>
+            <p>Refresh-Token: {has_refresh}</p>
             <p><strong>Dieses Fenster kann geschlossen werden.</strong></p>
             <script>setTimeout(() => window.close(), 3000);</script>
         </body></html>""")
@@ -78,7 +81,7 @@ async def oauth_callback(code: str = Query(""), state: str = Query(""), error: s
         logger.error("Webex OAuth Token-Exchange fehlgeschlagen: %s", e)
         return HTMLResponse(f"""<html><body>
             <h2>Token-Exchange fehlgeschlagen</h2>
-            <p>{str(e)}</p>
+            <p>{html.escape(str(e))}</p>
         </body></html>""")
 
 

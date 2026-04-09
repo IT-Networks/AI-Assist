@@ -342,10 +342,13 @@ class EmailAutomationService:
             import re
             match = re.search(r'\{[^{}]*"is_todo"[^{}]*\}', response, re.DOTALL)
             if match:
-                result = json.loads(match.group())
-                logger.info("Regel '%s' → Mail '%s': is_todo=%s (aus Text extrahiert)",
-                            rule.name, email_data.get("subject", "?")[:40], result.get("is_todo"))
-                return result
+                try:
+                    result = json.loads(match.group())
+                    logger.info("Regel '%s' → Mail '%s': is_todo=%s (aus Text extrahiert)",
+                                rule.name, email_data.get("subject", "?")[:40], result.get("is_todo"))
+                    return result
+                except json.JSONDecodeError:
+                    pass
             logger.warning("LLM-Antwort enthält kein gültiges JSON: %s", response[:200])
             return None
 

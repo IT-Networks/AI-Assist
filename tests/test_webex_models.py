@@ -1,7 +1,7 @@
 """Tests für app.models.webex_models — Datenmodelle der Webex-Integration."""
 
 import pytest
-from app.models.webex_models import WebexRule, WebexRulesStore, WebexMessageSnapshot
+from app.models.webex_models import WebexRule, WebexRulesStore
 from app.models.email_models import TodoItem, TodoStore, MailSnapshot
 
 
@@ -55,31 +55,6 @@ class TestWebexRulesStore:
         # Alle IDs sind unique
         ids = [r.id for r in store.rules]
         assert len(set(ids)) == 5
-
-
-class TestWebexMessageSnapshot:
-    def test_defaults(self):
-        snap = WebexMessageSnapshot()
-        assert snap.id == ""
-        assert snap.room_id == ""
-        assert snap.text == ""
-        assert snap.has_files is False
-
-    def test_full(self):
-        snap = WebexMessageSnapshot(
-            id="msg123",
-            room_id="room456",
-            room_title="Team Chat",
-            person_email="user@example.com",
-            person_display_name="User",
-            text="Bitte bis Freitag erledigen",
-            html="<p>Bitte bis Freitag erledigen</p>",
-            created="2026-04-09T10:00:00Z",
-            parent_id="",
-            has_files=True,
-        )
-        assert snap.person_email == "user@example.com"
-        assert snap.has_files is True
 
 
 class TestTodoItemWithSource:

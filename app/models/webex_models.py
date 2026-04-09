@@ -5,7 +5,7 @@ Regeln, Message-Snapshots und Stores.
 """
 
 from datetime import datetime
-from typing import List, Literal, Optional
+from typing import List
 from uuid import uuid4
 
 from pydantic import BaseModel, Field
@@ -29,19 +29,3 @@ class WebexRulesStore(BaseModel):
     """Persistenz-Format für webex_rules.json."""
     rules: List[WebexRule] = []
     version: int = 1
-
-
-# ── Message Snapshot (für Todo-Persistenz) ─────────────────────────────────────
-
-class WebexMessageSnapshot(BaseModel):
-    """Snapshot einer Webex-Nachricht für die Todo-Persistenz."""
-    id: str = ""
-    room_id: str = ""
-    room_title: str = ""
-    person_email: str = ""
-    person_display_name: str = ""
-    text: str = ""
-    html: str = ""
-    created: str = ""
-    parent_id: str = ""                # Thread-Parent
-    has_files: bool = False
