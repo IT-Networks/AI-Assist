@@ -325,16 +325,27 @@ class EmailAutomationService:
             {"role": "user", "content": user_prompt},
         ]
 
+        logger.debug("LLM-Auswertung: Regel='%s', Mail='%s' von '%s'",
+                     rule.name, email_data.get("subject", "?"), email_data.get("sender", "?"))
+
         response = await llm_client.chat(messages)
+        logger.debug("LLM-Antwort: %s", response[:300] if response else "(leer)")
 
         # JSON aus Antwort extrahieren
         try:
-            return json.loads(response)
+            result = json.loads(response)
+            logger.info("Regel '%s' → Mail '%s': is_todo=%s, todo='%s'",
+                        rule.name, email_data.get("subject", "?")[:40],
+                        result.get("is_todo"), result.get("todo_text", "")[:60])
+            return result
         except json.JSONDecodeError:
             import re
             match = re.search(r'\{[^{}]*"is_todo"[^{}]*\}', response, re.DOTALL)
             if match:
-                return json.loads(match.group())
+                result = json.loads(match.group())
+                logger.info("Regel '%s' → Mail '%s': is_todo=%s (aus Text extrahiert)",
+                            rule.name, email_data.get("subject", "?")[:40], result.get("is_todo"))
+                return result
             logger.warning("LLM-Antwort enthält kein gültiges JSON: %s", response[:200])
             return None
 
@@ -352,7 +363,9 @@ class EmailAutomationService:
         store = get_todo_store()
 
         since = datetime.now() - timedelta(days=7)
-        emails = await client.get_new_emails_since(since=since, limit=limit)
+        # Mehr Mails laden als das Regel-Limit (limit ist Anzahl zu prüfender Mails)
+        emails = await client.get_new_emails_since(since=since, limit=max(limit, 50))
+        logger.info("Regel-Test '%s': %d Mails geladen (seit %s)", rule.name, len(emails), since.isoformat())
 
         matches = []
         for email_data in emails:

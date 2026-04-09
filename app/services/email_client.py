@@ -453,15 +453,19 @@ class ExchangeEmailClient:
         return self._fetch_emails_from_folder(target_folder, since, limit)
 
     def _fetch_emails_from_folder(self, target_folder, since: datetime, limit: int) -> List[Dict[str, Any]]:
-        """Holt E-Mails aus einem Folder-Objekt seit einem Zeitstempel."""
+        """Holt E-Mails (inkl. gelesene) aus einem Folder seit einem Zeitstempel."""
         from exchangelib import Q, EWSDateTime
         from exchangelib.items import Message
 
         tz = _get_ews_timezone()
+        # Sicherstellen dass since timezone-aware ist
+        if since.tzinfo is None:
+            from exchangelib import EWSTimeZone
+            since = since.replace(tzinfo=tz)
         since_ews = EWSDateTime.from_datetime(since).astimezone(tz)
 
         qs = target_folder.filter(
-            Q(datetime_received__gt=since_ews)
+            Q(datetime_received__gte=since_ews)
         ).order_by('-datetime_received')[:limit]
 
         results = []

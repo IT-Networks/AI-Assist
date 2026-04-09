@@ -20759,17 +20759,17 @@ const emailModule = {
   },
 
   async testRule(ruleId) {
-    showToast('Teste Regel gegen letzte 10 Mails...', 'info');
+    showToast('Teste Regel gegen Mails der letzten 7 Tage (alle Ordner, inkl. gelesene)...', 'info');
     try {
       const res = await fetch(`/api/email/rules/${ruleId}/test`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ limit: 10 }),
+        body: JSON.stringify({ limit: 50 }),
       });
       const data = await res.json();
       const matches = data.matches || [];
       if (matches.length === 0) {
-        showToast('Keine Treffer in den letzten 7 Tagen gefunden.', 'info');
+        showToast('Keine Treffer. Regel-Beschreibung pr\u00fcfen oder Zeitraum erh\u00f6hen. Details im Server-Log.', 'info');
       } else {
         const created = data.created || 0;
         if (created > 0) {
