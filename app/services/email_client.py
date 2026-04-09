@@ -547,8 +547,13 @@ class ExchangeEmailClient:
 
     # ── Hilfsmethoden ──────────────────────────────────────────────────────────
 
+    # Betreff-Prefixes für Antworten und Weiterleitungen (international)
+    _REPLY_PREFIXES = ("re:", "aw:", "re[", "aw[", "sv:", "odp:", "ref:")
+    _FORWARD_PREFIXES = ("fw:", "fwd:", "wg:", "wg[", "tr:", "rv:", "enc:", "i:", "fs:", "vl:")
+
     def _get_thread_info(self, item, folder) -> Dict[str, Any]:
-        """Prüft ob es im selben Thread Antworten oder Weiterleitungen gibt."""
+        """Prüft ob es im selben Thread Antworten oder Weiterleitungen gibt.
+        Durchsucht den aktuellen Ordner UND den Gesendet-Ordner."""
         from exchangelib.items import Message
 
         info = {
@@ -564,35 +569,51 @@ class ExchangeEmailClient:
             if not conv_id:
                 return info
 
-            # Suche alle Mails mit gleicher conversation_id
-            from exchangelib import Q
-            thread = folder.filter(conversation_id=conv_id).only(
-                'id', 'subject', 'sender', 'datetime_received'
-            ).order_by('datetime_received')
+            # Durchsuche mehrere Ordner: aktueller Ordner + Gesendet
+            folders_to_search = [folder]
+            try:
+                sent = self._account.sent
+                if sent and sent != folder:
+                    folders_to_search.append(sent)
+            except Exception:
+                pass
 
-            for msg in thread:
-                if not isinstance(msg, Message) or msg.id == item.id:
-                    continue
-                subj = (msg.subject or "").lower()
-                sender = str(msg.sender.email_address) if msg.sender else ""
-                entry = {
-                    "subject": msg.subject or "",
-                    "sender": sender,
-                    "date": msg.datetime_received.isoformat() if msg.datetime_received else "",
-                }
+            seen_ids = {item.id}
 
-                if subj.startswith(("re:", "aw:", "re[", "aw[")):
-                    info["has_replies"] = True
-                    info["reply_count"] += 1
-                    entry["type"] = "reply"
-                elif subj.startswith(("fw:", "wg:", "fwd:")):
-                    info["has_forwards"] = True
-                    info["forward_count"] += 1
-                    entry["type"] = "forward"
-                else:
-                    entry["type"] = "related"
+            for search_folder in folders_to_search:
+                try:
+                    thread = search_folder.filter(conversation_id=conv_id).only(
+                        'id', 'subject', 'sender', 'datetime_received'
+                    ).order_by('datetime_received')
 
-                info["thread_messages"].append(entry)
+                    for msg in thread:
+                        if not isinstance(msg, Message) or msg.id in seen_ids:
+                            continue
+                        seen_ids.add(msg.id)
+
+                        subj = (msg.subject or "").lower().strip()
+                        sender = str(msg.sender.email_address) if msg.sender else ""
+                        entry = {
+                            "subject": msg.subject or "",
+                            "sender": sender,
+                            "date": msg.datetime_received.isoformat() if msg.datetime_received else "",
+                        }
+
+                        if subj.startswith(self._REPLY_PREFIXES):
+                            info["has_replies"] = True
+                            info["reply_count"] += 1
+                            entry["type"] = "reply"
+                        elif subj.startswith(self._FORWARD_PREFIXES):
+                            info["has_forwards"] = True
+                            info["forward_count"] += 1
+                            entry["type"] = "forward"
+                        else:
+                            entry["type"] = "related"
+
+                        info["thread_messages"].append(entry)
+                except Exception as e:
+                    logger.debug("Thread-Suche in '%s' fehlgeschlagen: %s",
+                                 getattr(search_folder, 'name', '?'), e)
         except Exception as e:
             logger.debug("Thread-Info Fehler: %s", e)
 
