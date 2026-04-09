@@ -11,6 +11,7 @@ Pipeline:
 import asyncio
 import json
 import logging
+import re
 import time
 from typing import Awaitable, Callable, Dict, List, Optional
 
@@ -515,13 +516,11 @@ class MultiAgentOrchestrator:
 
         # Node-Definitionen mit Status-Styling
         for task in tasks:
-            label = (task.title[:30]
-                     .replace('"', "'")
-                     .replace('[', '&#91;').replace(']', '&#93;')
-                     .replace('(', '&#40;').replace(')', '&#41;')
-                     .replace('{', '&#123;').replace('}', '&#125;'))
+            # Mermaid-sichere Labels: keine HTML-Tags, keine Sonderzeichen die Node-Shapes oeffnen
+            label = re.sub(r'["\[\](){}/<>]', ' ', task.title[:30]).strip()
+            label = re.sub(r'\s+', ' ', label)
             agent = task.assignee
-            lines.append(f'    {task.id}["{label}<br/><small>{agent}</small>"]')
+            lines.append(f'    {task.id}["{label} | {agent}"]')
 
         # Dependency-Pfeile
         has_edges = False
@@ -534,14 +533,17 @@ class MultiAgentOrchestrator:
         if not has_edges and len(tasks) <= 2:
             return ""
 
-        # Styling nach Status
+        # Styling nach Status via classDef + class (style unterstützt keine Komma-Trennung)
         completed = [t.id for t in tasks if t.status == "completed"]
         failed = [t.id for t in tasks if t.status == "failed"]
 
+        if completed or failed:
+            lines.append('    classDef ok fill:#4caf50,color:#fff')
+            lines.append('    classDef err fill:#f44336,color:#fff')
         if completed:
-            lines.append(f"    style {','.join(completed)} fill:#4caf50,color:#fff")
+            lines.append(f"    class {','.join(completed)} ok")
         if failed:
-            lines.append(f"    style {','.join(failed)} fill:#f44336,color:#fff")
+            lines.append(f"    class {','.join(failed)} err")
 
         return "\n".join(lines)
 
