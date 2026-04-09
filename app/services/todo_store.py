@@ -77,14 +77,13 @@ class TodoStoreService:
         store.todos.insert(0, todo)  # Neueste zuerst
         self.save()
 
-        # SSE-Benachrichtigung
-        asyncio.ensure_future(self.notify("new_todo", {
+        self._notify_safe("new_todo", {
             "id": todo.id,
             "subject": todo.subject,
             "sender": todo.sender,
             "todo_text": todo.todo_text,
             "counts": self.get_counts(),
-        }))
+        })
 
         logger.info("Neues Todo erstellt: %s (Regel: %s)", todo.id, todo.rule_name)
         return todo
@@ -100,27 +99,32 @@ class TodoStoreService:
                 todo.status = status
                 self.save()
 
-                asyncio.ensure_future(self.notify("todo_count", self.get_counts()))
+                self._notify_safe("todo_count", self.get_counts())
                 return True
 
         return False
 
     def delete(self, todo_id: str) -> bool:
-        """Todo löschen und email_id aus processed-Liste entfernen (erlaubt Re-Erkennung)."""
+        """Todo löschen und process_key aus processed-Liste entfernen (erlaubt Re-Erkennung)."""
         store = self.load()
-        # Finde das Todo um die email_id zu bekommen
-        deleted_email_id = None
+        # Finde das Todo um email_id und rule_id zu bekommen
+        deleted_todo = None
         for todo in store.todos:
             if todo.id == todo_id:
-                deleted_email_id = todo.email_id
+                deleted_todo = todo
                 break
 
         before = len(store.todos)
         store.todos = [t for t in store.todos if t.id != todo_id]
         if len(store.todos) < before:
-            # email_id aus processed entfernen damit die Mail erneut erkannt werden kann
-            if deleted_email_id and deleted_email_id in store.processed_email_ids:
-                store.processed_email_ids.remove(deleted_email_id)
+            # process_key aus processed entfernen damit die Mail erneut erkannt werden kann
+            if deleted_todo:
+                process_key = f"{deleted_todo.email_id}:{deleted_todo.rule_id}"
+                if process_key in store.processed_email_ids:
+                    store.processed_email_ids.remove(process_key)
+                # Auch alte email_id-only Keys entfernen (Migration)
+                if deleted_todo.email_id in store.processed_email_ids:
+                    store.processed_email_ids.remove(deleted_todo.email_id)
             self.save()
             asyncio.ensure_future(self.notify("todo_count", self.get_counts()))
             return True
@@ -135,19 +139,19 @@ class TodoStoreService:
                 counts[todo.status] += 1
         return counts
 
-    def is_processed(self, email_id: str) -> bool:
-        """Prüft ob eine E-Mail-ID bereits verarbeitet wurde."""
+    def is_processed(self, process_key: str) -> bool:
+        """Prüft ob ein process_key (email_id:rule_id) bereits verarbeitet wurde."""
         store = self.load()
-        return email_id in store.processed_email_ids
+        return process_key in store.processed_email_ids
 
-    def mark_processed(self, email_id: str) -> None:
-        """Markiert eine E-Mail-ID als verarbeitet."""
+    def mark_processed(self, process_key: str) -> None:
+        """Markiert einen process_key als verarbeitet."""
         store = self.load()
-        if email_id not in store.processed_email_ids:
-            store.processed_email_ids.append(email_id)
-            # Begrenze die Liste auf die letzten 5000 IDs
-            if len(store.processed_email_ids) > 5000:
-                store.processed_email_ids = store.processed_email_ids[-5000:]
+        if process_key not in store.processed_email_ids:
+            store.processed_email_ids.append(process_key)
+            # Begrenze die Liste auf die letzten 10000 Keys
+            if len(store.processed_email_ids) > 10000:
+                store.processed_email_ids = store.processed_email_ids[-10000:]
             self.save()
 
     def update_last_poll(self, timestamp: str) -> None:
@@ -155,6 +159,13 @@ class TodoStoreService:
         store = self.load()
         store.last_poll = timestamp
         self.save()
+
+    def _notify_safe(self, event: str, data: Any) -> None:
+        """SSE-Benachrichtigung senden (ignoriert Fehler wenn kein Event-Loop aktiv)."""
+        try:
+            asyncio.ensure_future(self.notify(event, data))
+        except RuntimeError:
+            pass
 
     # ── SSE ────────────────────────────────────────────────────────────────────
 

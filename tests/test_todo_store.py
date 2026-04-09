@@ -147,10 +147,10 @@ class TestTodoStoreDuplicateProtection:
         assert data.processed_email_ids.count("email-123") == 1
 
     def test_processed_list_limit(self, store):
-        for i in range(5010):
+        for i in range(10010):
             store.mark_processed(f"email-{i}")
         data = store.load()
-        assert len(data.processed_email_ids) <= 5000
+        assert len(data.processed_email_ids) <= 10000
 
 
 class TestTodoStorePersistence:

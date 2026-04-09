@@ -106,11 +106,11 @@ class EmailAutomationService:
 
     @property
     def is_running(self) -> bool:
-        return self._running
+        return self._running and self._task is not None and not self._task.done()
 
     async def start(self) -> None:
         """Startet den Polling-Loop als asyncio.Task."""
-        if self._running:
+        if self.is_running:
             logger.warning("Email-Automation läuft bereits")
             return
 
@@ -140,7 +140,7 @@ class EmailAutomationService:
         rules = self.get_rules()
 
         return {
-            "running": self._running,
+            "running": self.is_running,
             "polling_enabled": settings.email.polling_enabled,
             "last_poll": data.last_poll,
             "polling_interval_minutes": settings.email.polling_interval_minutes,
@@ -205,10 +205,13 @@ class EmailAutomationService:
 
         for email_data in emails:
             email_id = email_data.get("email_id", "")
-            if store.is_processed(email_id):
-                continue
 
             for rule in active_rules:
+                # Regel-spezifischer Duplikat-Check: email_id:rule_id
+                process_key = f"{email_id}:{rule.id}"
+                if store.is_processed(process_key):
+                    continue
+
                 # Absender-Filter prüfen
                 if rule.sender_filter:
                     sender = email_data.get("sender", "").lower()
@@ -219,41 +222,53 @@ class EmailAutomationService:
                 try:
                     result = await self._evaluate_email(email_data, rule)
                     if result and result.get("is_todo"):
-                        todo = TodoItem(
-                            rule_id=rule.id,
-                            rule_name=rule.name,
-                            email_id=email_id,
-                            subject=email_data.get("subject", ""),
-                            sender=email_data.get("sender", ""),
-                            sender_name=email_data.get("sender_name", ""),
-                            received_at=email_data.get("date", ""),
-                            todo_text=result.get("todo_text", ""),
-                            ai_analysis=result.get("analysis", ""),
-                            priority=result.get("priority", "medium"),
-                            deadline=result.get("deadline"),
-                            mail_snapshot=MailSnapshot(
-                                subject=email_data.get("subject", ""),
-                                sender=email_data.get("sender", ""),
-                                sender_name=email_data.get("sender_name", ""),
-                                to=email_data.get("to", []),
-                                cc=email_data.get("cc", []),
-                                date=email_data.get("date", ""),
-                                body_text=email_data.get("body_text", "")[:5000],
-                                body_html=email_data.get("body_html", "")[:10000],
-                                attachments=[
-                                    EmailAttachmentInfo(**a) for a in email_data.get("attachments", [])
-                                ],
-                            ),
-                        )
-                        store.add(todo)
+                        self._create_todo(store, email_data, rule, result)
                 except Exception as e:
                     logger.error("LLM-Auswertung fehlgeschlagen für Mail '%s' mit Regel '%s': %s",
                                  email_data.get("subject", "?"), rule.name, e)
 
-            store.mark_processed(email_id)
+                # Regel-spezifisch als verarbeitet markieren
+                store.mark_processed(process_key)
 
         store.update_last_poll(datetime.now().isoformat())
         logger.info("Email-Poll abgeschlossen: %d Mails verarbeitet", len(emails))
+
+    # ── Todo-Erstellung (gemeinsam für Polling und Test) ───────────────────────
+
+    def _create_todo(
+        self, store, email_data: Dict, rule: EmailRule, result: Dict
+    ) -> TodoItem:
+        """Erstellt ein TodoItem aus E-Mail-Daten und LLM-Ergebnis."""
+        todo = TodoItem(
+            rule_id=rule.id,
+            rule_name=rule.name,
+            email_id=email_data.get("email_id", ""),
+            subject=email_data.get("subject", ""),
+            sender=email_data.get("sender", ""),
+            sender_name=email_data.get("sender_name", ""),
+            received_at=email_data.get("date", ""),
+            todo_text=result.get("todo_text", ""),
+            ai_analysis=result.get("analysis", ""),
+            priority=result.get("priority", "medium"),
+            deadline=result.get("deadline"),
+            mail_snapshot=MailSnapshot(
+                subject=email_data.get("subject", ""),
+                sender=email_data.get("sender", ""),
+                sender_name=email_data.get("sender_name", ""),
+                to=email_data.get("to", []),
+                cc=email_data.get("cc", []),
+                date=email_data.get("date", ""),
+                body_text=email_data.get("body_text", "")[:5000],
+                body_html=email_data.get("body_html", "")[:10000],
+                attachments=[
+                    EmailAttachmentInfo(**a) for a in email_data.get("attachments", [])
+                ],
+            ),
+        )
+        store.add(todo)
+        return todo
+
+    # ── LLM-Auswertung ────────────────────────────────────────────────────────
 
     async def _evaluate_email(self, email_data: Dict, rule: EmailRule) -> Optional[Dict]:
         """LLM-Aufruf: Prüfe E-Mail gegen Regel-Beschreibung."""
@@ -314,16 +329,16 @@ class EmailAutomationService:
 
         # JSON aus Antwort extrahieren
         try:
-            # Versuche direktes JSON
             return json.loads(response)
         except json.JSONDecodeError:
-            # Suche JSON in der Antwort
             import re
             match = re.search(r'\{[^{}]*"is_todo"[^{}]*\}', response, re.DOTALL)
             if match:
                 return json.loads(match.group())
             logger.warning("LLM-Antwort enthält kein gültiges JSON: %s", response[:200])
             return None
+
+    # ── Regel-Test ─────────────────────────────────────────────────────────────
 
     async def test_rule(self, rule_id: str, limit: int = 10, create_todos: bool = False) -> List[Dict[str, Any]]:
         """Testlauf einer Regel gegen die letzten N Mails. Optional Todos erstellen."""
@@ -342,6 +357,7 @@ class EmailAutomationService:
         matches = []
         for email_data in emails:
             email_id = email_data.get("email_id", "")
+            process_key = f"{email_id}:{rule.id}"
 
             # Absender-Filter
             if rule.sender_filter:
@@ -361,36 +377,9 @@ class EmailAutomationService:
                     }
                     matches.append(match_info)
 
-                    # Todo erstellen wenn gewünscht und nicht bereits verarbeitet
-                    if create_todos and not store.is_processed(email_id):
-                        todo = TodoItem(
-                            rule_id=rule.id,
-                            rule_name=rule.name,
-                            email_id=email_id,
-                            subject=email_data.get("subject", ""),
-                            sender=email_data.get("sender", ""),
-                            sender_name=email_data.get("sender_name", ""),
-                            received_at=email_data.get("date", ""),
-                            todo_text=result.get("todo_text", ""),
-                            ai_analysis=result.get("analysis", ""),
-                            priority=result.get("priority", "medium"),
-                            deadline=result.get("deadline"),
-                            mail_snapshot=MailSnapshot(
-                                subject=email_data.get("subject", ""),
-                                sender=email_data.get("sender", ""),
-                                sender_name=email_data.get("sender_name", ""),
-                                to=email_data.get("to", []),
-                                cc=email_data.get("cc", []),
-                                date=email_data.get("date", ""),
-                                body_text=email_data.get("body_text", "")[:5000],
-                                body_html=email_data.get("body_html", "")[:10000],
-                                attachments=[
-                                    EmailAttachmentInfo(**a) for a in email_data.get("attachments", [])
-                                ],
-                            ),
-                        )
-                        store.add(todo)
-                        store.mark_processed(email_id)
+                    if create_todos and not store.is_processed(process_key):
+                        self._create_todo(store, email_data, rule, result)
+                        store.mark_processed(process_key)
                         match_info["todo_created"] = True
             except Exception as e:
                 logger.error("Test-Regel Fehler: %s", e)
