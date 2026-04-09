@@ -1478,9 +1478,11 @@ class TaskAgentConfig(BaseModel):
 class EmailConfig(BaseModel):
     """Exchange E-Mail Konfiguration (EWS mit NTLM)."""
     enabled: bool = False
-    ews_url: str = ""                      # z.B. https://mail.example.com/EWS/Exchange.asmx
-    smtp_address: str = ""                 # E-Mail-Adresse = Login-Name
+    ews_url: str = ""                      # z.B. mail.example.com/EWS/Exchange.asmx
+    smtp_address: str = ""                 # E-Mail-Adresse des Postfachs
+    domain: str = ""                       # NTLM-Domain (z.B. FIRMA)
     credential_ref: str = ""               # Zentrale Credentials (bevorzugt)
+    username: str = ""                     # Direkt: NTLM-Benutzername (ohne Domain)
     password: str = ""                     # SENSITIVE - Direkt (Fallback)
     verify_ssl: bool = True
     timeout_seconds: int = 30

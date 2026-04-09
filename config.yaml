@@ -1025,9 +1025,11 @@ analytics:
 # ═════════════════════════════════════════════════════════════════════
 email:
   enabled: false
-  ews_url: ''                      # z.B. https://mail.example.com/EWS/Exchange.asmx
-  smtp_address: ''                 # E-Mail-Adresse (= Login-Name)
-  credential_ref: ''               # Referenz auf zentrale Credentials (bevorzugt)
+  ews_url: ''                      # z.B. mail.example.com/EWS/Exchange.asmx
+  smtp_address: ''                 # E-Mail-Adresse des Postfachs
+  domain: ''                       # NTLM-Domain (z.B. FIRMA)
+  credential_ref: ''               # Zentrale Credentials (bevorzugt, username=DOMAIN\user)
+  username: ''                     # Direkt: NTLM-Benutzername (ohne Domain-Prefix)
   password: ''                     # Direkt-Passwort (Fallback)
   verify_ssl: true
   timeout_seconds: 30

@@ -29,19 +29,41 @@ def _check_exchangelib():
 
 
 def _get_credentials():
-    """Holt Credentials aus Config (credential_ref oder direkt)."""
+    """
+    Holt NTLM-Credentials aus Config (credential_ref oder direkt).
+
+    Returns:
+        (ntlm_username, password) — ntlm_username ist DOMAIN\\user Format
+    """
     from app.core.config import settings
 
     cfg = settings.email
+    username = cfg.username
     password = cfg.password
+    domain = cfg.domain
 
     if cfg.credential_ref:
         cred = settings.credentials.get(cfg.credential_ref)
         if cred:
             password = cred.password or cred.token
+            # credential_ref username kann bereits DOMAIN\user sein
+            if cred.username:
+                if '\\' in cred.username:
+                    # Bereits im DOMAIN\user Format
+                    return cred.username, password
+                else:
+                    username = cred.username
             logger.debug("Email: Verwende credential_ref '%s'", cfg.credential_ref)
 
-    return cfg.smtp_address, password
+    # NTLM erwartet DOMAIN\username
+    if domain and username:
+        ntlm_user = f"{domain}\\{username}"
+    elif username:
+        ntlm_user = username
+    else:
+        ntlm_user = cfg.smtp_address  # Fallback: E-Mail als UPN
+
+    return ntlm_user, password
 
 
 class ExchangeEmailClient:
@@ -62,22 +84,23 @@ class ExchangeEmailClient:
         if not cfg.ews_url or not cfg.smtp_address:
             raise ValueError("EWS-URL und SMTP-Adresse müssen konfiguriert sein.")
 
-        smtp_address, password = _get_credentials()
+        ntlm_user, password = _get_credentials()
         if not password:
             raise ValueError("Kein Passwort konfiguriert (weder credential_ref noch direkt).")
 
         loop = asyncio.get_event_loop()
         self._account = await loop.run_in_executor(None, lambda: self._connect_sync(
             ews_url=cfg.ews_url,
-            smtp_address=smtp_address,
+            smtp_address=cfg.smtp_address,
+            ntlm_user=ntlm_user,
             password=password,
             verify_ssl=cfg.verify_ssl,
         ))
         self._connected = True
-        logger.info("Email: Verbunden als %s", smtp_address)
+        logger.info("Email: Verbunden als %s (NTLM: %s)", cfg.smtp_address, ntlm_user)
         return True
 
-    def _connect_sync(self, ews_url: str, smtp_address: str, password: str, verify_ssl: bool):
+    def _connect_sync(self, ews_url: str, smtp_address: str, ntlm_user: str, password: str, verify_ssl: bool):
         """Synchrone Verbindung (läuft in Executor)."""
         from exchangelib import (
             Credentials, Configuration, Account,
@@ -90,7 +113,7 @@ class ExchangeEmailClient:
             urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
             BaseProtocol.HTTP_ADAPTER_CLS = _get_no_verify_adapter()
 
-        credentials = Credentials(username=smtp_address, password=password)
+        credentials = Credentials(username=ntlm_user, password=password)
 
         # exchangelib erlaubt nur server ODER service_endpoint, nicht beides.
         # Wenn die URL ein Pfad enthält (z.B. /EWS/Exchange.asmx) → service_endpoint
