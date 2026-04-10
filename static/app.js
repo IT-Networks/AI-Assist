@@ -5303,6 +5303,7 @@ async function sendAgentChat(message, abortSignal, chat, attachments = null) {
       handbook_services: ctx.handbookServices.map(s => s.id),
     },
     attachments: attachments || undefined,
+    tts: VoiceController.active ? true : undefined,
   };
 
   const res = await fetch('/api/agent/chat', {
@@ -5853,6 +5854,14 @@ async function processAgentEvent(event, bubble, msgDiv, chat) {
           lastBubble.appendChild(transcriptEl);
         }
         transcriptEl.textContent = data.transcription;
+      }
+      break;
+    }
+
+    case 'tts_audio': {
+      // TTS: LLM-Antwort als Audio abspielen
+      if (data.data) {
+        VoiceController.playTTSAudio(data.data, data.mime || 'audio/flac');
       }
       break;
     }
@@ -11234,6 +11243,7 @@ function renderSettingsSection() {
     email: 'Exchange E-Mail über EWS (NTLM). Ermöglicht E-Mail-Suche, Lesen und Entwürfe im Chat sowie automatische Todo-Erkennung.',
     webex: 'Webex Messaging Integration. OAuth2-Login über Client-ID/Secret ODER manueller Bearer/Access-Token. Ermöglicht das Lesen und Durchsuchen von Webex-Räumen sowie automatische Todo-Erkennung.',
     whisper: 'Whisper Speech-to-Text für Audio-Nachrichten. Nutzt eine OpenAI-kompatible Whisper API (lokal oder remote) zur Transkription von Sprachaufnahmen.',
+    tts: 'Text-to-Speech für Sprach-Antworten. Nutzt eine OpenAI-kompatible TTS API (z.B. Piper, Coqui XTTS, OpenedAI-Speech) zur Audio-Synthese.',
   };
 
   let html = `
@@ -21738,6 +21748,116 @@ function openImageModal(src) {
   modal.innerHTML = `<img src="${src}" alt="Vollbild">`;
   document.body.appendChild(modal);
 }
+
+// ══════════════════════════════════════════════════════════════════════════════
+// Voice Controller — Voice-Chat-Modus mit TTS
+// ══════════════════════════════════════════════════════════════════════════════
+
+const VoiceController = {
+  active: false,
+  _currentAudio: null,
+  _autoRecordAfterTTS: true,
+
+  toggle() {
+    this.active = !this.active;
+    const btn = document.getElementById('voice-toggle-btn');
+    if (btn) btn.classList.toggle('voice-active', this.active);
+
+    if (this.active) {
+      // Voice-Mode ON: Starte sofort Mic-Aufnahme
+      this._updateIndicator('listening');
+      toggleMicRecording();
+    } else {
+      // Voice-Mode OFF: Stoppe alles
+      this.stopAll();
+      this._updateIndicator('off');
+    }
+  },
+
+  stopAll() {
+    // Audio stoppen
+    if (this._currentAudio) {
+      this._currentAudio.pause();
+      this._currentAudio = null;
+    }
+    // Mic stoppen falls aktiv
+    if (_mediaRecorder && _mediaRecorder.state === 'recording') {
+      _mediaRecorder.stop();
+      const btn = document.getElementById('mic-btn');
+      if (btn) btn.classList.remove('recording');
+      _hideMicTimer();
+    }
+  },
+
+  playTTSAudio(base64Data, mime) {
+    // Vorheriges Audio stoppen
+    if (this._currentAudio) {
+      this._currentAudio.pause();
+      this._currentAudio = null;
+    }
+
+    this._updateIndicator('speaking');
+
+    const audio = new Audio(`data:${mime};base64,${base64Data}`);
+    this._currentAudio = audio;
+
+    audio.onended = () => {
+      this._currentAudio = null;
+      if (this.active && this._autoRecordAfterTTS) {
+        // Auto-Record: Nach TTS-Ende sofort wieder aufnehmen
+        this._updateIndicator('listening');
+        setTimeout(() => {
+          if (this.active) toggleMicRecording();
+        }, 500);
+      } else {
+        this._updateIndicator(this.active ? 'idle' : 'off');
+      }
+    };
+
+    audio.onerror = () => {
+      this._currentAudio = null;
+      this._updateIndicator(this.active ? 'idle' : 'off');
+    };
+
+    audio.play().catch(e => {
+      console.warn('[VoiceController] Audio playback failed:', e);
+      this._updateIndicator(this.active ? 'idle' : 'off');
+    });
+  },
+
+  _updateIndicator(state) {
+    const btn = document.getElementById('voice-toggle-btn');
+    const icon = document.getElementById('voice-toggle-icon');
+    if (!btn || !icon) return;
+
+    btn.className = 'header-btn';
+    switch (state) {
+      case 'listening':
+        btn.classList.add('voice-active', 'voice-listening');
+        icon.innerHTML = '&#127908;'; // Mic
+        btn.title = 'Voice-Modus: Höre zu...';
+        break;
+      case 'speaking':
+        btn.classList.add('voice-active', 'voice-speaking');
+        icon.innerHTML = '&#128264;'; // Speaker
+        btn.title = 'Voice-Modus: Spreche...';
+        break;
+      case 'idle':
+        btn.classList.add('voice-active');
+        icon.innerHTML = '&#127908;';
+        btn.title = 'Voice-Modus aktiv (klicke zum Deaktivieren)';
+        break;
+      default:
+        icon.innerHTML = '&#127908;';
+        btn.title = 'Voice-Modus (Sprach-Dialog)';
+    }
+  },
+};
+
+function toggleVoiceMode() {
+  VoiceController.toggle();
+}
+
 
 // ── Init ──────────────────────────────────────────────────
 document.addEventListener('DOMContentLoaded', () => {

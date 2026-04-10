@@ -102,6 +102,7 @@ def get_section_schema(section: str) -> Dict[str, Any]:
         "alm": "ALMConfig",
         "script_execution": "ScriptExecutionConfig",
         "whisper": "WhisperConfig",
+        "tts": "TTSConfig",
     }
 
     if section not in section_classes:

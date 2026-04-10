@@ -472,6 +472,7 @@ class AgentOrchestrator:
         model: Optional[str] = None,
         context_selection: Optional[Any] = None,
         attachments: Optional[List[dict]] = None,
+        tts: Optional[bool] = None,
     ) -> AsyncGenerator[AgentEvent, Optional[bool]]:
         """
         Verarbeitet eine User-Nachricht im Agent-Loop.
@@ -1735,6 +1736,20 @@ class AgentOrchestrator:
                             })
                         finally:
                             state.pending_pr_analysis = None
+
+                    # TTS: Antwort als Audio generieren wenn angefordert
+                    if tts and assistant_response:
+                        try:
+                            from app.services.tts import synthesize_speech, get_tts_mime
+                            import base64 as _b64
+                            tts_audio = await synthesize_speech(assistant_response)
+                            if tts_audio:
+                                yield AgentEvent(AgentEventType.TTS_AUDIO, {
+                                    "data": _b64.b64encode(tts_audio).decode("ascii"),
+                                    "mime": get_tts_mime(),
+                                })
+                        except Exception as e:
+                            logger.warning(f"[agent] TTS fehlgeschlagen: {e}")
 
                     yield AgentEvent(AgentEventType.DONE, {
                         "response": assistant_response,

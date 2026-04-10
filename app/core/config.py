@@ -1515,6 +1515,16 @@ class EmailConfig(BaseModel):
     max_emails_per_poll: int = 50
 
 
+class TTSConfig(BaseModel):
+    """Text-to-Speech Konfiguration (OpenAI-kompatible API)."""
+    enabled: bool = False
+    base_url: str = ""                  # z.B. "http://tts-server:8000/v1/audio/speech"
+    api_key: str = "none"
+    voice: str = "alloy"                # Stimme: alloy, echo, fable, onyx, nova, shimmer
+    response_format: str = "flac"       # flac, mp3, wav, opus
+    speed: float = 1.0                  # Sprechgeschwindigkeit (0.5-2.0)
+
+
 class WhisperConfig(BaseModel):
     """Whisper STT Konfiguration."""
     enabled: bool = False
@@ -1577,6 +1587,7 @@ class Settings(BaseModel):
     email: EmailConfig = Field(default_factory=EmailConfig)
     webex: WebexConfig = Field(default_factory=WebexConfig)
     whisper: WhisperConfig = Field(default_factory=WhisperConfig)
+    tts: TTSConfig = Field(default_factory=TTSConfig)
 
     def apply_env_overrides(self) -> "Settings":
         if os.getenv("LLM_BASE_URL"):

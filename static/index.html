@@ -52,6 +52,9 @@
         <span title="Plan &amp; Ausführen">&#128203;</span>
       </label>
     </div>
+    <button class="header-btn" id="voice-toggle-btn" onclick="toggleVoiceMode()" title="Voice-Modus (Sprach-Dialog)">
+      <span id="voice-toggle-icon">&#127908;</span>
+    </button>
     <button class="header-btn" id="dashboard-btn" onclick="openDashboard()" title="Dashboard">
       &#128202;
     </button>
@@ -113,6 +116,7 @@
               <button class="settings-nav-item active" data-section="llm">LLM</button>
               <button class="settings-nav-item" data-section="models">Modelle</button>
               <button class="settings-nav-item" data-section="whisper">Whisper STT</button>
+              <button class="settings-nav-item" data-section="tts">Text-to-Speech</button>
               <!-- Sub-Agenten entfernt in v2.31.5 — ersetzt durch Teams -->
             </div>
           </div>

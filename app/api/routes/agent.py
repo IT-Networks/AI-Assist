@@ -71,6 +71,7 @@ class AgentChatRequest(BaseModel):
     skill_ids: Optional[List[str]] = Field(None, max_length=20, description="Skill-IDs zum Aktivieren (max 20)")
     context: Optional[ContextSelection] = Field(None, description="Manuell ausgewählte Kontext-Elemente")
     attachments: Optional[List[ChatAttachment]] = Field(None, max_length=5, description="Bild-/Audio-Anhänge (max 5)")
+    tts: Optional[bool] = Field(None, description="TTS-Audio für Antwort generieren")
 
 
 class AgentModeRequest(BaseModel):
@@ -155,6 +156,7 @@ async def agent_chat(request: AgentChatRequest, http_request: Request):
                 model=request.model,
                 context_selection=request.context,
                 attachments=[a.dict() for a in request.attachments] if request.attachments else None,
+                tts=request.tts,
             )
 
             async for event in gen:
@@ -231,6 +233,7 @@ async def agent_chat_sync(request: AgentChatRequest) -> Dict[str, Any]:
             model=request.model,
             context_selection=request.context,
             attachments=[a.dict() for a in request.attachments] if request.attachments else None,
+            tts=request.tts,
         )
 
         async for event in gen:

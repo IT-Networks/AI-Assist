@@ -86,6 +86,7 @@ class AgentEventType(str, Enum):
     WORKSPACE_SQL_RESULT = "workspace_sql_result"    # SQL-Abfrage-Ergebnis fuer Workspace Panel
     # Audio Events
     AUDIO_CONVERTED = "audio_converted"              # Audio zu FLAC konvertiert (fuer Frontend-Update)
+    TTS_AUDIO = "tts_audio"                          # TTS-Audio fuer Sprach-Antwort
     WORKSPACE_FILE = "workspace_file"                # Gelesene Datei fuer Workspace Panel
     WORKSPACE_RESEARCH = "workspace_research"        # Research-Ergebnis fuer Workspace Panel
     WORKSPACE_PR = "workspace_pr"                    # PR-Daten fuer Workspace Panel
