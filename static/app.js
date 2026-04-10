@@ -21395,9 +21395,16 @@ const AttachmentManager = {
   items: [],
 
   validate(file) {
-    const isImage = this.ALLOWED_IMAGE.includes(file.type);
-    const isAudio = this.ALLOWED_AUDIO.includes(file.type);
-    if (!isImage && !isAudio) return { ok: false, error: `Dateityp ${file.type} nicht unterstützt` };
+    // Fallback: Manche Browser melden FLAC/OGG ohne MIME → aus Dateiendung ableiten
+    let fileType = file.type;
+    if (!fileType && file.name) {
+      const ext = file.name.split('.').pop()?.toLowerCase();
+      const extMap = { flac: 'audio/flac', ogg: 'audio/ogg', wav: 'audio/wav', mp3: 'audio/mp3', webm: 'audio/webm' };
+      fileType = extMap[ext] || '';
+    }
+    const isImage = this.ALLOWED_IMAGE.includes(fileType);
+    const isAudio = this.ALLOWED_AUDIO.includes(fileType);
+    if (!isImage && !isAudio) return { ok: false, error: `Dateityp ${fileType || file.type || 'unbekannt'} nicht unterstützt` };
     const limit = isImage ? this.MAX_IMAGE_SIZE : this.MAX_AUDIO_SIZE;
     if (file.size > limit) return { ok: false, error: `Datei zu groß (max ${Math.round(limit / 1024 / 1024)}MB)` };
     if (this.items.length >= this.MAX_ATTACHMENTS) return { ok: false, error: 'Maximal 5 Anhänge erlaubt' };
@@ -21418,9 +21425,16 @@ const AttachmentManager = {
 
   async addAudio(file) {
     const base64 = await this._fileToBase64(file);
+    // MIME aus file.type oder Dateiendung ableiten
+    let mime = file.type;
+    if (!mime && file.name) {
+      const ext = file.name.split('.').pop()?.toLowerCase();
+      const extMap = { flac: 'audio/flac', ogg: 'audio/ogg', wav: 'audio/wav', mp3: 'audio/mp3', webm: 'audio/webm' };
+      mime = extMap[ext] || 'audio/webm';
+    }
     this.items.push({
       type: 'audio',
-      mime: file.type || 'audio/webm',
+      mime: mime || 'audio/webm',
       data: base64,
       name: file.name || 'Aufnahme',
       blobUrl: URL.createObjectURL(file),
