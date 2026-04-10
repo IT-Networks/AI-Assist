@@ -236,10 +236,12 @@ async def transcribe_audio(audio_base64: str, mime: str, language: str = "de") -
                 headers["Authorization"] = f"Bearer {settings.whisper.api_key}"
 
             post_data = {
-                "model": settings.whisper.model,
                 "language": language,
                 "response_format": "json",
             }
+            # model nur mitsenden wenn explizit konfiguriert (manche Server brauchen es nicht)
+            if settings.whisper.model and settings.whisper.model != "none":
+                post_data["model"] = settings.whisper.model
             file_tuple = ("file", (upload_filename, audio_bytes, upload_mime))
 
             # URL-Kandidaten: base_url kann verschiedene Formate haben:

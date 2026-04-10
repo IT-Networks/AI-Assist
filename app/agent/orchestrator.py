@@ -1129,9 +1129,15 @@ class AgentOrchestrator:
             user_content = build_user_content(user_message, attachments)
             if isinstance(user_content, list):
                 logger.info(f"[agent] Multimodal content: {len(user_content)} Parts (text + images)")
-            # Falls Text leer und nur Audio ohne Transkription → Hinweis als Text
-            if not user_message and audio_count > 0 and not any(a.get("transcription") for a in attachments if a["type"] == "audio"):
-                user_content = "[Audio-Nachricht gesendet — Whisper STT nicht konfiguriert, Transkription nicht möglich]"
+            # Falls Audio ohne Transkription → klaren Hinweis setzen
+            audio_atts = [a for a in attachments if a["type"] == "audio"]
+            has_transcription = any(a.get("transcription") for a in audio_atts)
+            if audio_count > 0 and not has_transcription:
+                hint = "[Der Nutzer hat eine Audio-Nachricht gesendet. Die Transkription war nicht möglich. Bitte den Nutzer, seine Frage als Text zu stellen.]"
+                if user_message:
+                    user_content = f"{user_message}\n\n{hint}"
+                else:
+                    user_content = hint
         else:
             user_content = user_message
 
