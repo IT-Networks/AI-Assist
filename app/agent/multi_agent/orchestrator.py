@@ -159,6 +159,7 @@ class MultiAgentOrchestrator:
             f"ZIEL: {goal}\n\n"
             f"VERFUEGBARE AGENTEN:\n{agents_desc}\n\n"
             f"REGELN:\n"
+            f"- SPRACHE: Alle Task-Titel und -Beschreibungen MUESSEN auf Deutsch sein!\n"
             f"- Erstelle 2-8 Tasks (nicht mehr)\n"
             f"- Jeder Task muss einem Agenten zugewiesen sein (assignee)\n"
             f"- Tasks koennen von anderen Tasks abhaengen (dependsOn: [task-id])\n"
@@ -171,13 +172,14 @@ class MultiAgentOrchestrator:
             f"- Der letzte Task (Zusammenfassung/Review) sollte von den anderen abhaengen\n"
             f"- WICHTIG fuer Task-Beschreibungen:\n"
             f"  Die 'description' MUSS die SPEZIFISCHE Frage/Aufgabe enthalten, NICHT generisch!\n"
+            f"  Die 'description' MUSS das VOLLSTAENDIGE Ziel referenzieren, NICHT abkuerzen!\n"
             f"  SCHLECHT: 'Suche Dokumentation zu Authentication'\n"
             f"  GUT: 'Suche in Confluence wie die Authentication in unseren Microservices funktioniert, "
             f"insbesondere Token-Handling und Service-to-Service Auth'\n"
             f"  Die description soll dem Agent genau sagen WAS er finden soll.\n\n"
             f"Antworte NUR mit JSON-Array:\n"
             f'[{{"id":"t1","title":"...","description":"SPEZIFISCHE Aufgabe bezogen auf das Ziel","assignee":"agent1","dependsOn":[]}},'
-            f'{{"id":"t2","title":"Zusammenfassung","description":"Fasse Ergebnisse zusammen und beantworte: {goal[:80]}","assignee":"agent2","dependsOn":["t1"]}}]'
+            f'{{"id":"t2","title":"Zusammenfassung","description":"Fasse Ergebnisse zusammen und beantworte: {goal}","assignee":"agent2","dependsOn":["t1"]}}]'
         )
 
         try:

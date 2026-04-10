@@ -200,6 +200,279 @@ def register_email_tools(registry: ToolRegistry) -> int:
         except Exception as e:
             return ToolResult(success=False, error=str(e))
 
+    # ── email_list_rules ─────────────────────────────────────────────────────
+    async def email_list_rules(**kwargs: Any) -> ToolResult:
+        from app.services.email_client import get_email_client
+        try:
+            client = get_email_client()
+            rules = await client.list_rules()
+            return ToolResult(success=True, data={"rules": rules, "count": len(rules)})
+        except Exception as e:
+            return ToolResult(success=False, error=str(e))
+
+    registry.register(Tool(
+        name="email_list_rules",
+        description=(
+            "Listet alle Inbox-Regeln (Server-Side Rules) des Exchange-Postfachs auf. "
+            "Zeigt pro Regel: Name, aktiv/inaktiv, Bedingungen und Aktionen. "
+            "Nuetzlich um zu verstehen welche automatischen Sortierungen und Weiterleitungen aktiv sind."
+        ),
+        category=ToolCategory.SEARCH,
+        parameters=[],
+        handler=email_list_rules,
+    ))
+    count += 1
+
+    # ── email_resolve_name ────────────────────────────────────────────────────
+    async def email_resolve_name(**kwargs: Any) -> ToolResult:
+        from app.services.email_client import get_email_client
+        try:
+            name = kwargs.get("name", "").strip()
+            if not name:
+                return ToolResult(success=False, error="name ist erforderlich.")
+            client = get_email_client()
+            results = await client.resolve_name(
+                name=name,
+                limit=int(kwargs.get("limit", 20)),
+            )
+            return ToolResult(
+                success=True,
+                data={"results": results, "count": len(results), "hint": "Mehr Ergebnisse moeglich" if len(results) >= 20 else ""}
+            )
+        except Exception as e:
+            return ToolResult(success=False, error=str(e))
+
+    registry.register(Tool(
+        name="email_resolve_name",
+        description=(
+            "Durchsucht das globale Adressbuch (GAL / Active Directory) nach einer Person. "
+            "Gibt E-Mail-Adresse, Name, Abteilung, Buero und Telefonnummer zurueck. "
+            "Verwende dies um die E-Mail-Adresse oder Kontaktdaten eines Kollegen zu finden."
+        ),
+        category=ToolCategory.SEARCH,
+        parameters=[
+            ToolParameter(
+                name="name",
+                type="string",
+                description="Suchbegriff: Name, Vorname, Nachname oder Alias (mind. 2 Zeichen)",
+                required=True,
+            ),
+            ToolParameter(
+                name="limit",
+                type="integer",
+                description="Max. Anzahl Ergebnisse (Standard: 20)",
+                required=False,
+                default=20,
+            ),
+        ],
+        handler=email_resolve_name,
+    ))
+    count += 1
+
+    # ── email_search_contacts ─────────────────────────────────────────────────
+    async def email_search_contacts(**kwargs: Any) -> ToolResult:
+        from app.services.email_client import get_email_client
+        try:
+            query = kwargs.get("query", "").strip()
+            if not query:
+                return ToolResult(success=False, error="query ist erforderlich.")
+            client = get_email_client()
+            results = await client.search_contacts(
+                query=query,
+                limit=int(kwargs.get("limit", 20)),
+            )
+            return ToolResult(
+                success=True,
+                data={"contacts": results, "count": len(results)}
+            )
+        except Exception as e:
+            return ToolResult(success=False, error=str(e))
+
+    registry.register(Tool(
+        name="email_search_contacts",
+        description=(
+            "Durchsucht die persoenlichen Kontakte im Exchange-Postfach. "
+            "Sucht nach Name, Firma, Abteilung. "
+            "Fuer Firmen-Kontakte (GAL) verwende stattdessen email_resolve_name."
+        ),
+        category=ToolCategory.SEARCH,
+        parameters=[
+            ToolParameter(
+                name="query",
+                type="string",
+                description="Suchbegriff: Name, Firma oder Abteilung",
+                required=True,
+            ),
+            ToolParameter(
+                name="limit",
+                type="integer",
+                description="Max. Anzahl Ergebnisse (Standard: 20)",
+                required=False,
+                default=20,
+            ),
+        ],
+        handler=email_search_contacts,
+    ))
+    count += 1
+
+    # ── email_get_oof ─────────────────────────────────────────────────────────
+    async def email_get_oof(**kwargs: Any) -> ToolResult:
+        from app.services.email_client import get_email_client
+        try:
+            client = get_email_client()
+            oof = await client.get_oof()
+            return ToolResult(success=True, data=oof)
+        except Exception as e:
+            return ToolResult(success=False, error=str(e))
+
+    registry.register(Tool(
+        name="email_get_oof",
+        description=(
+            "Liest den Out-of-Office / Abwesenheitsstatus des eigenen Postfachs. "
+            "Zeigt Status (aktiv/inaktiv/geplant), Zeitraum und die Auto-Reply-Nachrichten "
+            "(intern und extern)."
+        ),
+        category=ToolCategory.SEARCH,
+        parameters=[],
+        handler=email_get_oof,
+    ))
+    count += 1
+
+    # ── email_get_thread ──────────────────────────────────────────────────────
+    async def email_get_thread(**kwargs: Any) -> ToolResult:
+        from app.services.email_client import get_email_client
+        try:
+            email_id = kwargs.get("email_id", "").strip()
+            if not email_id:
+                return ToolResult(success=False, error="email_id ist erforderlich.")
+            client = get_email_client()
+            thread = await client.get_thread(
+                email_id=email_id,
+                folder=kwargs.get("folder", "inbox"),
+            )
+            return ToolResult(success=True, data=thread)
+        except Exception as e:
+            return ToolResult(success=False, error=str(e))
+
+    registry.register(Tool(
+        name="email_get_thread",
+        description=(
+            "Laedt die vollstaendige E-Mail-Konversation (Thread) zu einer bestimmten E-Mail. "
+            "Zeigt alle Nachrichten im Thread chronologisch mit Absender, Datum und Body. "
+            "Durchsucht Inbox, Gesendet und Entwuerfe. Benoetigt email_id aus email_search."
+        ),
+        category=ToolCategory.SEARCH,
+        parameters=[
+            ToolParameter(
+                name="email_id",
+                type="string",
+                description="Die ID der E-Mail (aus email_search Ergebnissen)",
+                required=True,
+            ),
+            ToolParameter(
+                name="folder",
+                type="string",
+                description="Ordner der Ausgangs-Mail (Standard: inbox)",
+                required=False,
+            ),
+        ],
+        handler=email_get_thread,
+    ))
+    count += 1
+
+    # ── email_move ────────────────────────────────────────────────────────────
+    async def email_move(**kwargs: Any) -> ToolResult:
+        from app.services.email_client import get_email_client
+        try:
+            email_id = kwargs.get("email_id", "").strip()
+            target_folder = kwargs.get("target_folder", "").strip()
+            if not email_id or not target_folder:
+                return ToolResult(success=False, error="email_id und target_folder sind erforderlich.")
+            client = get_email_client()
+            result = await client.move_email(email_id=email_id, target_folder=target_folder)
+            return ToolResult(success=True, data=result)
+        except Exception as e:
+            return ToolResult(success=False, error=str(e))
+
+    registry.register(Tool(
+        name="email_move",
+        description=(
+            "Verschiebt eine E-Mail in einen anderen Ordner. "
+            "ACHTUNG: Schreib-Operation - erfordert Bestaetigung durch den Nutzer. "
+            "Verwende email_list_folders um verfuegbare Ordner zu sehen."
+        ),
+        category=ToolCategory.SEARCH,
+        is_write_operation=True,
+        parameters=[
+            ToolParameter(
+                name="email_id",
+                type="string",
+                description="Die ID der E-Mail (aus email_search Ergebnissen)",
+                required=True,
+            ),
+            ToolParameter(
+                name="target_folder",
+                type="string",
+                description="Name des Ziel-Ordners (z.B. 'Archiv', 'Projekte/2026')",
+                required=True,
+            ),
+        ],
+        handler=email_move,
+    ))
+    count += 1
+
+    # ── email_flag ────────────────────────────────────────────────────────────
+    async def email_flag(**kwargs: Any) -> ToolResult:
+        from app.services.email_client import get_email_client
+        try:
+            email_id = kwargs.get("email_id", "").strip()
+            if not email_id:
+                return ToolResult(success=False, error="email_id ist erforderlich.")
+            flag = kwargs.get("flag", "").strip()
+            importance = kwargs.get("importance", "").strip()
+            if not flag and not importance:
+                return ToolResult(success=False, error="Mindestens flag oder importance muss angegeben werden.")
+            client = get_email_client()
+            result = await client.flag_email(email_id=email_id, flag=flag, importance=importance)
+            return ToolResult(success=True, data=result)
+        except Exception as e:
+            return ToolResult(success=False, error=str(e))
+
+    registry.register(Tool(
+        name="email_flag",
+        description=(
+            "Setzt den Flag-Status und/oder die Wichtigkeit einer E-Mail. "
+            "ACHTUNG: Schreib-Operation - erfordert Bestaetigung durch den Nutzer. "
+            "Flag-Werte: flagged, complete, notflagged. Wichtigkeit: high, normal, low."
+        ),
+        category=ToolCategory.SEARCH,
+        is_write_operation=True,
+        parameters=[
+            ToolParameter(
+                name="email_id",
+                type="string",
+                description="Die ID der E-Mail (aus email_search Ergebnissen)",
+                required=True,
+            ),
+            ToolParameter(
+                name="flag",
+                type="string",
+                description="Flag-Status: flagged, complete oder notflagged",
+                required=False,
+            ),
+            ToolParameter(
+                name="importance",
+                type="string",
+                description="Wichtigkeit: high, normal oder low",
+                required=False,
+            ),
+        ],
+        handler=email_flag,
+    ))
+    count += 1
+
+    # ── email_draft ────────────────────────────────────────────────────────────
+
     registry.register(Tool(
         name="email_draft",
         description=(

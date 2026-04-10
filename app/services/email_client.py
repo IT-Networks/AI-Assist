@@ -550,6 +550,384 @@ class ExchangeEmailClient:
         logger.info("Alle Ordner durchsucht: %d Mails gefunden", len(all_results))
         return all_results[:limit]
 
+    # ── Inbox-Regeln ─────────────────────────────────────────────────────────
+
+    async def list_rules(self) -> List[Dict[str, Any]]:
+        """Listet alle Inbox-Regeln (Server-Side Rules) auf."""
+        await self._ensure_connected()
+        loop = asyncio.get_event_loop()
+        return await loop.run_in_executor(None, self._list_rules_sync)
+
+    def _list_rules_sync(self) -> List[Dict[str, Any]]:
+        rules = []
+        try:
+            for rule in self._account.rules:
+                conditions = []
+                if rule.conditions:
+                    c = rule.conditions
+                    if getattr(c, 'contains_subject_strings', None):
+                        conditions.append(f"Betreff enthaelt: {', '.join(c.contains_subject_strings)}")
+                    if getattr(c, 'from_addresses', None):
+                        addrs = [str(getattr(a, 'email_address', a)) for a in c.from_addresses]
+                        conditions.append(f"Von: {', '.join(addrs)}")
+                    if getattr(c, 'sent_to_addresses', None):
+                        addrs = [str(getattr(a, 'email_address', a)) for a in c.sent_to_addresses]
+                        conditions.append(f"An: {', '.join(addrs)}")
+                    if getattr(c, 'contains_body_strings', None):
+                        conditions.append(f"Body enthaelt: {', '.join(c.contains_body_strings)}")
+                    if getattr(c, 'contains_sender_strings', None):
+                        conditions.append(f"Absender enthaelt: {', '.join(c.contains_sender_strings)}")
+                    if getattr(c, 'has_attachments', None):
+                        conditions.append("Hat Anhaenge")
+                    if getattr(c, 'importance', None):
+                        conditions.append(f"Wichtigkeit: {c.importance}")
+                    if getattr(c, 'is_read', None) is not None:
+                        conditions.append(f"Gelesen: {c.is_read}")
+                    if not conditions:
+                        conditions.append("(weitere Bedingungen)")
+
+                actions = []
+                if rule.actions:
+                    a = rule.actions
+                    if getattr(a, 'move_to_folder', None):
+                        folder_name = getattr(a.move_to_folder, 'name', str(a.move_to_folder))
+                        actions.append(f"Verschieben nach: {folder_name}")
+                    if getattr(a, 'copy_to_folder', None):
+                        folder_name = getattr(a.copy_to_folder, 'name', str(a.copy_to_folder))
+                        actions.append(f"Kopieren nach: {folder_name}")
+                    if getattr(a, 'delete', None):
+                        actions.append("Loeschen")
+                    if getattr(a, 'permanent_delete', None):
+                        actions.append("Endgueltig loeschen")
+                    if getattr(a, 'forward_to_recipients', None):
+                        addrs = [str(getattr(r, 'email_address', r)) for r in a.forward_to_recipients]
+                        actions.append(f"Weiterleiten an: {', '.join(addrs)}")
+                    if getattr(a, 'redirect_to_recipients', None):
+                        addrs = [str(getattr(r, 'email_address', r)) for r in a.redirect_to_recipients]
+                        actions.append(f"Umleiten an: {', '.join(addrs)}")
+                    if getattr(a, 'mark_importance', None):
+                        actions.append(f"Wichtigkeit setzen: {a.mark_importance}")
+                    if getattr(a, 'mark_as_read', None):
+                        actions.append("Als gelesen markieren")
+                    if getattr(a, 'stop_processing_rules', None):
+                        actions.append("Keine weiteren Regeln")
+                    if not actions:
+                        actions.append("(weitere Aktionen)")
+
+                rules.append({
+                    "name": rule.display_name or "(Ohne Name)",
+                    "enabled": bool(rule.is_enabled),
+                    "priority": rule.priority,
+                    "in_error": bool(getattr(rule, 'is_in_error', False)),
+                    "conditions": conditions,
+                    "actions": actions,
+                })
+        except Exception as e:
+            logger.error("Inbox-Regeln konnten nicht geladen werden: %s", e)
+            raise RuntimeError(f"Inbox-Regeln nicht verfuegbar: {e}")
+
+        return rules
+
+    # ── GAL / Name Resolution ─────────────────────────────────────────────────
+
+    async def resolve_name(self, name: str, limit: int = 20) -> List[Dict[str, Any]]:
+        """Loest einen Namen gegen das globale Adressbuch (GAL) auf."""
+        await self._ensure_connected()
+        loop = asyncio.get_event_loop()
+        return await loop.run_in_executor(None, lambda: self._resolve_name_sync(name, limit))
+
+    def _resolve_name_sync(self, name: str, limit: int) -> List[Dict[str, Any]]:
+        results = []
+        try:
+            resolved = self._account.protocol.resolve_names([name], search_scope='ActiveDirectory')
+            for entry in resolved:
+                # resolve_names liefert (Mailbox, Contact) Tupel oder Mailbox-Objekte
+                mailbox = None
+                contact = None
+
+                if isinstance(entry, tuple):
+                    mailbox, contact = entry
+                else:
+                    mailbox = entry
+
+                record = {}
+                if mailbox:
+                    record["email"] = str(getattr(mailbox, 'email_address', '')) or ""
+                    record["name"] = str(getattr(mailbox, 'name', '')) or ""
+                    record["type"] = str(getattr(mailbox, 'mailbox_type', '')) or ""
+
+                if contact:
+                    record["vorname"] = str(getattr(contact, 'given_name', '')) or ""
+                    record["nachname"] = str(getattr(contact, 'surname', '')) or ""
+                    record["anzeigename"] = str(getattr(contact, 'display_name', '')) or record.get("name", "")
+                    record["abteilung"] = str(getattr(contact, 'department', '')) or ""
+                    record["buero"] = str(getattr(contact, 'office', '')) or ""
+                    record["titel"] = str(getattr(contact, 'title', '')) or ""
+                    record["firma"] = str(getattr(contact, 'company_name', '')) or ""
+                    # Telefonnummern
+                    phones = getattr(contact, 'phone_numbers', None)
+                    if phones:
+                        phone_list = []
+                        for p in phones:
+                            label = getattr(p, 'label', '')
+                            number = getattr(p, 'phone_number', str(p))
+                            phone_list.append(f"{label}: {number}" if label else str(number))
+                        record["telefon"] = phone_list
+
+                if record.get("email") or record.get("name"):
+                    results.append(record)
+                    if len(results) >= limit:
+                        break
+        except Exception as e:
+            logger.error("GAL-Aufloesung fehlgeschlagen: %s", e)
+            raise RuntimeError(f"Adressbuch-Suche fehlgeschlagen: {e}")
+
+        return results
+
+    # ── Persoenliche Kontakte ─────────────────────────────────────────────────
+
+    async def search_contacts(self, query: str, limit: int = 20) -> List[Dict[str, Any]]:
+        """Durchsucht die persoenlichen Kontakte."""
+        await self._ensure_connected()
+        loop = asyncio.get_event_loop()
+        return await loop.run_in_executor(None, lambda: self._search_contacts_sync(query, limit))
+
+    def _search_contacts_sync(self, query: str, limit: int) -> List[Dict[str, Any]]:
+        from exchangelib import Q
+
+        contacts_folder = self._account.contacts
+        if contacts_folder is None:
+            return []
+
+        q = query.lower()
+        q_filter = (
+            Q(display_name__icontains=q)
+            | Q(given_name__icontains=q)
+            | Q(surname__icontains=q)
+            | Q(company_name__icontains=q)
+            | Q(department__icontains=q)
+        )
+
+        results = []
+        try:
+            for contact in contacts_folder.filter(q_filter)[:limit]:
+                emails = []
+                if getattr(contact, 'email_addresses', None):
+                    for ea in contact.email_addresses:
+                        addr = getattr(ea, 'email', None) or str(ea)
+                        if addr and addr != 'None':
+                            emails.append(addr)
+
+                phones = []
+                if getattr(contact, 'phone_numbers', None):
+                    for p in contact.phone_numbers:
+                        label = getattr(p, 'label', '')
+                        number = getattr(p, 'phone_number', str(p))
+                        phones.append(f"{label}: {number}" if label else str(number))
+
+                results.append({
+                    "name": getattr(contact, 'display_name', '') or "",
+                    "vorname": getattr(contact, 'given_name', '') or "",
+                    "nachname": getattr(contact, 'surname', '') or "",
+                    "email": emails,
+                    "telefon": phones,
+                    "firma": getattr(contact, 'company_name', '') or "",
+                    "abteilung": getattr(contact, 'department', '') or "",
+                    "buero": getattr(contact, 'office_location', '') or "",
+                    "notizen": (getattr(contact, 'body', '') or "")[:200],
+                })
+        except Exception as e:
+            logger.error("Kontakt-Suche fehlgeschlagen: %s", e)
+            raise RuntimeError(f"Kontakt-Suche fehlgeschlagen: {e}")
+
+        return results
+
+    # ── Out-of-Office ─────────────────────────────────────────────────────────
+
+    async def get_oof(self) -> Dict[str, Any]:
+        """Liest den Out-of-Office-Status des eigenen Postfachs."""
+        await self._ensure_connected()
+        loop = asyncio.get_event_loop()
+        return await loop.run_in_executor(None, self._get_oof_sync)
+
+    def _get_oof_sync(self) -> Dict[str, Any]:
+        try:
+            oof = self._account.oof_settings
+            return {
+                "status": str(oof.state) if oof.state else "Disabled",
+                "intern_antwort": str(oof.internal_reply) if oof.internal_reply else "",
+                "extern_antwort": str(oof.external_reply) if oof.external_reply else "",
+                "von": oof.start.isoformat() if getattr(oof, 'start', None) else "",
+                "bis": oof.end.isoformat() if getattr(oof, 'end', None) else "",
+                "extern_zielgruppe": str(getattr(oof, 'external_audience', '')) or "",
+            }
+        except Exception as e:
+            logger.error("OOF-Status konnte nicht geladen werden: %s", e)
+            raise RuntimeError(f"Out-of-Office Status nicht verfuegbar: {e}")
+
+    # ── Thread / Konversation ─────────────────────────────────────────────────
+
+    async def get_thread(self, email_id: str, folder: str = "inbox") -> Dict[str, Any]:
+        """Laedt die vollstaendige Konversation/Thread einer Email."""
+        await self._ensure_connected()
+        loop = asyncio.get_event_loop()
+        return await loop.run_in_executor(None, lambda: self._get_thread_sync(email_id, folder))
+
+    def _get_thread_sync(self, email_id: str, folder_name: str) -> Dict[str, Any]:
+        from exchangelib.items import Message
+        from exchangelib.properties import ItemId
+
+        items = list(self._account.fetch(ids=[ItemId(id=email_id)]))
+        if not items or items[0] is None:
+            raise ValueError(f"E-Mail mit ID '{email_id}' nicht gefunden.")
+
+        item = items[0]
+        conv_id = getattr(item, 'conversation_id', None)
+        if not conv_id:
+            return {
+                "thread_id": None,
+                "subject": item.subject or "",
+                "messages": [self._thread_message_dict(item)],
+                "count": 1,
+            }
+
+        # Mehrere Ordner durchsuchen
+        folders_to_search = []
+        target_folder = self._get_folder(folder_name)
+        if target_folder:
+            folders_to_search.append(target_folder)
+        for std_folder in [self._account.inbox, self._account.sent, self._account.drafts]:
+            if std_folder and std_folder not in folders_to_search:
+                folders_to_search.append(std_folder)
+
+        seen_ids = set()
+        messages = []
+
+        for search_folder in folders_to_search:
+            try:
+                thread = search_folder.filter(conversation_id=conv_id).order_by('datetime_received')
+                for msg in thread:
+                    if not isinstance(msg, Message) or msg.id in seen_ids:
+                        continue
+                    seen_ids.add(msg.id)
+                    messages.append(self._thread_message_dict(msg))
+            except Exception as e:
+                logger.debug("Thread-Suche in '%s' fehlgeschlagen: %s",
+                             getattr(search_folder, 'name', '?'), e)
+
+        messages.sort(key=lambda m: m.get("date", ""))
+
+        return {
+            "thread_id": str(conv_id),
+            "subject": item.subject or "",
+            "messages": messages,
+            "count": len(messages),
+        }
+
+    def _thread_message_dict(self, msg) -> Dict[str, Any]:
+        """Erstellt ein Dict fuer eine Thread-Nachricht."""
+        body_text = ""
+        try:
+            if msg.text_body:
+                body_text = msg.text_body
+            elif msg.body:
+                from bs4 import BeautifulSoup
+                body_text = BeautifulSoup(str(msg.body), 'html.parser').get_text(separator='\n', strip=True)
+        except Exception:
+            pass
+        if len(body_text) > 3000:
+            body_text = body_text[:3000] + "\n\n[... gekuerzt ...]"
+
+        return {
+            "email_id": msg.id,
+            "subject": msg.subject or "",
+            "sender": str(msg.sender.email_address) if msg.sender else "",
+            "sender_name": str(msg.sender.name) if msg.sender and msg.sender.name else "",
+            "to": [str(r.email_address) for r in (msg.to_recipients or [])],
+            "date": msg.datetime_received.isoformat() if msg.datetime_received else "",
+            "body": body_text,
+        }
+
+    # ── Email verschieben ─────────────────────────────────────────────────────
+
+    async def move_email(self, email_id: str, target_folder: str) -> Dict[str, Any]:
+        """Verschiebt eine Email in einen anderen Ordner."""
+        await self._ensure_connected()
+        loop = asyncio.get_event_loop()
+        return await loop.run_in_executor(None, lambda: self._move_email_sync(email_id, target_folder))
+
+    def _move_email_sync(self, email_id: str, target_folder_name: str) -> Dict[str, Any]:
+        from exchangelib.properties import ItemId
+
+        target = self._get_folder(target_folder_name)
+        if target is None:
+            raise ValueError(f"Ziel-Ordner '{target_folder_name}' nicht gefunden.")
+
+        items = list(self._account.fetch(ids=[ItemId(id=email_id)]))
+        if not items or items[0] is None:
+            raise ValueError(f"E-Mail mit ID '{email_id}' nicht gefunden.")
+
+        item = items[0]
+        subject = item.subject or "(Kein Betreff)"
+        item.move(target)
+
+        return {
+            "success": True,
+            "message": f"E-Mail '{subject}' nach '{target_folder_name}' verschoben.",
+        }
+
+    # ── Email flaggen ─────────────────────────────────────────────────────────
+
+    async def flag_email(
+        self, email_id: str, flag: str = "", importance: str = ""
+    ) -> Dict[str, Any]:
+        """Setzt Flag-Status und/oder Wichtigkeit einer Email."""
+        await self._ensure_connected()
+        loop = asyncio.get_event_loop()
+        return await loop.run_in_executor(
+            None, lambda: self._flag_email_sync(email_id, flag, importance)
+        )
+
+    def _flag_email_sync(self, email_id: str, flag: str, importance: str) -> Dict[str, Any]:
+        from exchangelib.properties import ItemId
+
+        items = list(self._account.fetch(ids=[ItemId(id=email_id)]))
+        if not items or items[0] is None:
+            raise ValueError(f"E-Mail mit ID '{email_id}' nicht gefunden.")
+
+        item = items[0]
+        update_fields = []
+        changes = []
+
+        if flag:
+            flag_lower = flag.lower()
+            valid_flags = {"flagged": "Flagged", "complete": "Complete", "notflagged": "NotFlagged"}
+            if flag_lower not in valid_flags:
+                raise ValueError(f"Ungueltiger Flag-Wert: '{flag}'. Erlaubt: {', '.join(valid_flags.keys())}")
+            from exchangelib.properties import Flag as EWSFlag
+            item.flag = EWSFlag(flag_status=valid_flags[flag_lower])
+            update_fields.append('flag')
+            changes.append(f"Flag: {valid_flags[flag_lower]}")
+
+        if importance:
+            imp_lower = importance.lower()
+            valid_imp = {"high": "High", "normal": "Normal", "low": "Low"}
+            if imp_lower not in valid_imp:
+                raise ValueError(f"Ungueltige Wichtigkeit: '{importance}'. Erlaubt: {', '.join(valid_imp.keys())}")
+            item.importance = valid_imp[imp_lower]
+            update_fields.append('importance')
+            changes.append(f"Wichtigkeit: {valid_imp[imp_lower]}")
+
+        if not update_fields:
+            return {"success": False, "message": "Kein Flag oder Wichtigkeit angegeben."}
+
+        item.save(update_fields=update_fields)
+
+        return {
+            "success": True,
+            "message": f"E-Mail aktualisiert: {', '.join(changes)}",
+        }
+
     # ── Hilfsmethoden ──────────────────────────────────────────────────────────
 
     # Betreff-Prefixes für Antworten und Weiterleitungen (international)

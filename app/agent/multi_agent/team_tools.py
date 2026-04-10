@@ -78,7 +78,7 @@ async def _handle_run_team(
 
     await event_bridge.emit("team_started", {
         "team": internal_config.name,
-        "goal": goal[:200],
+        "goal": goal,
         "agents": internal_config.agent_names(),
     })
 
@@ -146,11 +146,13 @@ def register_team_tools(registry: ToolRegistry) -> int:
             "Startet ein Multi-Agent-Team das die Aufgabe automatisch in parallele Tasks zerlegt. "
             "NICHT manuell search_code oder read_file aufrufen — das Team macht das automatisch! "
             f"{teams_hint} "
+            "SPRACHE: Der goal-Parameter MUSS auf Deutsch formuliert sein! "
+            "Uebernimm die Frage des Users vollstaendig auf Deutsch als Goal. "
             "Nach Aufruf: Ergebnis dem User mitteilen und KEINE weiteren Tools aufrufen."
         ),
         category=ToolCategory.ANALYSIS,
         parameters=[
-            ToolParameter("goal", "string", "Das Ziel/die Aufgabe fuer das Team", required=True),
+            ToolParameter("goal", "string", "Das Ziel/die Aufgabe fuer das Team. MUSS auf Deutsch formuliert sein! Uebernimm die vollstaendige Frage des Users auf Deutsch.", required=True),
             ToolParameter("team", "string", "Name des Teams (aus config.yaml). Ohne Angabe wird das erste Team verwendet.", required=False),
         ],
         is_write_operation=False,

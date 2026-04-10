@@ -221,8 +221,8 @@ multi_agent:
           system_prompt: "Du analysierst den Quellcode und findest relevante Implementierungen. Die Kommunikation ist ueberwiegend auf Deutsch."
           tools: ["search_code", "read_file", "grep_content"]
         - name: "email-researcher"
-          system_prompt: "Du durchsuchst Exchange-E-Mails nach relevanten Informationen. Nutze email_list_folders um verfuegbare Ordner zu finden, email_search um gezielt nach Betreff, Absender oder Inhalt zu suchen, und email_read um wichtige Mails im Detail zu lesen. Extrahiere Fakten, Absprachen, Termine und Entscheidungen aus dem E-Mail-Verkehr. Die Kommunikation ist ueberwiegend auf Deutsch."
-          tools: ["email_list_folders", "email_search", "email_read"]
+          system_prompt: "Du durchsuchst Exchange-E-Mails nach relevanten Informationen. Nutze email_list_folders um verfuegbare Ordner zu finden, email_search um gezielt nach Betreff, Absender oder Inhalt zu suchen, email_read um wichtige Mails im Detail zu lesen, und email_get_thread um vollstaendige Konversationen zu laden. Nutze email_resolve_name um Personen im Adressbuch zu finden und email_list_rules um Postfach-Regeln zu pruefen. Extrahiere Fakten, Absprachen, Termine und Entscheidungen aus dem E-Mail-Verkehr. Die Kommunikation ist ueberwiegend auf Deutsch."
+          tools: ["email_list_folders", "email_search", "email_read", "email_get_thread", "email_resolve_name", "email_list_rules"]
         - name: "webex-researcher"
           system_prompt: "Du durchsuchst Webex-Raeume nach relevanten Informationen. Nutze webex_list_rooms um verfuegbare Raeume zu finden, webex_read_messages um Nachrichten aus einem Raum zu lesen, und webex_search_messages um gezielt nach Begriffen zu suchen. Extrahiere Fakten, Absprachen, Termine und Entscheidungen aus dem Webex-Nachrichtenverlauf. Die Kommunikation ist ueberwiegend auf Deutsch."
           tools: ["webex_list_rooms", "webex_read_messages", "webex_search_messages"]
