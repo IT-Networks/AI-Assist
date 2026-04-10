@@ -1098,6 +1098,7 @@ class AgentOrchestrator:
             audio_count = sum(1 for a in attachments if a["type"] == "audio")
             logger.info(f"[agent] Multimodal: {image_count} Bilder, {audio_count} Audio-Dateien")
             # Audio zu FLAC konvertieren + transkribieren
+            transcribed_texts = []
             for i, att in enumerate(attachments):
                 if att["type"] == "audio":
                     ext = _EXT_MAP.get(att["mime"], "webm")
@@ -1123,12 +1124,31 @@ class AgentOrchestrator:
                         transcription = await transcribe_audio(att["data"], att["mime"])
                         if transcription:
                             att["transcription"] = transcription
+                            transcribed_texts.append(transcription)
                             logger.info(f"[agent] Audio transkribiert: {len(transcription)} Zeichen")
+                            # Transkription ans Frontend senden (wird unter Audio-Player angezeigt)
+                            yield AgentEvent(AgentEventType.AUDIO_CONVERTED, {
+                                "index": i,
+                                "transcription": transcription,
+                            })
                         else:
                             logger.warning("[agent] Audio-Transkription fehlgeschlagen oder Whisper deaktiviert")
-            user_content = build_user_content(user_message, attachments)
-            if isinstance(user_content, list):
-                logger.info(f"[agent] Multimodal content: {len(user_content)} Parts (text + images)")
+
+            # Transkription wird zur User-Nachricht (nicht als Annotation)
+            # Der User spricht → Transkription IST die Nachricht
+            if transcribed_texts:
+                transcription_text = " ".join(transcribed_texts)
+                if user_message:
+                    user_content = f"{user_message}\n\n{transcription_text}"
+                else:
+                    user_content = transcription_text
+                # Auch user_message aktualisieren für Historie
+                user_message = user_content
+            else:
+                user_content = build_user_content(user_message, attachments)
+                if isinstance(user_content, list):
+                    logger.info(f"[agent] Multimodal content: {len(user_content)} Parts (text + images)")
+
             # Falls Audio ohne Transkription → klaren Hinweis setzen
             audio_atts = [a for a in attachments if a["type"] == "audio"]
             has_transcription = any(a.get("transcription") for a in audio_atts)

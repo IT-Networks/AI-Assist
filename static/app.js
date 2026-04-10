@@ -5828,16 +5828,31 @@ async function processAgentEvent(event, bubble, msgDiv, chat) {
     }
 
     case 'audio_converted': {
-      // Backend hat Audio zu FLAC konvertiert → Audio-Player im Chat aktualisieren
+      // Backend hat Audio zu FLAC konvertiert und/oder transkribiert
       const userMsgs = chat.pane.querySelectorAll('.message.user');
       const lastUserMsg = userMsgs[userMsgs.length - 1];
-      if (lastUserMsg && data.data) {
+      if (!lastUserMsg) break;
+      const lastBubble = lastUserMsg.querySelector('.message-bubble');
+
+      // FLAC-Update: Audio-Player aktualisieren
+      if (data.data) {
         const audioPlayers = lastUserMsg.querySelectorAll('.message-audio-player');
         const idx = data.index ?? 0;
         if (audioPlayers[idx]) {
           audioPlayers[idx].src = `data:${data.mime};base64,${data.data}`;
           audioPlayers[idx].dataset.filename = data.name || 'aufnahme.flac';
         }
+      }
+
+      // Transkription: Text unter dem Audio-Player anzeigen
+      if (data.transcription && lastBubble) {
+        let transcriptEl = lastBubble.querySelector('.audio-transcription');
+        if (!transcriptEl) {
+          transcriptEl = document.createElement('div');
+          transcriptEl.className = 'audio-transcription';
+          lastBubble.appendChild(transcriptEl);
+        }
+        transcriptEl.textContent = data.transcription;
       }
       break;
     }

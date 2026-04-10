@@ -1779,6 +1779,18 @@ textarea.ma-input { resize: vertical; font-family: inherit; }
   height: 36px;
 }
 
+/* ── Audio-Transkription (unter Audio-Player) ────────────── */
+.audio-transcription {
+  font-size: 0.85rem;
+  color: var(--text-muted);
+  font-style: italic;
+  margin-top: 6px;
+  padding: 6px 10px;
+  background: var(--bg);
+  border-left: 3px solid var(--accent);
+  border-radius: 0 6px 6px 0;
+}
+
 /* ── Image Modal (Vollbild-Anzeige) ──────────────────────── */
 #image-modal {
   position: fixed;
