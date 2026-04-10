@@ -21389,7 +21389,7 @@ const AttachmentManager = {
   MAX_AUDIO_SIZE: 25 * 1024 * 1024,
   MAX_IMAGE_DIM: 2048,
   ALLOWED_IMAGE: ['image/png', 'image/jpeg', 'image/gif', 'image/webp'],
-  ALLOWED_AUDIO: ['audio/webm', 'audio/mp3', 'audio/mpeg', 'audio/wav', 'audio/ogg'],
+  ALLOWED_AUDIO: ['audio/webm', 'audio/mp3', 'audio/mpeg', 'audio/wav', 'audio/ogg', 'audio/flac', 'audio/x-flac'],
 
   /** @type {Array<{type: string, mime: string, data: string, name: string, blobUrl?: string}>} */
   items: [],

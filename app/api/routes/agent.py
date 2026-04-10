@@ -36,7 +36,7 @@ class ContextSelection(BaseModel):
 
 
 ALLOWED_IMAGE_MIMES = {"image/png", "image/jpeg", "image/gif", "image/webp"}
-ALLOWED_AUDIO_MIMES = {"audio/webm", "audio/mp3", "audio/mpeg", "audio/wav", "audio/ogg", "audio/mp4"}
+ALLOWED_AUDIO_MIMES = {"audio/webm", "audio/mp3", "audio/mpeg", "audio/wav", "audio/ogg", "audio/mp4", "audio/flac", "audio/x-flac"}
 
 class ChatAttachment(BaseModel):
     """Ein Bild- oder Audio-Anhang (Base64-kodiert)."""

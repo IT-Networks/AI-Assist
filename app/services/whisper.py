@@ -25,6 +25,8 @@ _EXT_MAP = {
     "audio/wav": "wav",
     "audio/ogg": "ogg",
     "audio/mp4": "m4a",
+    "audio/flac": "flac",
+    "audio/x-flac": "flac",
 }
 
 
