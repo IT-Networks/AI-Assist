@@ -64,6 +64,8 @@ class TodoStoreService:
     def get_all(self, status: Optional[str] = None) -> List[TodoItem]:
         """Alle Todos, optional nach Status gefiltert."""
         store = self.load()
+        if status == "open":
+            return [t for t in store.todos if t.status != "done"]
         if status:
             return [t for t in store.todos if t.status == status]
         return list(store.todos)

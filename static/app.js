@@ -20525,7 +20525,7 @@ const taskProgressPanel = {
 const emailModule = {
   todoPanelOpen: false,
   currentTodoId: null,
-  todoFilter: 'all',
+  todoFilter: 'open',
   todoSourceFilter: 'all',
   sseSource: null,
   automationData: null,
@@ -20605,7 +20605,7 @@ const emailModule = {
   // ── Todo Panel ─────────────────────────────────────────────────────────────
 
   async loadTodos() {
-    const statusParam = this.todoFilter === 'all' ? '' : `?status=${this.todoFilter}`;
+    const statusParam = `?status=${this.todoFilter}`;
     try {
       const res = await fetch(`/api/email/todos${statusParam}`);
       const data = await res.json();
