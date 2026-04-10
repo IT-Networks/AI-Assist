@@ -5164,7 +5164,8 @@ function enqueueOrProcessEvent(event, bubble, msgDiv, chat, streamingState) {
 async function sendMessage() {
   const input = document.getElementById('message-input');
   const text = input.value.trim();
-  if (!text) return;
+  const hasAttachments = AttachmentManager.hasItems();
+  if (!text && !hasAttachments) return;
 
   // Check if this is a suggestion response (user clicked a suggestion chip)
   // Suggestion responses are allowed even while LLM is streaming, since they're
@@ -5215,9 +5216,10 @@ async function sendMessage() {
   input.value = '';
   input.style.height = 'auto';
   hideSuggestions();
-  appendMessage('user', text, pendingAttachments);
+  const displayText = text || (pendingAttachments ? '' : '');
+  appendMessage('user', displayText, pendingAttachments);
 
-  updateActiveChatTitle(text);
+  updateActiveChatTitle(text || (pendingAttachments ? 'Medien-Nachricht' : ''));
 
   const ac = new AbortController();
   activeChat.streamingState = createStreamingState(ac);
@@ -11201,6 +11203,7 @@ function renderSettingsSection() {
     llm: 'LLM-Verbindungseinstellungen. tool_model = schnelles Modell für Suche, analysis_model = großes Modell für Antworten.',
     email: 'Exchange E-Mail über EWS (NTLM). Ermöglicht E-Mail-Suche, Lesen und Entwürfe im Chat sowie automatische Todo-Erkennung.',
     webex: 'Webex Messaging Integration. OAuth2-Login über Client-ID/Secret ODER manueller Bearer/Access-Token. Ermöglicht das Lesen und Durchsuchen von Webex-Räumen sowie automatische Todo-Erkennung.',
+    whisper: 'Whisper Speech-to-Text für Audio-Nachrichten. Nutzt eine OpenAI-kompatible Whisper API (lokal oder remote) zur Transkription von Sprachaufnahmen.',
   };
 
   let html = `
@@ -21592,9 +21595,41 @@ function _initAttachmentFileSelect() {
   });
 }
 
-// ── Mikrofon-Aufnahme ──────────────────────────────────────
+// ── Mikrofon-Aufnahme mit Timer ──────────────────────────────
 let _mediaRecorder = null;
 let _audioChunks = [];
+let _micTimerInterval = null;
+let _micStartTime = 0;
+
+function _formatMicTime(ms) {
+  const totalSec = Math.floor(ms / 1000);
+  const min = Math.floor(totalSec / 60);
+  const sec = totalSec % 60;
+  return `${min}:${sec.toString().padStart(2, '0')}`;
+}
+
+function _showMicTimer() {
+  let timerEl = document.getElementById('mic-timer');
+  if (!timerEl) {
+    timerEl = document.createElement('span');
+    timerEl.id = 'mic-timer';
+    timerEl.className = 'mic-timer';
+    const btn = document.getElementById('mic-btn');
+    if (btn && btn.parentNode) btn.parentNode.insertBefore(timerEl, btn.nextSibling);
+  }
+  _micStartTime = Date.now();
+  timerEl.textContent = '0:00';
+  timerEl.style.display = 'inline';
+  _micTimerInterval = setInterval(() => {
+    timerEl.textContent = _formatMicTime(Date.now() - _micStartTime);
+  }, 500);
+}
+
+function _hideMicTimer() {
+  if (_micTimerInterval) { clearInterval(_micTimerInterval); _micTimerInterval = null; }
+  const timerEl = document.getElementById('mic-timer');
+  if (timerEl) timerEl.style.display = 'none';
+}
 
 async function toggleMicRecording() {
   const btn = document.getElementById('mic-btn');
@@ -21605,13 +21640,13 @@ async function toggleMicRecording() {
     _mediaRecorder.stop();
     btn.classList.remove('recording');
     btn.title = 'Sprachnachricht aufnehmen';
+    _hideMicTimer();
     return;
   }
 
   // Start recording
   try {
     const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-    // Prefer webm/opus, fallback to whatever browser supports
     const mimeType = MediaRecorder.isTypeSupported('audio/webm;codecs=opus')
       ? 'audio/webm;codecs=opus'
       : MediaRecorder.isTypeSupported('audio/webm') ? 'audio/webm' : '';
@@ -21625,6 +21660,7 @@ async function toggleMicRecording() {
 
     _mediaRecorder.onstop = async () => {
       stream.getTracks().forEach(t => t.stop());
+      _hideMicTimer();
       const mime = _mediaRecorder.mimeType.split(';')[0] || 'audio/webm';
       const blob = new Blob(_audioChunks, { type: mime });
       const file = new File([blob], 'aufnahme.webm', { type: mime });
@@ -21641,6 +21677,7 @@ async function toggleMicRecording() {
     _mediaRecorder.start();
     btn.classList.add('recording');
     btn.title = 'Aufnahme stoppen';
+    _showMicTimer();
   } catch (err) {
     appendMessage('error', 'Mikrofon-Zugriff verweigert: ' + err.message);
   }

@@ -65,7 +65,7 @@ class ChatAttachment(BaseModel):
 
 class AgentChatRequest(BaseModel):
     """Anfrage für Agent-Chat."""
-    message: str = Field(..., min_length=1, max_length=100000, description="User-Nachricht (max 100k Zeichen)")
+    message: str = Field("", max_length=100000, description="User-Nachricht (leer erlaubt bei Attachments)")
     session_id: Optional[str] = Field(None, max_length=100, description="Session-ID (neu wenn leer)")
     model: Optional[str] = Field(None, max_length=100, description="LLM-Modell")
     skill_ids: Optional[List[str]] = Field(None, max_length=20, description="Skill-IDs zum Aktivieren (max 20)")

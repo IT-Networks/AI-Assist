@@ -1722,6 +1722,17 @@ textarea.ma-input { resize: vertical; font-family: inherit; }
   50% { opacity: 0.3; }
 }
 
+/* ── Mic Recording Timer ─────────────────────────────────── */
+.mic-timer {
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: #e05252;
+  font-variant-numeric: tabular-nums;
+  align-self: flex-end;
+  padding-bottom: 10px;
+  animation: pulse-mic 1.5s ease-in-out infinite;
+}
+
 /* ── Drop Overlay ────────────────────────────────────────── */
 #drop-overlay {
   position: fixed;

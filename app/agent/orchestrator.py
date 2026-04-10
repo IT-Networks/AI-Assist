@@ -1093,13 +1093,24 @@ class AgentOrchestrator:
         if attachments:
             from app.services.multimodal import build_user_content
             from app.services.whisper import transcribe_audio
+            image_count = sum(1 for a in attachments if a["type"] == "image")
+            audio_count = sum(1 for a in attachments if a["type"] == "audio")
+            logger.info(f"[agent] Multimodal: {image_count} Bilder, {audio_count} Audio-Dateien")
             # Audio transkribieren
             for att in attachments:
                 if att["type"] == "audio" and "transcription" not in att:
                     transcription = await transcribe_audio(att["data"], att["mime"])
                     if transcription:
                         att["transcription"] = transcription
+                        logger.info(f"[agent] Audio transkribiert: {len(transcription)} Zeichen")
+                    else:
+                        logger.warning("[agent] Audio-Transkription fehlgeschlagen oder Whisper deaktiviert")
             user_content = build_user_content(user_message, attachments)
+            if isinstance(user_content, list):
+                logger.info(f"[agent] Multimodal content: {len(user_content)} Parts (text + images)")
+            # Falls Text leer und nur Audio ohne Transkription → Hinweis als Text
+            if not user_message and audio_count > 0 and not any(a.get("transcription") for a in attachments if a["type"] == "audio"):
+                user_content = "[Audio-Nachricht gesendet — Whisper STT nicht konfiguriert, Transkription nicht möglich]"
         else:
             user_content = user_message
 
