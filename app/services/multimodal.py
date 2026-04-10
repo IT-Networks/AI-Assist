@@ -72,6 +72,31 @@ def build_user_content(
     return parts
 
 
+def ensure_text_only_messages(messages: List[dict]) -> List[dict]:
+    """
+    Konvertiert multimodale content-Arrays zu reinem Text.
+
+    Für Modelle OHNE Vision-Support: Entfernt image_url Parts,
+    behält nur Text-Teile. Gibt eine neue Liste zurück (kein Mutate).
+    """
+    result = []
+    for msg in messages:
+        content = msg.get("content")
+        if isinstance(content, list):
+            # Multimodal → nur Text extrahieren
+            text_parts = [
+                p.get("text", "") for p in content
+                if isinstance(p, dict) and p.get("type") == "text"
+            ]
+            text = "\n".join(t for t in text_parts if t)
+            new_msg = dict(msg)
+            new_msg["content"] = text or "(Bild gesendet — Modell unterstützt keine Bilder)"
+            result.append(new_msg)
+        else:
+            result.append(msg)
+    return result
+
+
 def extract_text_from_content(content: Any) -> str:
     """
     Extrahiert Text aus str oder multimodal content array.

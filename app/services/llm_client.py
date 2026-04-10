@@ -23,6 +23,23 @@ def _is_mistral_model(model: str) -> bool:
     return any(name in model_lower for name in ("mistral", "devstral", "codestral", "pixtral"))
 
 
+def _is_vision_model(model: str) -> bool:
+    """Prüft ob das Modell Vision/Bilder unterstützt."""
+    if not model:
+        return False
+    model_lower = model.lower()
+    # Bekannte Vision-Modelle: pixtral, llava, qwen-vl/qwen2-vl, gpt-4o, gpt-4-vision, internvl
+    return any(name in model_lower for name in (
+        "pixtral", "llava", "qwen-vl", "qwen2-vl", "internvl",
+        "gpt-4o", "gpt-4-vision", "gpt-4-turbo", "vision",
+    ))
+
+
+def _has_multimodal_content(messages: List[Dict]) -> bool:
+    """Prüft ob Messages multimodale Content-Arrays enthalten."""
+    return any(isinstance(m.get("content"), list) for m in messages)
+
+
 def _sanitize_tool_call_id_for_mistral(tool_call_id: str) -> str:
     """
     Konvertiert eine Tool-Call-ID ins Mistral-kompatible Format.
@@ -777,6 +794,10 @@ class LLMClient:
         if is_mistral:
             logger.info(f"[llm.chat] Mistral detected: {model}, sanitizing messages")
             messages = _sanitize_messages_for_mistral(messages)
+        # Multimodal Fallback für Nicht-Vision-Modelle
+        if _has_multimodal_content(messages) and not _is_vision_model(model):
+            from app.services.multimodal import ensure_text_only_messages
+            messages = ensure_text_only_messages(messages)
         payload = {
             "model": model,
             "messages": messages,
@@ -829,6 +850,10 @@ class LLMClient:
         # Mistral-Kompatibilität
         if is_mistral:
             messages = _sanitize_messages_for_mistral(messages)
+        # Multimodal Fallback für Nicht-Vision-Modelle
+        if _has_multimodal_content(messages) and not _is_vision_model(model):
+            from app.services.multimodal import ensure_text_only_messages
+            messages = ensure_text_only_messages(messages)
         payload = {
             "model": model,
             "messages": messages,
@@ -1053,6 +1078,14 @@ class LLMClient:
                 temperature = 0.2
                 print(f"[LLM DEBUG] Mistral: temperature reduced to {temperature} for tool consistency")
             print(f"[LLM DEBUG] Mistral with tools: timeout={timeout}s, temp={temperature}")
+
+        # Multimodal Fallback: Nicht-Vision-Modelle können keine Bilder verarbeiten
+        # → Content-Arrays zu reinem Text konvertieren
+        if _has_multimodal_content(messages) and not _is_vision_model(model):
+            from app.services.multimodal import ensure_text_only_messages
+            logger.warning(f"[llm] Modell '{model}' hat keinen Vision-Support — Bilder werden als Text-Hinweis gesendet")
+            print(f"[LLM DEBUG] Non-vision model '{model}': stripping image content from messages")
+            messages = ensure_text_only_messages(messages)
 
         payload = {
             "model": model,
