@@ -5898,6 +5898,8 @@ async function processAgentEvent(event, bubble, msgDiv, chat) {
     case 'done':
       if (data.usage) displayTokenUsage(data.usage, chat);
       hideSuggestions();  // Rückfrage-Buttons ausblenden wenn Antwort fertig
+      // Voice-Mode: Nach Antwort nächste Runde starten (wenn kein TTS)
+      VoiceController.onResponseDone();
       break;
 
     case 'question':
@@ -21722,6 +21724,11 @@ async function toggleMicRecording() {
       const check = AttachmentManager.validate(file);
       if (check.ok) {
         await AttachmentManager.addAudio(file);
+        // Voice-Mode: Automatisch senden nach Aufnahme
+        if (VoiceController.active) {
+          VoiceController.onAudioSent();
+          await sendMessage();
+        }
       } else {
         appendMessage('error', check.error);
       }
@@ -21750,37 +21757,40 @@ function openImageModal(src) {
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
-// Voice Controller — Voice-Chat-Modus mit TTS
+// Voice Controller — Voice-Chat-Modus mit TTS + State Machine
+//
+// States: off → idle → listening → processing → speaking → idle → listening...
 // ══════════════════════════════════════════════════════════════════════════════
 
 const VoiceController = {
   active: false,
+  state: 'off',           // off | idle | listening | processing | speaking
   _currentAudio: null,
   _autoRecordAfterTTS: true,
+  _keyboardBound: false,
 
   toggle() {
     this.active = !this.active;
-    const btn = document.getElementById('voice-toggle-btn');
-    if (btn) btn.classList.toggle('voice-active', this.active);
 
     if (this.active) {
-      // Voice-Mode ON: Starte sofort Mic-Aufnahme
-      this._updateIndicator('listening');
-      toggleMicRecording();
+      this._setState('idle');
+      this._showVoiceOverlay();
+      this._bindKeyboard();
+      // Sofort Aufnahme starten
+      this._startListening();
     } else {
-      // Voice-Mode OFF: Stoppe alles
       this.stopAll();
-      this._updateIndicator('off');
+      this._setState('off');
+      this._hideVoiceOverlay();
+      this._unbindKeyboard();
     }
   },
 
   stopAll() {
-    // Audio stoppen
     if (this._currentAudio) {
       this._currentAudio.pause();
       this._currentAudio = null;
     }
-    // Mic stoppen falls aktiv
     if (_mediaRecorder && _mediaRecorder.state === 'recording') {
       _mediaRecorder.stop();
       const btn = document.getElementById('mic-btn');
@@ -21789,14 +21799,46 @@ const VoiceController = {
     }
   },
 
+  // ── State Machine ────────────────────────────────────────
+  _setState(newState) {
+    this.state = newState;
+    this._updateHeaderButton(newState);
+    this._updateOverlay(newState);
+  },
+
+  _startListening() {
+    if (!this.active) return;
+    this._setState('listening');
+    // Starte Mic-Aufnahme
+    if (!_mediaRecorder || _mediaRecorder.state !== 'recording') {
+      toggleMicRecording();
+    }
+  },
+
+  // Wird aufgerufen wenn Mic-Aufnahme fertig und Message gesendet wird
+  onAudioSent() {
+    if (!this.active) return;
+    this._setState('processing');
+  },
+
+  // Wird aufgerufen wenn LLM-Antwort komplett (done Event)
+  onResponseDone() {
+    // Nur relevant wenn kein TTS kommt (TTS übernimmt dann)
+    if (!this.active || this.state === 'speaking') return;
+    // Wenn TTS nicht konfiguriert → direkt wieder aufnehmen
+    this._setState('idle');
+    if (this._autoRecordAfterTTS) {
+      setTimeout(() => { if (this.active) this._startListening(); }, 800);
+    }
+  },
+
   playTTSAudio(base64Data, mime) {
-    // Vorheriges Audio stoppen
     if (this._currentAudio) {
       this._currentAudio.pause();
       this._currentAudio = null;
     }
 
-    this._updateIndicator('speaking');
+    this._setState('speaking');
 
     const audio = new Audio(`data:${mime};base64,${base64Data}`);
     this._currentAudio = audio;
@@ -21804,28 +21846,95 @@ const VoiceController = {
     audio.onended = () => {
       this._currentAudio = null;
       if (this.active && this._autoRecordAfterTTS) {
-        // Auto-Record: Nach TTS-Ende sofort wieder aufnehmen
-        this._updateIndicator('listening');
-        setTimeout(() => {
-          if (this.active) toggleMicRecording();
-        }, 500);
+        this._setState('idle');
+        setTimeout(() => { if (this.active) this._startListening(); }, 500);
       } else {
-        this._updateIndicator(this.active ? 'idle' : 'off');
+        this._setState(this.active ? 'idle' : 'off');
       }
     };
 
     audio.onerror = () => {
       this._currentAudio = null;
-      this._updateIndicator(this.active ? 'idle' : 'off');
+      this._setState(this.active ? 'idle' : 'off');
     };
 
     audio.play().catch(e => {
-      console.warn('[VoiceController] Audio playback failed:', e);
-      this._updateIndicator(this.active ? 'idle' : 'off');
+      console.warn('[VoiceController] Playback failed:', e);
+      this._setState(this.active ? 'idle' : 'off');
     });
   },
 
-  _updateIndicator(state) {
+  // ── Voice Overlay (großes UI über Input-Bereich) ─────────
+  _showVoiceOverlay() {
+    let overlay = document.getElementById('voice-overlay');
+    if (!overlay) {
+      overlay = document.createElement('div');
+      overlay.id = 'voice-overlay';
+      overlay.innerHTML = `
+        <div class="voice-overlay-content">
+          <div class="voice-state-icon" id="voice-state-icon">&#127908;</div>
+          <div class="voice-state-label" id="voice-state-label">Bereit</div>
+          <div class="voice-timer" id="voice-timer"></div>
+          <div class="voice-controls">
+            <button class="voice-control-btn" id="voice-stop-btn" onclick="VoiceController.toggle()" title="Voice-Modus beenden">&#9724; Beenden</button>
+          </div>
+          <div class="voice-hint">Leertaste: Aufnahme starten/stoppen</div>
+        </div>
+      `;
+      const inputArea = document.querySelector('.input-area') || document.getElementById('input-row')?.parentElement;
+      if (inputArea) inputArea.appendChild(overlay);
+    }
+    overlay.style.display = 'flex';
+    // Input-Row ausblenden
+    const inputRow = document.getElementById('input-row');
+    if (inputRow) inputRow.style.display = 'none';
+    const attachPreview = document.getElementById('attachment-preview');
+    if (attachPreview) attachPreview.style.display = 'none';
+  },
+
+  _hideVoiceOverlay() {
+    const overlay = document.getElementById('voice-overlay');
+    if (overlay) overlay.style.display = 'none';
+    // Input-Row wieder einblenden
+    const inputRow = document.getElementById('input-row');
+    if (inputRow) inputRow.style.display = 'flex';
+  },
+
+  _updateOverlay(state) {
+    const icon = document.getElementById('voice-state-icon');
+    const label = document.getElementById('voice-state-label');
+    if (!icon || !label) return;
+
+    switch (state) {
+      case 'listening':
+        icon.innerHTML = '&#127908;';
+        icon.className = 'voice-state-icon voice-icon-listening';
+        label.textContent = 'Ich höre zu...';
+        break;
+      case 'processing':
+        icon.innerHTML = '&#9881;';
+        icon.className = 'voice-state-icon voice-icon-processing';
+        label.textContent = 'Verarbeite...';
+        break;
+      case 'speaking':
+        icon.innerHTML = '&#128264;';
+        icon.className = 'voice-state-icon voice-icon-speaking';
+        label.textContent = 'Spreche...';
+        break;
+      case 'idle':
+        icon.innerHTML = '&#127908;';
+        icon.className = 'voice-state-icon';
+        label.textContent = 'Bereit — Leertaste drücken';
+        break;
+      default:
+        icon.innerHTML = '&#127908;';
+        icon.className = 'voice-state-icon';
+        label.textContent = '';
+    }
+  },
+
+  // ── Header Button ────────────────────────────────────────
+  _updateHeaderButton(state) {
     const btn = document.getElementById('voice-toggle-btn');
     const icon = document.getElementById('voice-toggle-icon');
     if (!btn || !icon) return;
@@ -21834,23 +21943,64 @@ const VoiceController = {
     switch (state) {
       case 'listening':
         btn.classList.add('voice-active', 'voice-listening');
-        icon.innerHTML = '&#127908;'; // Mic
-        btn.title = 'Voice-Modus: Höre zu...';
+        icon.innerHTML = '&#127908;';
+        btn.title = 'Voice: Höre zu...';
+        break;
+      case 'processing':
+        btn.classList.add('voice-active', 'voice-processing');
+        icon.innerHTML = '&#9881;';
+        btn.title = 'Voice: Verarbeite...';
         break;
       case 'speaking':
         btn.classList.add('voice-active', 'voice-speaking');
-        icon.innerHTML = '&#128264;'; // Speaker
-        btn.title = 'Voice-Modus: Spreche...';
+        icon.innerHTML = '&#128264;';
+        btn.title = 'Voice: Spreche...';
         break;
       case 'idle':
         btn.classList.add('voice-active');
         icon.innerHTML = '&#127908;';
-        btn.title = 'Voice-Modus aktiv (klicke zum Deaktivieren)';
+        btn.title = 'Voice aktiv (klicke zum Beenden)';
         break;
       default:
         icon.innerHTML = '&#127908;';
         btn.title = 'Voice-Modus (Sprach-Dialog)';
     }
+  },
+
+  // ── Keyboard: Leertaste für Aufnahme ─────────────────────
+  _onKeyDown(e) {
+    if (!VoiceController.active) return;
+    if (e.code !== 'Space') return;
+    // Nicht wenn ein Input/Textarea fokussiert ist (außer voice-overlay ist sichtbar)
+    const overlay = document.getElementById('voice-overlay');
+    if (!overlay || overlay.style.display === 'none') return;
+    if (document.activeElement && (document.activeElement.tagName === 'INPUT' || document.activeElement.tagName === 'TEXTAREA')) return;
+
+    e.preventDefault();
+    if (VoiceController.state === 'listening' && _mediaRecorder && _mediaRecorder.state === 'recording') {
+      // Aufnahme stoppen → wird automatisch gesendet
+      toggleMicRecording();
+    } else if (VoiceController.state === 'idle') {
+      VoiceController._startListening();
+    } else if (VoiceController.state === 'speaking') {
+      // TTS unterbrechen → idle
+      if (VoiceController._currentAudio) {
+        VoiceController._currentAudio.pause();
+        VoiceController._currentAudio = null;
+      }
+      VoiceController._setState('idle');
+    }
+  },
+
+  _bindKeyboard() {
+    if (this._keyboardBound) return;
+    document.addEventListener('keydown', this._onKeyDown);
+    this._keyboardBound = true;
+  },
+
+  _unbindKeyboard() {
+    document.removeEventListener('keydown', this._onKeyDown);
+    this._keyboardBound = false;
   },
 };
 

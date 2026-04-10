@@ -1795,6 +1795,81 @@ textarea.ma-input { resize: vertical; font-family: inherit; }
   0%, 100% { opacity: 1; }
   50% { opacity: 0.6; transform: scale(1.05); }
 }
+#voice-toggle-btn.voice-processing {
+  background: var(--accent);
+  color: var(--bg);
+  border-radius: 8px;
+  animation: pulse-speak 2s ease-in-out infinite;
+}
+
+/* ── Voice Overlay (ersetzt Input-Bereich im Voice-Mode) ── */
+#voice-overlay {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  background: var(--surface);
+  border-top: 1px solid var(--border);
+}
+.voice-overlay-content {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+}
+.voice-state-icon {
+  font-size: 3rem;
+  transition: transform 0.3s;
+}
+.voice-icon-listening {
+  color: #e05252;
+  animation: pulse-mic 1s ease-in-out infinite;
+}
+.voice-icon-processing {
+  color: var(--accent);
+  animation: spin-gear 2s linear infinite;
+}
+.voice-icon-speaking {
+  color: var(--success, #66bb6a);
+  animation: pulse-speak 1.5s ease-in-out infinite;
+}
+@keyframes spin-gear {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+.voice-state-label {
+  font-size: 0.95rem;
+  color: var(--text-muted);
+  font-weight: 500;
+}
+.voice-timer {
+  font-size: 0.85rem;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-muted);
+}
+.voice-controls {
+  display: flex;
+  gap: 10px;
+}
+.voice-control-btn {
+  background: var(--bg);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 8px 16px;
+  cursor: pointer;
+  font-size: 0.85rem;
+  transition: background 0.15s, border-color 0.15s;
+}
+.voice-control-btn:hover {
+  background: var(--surface);
+  border-color: var(--accent);
+}
+.voice-hint {
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  opacity: 0.6;
+}
 
 /* ── Audio-Transkription (unter Audio-Player) ────────────── */
 .audio-transcription {
