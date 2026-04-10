@@ -148,7 +148,7 @@ async def list_rooms(type: str = Query("", description="group oder direct")):
 
 # ── Nachrichten ────────────────────────────────────────────────────────────────
 
-@router.get("/rooms/{room_id}/messages")
+@router.get("/rooms/{room_id:path}/messages")
 async def get_room_messages(
     room_id: str,
     limit: int = Query(50, ge=1, le=200),
@@ -164,7 +164,7 @@ async def get_room_messages(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.get("/messages/{message_id}")
+@router.get("/messages/{message_id:path}")
 async def get_message(message_id: str):
     """Einzelne Nachricht lesen."""
     from app.services.webex_client import get_webex_client
