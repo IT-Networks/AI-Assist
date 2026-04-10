@@ -5827,6 +5827,21 @@ async function processAgentEvent(event, bubble, msgDiv, chat) {
       break;
     }
 
+    case 'audio_converted': {
+      // Backend hat Audio zu FLAC konvertiert → Audio-Player im Chat aktualisieren
+      const userMsgs = chat.pane.querySelectorAll('.message.user');
+      const lastUserMsg = userMsgs[userMsgs.length - 1];
+      if (lastUserMsg && data.data) {
+        const audioPlayers = lastUserMsg.querySelectorAll('.message-audio-player');
+        const idx = data.index ?? 0;
+        if (audioPlayers[idx]) {
+          audioPlayers[idx].src = `data:${data.mime};base64,${data.data}`;
+          audioPlayers[idx].dataset.filename = data.name || 'aufnahme.flac';
+        }
+      }
+      break;
+    }
+
     case 'error':
       appendMessageToPane(chat.pane, 'error', data.error || 'Unbekannter Fehler');
       break;
@@ -21677,7 +21692,8 @@ async function toggleMicRecording() {
       _hideMicTimer();
       const mime = _mediaRecorder.mimeType.split(';')[0] || 'audio/webm';
       const blob = new Blob(_audioChunks, { type: mime });
-      const file = new File([blob], 'aufnahme.webm', { type: mime });
+      // Name als .flac — Backend konvertiert zu FLAC vor Whisper-Call
+      const file = new File([blob], 'aufnahme.flac', { type: mime });
       const check = AttachmentManager.validate(file);
       if (check.ok) {
         await AttachmentManager.addAudio(file);

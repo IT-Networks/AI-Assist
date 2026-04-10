@@ -66,12 +66,14 @@ def _find_ffmpeg() -> Optional[str]:
     return _ffmpeg_path
 
 
-def _convert_to_wav_ffmpeg(audio_bytes: bytes, input_ext: str) -> Optional[bytes]:
+def _convert_to_flac_ffmpeg(audio_bytes: bytes, input_ext: str) -> Optional[bytes]:
     """
-    Konvertiert Audio zu WAV via ffmpeg (subprocess).
+    Konvertiert Audio zu FLAC via ffmpeg (subprocess).
 
-    Dies ist die zuverlässigste Methode — ffmpeg unterstützt alle
-    gängigen Formate inkl. WebM/Opus.
+    FLAC ist das Zielformat für alle Audios:
+    - Verlustfrei komprimiert
+    - Von allen Whisper-Servern akzeptiert
+    - Gutes Download-Format
     """
     ffmpeg = _find_ffmpeg()
     if not ffmpeg:
@@ -80,7 +82,7 @@ def _convert_to_wav_ffmpeg(audio_bytes: bytes, input_ext: str) -> Optional[bytes
     try:
         with tempfile.TemporaryDirectory() as tmpdir:
             input_path = Path(tmpdir) / f"input.{input_ext}"
-            output_path = Path(tmpdir) / "output.wav"
+            output_path = Path(tmpdir) / "output.flac"
 
             input_path.write_bytes(audio_bytes)
 
@@ -90,7 +92,6 @@ def _convert_to_wav_ffmpeg(audio_bytes: bytes, input_ext: str) -> Optional[bytes
                     "-i", str(input_path),
                     "-ar", "16000",       # 16kHz — optimal für Whisper
                     "-ac", "1",           # Mono
-                    "-c:a", "pcm_s16le",  # 16-bit PCM WAV
                     str(output_path),
                 ],
                 capture_output=True,
@@ -102,12 +103,12 @@ def _convert_to_wav_ffmpeg(audio_bytes: bytes, input_ext: str) -> Optional[bytes
                 logger.warning(f"[whisper] ffmpeg Fehler: {stderr}")
                 return None
 
-            wav_bytes = output_path.read_bytes()
+            flac_bytes = output_path.read_bytes()
             logger.info(
                 f"[whisper] ffmpeg Konvertierung: {input_ext} "
-                f"({len(audio_bytes)} bytes) → WAV ({len(wav_bytes)} bytes)"
+                f"({len(audio_bytes)} bytes) → FLAC ({len(flac_bytes)} bytes)"
             )
-            return wav_bytes
+            return flac_bytes
 
     except subprocess.TimeoutExpired:
         logger.warning("[whisper] ffmpeg Timeout (30s)")
@@ -117,22 +118,21 @@ def _convert_to_wav_ffmpeg(audio_bytes: bytes, input_ext: str) -> Optional[bytes
         return None
 
 
-def _convert_to_wav_pydub(audio_bytes: bytes, input_ext: str) -> Optional[bytes]:
+def _convert_to_flac_pydub(audio_bytes: bytes, input_ext: str) -> Optional[bytes]:
     """Fallback: Konvertierung via pydub (benötigt pydub + ffmpeg)."""
     try:
         from pydub import AudioSegment
         audio = AudioSegment.from_file(io.BytesIO(audio_bytes), format=input_ext)
-        # Whisper-optimiert: 16kHz Mono
         audio = audio.set_frame_rate(16000).set_channels(1)
-        wav_buffer = io.BytesIO()
-        audio.export(wav_buffer, format="wav")
-        wav_buffer.seek(0)
-        wav_bytes = wav_buffer.read()
+        flac_buffer = io.BytesIO()
+        audio.export(flac_buffer, format="flac")
+        flac_buffer.seek(0)
+        flac_bytes = flac_buffer.read()
         logger.info(
             f"[whisper] pydub Konvertierung: {input_ext} "
-            f"({len(audio_bytes)} bytes) → WAV ({len(wav_bytes)} bytes)"
+            f"({len(audio_bytes)} bytes) → FLAC ({len(flac_bytes)} bytes)"
         )
-        return wav_bytes
+        return flac_bytes
     except ImportError:
         return None
     except Exception as e:
@@ -140,25 +140,29 @@ def _convert_to_wav_pydub(audio_bytes: bytes, input_ext: str) -> Optional[bytes]
         return None
 
 
-def _convert_audio_to_wav(audio_bytes: bytes, input_ext: str) -> Optional[bytes]:
+def convert_audio_to_flac(audio_bytes: bytes, input_ext: str) -> Optional[bytes]:
     """
-    Konvertiert Audio zu WAV. Probiert ffmpeg, dann pydub.
+    Konvertiert Audio zu FLAC. Probiert ffmpeg, dann pydub.
 
     Returns:
-        WAV-Bytes oder None wenn Konvertierung nicht möglich.
+        FLAC-Bytes oder None wenn Konvertierung nicht möglich.
     """
-    # 1. ffmpeg (zuverlässigste Methode)
-    wav = _convert_to_wav_ffmpeg(audio_bytes, input_ext)
-    if wav:
-        return wav
+    # Bereits FLAC → nichts zu tun
+    if input_ext == "flac":
+        return audio_bytes
 
-    # 2. pydub (braucht auch ffmpeg, aber manchmal anders verfügbar)
-    wav = _convert_to_wav_pydub(audio_bytes, input_ext)
-    if wav:
-        return wav
+    # 1. ffmpeg (zuverlässigste Methode)
+    flac = _convert_to_flac_ffmpeg(audio_bytes, input_ext)
+    if flac:
+        return flac
+
+    # 2. pydub
+    flac = _convert_to_flac_pydub(audio_bytes, input_ext)
+    if flac:
+        return flac
 
     logger.error(
-        f"[whisper] Konvertierung von {input_ext} zu WAV fehlgeschlagen. "
+        f"[whisper] Konvertierung von {input_ext} zu FLAC fehlgeschlagen. "
         "Bitte ffmpeg installieren: apt install ffmpeg / brew install ffmpeg"
     )
     return None
@@ -195,17 +199,16 @@ async def transcribe_audio(audio_base64: str, mime: str, language: str = "de") -
 
         logger.info(f"[whisper] Audio empfangen: {len(audio_bytes)} bytes, MIME={mime}, ext={ext}")
 
-        # WebM/Opus/WEBA: Whisper-Server können das oft nicht dekodieren
-        # → zu WAV konvertieren (16kHz, Mono, PCM — optimal für Whisper)
-        if ext in _NEEDS_CONVERSION:
-            wav_bytes = _convert_audio_to_wav(audio_bytes, ext)
-            if wav_bytes:
-                audio_bytes = wav_bytes
-                ext = "wav"
-                upload_mime = "audio/wav"
-                upload_filename = "audio.wav"
+        # ALLE Audios zu FLAC konvertieren (einheitliches Format für Whisper)
+        if ext != "flac":
+            flac_bytes = convert_audio_to_flac(audio_bytes, ext)
+            if flac_bytes:
+                audio_bytes = flac_bytes
+                ext = "flac"
+                upload_mime = "audio/flac"
+                upload_filename = "audio.flac"
             else:
-                logger.warning(f"[whisper] Konvertierung fehlgeschlagen — sende {ext} direkt (kann fehlschlagen)")
+                logger.warning(f"[whisper] FLAC-Konvertierung fehlgeschlagen — sende {ext} direkt (kann fehlschlagen)")
 
         async with httpx.AsyncClient(timeout=120, verify=False) as client:
             headers = {}

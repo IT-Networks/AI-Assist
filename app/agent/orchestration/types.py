@@ -84,6 +84,8 @@ class AgentEventType(str, Enum):
     # Workspace Events
     WORKSPACE_CODE_CHANGE = "workspace_code_change"  # Code-Aenderung fuer Workspace Panel
     WORKSPACE_SQL_RESULT = "workspace_sql_result"    # SQL-Abfrage-Ergebnis fuer Workspace Panel
+    # Audio Events
+    AUDIO_CONVERTED = "audio_converted"              # Audio zu FLAC konvertiert (fuer Frontend-Update)
     WORKSPACE_FILE = "workspace_file"                # Gelesene Datei fuer Workspace Panel
     WORKSPACE_RESEARCH = "workspace_research"        # Research-Ergebnis fuer Workspace Panel
     WORKSPACE_PR = "workspace_pr"                    # PR-Daten fuer Workspace Panel

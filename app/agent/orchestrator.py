@@ -1092,19 +1092,40 @@ class AgentOrchestrator:
         # Multimodal: Attachments in User-Message integrieren
         if attachments:
             from app.services.multimodal import build_user_content
-            from app.services.whisper import transcribe_audio
+            from app.services.whisper import transcribe_audio, convert_audio_to_flac
+            from app.services.whisper import _EXT_MAP
             image_count = sum(1 for a in attachments if a["type"] == "image")
             audio_count = sum(1 for a in attachments if a["type"] == "audio")
             logger.info(f"[agent] Multimodal: {image_count} Bilder, {audio_count} Audio-Dateien")
-            # Audio transkribieren
-            for att in attachments:
-                if att["type"] == "audio" and "transcription" not in att:
-                    transcription = await transcribe_audio(att["data"], att["mime"])
-                    if transcription:
-                        att["transcription"] = transcription
-                        logger.info(f"[agent] Audio transkribiert: {len(transcription)} Zeichen")
-                    else:
-                        logger.warning("[agent] Audio-Transkription fehlgeschlagen oder Whisper deaktiviert")
+            # Audio zu FLAC konvertieren + transkribieren
+            for i, att in enumerate(attachments):
+                if att["type"] == "audio":
+                    ext = _EXT_MAP.get(att["mime"], "webm")
+                    # Zu FLAC konvertieren (einheitliches Format)
+                    if ext != "flac":
+                        import base64 as _b64
+                        raw_bytes = _b64.b64decode(att["data"])
+                        flac_bytes = convert_audio_to_flac(raw_bytes, ext)
+                        if flac_bytes:
+                            att["data"] = _b64.b64encode(flac_bytes).decode("ascii")
+                            att["mime"] = "audio/flac"
+                            att["name"] = (att.get("name") or "aufnahme").rsplit(".", 1)[0] + ".flac"
+                            logger.info(f"[agent] Audio zu FLAC konvertiert: {len(flac_bytes)} bytes")
+                            # FLAC ans Frontend senden damit Chat-Player aktualisiert wird
+                            yield AgentEvent(AgentEventType.AUDIO_CONVERTED, {
+                                "index": i,
+                                "mime": "audio/flac",
+                                "name": att["name"],
+                                "data": att["data"],
+                            })
+                    # Transkribieren
+                    if "transcription" not in att:
+                        transcription = await transcribe_audio(att["data"], att["mime"])
+                        if transcription:
+                            att["transcription"] = transcription
+                            logger.info(f"[agent] Audio transkribiert: {len(transcription)} Zeichen")
+                        else:
+                            logger.warning("[agent] Audio-Transkription fehlgeschlagen oder Whisper deaktiviert")
             user_content = build_user_content(user_message, attachments)
             if isinstance(user_content, list):
                 logger.info(f"[agent] Multimodal content: {len(user_content)} Parts (text + images)")
