@@ -17,6 +17,7 @@ class TestConnectionTest:
     def test_success(self, client):
         with patch("app.services.webex_client.get_webex_client") as mock:
             mock_inst = AsyncMock()
+            mock_inst.close = AsyncMock()
             mock_inst.test_connection = AsyncMock(return_value={
                 "success": True,
                 "display_name": "Bot User",
@@ -33,7 +34,10 @@ class TestConnectionTest:
 
     def test_failure(self, client):
         with patch("app.services.webex_client.get_webex_client") as mock:
-            mock.return_value.test_connection = AsyncMock(side_effect=Exception("Invalid token"))
+            mock_inst = AsyncMock()
+            mock_inst.close = AsyncMock()
+            mock_inst.test_connection = AsyncMock(side_effect=Exception("Invalid token"))
+            mock.return_value = mock_inst
 
             resp = client.post("/api/webex/test")
             assert resp.status_code == 200

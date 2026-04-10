@@ -1036,16 +1036,15 @@ webex:
   client_secret: ''              # Integration Client-Secret
   redirect_uri: 'http://localhost:8000/api/webex/oauth/callback'
   scopes: 'spark:rooms_read spark:messages_read spark:people_read'
-  # Token (werden automatisch nach OAuth-Login befüllt)
-  access_token: ''               # Wird automatisch gesetzt (14 Tage gültig)
-  refresh_token: ''              # Wird automatisch gesetzt (90 Tage gültig)
-  token_expires_at: ''           # ISO-Zeitstempel
+  # Token (OAuth automatisch ODER manueller Bearer-Token)
+  access_token: ''               # Manuell: Bearer-Token eintragen / OAuth: automatisch
+  refresh_token: ''              # OAuth: automatisch (90 Tage)
+  token_expires_at: ''           # OAuth: automatisch
   # Allgemein
-  credential_ref: ''             # Alternativ: Zentrale Credentials
   base_url: 'https://webexapis.com/v1'
   timeout_seconds: 30
   use_proxy: true                # Zentralen Proxy verwenden
-  verify_ssl: true               # SSL-Zertifikate prüfen
+  verify_ssl: false              # SSL-Zertifikate prüfen (false fuer Corporate Proxy)
   polling_enabled: false         # Automatisches Polling für Todo-Erkennung
   polling_interval_minutes: 5    # Intervall 1-60 Minuten
   max_messages_per_poll: 100

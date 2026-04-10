@@ -50,7 +50,11 @@ def _apply_token_data(token_data: dict) -> None:
 
 
 def _load_persisted_tokens() -> None:
-    """Lädt Token aus webex_tokens.json in Settings (Startup)."""
+    """Lädt Token aus webex_tokens.json in Settings.
+
+    webex_tokens.json ist die Quelle der Wahrheit für Tokens (nicht config.yaml),
+    da config.yaml die Tokens nicht speichert um Überschreiben zu vermeiden.
+    """
     import json
     from app.core.config import settings
 
@@ -59,11 +63,12 @@ def _load_persisted_tokens() -> None:
 
     try:
         data = json.loads(_TOKEN_FILE.read_text(encoding="utf-8"))
-        if data.get("access_token") and not settings.webex.access_token:
+        # Token-Datei hat immer Vorrang (enthält die aktuellsten Tokens)
+        if data.get("access_token"):
             settings.webex.access_token = data["access_token"]
-        if data.get("refresh_token") and not settings.webex.refresh_token:
+        if data.get("refresh_token"):
             settings.webex.refresh_token = data["refresh_token"]
-        if data.get("token_expires_at") and not settings.webex.token_expires_at:
+        if data.get("token_expires_at"):
             settings.webex.token_expires_at = data["token_expires_at"]
         logger.debug("Webex-Tokens aus webex_tokens.json geladen")
     except Exception as e:
@@ -107,33 +112,30 @@ class WebexClient:
         return self._client
 
     def _get_token(self) -> str:
-        """Holt den Access-Token, refresht automatisch wenn nötig."""
+        """Holt den Access-Token. Reihenfolge:
+
+        1. webex_tokens.json (OAuth-Tokens, automatisch verwaltet)
+        2. settings.webex.access_token (manuell eingetragener Bearer-Token)
+
+        Bei OAuth-Tokens: Auto-Refresh wenn abgelaufen.
+        """
         from app.core.config import settings
 
-        # Persistierte Tokens laden (falls noch nicht in Memory)
-        if not settings.webex.access_token:
-            _load_persisted_tokens()
+        # Persistierte OAuth-Tokens laden
+        _load_persisted_tokens()
 
-        # Prüfe ob Token abgelaufen → Refresh
+        # Prüfe ob OAuth-Token abgelaufen → Refresh
         if settings.webex.access_token and settings.webex.token_expires_at:
             try:
                 expires = datetime.fromisoformat(settings.webex.token_expires_at)
                 if datetime.now() >= expires - timedelta(minutes=10):
-                    # Token läuft bald ab oder ist abgelaufen → Refresh
-                    if settings.webex.refresh_token:
+                    if settings.webex.refresh_token and settings.webex.client_id:
                         logger.info("Webex Access-Token abgelaufen, refreshe...")
                         self._refresh_token_sync()
             except (ValueError, TypeError):
                 pass
 
-        if settings.webex.access_token:
-            return settings.webex.access_token
-
-        if settings.webex.credential_ref:
-            for cred in settings.credentials.entries:
-                if cred.name == settings.webex.credential_ref:
-                    return cred.password or cred.token or ""
-        return ""
+        return settings.webex.access_token
 
     def _refresh_token_sync(self) -> bool:
         """Synchroner Token-Refresh (für Lazy-Init im _get_client).

@@ -11171,7 +11171,7 @@ function renderSettingsSection() {
     database: 'DB2-Datenbankverbindung für SQL-Abfragen. Der Agent kann Tabellen abfragen (nur SELECT).',
     llm: 'LLM-Verbindungseinstellungen. tool_model = schnelles Modell für Suche, analysis_model = großes Modell für Antworten.',
     email: 'Exchange E-Mail über EWS (NTLM). Ermöglicht E-Mail-Suche, Lesen und Entwürfe im Chat sowie automatische Todo-Erkennung.',
-    webex: 'Webex Messaging Integration. Ermöglicht das Lesen und Durchsuchen von Webex-Räumen sowie automatische Todo-Erkennung aus Nachrichten.',
+    webex: 'Webex Messaging Integration. OAuth2-Login über Client-ID/Secret ODER manueller Bearer/Access-Token. Ermöglicht das Lesen und Durchsuchen von Webex-Räumen sowie automatische Todo-Erkennung.',
   };
 
   let html = `
@@ -11290,7 +11290,13 @@ async function checkWebexOAuthStatus() {
     const data = await res.json();
 
     if (data.has_token) {
-      const expires = data.expires_at ? new Date(data.expires_at).toLocaleString('de-DE') : '?';
+      let expires = '?';
+      if (data.expires_at && data.expires_at.length > 4) {
+        const d = new Date(data.expires_at);
+        if (!isNaN(d.getTime()) && d.getFullYear() > 2020) {
+          expires = d.toLocaleString('de-DE');
+        }
+      }
       const status = data.expired ? '⚠️ Abgelaufen' : '✓ Aktiv';
       el.innerHTML = `Token: ${status} (bis ${expires})` +
         (data.has_refresh ? ' | Refresh-Token vorhanden' : ' | <span style="color:var(--warning)">Kein Refresh-Token</span>');

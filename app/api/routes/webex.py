@@ -87,9 +87,14 @@ async def oauth_callback(code: str = Query(""), state: str = Query(""), error: s
 
 @router.get("/oauth/status")
 async def oauth_status():
-    """Prüft den OAuth-Token-Status."""
+    """Prüft den OAuth-Token-Status (liest auch aus webex_tokens.json)."""
     from app.core.config import settings
+    from app.services.webex_client import _load_persisted_tokens
     from datetime import datetime
+
+    # Sicherstellen dass persistierte Tokens geladen sind
+    if not settings.webex.access_token:
+        _load_persisted_tokens()
 
     has_token = bool(settings.webex.access_token)
     has_refresh = bool(settings.webex.refresh_token)
@@ -105,7 +110,7 @@ async def oauth_status():
     return {
         "has_token": has_token,
         "has_refresh": has_refresh,
-        "expires_at": expires_at,
+        "expires_at": expires_at or "",
         "expired": expired,
         "has_client_credentials": bool(settings.webex.client_id and settings.webex.client_secret),
     }
@@ -115,10 +120,12 @@ async def oauth_status():
 
 @router.post("/test")
 async def test_webex_connection():
-    """Testet die Webex-Verbindung."""
+    """Testet die Webex-Verbindung (erstellt Client neu für aktuelle Settings)."""
     from app.services.webex_client import get_webex_client
     try:
         client = get_webex_client()
+        # Client neu erstellen damit aktuelle Settings (verify_ssl etc.) wirken
+        await client.close()
         result = await client.test_connection()
         return result
     except Exception as e:
