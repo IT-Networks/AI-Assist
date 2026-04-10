@@ -8,6 +8,7 @@ ruft LLM auf und erstellt Todos.
 import asyncio
 import json
 import logging
+from fnmatch import fnmatch
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -234,18 +235,25 @@ class WebexAutomationService:
                 if store.is_processed(process_key):
                     continue
 
-                # Room-Filter prüfen
+                # Room-Filter prüfen (Wildcard mit * und ? oder Substring)
                 if rule.room_filter:
                     room_id = msg.get("room_id", "")
                     room_title = msg.get("room_title", "").lower()
-                    if (rule.room_filter.lower() not in room_title
-                            and rule.room_filter != room_id):
+                    rf = rule.room_filter.lower()
+                    if any(c in rf for c in ('*', '?')):
+                        if not fnmatch(room_title, rf) and rule.room_filter != room_id:
+                            continue
+                    elif rf not in room_title and rule.room_filter != room_id:
                         continue
 
-                # Sender-Filter prüfen
+                # Sender-Filter prüfen (Wildcard mit * und ? oder Substring)
                 if rule.sender_filter:
                     sender = msg.get("person_email", "").lower()
-                    if rule.sender_filter.lower() not in sender:
+                    sf = rule.sender_filter.lower()
+                    if any(c in sf for c in ('*', '?')):
+                        if not fnmatch(sender, sf):
+                            continue
+                    elif sf not in sender:
                         continue
 
                 # Thread-Kontext anreichern

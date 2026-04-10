@@ -8,6 +8,7 @@ ruft LLM auf und erstellt Todos.
 import asyncio
 import json
 import logging
+from fnmatch import fnmatch
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -212,10 +213,14 @@ class EmailAutomationService:
                 if store.is_processed(process_key):
                     continue
 
-                # Absender-Filter prüfen
+                # Absender-Filter prüfen (Wildcard mit * und ? oder Substring)
                 if rule.sender_filter:
                     sender = email_data.get("sender", "").lower()
-                    if rule.sender_filter.lower() not in sender:
+                    sf = rule.sender_filter.lower()
+                    if any(c in sf for c in ('*', '?')):
+                        if not fnmatch(sender, sf):
+                            continue
+                    elif sf not in sender:
                         continue
 
                 # LLM-Auswertung
