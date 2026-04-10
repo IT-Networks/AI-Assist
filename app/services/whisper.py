@@ -18,7 +18,11 @@ from typing import Optional
 
 import httpx
 
-from app.core.config import settings
+# WICHTIG: Modul-Import statt Objekt-Import!
+# `from app.core.config import settings` würde eine lokale Referenz binden,
+# die nach Settings-Reload (via UI) stale wird. Mit Modul-Import folgen wir
+# immer dem aktuellen settings-Objekt.
+import app.core.config as _config
 
 logger = logging.getLogger(__name__)
 
@@ -72,6 +76,7 @@ async def transcribe_audio(audio_base64: str, mime: str, language: str = "de") -
     Returns:
         Transkribierter Text oder None bei Fehler
     """
+    settings = _config.settings
     if not getattr(settings, "whisper", None) or not settings.whisper.enabled:
         logger.warning("[whisper] Whisper nicht konfiguriert — Audio wird übersprungen")
         return None
