@@ -5208,10 +5208,14 @@ async function sendMessage() {
     abortStreamingState(activeChat);
   }
 
+  // Attachments einsammeln bevor Input geleert wird
+  const pendingAttachments = AttachmentManager.hasItems() ? AttachmentManager.getPayload() : null;
+  AttachmentManager.clear();
+
   input.value = '';
   input.style.height = 'auto';
   hideSuggestions();
-  appendMessage('user', text);
+  appendMessage('user', text, pendingAttachments);
 
   updateActiveChatTitle(text);
 
@@ -5221,7 +5225,7 @@ async function sendMessage() {
   _setStreamingMode(true);
 
   try {
-    await sendAgentChat(text, ac.signal, activeChat);
+    await sendAgentChat(text, ac.signal, activeChat, pendingAttachments);
   } catch (e) {
     if (e.name !== 'AbortError') {
       appendMessageToPane(activeChat.pane, 'error', 'Fehler: ' + e.message);
@@ -5283,7 +5287,7 @@ async function sendChatInternal(message) {
   }
 }
 
-async function sendAgentChat(message, abortSignal, chat) {
+async function sendAgentChat(message, abortSignal, chat, attachments = null) {
   const ctx = chat.context || state.context;
   const payload = {
     message,
@@ -5296,6 +5300,7 @@ async function sendAgentChat(message, abortSignal, chat) {
       pdf_ids: ctx.pdfIds.map(p => p.id),
       handbook_services: ctx.handbookServices.map(s => s.id),
     },
+    attachments: attachments || undefined,
   };
 
   const res = await fetch('/api/agent/chat', {
@@ -7623,13 +7628,13 @@ async function rejectPlan(card, chat) {
 // switchRightPanel defined earlier (line ~1055) with null-safety checks
 
 // ── Messages ──
-function appendMessage(role, text) {
+function appendMessage(role, text, attachments) {
   // Schreibt in den aktiven Chat-Pane (Fallback: #messages)
   const pane = chatManager.getActive()?.pane || document.getElementById('messages');
-  return appendMessageToPane(pane, role, text);
+  return appendMessageToPane(pane, role, text, attachments);
 }
 
-function appendMessageToPane(pane, role, text) {
+function appendMessageToPane(pane, role, text, attachments) {
   const div = document.createElement('div');
   div.className = `message ${role}`;
 
@@ -7645,6 +7650,29 @@ function appendMessageToPane(pane, role, text) {
     renderMermaidBlocks(bubble);
   } else {
     bubble.textContent = text;
+  }
+
+  // Attachments im Chat-Verlauf anzeigen (Bilder + Audio)
+  if (attachments && attachments.length) {
+    const attDiv = document.createElement('div');
+    attDiv.className = 'message-attachments';
+    for (const att of attachments) {
+      if (att.type === 'image') {
+        const img = document.createElement('img');
+        img.src = att.blobUrl || `data:${att.mime};base64,${att.data}`;
+        img.className = 'message-image-thumb';
+        img.alt = att.name || 'Bild';
+        img.onclick = () => openImageModal(img.src);
+        attDiv.appendChild(img);
+      } else if (att.type === 'audio') {
+        const audio = document.createElement('audio');
+        audio.controls = true;
+        audio.src = att.blobUrl || `data:${att.mime};base64,${att.data}`;
+        audio.className = 'message-audio-player';
+        attDiv.appendChild(audio);
+      }
+    }
+    bubble.appendChild(attDiv);
   }
 
   div.appendChild(bubble);
@@ -21345,4 +21373,293 @@ function filterTodoSource(source) {
 // Initialize email + webex module after DOM is ready (non-blocking)
 document.addEventListener('DOMContentLoaded', () => {
   emailModule.init().catch(e => console.warn('[emailModule] Init failed:', e));
+});
+
+
+// ══════════════════════════════════════════════════════════════════════════════
+// Attachment Manager — Bilder & Audio für Multimodal-Chat
+// ══════════════════════════════════════════════════════════════════════════════
+
+const AttachmentManager = {
+  MAX_ATTACHMENTS: 5,
+  MAX_IMAGE_SIZE: 10 * 1024 * 1024,
+  MAX_AUDIO_SIZE: 25 * 1024 * 1024,
+  MAX_IMAGE_DIM: 2048,
+  ALLOWED_IMAGE: ['image/png', 'image/jpeg', 'image/gif', 'image/webp'],
+  ALLOWED_AUDIO: ['audio/webm', 'audio/mp3', 'audio/mpeg', 'audio/wav', 'audio/ogg'],
+
+  /** @type {Array<{type: string, mime: string, data: string, name: string, blobUrl?: string}>} */
+  items: [],
+
+  validate(file) {
+    const isImage = this.ALLOWED_IMAGE.includes(file.type);
+    const isAudio = this.ALLOWED_AUDIO.includes(file.type);
+    if (!isImage && !isAudio) return { ok: false, error: `Dateityp ${file.type} nicht unterstützt` };
+    const limit = isImage ? this.MAX_IMAGE_SIZE : this.MAX_AUDIO_SIZE;
+    if (file.size > limit) return { ok: false, error: `Datei zu groß (max ${Math.round(limit / 1024 / 1024)}MB)` };
+    if (this.items.length >= this.MAX_ATTACHMENTS) return { ok: false, error: 'Maximal 5 Anhänge erlaubt' };
+    return { ok: true, type: isImage ? 'image' : 'audio' };
+  },
+
+  async addImage(file) {
+    const base64 = await this._resizeAndEncode(file, this.MAX_IMAGE_DIM);
+    this.items.push({
+      type: 'image',
+      mime: file.type === 'image/png' ? 'image/png' : 'image/jpeg',
+      data: base64,
+      name: file.name || 'Bild',
+      blobUrl: URL.createObjectURL(file),
+    });
+    this._renderPreview();
+  },
+
+  async addAudio(file) {
+    const base64 = await this._fileToBase64(file);
+    this.items.push({
+      type: 'audio',
+      mime: file.type || 'audio/webm',
+      data: base64,
+      name: file.name || 'Aufnahme',
+      blobUrl: URL.createObjectURL(file),
+    });
+    this._renderPreview();
+  },
+
+  remove(index) {
+    const item = this.items[index];
+    if (item && item.blobUrl) URL.revokeObjectURL(item.blobUrl);
+    this.items.splice(index, 1);
+    this._renderPreview();
+  },
+
+  clear() {
+    this.items.forEach(item => { if (item.blobUrl) URL.revokeObjectURL(item.blobUrl); });
+    this.items = [];
+    this._renderPreview();
+  },
+
+  hasItems() {
+    return this.items.length > 0;
+  },
+
+  getPayload() {
+    return this.items.map(({ type, mime, data, name }) => ({ type, mime, data, name }));
+  },
+
+  _resizeAndEncode(file, maxDim) {
+    return new Promise((resolve, reject) => {
+      const img = new Image();
+      img.onload = () => {
+        let { width, height } = img;
+        if (width > maxDim || height > maxDim) {
+          const scale = maxDim / Math.max(width, height);
+          width = Math.round(width * scale);
+          height = Math.round(height * scale);
+        }
+        const canvas = document.createElement('canvas');
+        canvas.width = width;
+        canvas.height = height;
+        canvas.getContext('2d').drawImage(img, 0, 0, width, height);
+        const outMime = file.type === 'image/png' ? 'image/png' : 'image/jpeg';
+        const dataUrl = canvas.toDataURL(outMime, 0.85);
+        resolve(dataUrl.split(',')[1]);
+      };
+      img.onerror = () => reject(new Error('Bild konnte nicht geladen werden'));
+      img.src = URL.createObjectURL(file);
+    });
+  },
+
+  _fileToBase64(file) {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(reader.result.split(',')[1]);
+      reader.onerror = () => reject(new Error('Datei konnte nicht gelesen werden'));
+      reader.readAsDataURL(file);
+    });
+  },
+
+  _renderPreview() {
+    const container = document.getElementById('attachment-preview');
+    if (!container) return;
+    if (!this.items.length) {
+      container.style.display = 'none';
+      container.innerHTML = '';
+      return;
+    }
+    container.style.display = 'flex';
+    container.innerHTML = this.items.map((item, i) => {
+      if (item.type === 'image') {
+        const src = item.blobUrl || `data:${item.mime};base64,${item.data}`;
+        return `<div class="attachment-chip">
+          <img src="${src}" class="attachment-thumb" alt="${item.name}">
+          <span class="attachment-name">${item.name}</span>
+          <button class="attachment-remove" onclick="AttachmentManager.remove(${i})" title="Entfernen">&times;</button>
+        </div>`;
+      } else {
+        return `<div class="attachment-chip audio">
+          <audio src="${item.blobUrl}" controls class="attachment-audio"></audio>
+          <span class="attachment-name">${item.name}</span>
+          <button class="attachment-remove" onclick="AttachmentManager.remove(${i})" title="Entfernen">&times;</button>
+        </div>`;
+      }
+    }).join('');
+  },
+};
+
+
+// ══════════════════════════════════════════════════════════════════════════════
+// Drag & Drop, Paste, File-Select, Mikrofon
+// ══════════════════════════════════════════════════════════════════════════════
+
+function _initAttachmentDragDrop() {
+  const overlay = document.getElementById('drop-overlay');
+  if (!overlay) return;
+  let dragCounter = 0;
+
+  document.addEventListener('dragenter', (e) => {
+    if (!e.dataTransfer || !e.dataTransfer.types.includes('Files')) return;
+    e.preventDefault();
+    dragCounter++;
+    overlay.style.display = 'flex';
+  });
+
+  document.addEventListener('dragleave', (e) => {
+    dragCounter--;
+    if (dragCounter <= 0) {
+      dragCounter = 0;
+      overlay.style.display = 'none';
+    }
+  });
+
+  document.addEventListener('dragover', (e) => {
+    if (e.dataTransfer && e.dataTransfer.types.includes('Files')) {
+      e.preventDefault();
+    }
+  });
+
+  document.addEventListener('drop', async (e) => {
+    e.preventDefault();
+    dragCounter = 0;
+    overlay.style.display = 'none';
+    if (!e.dataTransfer || !e.dataTransfer.files.length) return;
+    for (const file of e.dataTransfer.files) {
+      const check = AttachmentManager.validate(file);
+      if (!check.ok) {
+        appendMessage('error', check.error);
+        continue;
+      }
+      if (check.type === 'image') await AttachmentManager.addImage(file);
+      else await AttachmentManager.addAudio(file);
+    }
+    document.getElementById('message-input')?.focus();
+  });
+}
+
+function _initAttachmentPaste() {
+  const input = document.getElementById('message-input');
+  if (!input) return;
+  input.addEventListener('paste', async (e) => {
+    if (!e.clipboardData || !e.clipboardData.items) return;
+    for (const item of e.clipboardData.items) {
+      if (item.type.startsWith('image/')) {
+        e.preventDefault();
+        const file = item.getAsFile();
+        if (!file) continue;
+        const check = AttachmentManager.validate(file);
+        if (!check.ok) { appendMessage('error', check.error); return; }
+        await AttachmentManager.addImage(file);
+        return;
+      }
+    }
+  });
+}
+
+function triggerFileSelect() {
+  document.getElementById('media-file-input')?.click();
+}
+
+function _initAttachmentFileSelect() {
+  const fileInput = document.getElementById('media-file-input');
+  if (!fileInput) return;
+  fileInput.addEventListener('change', async (e) => {
+    for (const file of e.target.files) {
+      const check = AttachmentManager.validate(file);
+      if (!check.ok) { appendMessage('error', check.error); continue; }
+      if (check.type === 'image') await AttachmentManager.addImage(file);
+      else await AttachmentManager.addAudio(file);
+    }
+    e.target.value = '';
+  });
+}
+
+// ── Mikrofon-Aufnahme ──────────────────────────────────────
+let _mediaRecorder = null;
+let _audioChunks = [];
+
+async function toggleMicRecording() {
+  const btn = document.getElementById('mic-btn');
+  if (!btn) return;
+
+  // Stop recording
+  if (_mediaRecorder && _mediaRecorder.state === 'recording') {
+    _mediaRecorder.stop();
+    btn.classList.remove('recording');
+    btn.title = 'Sprachnachricht aufnehmen';
+    return;
+  }
+
+  // Start recording
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    // Prefer webm/opus, fallback to whatever browser supports
+    const mimeType = MediaRecorder.isTypeSupported('audio/webm;codecs=opus')
+      ? 'audio/webm;codecs=opus'
+      : MediaRecorder.isTypeSupported('audio/webm') ? 'audio/webm' : '';
+    const options = mimeType ? { mimeType } : {};
+    _mediaRecorder = new MediaRecorder(stream, options);
+    _audioChunks = [];
+
+    _mediaRecorder.ondataavailable = (e) => {
+      if (e.data.size > 0) _audioChunks.push(e.data);
+    };
+
+    _mediaRecorder.onstop = async () => {
+      stream.getTracks().forEach(t => t.stop());
+      const mime = _mediaRecorder.mimeType.split(';')[0] || 'audio/webm';
+      const blob = new Blob(_audioChunks, { type: mime });
+      const file = new File([blob], 'aufnahme.webm', { type: mime });
+      const check = AttachmentManager.validate(file);
+      if (check.ok) {
+        await AttachmentManager.addAudio(file);
+      } else {
+        appendMessage('error', check.error);
+      }
+      _mediaRecorder = null;
+      _audioChunks = [];
+    };
+
+    _mediaRecorder.start();
+    btn.classList.add('recording');
+    btn.title = 'Aufnahme stoppen';
+  } catch (err) {
+    appendMessage('error', 'Mikrofon-Zugriff verweigert: ' + err.message);
+  }
+}
+
+// ── Image Modal ──────────────────────────────────────────
+function openImageModal(src) {
+  const existing = document.getElementById('image-modal');
+  if (existing) existing.remove();
+  const modal = document.createElement('div');
+  modal.id = 'image-modal';
+  modal.onclick = () => modal.remove();
+  modal.innerHTML = `<img src="${src}" alt="Vollbild">`;
+  document.body.appendChild(modal);
+}
+
+// ── Init ──────────────────────────────────────────────────
+document.addEventListener('DOMContentLoaded', () => {
+  _initAttachmentDragDrop();
+  _initAttachmentPaste();
+  _initAttachmentFileSelect();
 });

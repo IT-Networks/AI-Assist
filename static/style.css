@@ -1634,6 +1634,158 @@ textarea.ma-input { resize: vertical; font-family: inherit; }
   cursor: not-allowed;
 }
 
+/* ── Attachment Preview ──────────────────────────────────── */
+.attachment-preview {
+  display: flex;
+  gap: 8px;
+  padding: 8px 12px;
+  background: var(--surface);
+  border-radius: 10px 10px 0 0;
+  border: 1px solid var(--border);
+  border-bottom: none;
+  flex-wrap: wrap;
+  align-items: center;
+}
+.attachment-chip {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 4px 8px;
+}
+.attachment-chip.audio {
+  padding: 4px 6px;
+}
+.attachment-thumb {
+  height: 48px;
+  max-width: 80px;
+  object-fit: cover;
+  border-radius: 4px;
+}
+.attachment-audio {
+  height: 32px;
+  max-width: 200px;
+}
+.attachment-name {
+  font-size: 0.7rem;
+  color: var(--text-muted);
+  max-width: 80px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.attachment-remove {
+  background: rgba(224, 82, 82, 0.25);
+  color: var(--error, #e05252);
+  border: none;
+  border-radius: 50%;
+  width: 20px;
+  height: 20px;
+  font-size: 13px;
+  cursor: pointer;
+  line-height: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.15s;
+}
+.attachment-remove:hover {
+  background: rgba(224, 82, 82, 0.5);
+}
+
+/* ── Input Action Buttons (Attach, Mic) ──────────────────── */
+.input-action-btn {
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  font-size: 1.15rem;
+  cursor: pointer;
+  padding: 8px;
+  border-radius: 8px;
+  transition: color 0.15s, background 0.15s;
+  align-self: flex-end;
+}
+.input-action-btn:hover {
+  color: var(--accent);
+  background: var(--surface);
+}
+
+/* ── Mic Recording State ─────────────────────────────────── */
+#mic-btn.recording {
+  color: #e05252;
+  animation: pulse-mic 1s ease-in-out infinite;
+}
+@keyframes pulse-mic {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.3; }
+}
+
+/* ── Drop Overlay ────────────────────────────────────────── */
+#drop-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  background: rgba(124, 77, 255, 0.12);
+  backdrop-filter: blur(4px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 3px dashed var(--accent);
+  border-radius: 12px;
+  pointer-events: none;
+}
+#drop-overlay span {
+  font-size: 1.3rem;
+  color: var(--accent);
+  font-weight: 600;
+  padding: 16px 32px;
+  background: var(--surface);
+  border-radius: 12px;
+  box-shadow: 0 4px 20px rgba(0,0,0,0.3);
+}
+
+/* ── Message Attachments (im Chat-Verlauf) ───────────────── */
+.message-attachments {
+  display: flex;
+  gap: 8px;
+  margin-top: 8px;
+  flex-wrap: wrap;
+}
+.message-image-thumb {
+  max-height: 200px;
+  max-width: 300px;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: transform 0.15s;
+}
+.message-image-thumb:hover {
+  transform: scale(1.03);
+}
+.message-audio-player {
+  max-width: 300px;
+  height: 36px;
+}
+
+/* ── Image Modal (Vollbild-Anzeige) ──────────────────────── */
+#image-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 10000;
+  background: rgba(0,0,0,0.85);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+#image-modal img {
+  max-width: 90vw;
+  max-height: 90vh;
+  border-radius: 8px;
+  box-shadow: 0 8px 40px rgba(0,0,0,0.5);
+}
+
 #send-btn:not(:disabled):hover {
   opacity: 0.85;
 }

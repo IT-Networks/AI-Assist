@@ -57,6 +57,15 @@ def _sanitize_tool_call_id_for_mistral(tool_call_id: str) -> str:
     return ''.join(result)
 
 
+def _extract_text_from_content(content):
+    """Extrahiert Text aus str oder multimodal content-array."""
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        return " ".join(p.get("text", "") for p in content if isinstance(p, dict) and p.get("type") == "text")
+    return str(content) if content else ""
+
+
 def _sanitize_messages_for_mistral(messages: List[Dict]) -> List[Dict]:
     """
     Sanitiert Messages für Mistral-Kompatibilität.
@@ -172,9 +181,16 @@ def _sanitize_messages_for_mistral(messages: List[Dict]) -> List[Dict]:
             # Merge consecutive user messages
             if prev_role == "user" and result:
                 prev_content = result[-1].get("content", "")
-                result[-1]["content"] = f"{prev_content}\n\n{content}"
+                # Multimodal content (list) zu Text extrahieren für Merge
+                prev_text = _extract_text_from_content(prev_content)
+                curr_text = _extract_text_from_content(content)
+                result[-1]["content"] = f"{prev_text}\n\n{curr_text}"
                 logger.debug("[llm] Mistral: Merged consecutive user messages")
                 continue
+
+            # Multimodal content zu Text konvertieren (Mistral unterstützt kein Vision)
+            if isinstance(content, list):
+                content = _extract_text_from_content(content)
 
             result.append({"role": "user", "content": content})
             prev_role = "user"

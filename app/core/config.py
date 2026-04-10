@@ -1515,6 +1515,14 @@ class EmailConfig(BaseModel):
     max_emails_per_poll: int = 50
 
 
+class WhisperConfig(BaseModel):
+    """Whisper STT Konfiguration."""
+    enabled: bool = False
+    base_url: str = "http://localhost:8000/v1"
+    api_key: str = "none"
+    model: str = "whisper-large-v3"
+
+
 class Settings(BaseModel):
     # Globale Einstellungen
     credentials: CredentialsConfig = Field(default_factory=CredentialsConfig)  # Zentrale Credentials
@@ -1567,6 +1575,7 @@ class Settings(BaseModel):
     update: UpdateConfig = Field(default_factory=UpdateConfig)
     email: EmailConfig = Field(default_factory=EmailConfig)
     webex: WebexConfig = Field(default_factory=WebexConfig)
+    whisper: WhisperConfig = Field(default_factory=WhisperConfig)
 
     def apply_env_overrides(self) -> "Settings":
         if os.getenv("LLM_BASE_URL"):

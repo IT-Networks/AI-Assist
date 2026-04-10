@@ -10,11 +10,11 @@ Features:
 
 import asyncio
 import json
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Literal, Optional
 
 from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, validator
 import uuid
 
 from app.core.config import settings
@@ -35,6 +35,34 @@ class ContextSelection(BaseModel):
     handbook_services: List[str] = Field(default_factory=list, description="Ausgewählte Handbuch-Service-IDs")
 
 
+ALLOWED_IMAGE_MIMES = {"image/png", "image/jpeg", "image/gif", "image/webp"}
+ALLOWED_AUDIO_MIMES = {"audio/webm", "audio/mp3", "audio/mpeg", "audio/wav", "audio/ogg", "audio/mp4"}
+
+class ChatAttachment(BaseModel):
+    """Ein Bild- oder Audio-Anhang (Base64-kodiert)."""
+    type: Literal["image", "audio"] = Field(..., description="Medientyp")
+    mime: str = Field(..., description="MIME-Type, z.B. image/png, audio/webm")
+    data: str = Field(..., description="Base64-kodierte Datei-Daten")
+    name: Optional[str] = Field(None, max_length=255, description="Original-Dateiname")
+
+    @validator("mime")
+    def validate_mime(cls, v, values):
+        allowed = ALLOWED_IMAGE_MIMES | ALLOWED_AUDIO_MIMES
+        if v not in allowed:
+            raise ValueError(f"MIME-Type '{v}' nicht erlaubt. Erlaubt: {sorted(allowed)}")
+        return v
+
+    @validator("data")
+    def validate_size(cls, v, values):
+        size_bytes = len(v) * 3 / 4
+        is_audio = values.get("type") == "audio"
+        limit = 25 * 1024 * 1024 if is_audio else 10 * 1024 * 1024
+        limit_mb = 25 if is_audio else 10
+        if size_bytes > limit:
+            raise ValueError(f"Datei zu groß: {size_bytes / 1024 / 1024:.1f}MB (max {limit_mb}MB)")
+        return v
+
+
 class AgentChatRequest(BaseModel):
     """Anfrage für Agent-Chat."""
     message: str = Field(..., min_length=1, max_length=100000, description="User-Nachricht (max 100k Zeichen)")
@@ -42,6 +70,7 @@ class AgentChatRequest(BaseModel):
     model: Optional[str] = Field(None, max_length=100, description="LLM-Modell")
     skill_ids: Optional[List[str]] = Field(None, max_length=20, description="Skill-IDs zum Aktivieren (max 20)")
     context: Optional[ContextSelection] = Field(None, description="Manuell ausgewählte Kontext-Elemente")
+    attachments: Optional[List[ChatAttachment]] = Field(None, max_length=5, description="Bild-/Audio-Anhänge (max 5)")
 
 
 class AgentModeRequest(BaseModel):
@@ -125,6 +154,7 @@ async def agent_chat(request: AgentChatRequest, http_request: Request):
                 user_message=request.message,
                 model=request.model,
                 context_selection=request.context,
+                attachments=[a.dict() for a in request.attachments] if request.attachments else None,
             )
 
             async for event in gen:
@@ -200,6 +230,7 @@ async def agent_chat_sync(request: AgentChatRequest) -> Dict[str, Any]:
             user_message=request.message,
             model=request.model,
             context_selection=request.context,
+            attachments=[a.dict() for a in request.attachments] if request.attachments else None,
         )
 
         async for event in gen:

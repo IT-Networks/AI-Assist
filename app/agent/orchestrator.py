@@ -471,6 +471,7 @@ class AgentOrchestrator:
         user_message: str,
         model: Optional[str] = None,
         context_selection: Optional[Any] = None,
+        attachments: Optional[List[dict]] = None,
     ) -> AsyncGenerator[AgentEvent, Optional[bool]]:
         """
         Verarbeitet eine User-Nachricht im Agent-Loop.
@@ -1088,10 +1089,24 @@ class AgentOrchestrator:
             history_tokens += estimate_tokens(hist_msg.get("content", ""))
         budget.set("conversation", history_tokens)
 
-        # Aktuelle User-Nachricht hinzufügen
-        messages.append({"role": "user", "content": user_message})
+        # Multimodal: Attachments in User-Message integrieren
+        if attachments:
+            from app.services.multimodal import build_user_content
+            from app.services.whisper import transcribe_audio
+            # Audio transkribieren
+            for att in attachments:
+                if att["type"] == "audio" and "transcription" not in att:
+                    transcription = await transcribe_audio(att["data"], att["mime"])
+                    if transcription:
+                        att["transcription"] = transcription
+            user_content = build_user_content(user_message, attachments)
+        else:
+            user_content = user_message
 
-        # User-Nachricht in Historie speichern
+        # Aktuelle User-Nachricht hinzufügen (multimodal content für LLM)
+        messages.append({"role": "user", "content": user_content})
+
+        # User-Nachricht in Historie speichern (plain text für Anzeige)
         state.messages_history.append({"role": "user", "content": user_message})
 
         # === TRANSCRIPT LOGGING ===
