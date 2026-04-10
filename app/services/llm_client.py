@@ -288,6 +288,182 @@ Antworte immer mit konkreten Code-Beispielen.
 Formatiere Java-Code in ```java Blöcken, Python-Code in ```python Blöcken.
 Kontext wird in klar markierten Abschnitten bereitgestellt (z.B. [DATEI: Pfad], [PYTHON-DATEI: Pfad], [LOG], [PDF], [CONFLUENCE]).
 
+## Verfügbare Mermaid-Diagrammtypen (Mermaid v11.4.0)
+
+Das Frontend rendert ```mermaid Code-Blöcke automatisch als interaktive Grafiken.
+IMMER ```mermaid Fences verwenden, NIEMALS ASCII-Art.
+Nutze den passenden Diagrammtyp je nach Kontext — nicht nur Flowcharts!
+
+### Übersicht aller Typen mit Beispiel-Syntax:
+
+**1. Flowchart / Graph** — Prozesse, Abläufe, Entscheidungen
+```mermaid
+flowchart TD
+    A[Start] --> B{Entscheidung}
+    B -->|Ja| C[Aktion 1]
+    B -->|Nein| D[Aktion 2]
+```
+
+**2. Sequence Diagram** — Interaktionen zwischen Systemen/Akteuren
+```mermaid
+sequenceDiagram
+    Client->>Server: Request
+    Server->>DB: Query
+    DB-->>Server: Result
+    Server-->>Client: Response
+```
+
+**3. Class Diagram** — OOP-Strukturen, Klassen-Beziehungen
+```mermaid
+classDiagram
+    class Animal {
+        +String name
+        +makeSound()
+    }
+    Animal <|-- Dog
+```
+
+**4. State Diagram** — Zustandsmaschinen, Lifecycles
+```mermaid
+stateDiagram-v2
+    [*] --> Idle
+    Idle --> Processing : start
+    Processing --> Done : finish
+    Done --> [*]
+```
+
+**5. ER Diagram** — Datenmodelle, Entitäts-Beziehungen
+```mermaid
+erDiagram
+    USER ||--o{ ORDER : places
+    ORDER ||--|{ ITEM : contains
+```
+
+**6. Pie Chart** — Anteile, Verteilungen
+```mermaid
+pie title Verteilung
+    "Kategorie A" : 40
+    "Kategorie B" : 35
+    "Kategorie C" : 25
+```
+
+**7. XY Chart (Bar Chart / Line Chart)** — Balkendiagramme, Verlaufsdaten, Vergleiche
+```mermaid
+xychart-beta
+    title "Fehler pro Woche"
+    x-axis [KW1, KW2, KW3, KW4, KW5]
+    y-axis "Anzahl" 0 --> 50
+    bar [12, 25, 8, 35, 18]
+    line [12, 25, 8, 35, 18]
+```
+Nutze `bar` für Balkendiagramme, `line` für Liniendiagramme, oder beides kombiniert.
+
+**8. Gantt Chart** — Zeitpläne, Projektplanung
+```mermaid
+gantt
+    title Projektplan
+    dateFormat YYYY-MM-DD
+    section Phase 1
+    Task A :a1, 2024-01-01, 30d
+    Task B :after a1, 20d
+```
+
+**9. Quadrant Chart** — Priorisierung, 2x2-Matrizen
+```mermaid
+quadrantChart
+    title Prioritäts-Matrix
+    x-axis Niedrig --> Hoch
+    y-axis Niedrig --> Hoch
+    quadrant-1 Sofort umsetzen
+    quadrant-2 Planen
+    quadrant-3 Delegieren
+    quadrant-4 Verwerfen
+    Feature A: [0.8, 0.9]
+    Feature B: [0.3, 0.7]
+    Feature C: [0.6, 0.2]
+```
+
+**10. Timeline** — Chronologische Abläufe, Meilensteine
+```mermaid
+timeline
+    title Projekt-Meilensteine
+    2024-Q1 : Konzept fertig
+    2024-Q2 : MVP Launch
+    2024-Q3 : Beta Release
+```
+
+**11. Mindmap** — Brainstorming, Themen-Hierarchien
+```mermaid
+mindmap
+  root((Hauptthema))
+    Bereich A
+      Detail 1
+      Detail 2
+    Bereich B
+      Detail 3
+```
+
+**12. Sankey Diagram** — Fluss-Mengen, Ressourcen-Verteilung
+```mermaid
+sankey-beta
+Quelle A,Ziel X,50
+Quelle A,Ziel Y,30
+Quelle B,Ziel X,20
+Quelle B,Ziel Z,40
+```
+
+**13. Git Graph** — Branch-Strategien, Merge-Flows
+```mermaid
+gitgraph
+    commit
+    branch feature
+    commit
+    commit
+    checkout main
+    merge feature
+    commit
+```
+
+**14. User Journey** — Nutzererlebnis, Zufriedenheit pro Schritt
+```mermaid
+journey
+    title Benutzer-Workflow
+    section Login
+      Seite öffnen: 5: User
+      Credentials eingeben: 3: User
+      2FA bestätigen: 2: User
+    section Dashboard
+      Übersicht laden: 4: System
+```
+
+**15. Kanban Board** — Task-Status, Workflow-Boards
+```mermaid
+kanban
+  column1["To Do"]
+    task1["Feature A"]
+    task2["Bug Fix B"]
+  column2["In Progress"]
+    task3["Feature C"]
+  column3["Done"]
+    task4["Feature D"]
+```
+
+### Wann welchen Typ verwenden:
+- **Zahlen-Vergleiche / Trends** → `xychart-beta` (Bar/Line Chart)
+- **Anteile / Verteilungen** → `pie`
+- **Prozess / Ablauf** → `flowchart`
+- **System-Interaktionen** → `sequenceDiagram`
+- **Datenmodell** → `erDiagram`
+- **Zeitplan** → `gantt` oder `timeline`
+- **Priorisierung / Matrix** → `quadrantChart`
+- **Brainstorming** → `mindmap`
+- **Nutzererlebnis** → `journey`
+- **Ressourcen-Fluss** → `sankey-beta`
+- **Zustände / Lifecycle** → `stateDiagram-v2`
+- **OOP-Struktur** → `classDiagram`
+- **Task-Board** → `kanban`
+- **Git-Workflow** → `gitgraph`
+
 Wenn du mehrere Python-Dateien erstellst, nutze immer dieses Format:
 === FILE: relativer/pfad/datei.py ===
 [Dateiinhalt]
@@ -453,6 +629,25 @@ timeline
     10:15 : ERROR NullPointerException
     10:22 : WARN Connection timeout
     10:45 : ERROR OutOfMemoryError
+```
+
+Bei quantitativen Vergleichen (z.B. Fehler pro Server, Requests pro Stunde) ein Bar-Chart:
+```mermaid
+xychart-beta
+    title "Fehler pro Server"
+    x-axis [Server-1, Server-2, Server-3, Server-4]
+    y-axis "Anzahl Fehler" 0 --> 30
+    bar [18, 7, 25, 3]
+```
+
+Bei Trend-Daten über Zeit ein kombiniertes Bar+Line-Chart:
+```mermaid
+xychart-beta
+    title "Fehler-Trend (letzte 6h)"
+    x-axis ["08:00", "09:00", "10:00", "11:00", "12:00", "13:00"]
+    y-axis "Fehler" 0 --> 20
+    bar [3, 5, 12, 8, 15, 6]
+    line [3, 5, 12, 8, 15, 6]
 ```
 
 **4. Neutrale Formulierung:**

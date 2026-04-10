@@ -7699,6 +7699,7 @@ async function loadMermaid() {
           },
           flowchart: { curve: 'basis', padding: 10 },
           pie: { textPosition: 0.75 },
+          xyChart: { backgroundColor: 'transparent', titleColor: '#e0e0e0', xAxisLabelColor: '#ccc', yAxisLabelColor: '#ccc', xAxisLineColor: '#555', yAxisLineColor: '#555', plotColorPalette: '#7c4dff,#00bcd4,#ff7043,#66bb6a,#ffa726,#ab47bc' },
         });
         _mermaidLoaded = true;
         _mermaidLoading = false;
@@ -7723,7 +7724,7 @@ async function loadMermaid() {
 }
 
 // Mermaid-Syntax-Schluesselwoerter die am Zeilenanfang stehen muessen
-const _MERMAID_KEYWORDS = /^(flowchart\s+(TD|TB|BT|RL|LR)|graph\s+(TD|TB|BT|RL|LR)|sequenceDiagram|classDiagram|stateDiagram|erDiagram|gantt|pie\s+title|gitgraph|mindmap|timeline|sankey|xychart|block-beta)\b/;
+const _MERMAID_KEYWORDS = /^(flowchart\s+(TD|TB|BT|RL|LR)|graph\s+(TD|TB|BT|RL|LR)|sequenceDiagram|classDiagram|stateDiagram(-v2)?|erDiagram|gantt|pie(\s+title)?|gitgraph|mindmap|timeline|sankey-beta|sankey|xychart-beta|xychart|block-beta|quadrantChart|journey|requirementDiagram|kanban|architecture-beta|architecture|packet-beta)\b/;
 
 async function renderMermaidBlocks(container) {
   // Strategie 1: Vom Renderer-Hook erzeugte .mermaid-block Divs
