@@ -454,6 +454,9 @@ async def update_section_settings(
             # Invalidate ScriptManager singleton cache when config changes
             from app.services.script_manager import ScriptManager
             ScriptManager.invalidate_cache()
+        elif section == "whisper":
+            from app.services.whisper import reset_ffmpeg_cache
+            reset_ffmpeg_cache()
 
     except Exception as e:
         raise HTTPException(

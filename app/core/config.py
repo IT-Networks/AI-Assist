@@ -1521,6 +1521,7 @@ class WhisperConfig(BaseModel):
     base_url: str = "http://localhost:8000/v1"
     api_key: str = "none"
     model: str = "whisper-large-v3"
+    ffmpeg_path: str = ""  # Expliziter Pfad zu ffmpeg (leer = aus PATH suchen)
 
 
 class Settings(BaseModel):

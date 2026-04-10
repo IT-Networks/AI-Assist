@@ -53,17 +53,37 @@ _ffmpeg_checked = False
 
 
 def _find_ffmpeg() -> Optional[str]:
-    """Sucht ffmpeg im PATH."""
+    """Sucht ffmpeg: 1. Config-Pfad, 2. PATH."""
     global _ffmpeg_path, _ffmpeg_checked
     if _ffmpeg_checked:
         return _ffmpeg_path
     _ffmpeg_checked = True
+
+    # 1. Expliziter Pfad aus Config (whisper.ffmpeg_path)
+    settings = _config.settings
+    if hasattr(settings, "whisper") and settings.whisper.ffmpeg_path:
+        configured = settings.whisper.ffmpeg_path
+        if Path(configured).is_file():
+            _ffmpeg_path = configured
+            logger.info(f"[whisper] ffmpeg aus Config: {_ffmpeg_path}")
+            return _ffmpeg_path
+        else:
+            logger.warning(f"[whisper] ffmpeg Config-Pfad existiert nicht: {configured}")
+
+    # 2. Im PATH suchen
     _ffmpeg_path = shutil.which("ffmpeg")
     if _ffmpeg_path:
-        logger.info(f"[whisper] ffmpeg gefunden: {_ffmpeg_path}")
+        logger.info(f"[whisper] ffmpeg im PATH gefunden: {_ffmpeg_path}")
     else:
-        logger.warning("[whisper] ffmpeg nicht gefunden — WebM-Konvertierung eingeschränkt")
+        logger.warning("[whisper] ffmpeg nicht gefunden — bitte installieren oder Pfad in Whisper-Settings setzen")
     return _ffmpeg_path
+
+
+def reset_ffmpeg_cache():
+    """Setzt den ffmpeg-Cache zurück (nach Config-Änderung)."""
+    global _ffmpeg_path, _ffmpeg_checked
+    _ffmpeg_path = None
+    _ffmpeg_checked = False
 
 
 def _convert_to_flac_ffmpeg(audio_bytes: bytes, input_ext: str) -> Optional[bytes]:
