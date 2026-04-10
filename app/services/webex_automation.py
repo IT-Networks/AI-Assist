@@ -352,13 +352,18 @@ class WebexAutomationService:
             system_prompt += f"Absender-Filter: {rule.sender_filter}\n"
 
         system_prompt += (
-            "\nWICHTIG: Berücksichtige den Kontext der Nachricht:\n"
-            "- Wenn die Nachricht den User direkt erwähnt (@mention) oder eine "
-            "Direktnachricht ist, ist sie relevanter.\n"
+            "\nWICHTIG - Empfänger-Erkennung:\n"
+            "- Ob eine Nachricht an den User gerichtet ist, erkennst du NUR an den "
+            "technischen Feldern: 'Empfänger-Status' im Kontext unten.\n"
+            "- 'Direktnachricht' oder '@erwähnt' = an den User gerichtet.\n"
+            "- 'Gruppennachricht ohne @mention' = NICHT persönlich an den User gerichtet.\n"
+            "- Versuche NIEMALS aus dem Nachrichtentext abzuleiten, ob jemand gemeint ist. "
+            "Kürzel, Namen, Gebäudenummern oder Codes im Text sind KEINE Hinweise auf den Empfänger.\n"
+            "\nWICHTIG - Thread-Status:\n"
             "- Wenn es bereits Thread-Antworten gibt, ist das Todo möglicherweise "
             "schon bearbeitet. Setze is_todo auf false wenn die Antworten darauf "
             "hindeuten dass das Thema bereits erledigt ist.\n"
-            "- Wenn die Nachricht selbst eine Antwort (Reply) auf einen Thread ist, "
+            "- Wenn die Nachricht selbst eine Antwort (Reply) ist, "
             "prüfe ob sie eine neue Aufgabe enthält oder nur eine Antwort ist.\n"
             "\nAntworte NUR im folgenden JSON-Format (kein anderer Text):\n"
             '{"is_todo": true/false, "todo_text": "Kurze Zusammenfassung der Aufgabe (1-2 Sätze)", '
@@ -369,12 +374,17 @@ class WebexAutomationService:
 
         # Kontext-Info aufbauen
         context_parts = []
+
+        # Empfänger-Status (eindeutig technisch bestimmt)
         if msg.get("is_direct"):
-            context_parts.append("Direktnachricht (persönlich an dich)")
+            context_parts.append("Empfänger-Status: DIREKTNACHRICHT an dich persönlich")
         elif msg.get("mentions_me"):
-            context_parts.append("Du wirst in dieser Nachricht @erwähnt")
+            context_parts.append("Empfänger-Status: Du wirst per @mention direkt angesprochen")
+        else:
+            context_parts.append("Empfänger-Status: Gruppennachricht OHNE @mention an dich")
+
         if msg.get("is_reply"):
-            context_parts.append("Dies ist eine Antwort in einem Thread")
+            context_parts.append("Thread-Status: Dies ist eine Antwort in einem Thread")
         if msg.get("mentioned_groups"):
             context_parts.append(f"Erwähnte Gruppen: {', '.join(msg['mentioned_groups'])}")
 
