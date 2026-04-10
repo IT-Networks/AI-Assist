@@ -272,6 +272,15 @@ class TestSenderFilter:
             ])
             mock_client_inst.get_rooms_for_polling = AsyncMock(return_value=["room-1"])
             mock_client_inst.get_new_messages_since = AsyncMock(return_value=[msg])
+            # enrich_with_thread_context gibt die Nachricht mit Kontext zurück
+            async def _enrich(m):
+                m["mentions_me"] = False
+                m["is_direct"] = False
+                m["is_reply"] = False
+                m["thread_replies"] = []
+                m["thread_reply_count"] = 0
+                return m
+            mock_client_inst.enrich_with_thread_context = _enrich
             mock_client.return_value = mock_client_inst
 
             mock_store_inst = MagicMock()

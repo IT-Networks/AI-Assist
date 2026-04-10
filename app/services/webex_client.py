@@ -437,6 +437,76 @@ class WebexClient:
         """Formatiert eine Liste von Nachrichten."""
         return [self._format_message(item) for item in items]
 
+    async def get_thread_replies(self, room_id: str, parent_id: str, max_replies: int = 20) -> List[dict]:
+        """Lade Thread-Antworten zu einer Nachricht."""
+        params: Dict[str, Any] = {
+            "roomId": room_id,
+            "parentId": parent_id,
+            "max": max_replies,
+        }
+        data = await self._request("GET", "/messages", params=params)
+        return self._format_messages(data.get("items", []))
+
+    async def get_messages_mentioning_me(self, room_id: str, max_messages: int = 50) -> List[dict]:
+        """Nachrichten die den authentifizierten User @erwähnen."""
+        params: Dict[str, Any] = {
+            "roomId": room_id,
+            "mentionedPeople": "me",
+            "max": min(max_messages, 100),  # Webex-Limit bei mentionedPeople
+        }
+        data = await self._request("GET", "/messages", params=params)
+        return self._format_messages(data.get("items", []))
+
+    async def get_my_email(self) -> str:
+        """Gibt die E-Mail des authentifizierten Users zurück (gecached)."""
+        if not hasattr(self, "_my_email") or not self._my_email:
+            try:
+                data = await self._request("GET", "/people/me")
+                self._my_email = (data.get("emails", [""])[0] if data.get("emails") else "")
+                self._my_person_id = data.get("id", "")
+            except Exception:
+                self._my_email = ""
+                self._my_person_id = ""
+        return self._my_email
+
+    async def enrich_with_thread_context(self, msg: dict) -> dict:
+        """Reichert eine Nachricht mit Thread-Kontext und Mention-Info an.
+
+        Fügt hinzu:
+        - mentions_me: ob die Nachricht den Auth-User erwähnt
+        - is_direct: ob es eine Direktnachricht ist
+        - thread_replies: Antworten wenn die Nachricht ein Thread-Root ist
+        - is_reply: ob die Nachricht selbst eine Antwort ist
+        """
+        my_email = await self.get_my_email()
+        my_person_id = getattr(self, "_my_person_id", "")
+
+        # Mention-Check
+        mentioned_people = msg.get("mentioned_people", [])
+        msg["mentions_me"] = (
+            my_person_id in mentioned_people
+            or msg.get("room_type") == "direct"
+        )
+        msg["is_direct"] = msg.get("room_type") == "direct"
+        msg["is_reply"] = bool(msg.get("parent_id"))
+
+        # Thread-Antworten laden (nur für Root-Nachrichten die kein Reply sind)
+        msg["thread_replies"] = []
+        msg["thread_reply_count"] = 0
+        if not msg.get("parent_id") and msg.get("room_id") and msg.get("id"):
+            try:
+                replies = await self.get_thread_replies(
+                    room_id=msg["room_id"],
+                    parent_id=msg["id"],
+                    max_replies=10,
+                )
+                msg["thread_replies"] = replies
+                msg["thread_reply_count"] = len(replies)
+            except Exception as e:
+                logger.debug("Thread-Replies laden fehlgeschlagen: %s", e)
+
+        return msg
+
     def _format_message(self, item: dict) -> dict:
         """Formatiert eine einzelne Nachricht."""
         return {
@@ -451,6 +521,8 @@ class WebexClient:
             "created": item.get("created", ""),
             "updated": item.get("updated", ""),
             "parent_id": item.get("parentId", ""),
+            "mentioned_people": item.get("mentionedPeople", []),
+            "mentioned_groups": item.get("mentionedGroups", []),
             "has_files": bool(item.get("files")),
             "file_count": len(item.get("files", [])),
         }

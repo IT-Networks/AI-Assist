@@ -239,6 +239,12 @@ class WebexAutomationService:
                     if rule.sender_filter.lower() not in sender:
                         continue
 
+                # Thread-Kontext anreichern
+                try:
+                    msg = await client.enrich_with_thread_context(msg)
+                except Exception as e:
+                    logger.debug("Thread-Kontext laden fehlgeschlagen: %s", e)
+
                 # LLM-Auswertung
                 try:
                     result = await self._evaluate_message(msg, rule)
@@ -334,19 +340,54 @@ class WebexAutomationService:
             system_prompt += f"Absender-Filter: {rule.sender_filter}\n"
 
         system_prompt += (
+            "\nWICHTIG: Berücksichtige den Kontext der Nachricht:\n"
+            "- Wenn die Nachricht den User direkt erwähnt (@mention) oder eine "
+            "Direktnachricht ist, ist sie relevanter.\n"
+            "- Wenn es bereits Thread-Antworten gibt, ist das Todo möglicherweise "
+            "schon bearbeitet. Setze is_todo auf false wenn die Antworten darauf "
+            "hindeuten dass das Thema bereits erledigt ist.\n"
+            "- Wenn die Nachricht selbst eine Antwort (Reply) auf einen Thread ist, "
+            "prüfe ob sie eine neue Aufgabe enthält oder nur eine Antwort ist.\n"
             "\nAntworte NUR im folgenden JSON-Format (kein anderer Text):\n"
             '{"is_todo": true/false, "todo_text": "Kurze Zusammenfassung der Aufgabe (1-2 Sätze)", '
             '"analysis": "Begründung", "priority": "high/medium/low", "deadline": "YYYY-MM-DD oder null"}'
         )
 
         text = msg.get("text", "")[:3000]
+
+        # Kontext-Info aufbauen
+        context_parts = []
+        if msg.get("is_direct"):
+            context_parts.append("Direktnachricht (persönlich an dich)")
+        elif msg.get("mentions_me"):
+            context_parts.append("Du wirst in dieser Nachricht @erwähnt")
+        if msg.get("is_reply"):
+            context_parts.append("Dies ist eine Antwort in einem Thread")
+        if msg.get("mentioned_groups"):
+            context_parts.append(f"Erwähnte Gruppen: {', '.join(msg['mentioned_groups'])}")
+
+        # Thread-Antworten als Kontext
+        thread_text = ""
+        if msg.get("thread_replies"):
+            replies = msg["thread_replies"]
+            thread_text = f"\nThread-Antworten ({len(replies)}):"
+            for reply in replies[:5]:
+                thread_text += (
+                    f"\n  - {reply.get('person_display_name', reply.get('person_email', '?'))}: "
+                    f"{reply.get('text', '')[:200]} ({reply.get('created', '')})"
+                )
+
         user_prompt = (
             f"Von: {msg.get('person_email', '')} ({msg.get('person_display_name', '')})\n"
             f"Raum: {msg.get('room_title', 'Direktnachricht')}\n"
             f"Datum: {msg.get('created', '')}\n"
             f"Dateien: {'Ja' if msg.get('has_files') else 'Keine'}\n"
-            f"\nInhalt:\n{text}"
         )
+        if context_parts:
+            user_prompt += f"Kontext: {'; '.join(context_parts)}\n"
+        if thread_text:
+            user_prompt += thread_text + "\n"
+        user_prompt += f"\nInhalt:\n{text}"
 
         messages = [
             {"role": "system", "content": system_prompt},

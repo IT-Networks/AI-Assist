@@ -57,16 +57,27 @@ def register_webex_tools(registry: ToolRegistry) -> int:
                 return ToolResult(success=False, error="room_id ist erforderlich.")
 
             client = get_webex_client()
-            messages = await client.get_messages(
-                room_id=room_id,
-                max_messages=int(kwargs.get("limit", 20)),
-                before=kwargs.get("before", ""),
-            )
+            only_mentions = kwargs.get("mentions_only", "").lower() in ("true", "1", "yes")
 
-            # Für LLM-Kontext kürzen
+            if only_mentions:
+                messages = await client.get_messages_mentioning_me(
+                    room_id=room_id,
+                    max_messages=int(kwargs.get("limit", 20)),
+                )
+            else:
+                messages = await client.get_messages(
+                    room_id=room_id,
+                    max_messages=int(kwargs.get("limit", 20)),
+                    before=kwargs.get("before", ""),
+                )
+
+            # Kontext anreichern und für LLM kürzen
             for msg in messages:
                 if len(msg.get("text", "")) > 2000:
                     msg["text"] = msg["text"][:2000] + "\n[... gekürzt ...]"
+                # Kompakte Kontext-Infos
+                msg["is_reply"] = bool(msg.get("parent_id"))
+                msg["has_mentions"] = bool(msg.get("mentioned_people")) or bool(msg.get("mentioned_groups"))
 
             return ToolResult(
                 success=True,
@@ -80,7 +91,8 @@ def register_webex_tools(registry: ToolRegistry) -> int:
         description=(
             "Liest Nachrichten aus einem Webex-Raum. "
             "Benötigt die room_id aus webex_list_rooms. "
-            "Zeigt Absender, Zeitstempel und Inhalt der Nachrichten."
+            "Zeigt Absender, Zeitstempel, Inhalt, Thread-Status und Mentions. "
+            "Mit mentions_only=true werden nur Nachrichten geladen die dich @erwähnen."
         ),
         category=ToolCategory.SEARCH,
         parameters=[
@@ -96,6 +108,12 @@ def register_webex_tools(registry: ToolRegistry) -> int:
                 description="Max. Anzahl Nachrichten (Standard: 20, Max: 100)",
                 required=False,
                 default=20,
+            ),
+            ToolParameter(
+                name="mentions_only",
+                type="string",
+                description="Nur Nachrichten die mich @erwähnen (true/false, Standard: false)",
+                required=False,
             ),
             ToolParameter(
                 name="before",
