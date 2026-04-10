@@ -20634,12 +20634,31 @@ const emailModule = {
       }
 
       const mail = todo.mail_snapshot || {};
-      const attachmentsHtml = (mail.attachments || []).map(a =>
-        `<div class="todo-attachment">
-          &#128206; <a href="/api/email/attachment/${todo.email_id}/${encodeURIComponent(a.name)}?folder=inbox" download>${escapeHtml(a.name)}</a>
-          <span style="color:var(--text-muted)">(${Math.round((a.size || 0) / 1024)} KB)</span>
-        </div>`
-      ).join('');
+      const isWebex = (todo.source || 'email') === 'webex';
+      const fileUrls = mail.file_urls || [];
+
+      // Webex-Dateien: Bilder inline + Download-Link via Proxy
+      let attachmentsHtml = '';
+      if (isWebex && fileUrls.length > 0) {
+        attachmentsHtml = fileUrls.map((url, i) => {
+          const proxyUrl = `/api/webex/file?url=${encodeURIComponent(url)}`;
+          return `<div class="todo-attachment" style="margin-bottom:8px;">
+            <img src="${proxyUrl}" alt="Webex-Bild ${i + 1}"
+              style="max-width:100%;max-height:400px;border-radius:6px;cursor:pointer;border:1px solid var(--border);"
+              onclick="window.open('${proxyUrl}', '_blank')"
+              onerror="this.style.display='none'; this.nextElementSibling.style.display='block';">
+            <a href="${proxyUrl}" download style="display:none;">&#128206; Datei ${i + 1} herunterladen</a>
+          </div>`;
+        }).join('');
+      } else if (!isWebex) {
+        // E-Mail-Attachments
+        attachmentsHtml = (mail.attachments || []).map(a =>
+          `<div class="todo-attachment">
+            &#128206; <a href="/api/email/attachment/${todo.email_id}/${encodeURIComponent(a.name)}?folder=inbox" download>${escapeHtml(a.name)}</a>
+            <span style="color:var(--text-muted)">(${Math.round((a.size || 0) / 1024)} KB)</span>
+          </div>`
+        ).join('');
+      }
 
       document.getElementById('todo-detail-content').innerHTML = `
         <div class="todo-detail-section">

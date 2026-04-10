@@ -26,7 +26,7 @@ class EmailAttachmentInfo(BaseModel):
 # ── Mail Snapshot (für Todo-Persistenz) ────────────────────────────────────────
 
 class MailSnapshot(BaseModel):
-    """Snapshot einer E-Mail für die Todo-Persistenz."""
+    """Snapshot einer E-Mail/Webex-Nachricht für die Todo-Persistenz."""
     subject: str
     sender: str
     sender_name: str = ""
@@ -36,6 +36,7 @@ class MailSnapshot(BaseModel):
     body_text: str = ""
     body_html: str = ""
     attachments: List[EmailAttachmentInfo] = []
+    file_urls: List[str] = []          # Webex-Datei-URLs (für Bild-Anzeige)
 
 
 # ── E-Mail Regeln ──────────────────────────────────────────────────────────────

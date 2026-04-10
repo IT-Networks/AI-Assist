@@ -291,7 +291,18 @@ class WebexAutomationService:
 
     def _create_todo(self, store, msg: Dict, rule: WebexRule, result: Dict):
         """Erstellt ein TodoItem aus einer Webex-Nachricht und LLM-Ergebnis."""
-        from app.models.email_models import TodoItem, MailSnapshot
+        from app.models.email_models import TodoItem, MailSnapshot, EmailAttachmentInfo
+
+        # Datei-URLs als Attachments speichern
+        file_urls = msg.get("file_urls", [])
+        attachments = [
+            EmailAttachmentInfo(
+                name=url.split("/")[-1] if "/" in url else "attachment",
+                size=0,
+                content_type="webex-file",  # Marker für Webex-Dateien
+            )
+            for url in file_urls
+        ]
 
         snapshot = MailSnapshot(
             subject=f"[Webex] {msg.get('room_title', 'Direktnachricht')}",
@@ -302,7 +313,8 @@ class WebexAutomationService:
             date=msg.get("created", ""),
             body_text=msg.get("text", "")[:5000],
             body_html=msg.get("html", "")[:10000],
-            attachments=[],
+            attachments=attachments,
+            file_urls=file_urls,
         )
 
         todo = TodoItem(

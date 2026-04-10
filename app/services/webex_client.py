@@ -507,8 +507,46 @@ class WebexClient:
 
         return msg
 
+    async def get_file_info(self, file_url: str) -> dict:
+        """HEAD-Request auf Datei-URL um Metadaten zu holen."""
+        client = self._get_client()
+        response = await client.head(file_url)
+        response.raise_for_status()
+
+        content_disp = response.headers.get("Content-Disposition", "")
+        filename = ""
+        if "filename=" in content_disp:
+            filename = content_disp.split("filename=")[-1].strip('"').strip("'")
+
+        return {
+            "filename": filename,
+            "content_type": response.headers.get("Content-Type", ""),
+            "size": int(response.headers.get("Content-Length", "0")),
+        }
+
+    async def download_file(self, file_url: str) -> tuple:
+        """Lädt eine Datei herunter. Gibt (bytes, content_type, filename) zurück."""
+        client = self._get_client()
+        response = await client.get(file_url)
+        response.raise_for_status()
+
+        content_disp = response.headers.get("Content-Disposition", "")
+        filename = "attachment"
+        if "filename=" in content_disp:
+            filename = content_disp.split("filename=")[-1].strip('"').strip("'")
+
+        return (
+            response.content,
+            response.headers.get("Content-Type", "application/octet-stream"),
+            filename,
+        )
+
     def _format_message(self, item: dict) -> dict:
         """Formatiert eine einzelne Nachricht."""
+        # Datei-URLs extrahieren
+        files = item.get("files", [])
+        file_urls = files if isinstance(files, list) else []
+
         return {
             "id": item.get("id", ""),
             "room_id": item.get("roomId", ""),
@@ -523,8 +561,9 @@ class WebexClient:
             "parent_id": item.get("parentId", ""),
             "mentioned_people": item.get("mentionedPeople", []),
             "mentioned_groups": item.get("mentionedGroups", []),
-            "has_files": bool(item.get("files")),
-            "file_count": len(item.get("files", [])),
+            "has_files": bool(files),
+            "file_count": len(file_urls),
+            "file_urls": file_urls,
         }
 
 

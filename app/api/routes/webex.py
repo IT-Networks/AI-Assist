@@ -8,6 +8,7 @@ import logging
 from typing import Optional
 
 from fastapi import APIRouter, HTTPException, Query
+from fastapi.responses import Response
 from pydantic import BaseModel, Field
 
 logger = logging.getLogger(__name__)
@@ -142,6 +143,35 @@ async def list_rooms(type: str = Query("", description="group oder direct")):
         client = get_webex_client()
         rooms = await client.list_rooms(room_type=type)
         return {"rooms": rooms, "count": len(rooms)}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ── Datei-Download (Proxy) ─────────────────────────────────────────────────────
+
+@router.get("/file")
+async def download_webex_file(url: str = Query(..., description="Webex-Datei-URL")):
+    """Proxy-Download einer Webex-Datei (Bilder, Dokumente).
+
+    Das Frontend kann Webex-Datei-URLs nicht direkt laden (Auth nötig).
+    Diese Route fungiert als Proxy mit dem gespeicherten Access-Token.
+    """
+    from app.services.webex_client import get_webex_client
+
+    if not url or "webexapis.com" not in url:
+        raise HTTPException(status_code=400, detail="Ungültige Webex-Datei-URL")
+
+    try:
+        client = get_webex_client()
+        content, content_type, filename = await client.download_file(url)
+        return Response(
+            content=content,
+            media_type=content_type,
+            headers={
+                "Content-Disposition": f'inline; filename="{filename}"',
+                "Cache-Control": "private, max-age=3600",
+            },
+        )
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
