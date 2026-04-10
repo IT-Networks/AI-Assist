@@ -244,6 +244,7 @@ async def transcribe_audio(audio_base64: str, mime: str, language: str = "de") -
                 data={
                     "model": settings.whisper.model,
                     "language": language,
+                    "response_format": "json",
                 },
             )
             response.raise_for_status()
