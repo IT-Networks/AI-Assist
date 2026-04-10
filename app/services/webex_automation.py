@@ -216,9 +216,18 @@ class WebexAutomationService:
         except Exception:
             pass
 
+        # User-Anzeigename für namentliche Erkennung im LLM-Prompt
+        my_display_name = ""
+        try:
+            await client.get_my_email()  # Cached, lädt auch Display-Name
+            my_display_name = getattr(client, "_my_display_name", "")
+        except Exception:
+            pass
+
         for msg in messages:
             msg_id = msg.get("id", "")
             msg["room_title"] = room_titles.get(msg.get("room_id", ""), "")
+            msg["_my_display_name"] = my_display_name
 
             for rule in active_rules:
                 process_key = f"wx:{msg_id}:{rule.id}"
@@ -351,14 +360,23 @@ class WebexAutomationService:
         if rule.sender_filter:
             system_prompt += f"Absender-Filter: {rule.sender_filter}\n"
 
+        # User-Name für namentliche Erkennung
+        my_name = msg.get("_my_display_name", "")
+
         system_prompt += (
             "\nWICHTIG - Empfänger-Erkennung:\n"
-            "- Ob eine Nachricht an den User gerichtet ist, erkennst du NUR an den "
-            "technischen Feldern: 'Empfänger-Status' im Kontext unten.\n"
-            "- 'Direktnachricht' oder '@erwähnt' = an den User gerichtet.\n"
-            "- 'Gruppennachricht ohne @mention' = NICHT persönlich an den User gerichtet.\n"
-            "- Versuche NIEMALS aus dem Nachrichtentext abzuleiten, ob jemand gemeint ist. "
-            "Kürzel, Namen, Gebäudenummern oder Codes im Text sind KEINE Hinweise auf den Empfänger.\n"
+            "- Primär: Nutze die technischen Felder 'Empfänger-Status' im Kontext unten.\n"
+            "- 'Direktnachricht' oder '@erwähnt' = sicher an den User gerichtet.\n"
+        )
+        if my_name:
+            system_prompt += (
+                f"- Der User heißt \"{my_name}\". Wenn dieser vollständige Name (Vor- oder Nachname) "
+                "im Text namentlich genannt wird, darfst du daraus ableiten dass der User gemeint ist.\n"
+            )
+        system_prompt += (
+            "- Kürzel, Abkürzungen, Codes, Gebäudenummern oder ähnliche kurze Zeichenfolgen "
+            "im Text sind KEINE Hinweise auf den Empfänger. Leite daraus NIEMALS ab, "
+            "dass der User gemeint sein könnte.\n"
             "\nWICHTIG - Thread-Status:\n"
             "- Wenn es bereits Thread-Antworten gibt, ist das Todo möglicherweise "
             "schon bearbeitet. Setze is_todo auf false wenn die Antworten darauf "

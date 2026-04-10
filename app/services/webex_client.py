@@ -464,9 +464,11 @@ class WebexClient:
                 data = await self._request("GET", "/people/me")
                 self._my_email = (data.get("emails", [""])[0] if data.get("emails") else "")
                 self._my_person_id = data.get("id", "")
+                self._my_display_name = data.get("displayName", "")
             except Exception:
                 self._my_email = ""
                 self._my_person_id = ""
+                self._my_display_name = ""
         return self._my_email
 
     async def enrich_with_thread_context(self, msg: dict) -> dict:
