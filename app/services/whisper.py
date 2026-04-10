@@ -235,23 +235,55 @@ async def transcribe_audio(audio_base64: str, mime: str, language: str = "de") -
             if settings.whisper.api_key and settings.whisper.api_key != "none":
                 headers["Authorization"] = f"Bearer {settings.whisper.api_key}"
 
-            logger.info(f"[whisper] Sende an {settings.whisper.base_url}: {upload_filename} ({len(audio_bytes)} bytes)")
+            post_data = {
+                "model": settings.whisper.model,
+                "language": language,
+                "response_format": "json",
+            }
+            file_tuple = ("file", (upload_filename, audio_bytes, upload_mime))
 
-            response = await client.post(
-                f"{settings.whisper.base_url}/audio/transcriptions",
-                headers=headers,
-                files={"file": (upload_filename, audio_bytes, upload_mime)},
-                data={
-                    "model": settings.whisper.model,
-                    "language": language,
-                    "response_format": "json",
-                },
-            )
-            response.raise_for_status()
-            result = response.json()
-            text = result.get("text", "").strip()
-            logger.info(f"[whisper] Transkription erfolgreich: {len(text)} Zeichen")
-            return text if text else None
+            # URL-Kandidaten: base_url kann verschiedene Formate haben:
+            #   http://server:8000         → /v1/audio/transcriptions
+            #   http://server:8000/v1      → /audio/transcriptions
+            #   http://server:8000/v1/     → /audio/transcriptions
+            base = settings.whisper.base_url.rstrip("/")
+            urls = []
+            if base.endswith("/audio/transcriptions"):
+                urls.append(base)
+            else:
+                urls.append(f"{base}/audio/transcriptions")
+                # Fallback: mit/ohne /v1 probieren
+                if "/v1" in base:
+                    urls.append(base.replace("/v1", "") + "/audio/transcriptions")
+                else:
+                    urls.append(f"{base}/v1/audio/transcriptions")
+
+            for url in urls:
+                logger.info(f"[whisper] Versuche: {url} ({upload_filename}, {len(audio_bytes)} bytes)")
+                try:
+                    response = await client.post(
+                        url,
+                        headers=headers,
+                        files=[file_tuple],
+                        data=post_data,
+                    )
+                    if response.status_code == 404:
+                        logger.warning(f"[whisper] 404 bei {url} — versuche Alternative")
+                        continue
+                    response.raise_for_status()
+                    result = response.json()
+                    text = result.get("text", "").strip()
+                    logger.info(f"[whisper] Transkription erfolgreich ({url}): {len(text)} Zeichen")
+                    return text if text else None
+                except httpx.HTTPStatusError as e:
+                    if e.response.status_code == 404 and url != urls[-1]:
+                        logger.warning(f"[whisper] 404 bei {url} — versuche nächste URL")
+                        continue
+                    logger.error(f"[whisper] API-Fehler {e.response.status_code} bei {url}: {e.response.text[:500]}")
+                    return None
+
+            logger.error(f"[whisper] Alle URLs fehlgeschlagen: {urls}")
+            return None
 
     except httpx.HTTPStatusError as e:
         logger.error(f"[whisper] API-Fehler {e.response.status_code}: {e.response.text[:500]}")
