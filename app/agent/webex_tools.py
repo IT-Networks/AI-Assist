@@ -38,14 +38,16 @@ def register_webex_tools(registry: ToolRegistry) -> int:
     registry.register(Tool(
         name="webex_list_rooms",
         description=(
-            "Listet Webex-Räume auf (Gruppenräume und Direktnachrichten), sortiert nach letzter "
-            "Aktivität (neueste zuerst). Zeigt pro Raum: ID, Name, Typ, letzte Aktivität. "
-            "Standard: 50 Räume. Für vollständige Übersicht: max_rooms=500+ (Hard-Cap 1000). "
-            "Mit name_contains kannst du Räume nach Namensbestandteil filtern.\n\n"
-            "WANN NUTZEN: Wenn du nur die Raumliste/IDs brauchst (z.B. um danach gezielt "
-            "webex_read_messages oder webex_search_messages aufzurufen).\n"
-            "ALTERNATIVE: Wenn du Liste + neueste Msgs pro Raum willst → webex_recent_activity "
-            "(spart einen Tool-Roundtrip)."
+            "Listet Webex-Räume auf (sortiert nach letzter Aktivität, neueste zuerst). "
+            "Zeigt pro Raum: ID, Name, Typ, letzte Aktivität. "
+            "Standard: 50 Räume, Hard-Cap 1000. Mit name_contains nach Namensbestandteil filtern.\n\n"
+            "WICHTIG: Liefert nur EINE Seite (max 1000) — Räume die seit Monaten inaktiv sind, "
+            "können bei vielen Räumen fehlen!\n\n"
+            "WANN NUTZEN: Schneller Überblick über die aktivsten Räume.\n"
+            "ALTERNATIVEN:\n"
+            "- Bestimmten Chat suchen (auch alte/inaktive) → webex_find_chat (paginiert ALLE Räume "
+            "+ kann nach Person suchen)\n"
+            "- Liste + neueste Msgs pro Raum → webex_recent_activity"
         ),
         category=ToolCategory.SEARCH,
         parameters=[
@@ -143,8 +145,11 @@ def register_webex_tools(registry: ToolRegistry) -> int:
             "WANN NUTZEN: Wenn die room_id BEKANNT ist und du Msgs eines bestimmten Raums brauchst.\n"
             "FÜR ÄLTERE NACHRICHTEN (>1 Tag): IMMER 'since' (ISO-Datum, z.B. '2026-02-13') setzen, "
             "sonst bekommst du nur die neuesten Msgs!\n"
-            "ALTERNATIVEN: Wenn Raum unbekannt → webex_search_all_rooms; "
-            "wenn nur Übersicht über mehrere Räume → webex_recent_activity."
+            "ALTERNATIVEN:\n"
+            "- room_id unbekannt, du kennst aber Person/Raumname → ZUERST webex_find_chat aufrufen, "
+            "dann mit der zurückgegebenen room_id hierher\n"
+            "- room_id unbekannt + Suche nach Begriff in Nachrichten → webex_search_all_rooms\n"
+            "- Übersicht über mehrere Räume → webex_recent_activity"
         ),
         category=ToolCategory.SEARCH,
         parameters=[
@@ -278,8 +283,10 @@ def register_webex_tools(registry: ToolRegistry) -> int:
             "ANTWORT enthält 'oldest_scanned' (ISO-Datum der ältesten gescannten Msg) und "
             "'scanned_total'. Wenn 'oldest_scanned' nicht weit genug zurückreicht: erneut "
             "mit höherem max_pages aufrufen.\n\n"
-            "ALTERNATIVE: Wenn der Raum UNBEKANNT ist → webex_search_all_rooms (sucht über "
-            "alle Räume gleichzeitig)."
+            "ALTERNATIVEN:\n"
+            "- Raum-ID unbekannt aber Person/Raumname bekannt → ZUERST webex_find_chat, "
+            "dann hierher\n"
+            "- Raum-ID unbekannt UND nur Stichwort bekannt → webex_search_all_rooms"
         ),
         category=ToolCategory.SEARCH,
         parameters=[
@@ -331,6 +338,153 @@ def register_webex_tools(registry: ToolRegistry) -> int:
             ),
         ],
         handler=webex_search_messages,
+    ))
+    count += 1
+
+    # ── webex_find_chat ───────────────────────────────────────────────────────
+    async def webex_find_chat(**kwargs: Any) -> ToolResult:
+        """Findet einen Webex-Chat (Raum) über Person oder Raumname.
+
+        Drei Suchstrategien je nach Input:
+        1. person enthält '@' → Direkt-Chat via /messages/direct?personEmail=
+        2. person ohne '@' → /people?displayName=, dann je Person Direkt-Chat
+        3. room_name → paginiert ALLE Räume und filtert nach Title-Substring
+        """
+        from app.services.webex_client import get_webex_client
+        try:
+            person = (kwargs.get("person", "") or "").strip()
+            room_name = (kwargs.get("room_name", "") or "").strip()
+
+            if not person and not room_name:
+                return ToolResult(
+                    success=False,
+                    error="Mindestens 'person' (Email/Name) ODER 'room_name' angeben."
+                )
+
+            client = get_webex_client()
+            results: list = []
+            people_searched: list = []
+
+            # ── Strategie 1+2: Person → Direkt-Chat ─────────────────────────
+            if person:
+                if "@" in person:
+                    # Direkter Email-Lookup
+                    room = await client.find_direct_room_for_person(person)
+                    if room:
+                        results.append({**room, "match_type": "direct_chat_by_email"})
+                else:
+                    # Personensuche → Email → Direkt-Chat
+                    people = await client.find_person(
+                        person, limit=int(kwargs.get("max_people", 5) or 5)
+                    )
+                    for p in people:
+                        people_searched.append({
+                            "display_name": p.get("display_name", ""),
+                            "email": p.get("primary_email", ""),
+                            "department": p.get("department", ""),
+                        })
+                        email = p.get("primary_email", "")
+                        if not email:
+                            continue
+                        room = await client.find_direct_room_for_person(email)
+                        if room:
+                            results.append({
+                                **room,
+                                "person_display_name": p.get("display_name", ""),
+                                "person_id": p.get("id", ""),
+                                "match_type": "direct_chat_by_name",
+                            })
+
+            # ── Strategie 3: Raum-Name (paginiert über alle Räume) ──────────
+            if room_name:
+                rooms = await client.list_all_rooms(
+                    room_type=kwargs.get("type", ""),
+                    name_contains=room_name,
+                    max_total=int(kwargs.get("max_search", 2000) or 2000),
+                    page_size=min(int(kwargs.get("page_size", 1000) or 1000), 1000),
+                )
+                for r in rooms:
+                    results.append({**r, "match_type": "room_by_title"})
+
+            return ToolResult(
+                success=True,
+                data={
+                    "rooms": results,
+                    "count": len(results),
+                    "person_query": person,
+                    "room_name_query": room_name,
+                    "people_found": people_searched,
+                }
+            )
+        except Exception as e:
+            return ToolResult(success=False, error=str(e))
+
+    registry.register(Tool(
+        name="webex_find_chat",
+        description=(
+            "Findet einen Webex-Chat/Raum auf RAUM-EBENE (NICHT in Nachrichten suchen!). "
+            "Genau das richtige Tool wenn du fragst 'In welchem Chat...' oder 'Mein Direktchat "
+            "mit XY' — auch wenn der Chat seit Monaten inaktiv ist und nicht in webex_list_rooms "
+            "auftaucht.\n\n"
+            "DREI SUCHMODI (mindestens einen Parameter angeben):\n"
+            "1) person='vorname.nachname@firma.de' → findet den 1:1-Direkt-Chat (auch sehr alte!)\n"
+            "2) person='Max Mustermann' → sucht Person via /people, dann deren Direkt-Chat\n"
+            "3) room_name='Projekt Foo' → paginiert ALLE Räume (bis 2000) und filtert nach "
+            "Titel-Substring (auch inaktive Räume)\n\n"
+            "WANN NUTZEN: Immer wenn du eine room_id BRAUCHST aber noch nicht hast — VOR "
+            "webex_read_messages oder webex_search_messages.\n"
+            "ABGRENZUNG zu webex_search_all_rooms: Letzteres durchsucht NACHRICHTENTEXT in "
+            "vielen Räumen (teuer). webex_find_chat findet RÄUME via Person/Titel (effizient)."
+        ),
+        category=ToolCategory.SEARCH,
+        parameters=[
+            ToolParameter(
+                name="person",
+                type="string",
+                description=(
+                    "Email-Adresse ('a@b.de') ODER Anzeigename ('Max Mustermann') der Person. "
+                    "Findet den 1:1-Direkt-Chat — funktioniert auch für seit Monaten inaktive Chats."
+                ),
+                required=False,
+            ),
+            ToolParameter(
+                name="room_name",
+                type="string",
+                description=(
+                    "Substring des Raum-Titels (case-insensitive). Paginiert über alle Räume "
+                    "(nicht nur die zuletzt aktiven)."
+                ),
+                required=False,
+            ),
+            ToolParameter(
+                name="type",
+                type="string",
+                description="Optional bei room_name: 'group' oder 'direct' filtern",
+                required=False,
+            ),
+            ToolParameter(
+                name="max_people",
+                type="integer",
+                description="Bei Namens-Suche: max. Treffer bei /people (Std 5, Max 100)",
+                required=False,
+                default=5,
+            ),
+            ToolParameter(
+                name="max_search",
+                type="integer",
+                description="Bei room_name: max. zu durchsuchende Räume (Std 2000, Max 10000)",
+                required=False,
+                default=2000,
+            ),
+            ToolParameter(
+                name="page_size",
+                type="integer",
+                description="Räume pro API-Call bei Pagination (Std und Max: 1000)",
+                required=False,
+                default=1000,
+            ),
+        ],
+        handler=webex_find_chat,
     ))
     count += 1
 
@@ -426,11 +580,16 @@ def register_webex_tools(registry: ToolRegistry) -> int:
     registry.register(Tool(
         name="webex_search_all_rooms",
         description=(
-            "Cross-Room-Suche: durchsucht MEHRERE Webex-Räume gleichzeitig nach einem Begriff. "
+            "Cross-Room-Suche im NACHRICHTENTEXT: durchsucht mehrere Webex-Räume gleichzeitig. "
             "Listet zuerst Räume (sortiert nach letzter Aktivität), paginiert in jedem Raum "
             "rückwärts und sammelt Treffer. Treffer enthalten 'room_title' für Kontext.\n\n"
-            "WANN NUTZEN: Wenn der Raum UNBEKANNT ist und du wissen willst 'in welchem Chat "
-            "wurde XY erwähnt'. Default scannt 20 Räume × 2 Seiten = bis 4000 Msgs.\n"
+            "ABGRENZUNG: Dieses Tool sucht NACHRICHTENINHALT. Wenn du nur einen Chat-Raum "
+            "finden willst (z.B. 'Mein Chat mit Müller', 'Der Projekt-Foo Raum'), nutze "
+            "stattdessen webex_find_chat — das ist deutlich effizienter und findet auch "
+            "inaktive Räume.\n\n"
+            "WANN NUTZEN: Wenn du nach einem konkreten BEGRIFF/INHALT in Nachrichten "
+            "suchst und nicht weißt in welchem Raum. Default scannt 20 Räume × 2 Seiten = "
+            "bis 4000 Msgs.\n"
             "FÜR ÄLTERE CHATS: 'since' (ISO-Datum) setzen + max_pages_per_room auf 5-10 erhöhen. "
             "Beispiel 2 Monate (heute 2026-04-13): since='2026-02-13', max_pages_per_room=5.\n"
             "PERFORMANCE-TIPP: room_name_contains drastisch reduziert die Anzahl gescannter "
@@ -567,6 +726,7 @@ def register_webex_tools(registry: ToolRegistry) -> int:
             "gestern?', 'Worüber wurde zuletzt diskutiert?'. Mit 'since' (ISO-Datum) zeigt nur "
             "Räume mit neuer Aktivität (leere werden ausgeblendet).\n\n"
             "ALTERNATIVEN:\n"
+            "- Bestimmten Chat finden (auch inaktiven) → webex_find_chat\n"
             "- Nur @-Mentions an mich → webex_read_messages mit mentions_only=true (pro Raum)\n"
             "- Nach konkretem Begriff suchen → webex_search_all_rooms\n"
             "- Tiefere Historie eines bestimmten Raums → webex_read_messages mit since/max_pages\n\n"

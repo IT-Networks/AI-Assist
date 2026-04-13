@@ -383,6 +383,206 @@ class WebexClient:
         data = await self._request("GET", "/messages", params=params)
         return self._format_messages(data.get("items", []))
 
+    async def list_all_rooms(
+        self,
+        room_type: str = "",
+        name_contains: str = "",
+        max_total: int = 2000,
+        page_size: int = 100,
+    ) -> List[dict]:
+        """Paginiert über ALLE Räume via Webex Link-Header.
+
+        Standardmäßig sortiert Webex /rooms nach lastactivity DESC. Diese Methode
+        folgt dem 'Link: <...>; rel="next"' Header der Webex-API bis alle Räume
+        abgerufen sind oder max_total erreicht wird.
+
+        Args:
+            room_type: 'group', 'direct' oder leer (alle)
+            name_contains: optionaler Filter (case-insensitive Substring im Title)
+            max_total: Hard-Cap gegen API-Spam (Standard 2000, max 10000)
+            page_size: Räume pro API-Call (Standard und Max: 1000)
+
+        Returns:
+            Liste aller (gefilterten) Räume, formatiert wie list_rooms()
+        """
+        page_size = min(max(page_size, 1), 1000)
+        max_total = min(max(max_total, 1), 10000)
+        name_lower = (name_contains or "").strip().lower()
+
+        client = self._get_client()
+        params: Dict[str, Any] = {"sortBy": "lastactivity", "max": page_size}
+        if room_type in ("group", "direct"):
+            params["type"] = room_type
+
+        all_rooms: List[dict] = []
+        url: Optional[str] = "/rooms"
+        seen_ids: set = set()
+        page_count = 0
+        max_pages = 50  # Schutz gegen Endlos-Loop bei API-Bugs
+
+        while url and len(all_rooms) < max_total and page_count < max_pages:
+            try:
+                if url.startswith("http"):
+                    # Folge-Seite aus Link-Header (volle URL, keine params)
+                    response = await client.get(url)
+                else:
+                    response = await client.get(url, params=params)
+                    params = {}  # nur erste Anfrage hat params
+                response.raise_for_status()
+                data = response.json()
+            except Exception as e:
+                logger.warning("list_all_rooms Pagination Seite %d abgebrochen: %s",
+                               page_count + 1, e)
+                break
+
+            page_count += 1
+            items = data.get("items", [])
+            if not items:
+                break
+
+            for item in items:
+                rid = item.get("id", "")
+                if not rid or rid in seen_ids:
+                    continue
+                seen_ids.add(rid)
+
+                title = item.get("title", "") or ""
+                if name_lower and name_lower not in title.lower():
+                    continue
+
+                all_rooms.append({
+                    "id": rid,
+                    "title": title,
+                    "type": item.get("type", ""),
+                    "last_activity": item.get("lastActivity", ""),
+                    "created": item.get("created", ""),
+                    "is_locked": item.get("isLocked", False),
+                })
+                if len(all_rooms) >= max_total:
+                    break
+
+            # Next-Page aus Link-Header parsen
+            link_header = response.headers.get("Link", "")
+            url = self._parse_next_link(link_header)
+
+        return all_rooms
+
+    @staticmethod
+    def _parse_next_link(link_header: str) -> Optional[str]:
+        """Extrahiert die rel=next URL aus einem RFC-5988 Link-Header.
+
+        Format: '<https://webexapis.com/v1/rooms?cursor=...>; rel="next"'
+        """
+        if not link_header:
+            return None
+        for part in link_header.split(","):
+            segs = part.strip().split(";")
+            if len(segs) < 2:
+                continue
+            url_part = segs[0].strip()
+            rel_part = ";".join(segs[1:]).strip().lower()
+            if 'rel="next"' in rel_part or "rel=next" in rel_part:
+                if url_part.startswith("<") and url_part.endswith(">"):
+                    return url_part[1:-1]
+        return None
+
+    async def find_person(self, query: str, limit: int = 10) -> List[dict]:
+        """Sucht Personen via Webex /people API.
+
+        Heuristik: enthält query '@' → Email-Suche, sonst displayName-Suche.
+        Webex erlaubt nur EINEN Suchparameter pro Call.
+
+        Args:
+            query: Email oder Name(steil)
+            limit: Max. Treffer (Webex-Default 100)
+
+        Returns:
+            Liste von {id, display_name, emails, primary_email, status}
+        """
+        query = (query or "").strip()
+        if not query:
+            return []
+
+        params: Dict[str, Any] = {"max": min(max(limit, 1), 100)}
+        if "@" in query:
+            params["email"] = query
+        else:
+            params["displayName"] = query
+
+        try:
+            data = await self._request("GET", "/people", params=params)
+        except Exception as e:
+            logger.warning("find_person fehlgeschlagen für '%s': %s", query[:50], e)
+            return []
+
+        results = []
+        for p in data.get("items", []):
+            emails = p.get("emails", []) or []
+            results.append({
+                "id": p.get("id", ""),
+                "display_name": p.get("displayName", ""),
+                "emails": emails,
+                "primary_email": emails[0] if emails else "",
+                "department": p.get("department", ""),
+                "status": p.get("status", ""),
+            })
+        return results
+
+    async def find_direct_room_for_person(self, person_email: str) -> Optional[dict]:
+        """Findet den 1:1-Raum mit einer Person über /messages/direct.
+
+        Webex bindet Direkt-Chats an Personen, nicht an Raum-Listen-Position.
+        Diese Methode findet den Raum auch wenn er Monate inaktiv war.
+
+        Returns:
+            {id, title, type, last_activity, person_email, last_message_at}
+            oder None wenn kein Direkt-Chat existiert.
+        """
+        person_email = (person_email or "").strip()
+        if not person_email:
+            return None
+
+        try:
+            data = await self._request(
+                "GET", "/messages/direct",
+                params={"personEmail": person_email, "max": 1}
+            )
+        except Exception as e:
+            logger.debug("find_direct_room_for_person: keine DMs mit %s: %s",
+                         person_email[:50], e)
+            return None
+
+        items = data.get("items", [])
+        if not items:
+            return None
+        room_id = items[0].get("roomId", "")
+        if not room_id:
+            return None
+
+        # Raum-Metadaten holen
+        try:
+            room = await self._request("GET", f"/rooms/{room_id}")
+            return {
+                "id": room.get("id", ""),
+                "title": room.get("title", ""),
+                "type": room.get("type", "direct"),
+                "last_activity": room.get("lastActivity", ""),
+                "created": room.get("created", ""),
+                "person_email": person_email,
+                "last_message_at": items[0].get("created", ""),
+            }
+        except Exception as e:
+            logger.debug("Raum-Metadaten für %s fehlgeschlagen: %s", room_id[:20], e)
+            # Fallback: minimale Info aus der Message
+            return {
+                "id": room_id,
+                "title": items[0].get("personDisplayName", ""),
+                "type": "direct",
+                "last_activity": items[0].get("created", ""),
+                "person_email": person_email,
+                "last_message_at": items[0].get("created", ""),
+            }
+
     async def get_messages_paginated(
         self,
         room_id: str,
