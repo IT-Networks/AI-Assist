@@ -766,4 +766,182 @@ def register_webex_tools(registry: ToolRegistry) -> int:
     ))
     count += 1
 
+    # ── webex_create_draft ────────────────────────────────────────────────────
+    async def webex_create_draft(**kwargs: Any) -> ToolResult:
+        """Erstellt einen lokalen Webex-Nachrichten-Entwurf - sendet NICHTS."""
+        from app.services.webex_drafts import add_draft
+        try:
+            room_id = (kwargs.get("room_id", "") or "").strip()
+            text = (kwargs.get("text", "") or "").strip()
+
+            if not room_id:
+                return ToolResult(success=False, error="room_id ist erforderlich.")
+            if not text and not kwargs.get("markdown", "").strip():
+                return ToolResult(
+                    success=False,
+                    error="Mindestens 'text' oder 'markdown' muss befüllt sein."
+                )
+
+            # Optional: Raum-Titel für UI mit-persistieren
+            room_title = (kwargs.get("room_title", "") or "").strip()
+            if not room_title:
+                # Best-Effort: Titel aus Webex holen, scheitert lautlos
+                try:
+                    from app.services.webex_client import get_webex_client
+                    client = get_webex_client()
+                    room_data = await client._request("GET", f"/rooms/{room_id}")
+                    room_title = room_data.get("title", "")
+                except Exception:
+                    room_title = ""
+
+            draft = add_draft(
+                room_id=room_id,
+                text=text,
+                room_title=room_title,
+                markdown=(kwargs.get("markdown", "") or "").strip(),
+                parent_id=(kwargs.get("parent_id", "") or "").strip(),
+            )
+
+            return ToolResult(
+                success=True,
+                data={
+                    "draft": draft,
+                    "info": (
+                        "Entwurf lokal gespeichert. Wird NICHT automatisch an Webex "
+                        "gesendet. Verwende webex_list_drafts zum Anzeigen oder "
+                        "webex_delete_draft zum Löschen."
+                    ),
+                }
+            )
+        except Exception as e:
+            return ToolResult(success=False, error=str(e))
+
+    registry.register(Tool(
+        name="webex_create_draft",
+        description=(
+            "Erstellt einen LOKALEN Entwurf einer Webex-Nachricht. SENDET NICHT - der Draft "
+            "wird ausschließlich in einer lokalen JSON-Datei (webex_drafts.json) gespeichert "
+            "und kann später vom Nutzer manuell geprüft, bearbeitet oder gelöscht werden.\n\n"
+            "WANN NUTZEN: Wenn du eine Antwort/Nachricht für Webex VORBEREITEN sollst aber "
+            "der Nutzer sie selbst kontrollieren/abschicken will. Niemals zum direkten Senden!\n\n"
+            "PARAMETER: room_id ist Pflicht (per webex_find_chat oder webex_list_rooms holen). "
+            "Mindestens 'text' oder 'markdown' muss befüllt sein. parent_id für Thread-Antworten."
+        ),
+        category=ToolCategory.SEARCH,
+        # Bewusst KEIN is_write_operation=True: schreibt nur lokale Datei, keine
+        # externe Wirkung. Bestätigungs-Dialog wäre hier kontraproduktiv.
+        parameters=[
+            ToolParameter(
+                name="room_id",
+                type="string",
+                description="Webex Room-ID (aus webex_find_chat / webex_list_rooms)",
+                required=True,
+            ),
+            ToolParameter(
+                name="text",
+                type="string",
+                description="Plaintext der Nachricht",
+                required=True,
+            ),
+            ToolParameter(
+                name="markdown",
+                type="string",
+                description=(
+                    "Optionale Markdown-Variante (Webex rendert Markdown bevorzugt). "
+                    "Wenn gesetzt, sollte 'text' zusätzlich als Fallback gefüllt sein."
+                ),
+                required=False,
+            ),
+            ToolParameter(
+                name="parent_id",
+                type="string",
+                description="Optional: Message-ID auf die geantwortet wird (Thread-Reply)",
+                required=False,
+            ),
+            ToolParameter(
+                name="room_title",
+                type="string",
+                description="Optional: Raumname (wird sonst von Webex nachgeladen)",
+                required=False,
+            ),
+        ],
+        handler=webex_create_draft,
+    ))
+    count += 1
+
+    # ── webex_list_drafts ─────────────────────────────────────────────────────
+    async def webex_list_drafts(**kwargs: Any) -> ToolResult:
+        """Listet alle lokal gespeicherten Webex-Drafts."""
+        from app.services.webex_drafts import list_drafts
+        try:
+            room_id = (kwargs.get("room_id", "") or "").strip()
+            drafts = list_drafts(room_id=room_id)
+            return ToolResult(
+                success=True,
+                data={"drafts": drafts, "count": len(drafts), "room_filter": room_id}
+            )
+        except Exception as e:
+            return ToolResult(success=False, error=str(e))
+
+    registry.register(Tool(
+        name="webex_list_drafts",
+        description=(
+            "Listet alle lokal gespeicherten Webex-Nachrichten-Entwürfe (sortiert: neueste "
+            "zuerst). Drafts wurden NIE an Webex gesendet - reiner lokaler State.\n\n"
+            "Optional 'room_id' setzen um nur Drafts eines bestimmten Raums zu sehen."
+        ),
+        category=ToolCategory.SEARCH,
+        parameters=[
+            ToolParameter(
+                name="room_id",
+                type="string",
+                description="Optional: nur Drafts dieses Raums anzeigen",
+                required=False,
+            ),
+        ],
+        handler=webex_list_drafts,
+    ))
+    count += 1
+
+    # ── webex_delete_draft ────────────────────────────────────────────────────
+    async def webex_delete_draft(**kwargs: Any) -> ToolResult:
+        """Löscht einen lokalen Webex-Draft per ID."""
+        from app.services.webex_drafts import delete_draft
+        try:
+            draft_id = (kwargs.get("draft_id", "") or "").strip()
+            if not draft_id:
+                return ToolResult(success=False, error="draft_id ist erforderlich.")
+            ok = delete_draft(draft_id)
+            if not ok:
+                return ToolResult(
+                    success=False,
+                    error=f"Draft mit id={draft_id} nicht gefunden."
+                )
+            return ToolResult(
+                success=True,
+                data={"deleted": True, "draft_id": draft_id}
+            )
+        except Exception as e:
+            return ToolResult(success=False, error=str(e))
+
+    registry.register(Tool(
+        name="webex_delete_draft",
+        description=(
+            "Löscht einen lokalen Webex-Draft (per draft_id aus webex_list_drafts). "
+            "Da Drafts NIE an Webex gesendet wurden, betrifft das Löschen nur den lokalen Store."
+        ),
+        category=ToolCategory.SEARCH,
+        is_write_operation=True,
+        parameters=[
+            ToolParameter(
+                name="draft_id",
+                type="string",
+                description="UUID des Drafts (aus webex_list_drafts)",
+                required=True,
+            ),
+        ],
+        handler=webex_delete_draft,
+    ))
+    count += 1
+
     return count
