@@ -383,6 +383,78 @@ class WebexClient:
         data = await self._request("GET", "/messages", params=params)
         return self._format_messages(data.get("items", []))
 
+    async def get_messages_paginated(
+        self,
+        room_id: str,
+        max_pages: int = 10,
+        page_size: int = 100,
+        since: str = "",
+        before: str = "",
+    ) -> List[dict]:
+        """Lädt Nachrichten eines Raums über mehrere Seiten (Pagination).
+
+        Webex API gibt Nachrichten in absteigender Reihenfolge zurück (neueste zuerst).
+        Diese Methode paginiert via `before`-Parameter rückwärts in die Vergangenheit,
+        bis entweder `max_pages` erreicht ist, der Raum keine älteren Nachrichten mehr
+        hat, oder eine Nachricht älter als `since` gefunden wird.
+
+        Args:
+            room_id: Webex Room-ID
+            max_pages: Maximale Anzahl Seiten (Schutz vor Endlos-Paginierung)
+            page_size: Nachrichten pro Seite (Webex-Limit: 100)
+            since: ISO-Datum (z.B. "2026-02-01") - Stop wenn ältere Msgs erreicht werden
+            before: ISO-Datum oder Message-ID als Startpunkt (optional)
+
+        Returns:
+            Liste aller geladenen Nachrichten (formatiert), absteigend nach Datum
+        """
+        page_size = min(max(page_size, 1), 100)
+        max_pages = max(1, min(max_pages, 50))
+
+        all_messages: List[dict] = []
+        cursor = before
+        seen_ids: set = set()
+
+        for page_idx in range(max_pages):
+            params: Dict[str, Any] = {"roomId": room_id, "max": page_size}
+            if cursor:
+                params["before"] = cursor
+
+            try:
+                data = await self._request("GET", "/messages", params=params)
+            except Exception as e:
+                logger.warning("Webex Pagination Seite %d abgebrochen: %s", page_idx + 1, e)
+                break
+
+            items = data.get("items", [])
+            if not items:
+                break
+
+            stop_due_to_since = False
+            for item in items:
+                msg_id = item.get("id", "")
+                if msg_id in seen_ids:
+                    continue
+                seen_ids.add(msg_id)
+
+                created = item.get("created", "")
+                if since and created and created < since:
+                    stop_due_to_since = True
+                    continue
+
+                all_messages.append(self._format_message(item))
+
+            if stop_due_to_since:
+                break
+
+            # Nächste Seite: cursor = ältester Zeitstempel dieser Seite
+            oldest_created = items[-1].get("created", "")
+            if not oldest_created or oldest_created == cursor:
+                break
+            cursor = oldest_created
+
+        return all_messages
+
     async def get_direct_messages(self, person_email: str) -> List[dict]:
         """GET /messages/direct?personEmail=... - Direktnachrichten."""
         data = await self._request(
