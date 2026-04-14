@@ -33,17 +33,22 @@ class TaskEventType:
     CLARIFICATION_NEEDED = "task_clarification_needed"
 
 
-async def should_use_task_decomposition(user_message: str) -> bool:
+async def should_use_task_decomposition(
+    user_message: str,
+    intent: str = "",
+) -> bool:
     """
     Entscheidet ob Task-Decomposition verwendet werden soll.
 
     Kriterien:
     - Feature ist enabled
-    - Message ist lang genug (nicht triviale Anfragen)
+    - Intent ist "complex" (wenn Intent-Classifier aktiv)
+    - Complexity-Score >= 0.4 (semantische Heuristik)
     - Message enthaelt keine Skip-Marker (z.B. [CONTINUE])
 
     Args:
         user_message: Die User-Nachricht
+        intent: Intent-Klassifikation ("direct", "lookup", "guided", "complex")
 
     Returns:
         True wenn Task-Decomposition verwendet werden soll
@@ -55,12 +60,81 @@ async def should_use_task_decomposition(user_message: str) -> bool:
     if should_skip_decomposition(user_message):
         return False
 
+    # Wenn Intent-Classifier aktiv: nur bei COMPLEX-Intent
+    if intent and intent != "complex":
+        return False
+
     # Mindestlaenge pruefen (triviale Anfragen nicht zerlegen)
-    min_length = 30
+    min_length = 60
     if len(user_message.strip()) < min_length:
         return False
 
+    # Complexity-Score pruefen (semantische Heuristik)
+    score = _compute_complexity_score(user_message)
+    if score < 0.4:
+        logger.debug(
+            f"[TaskIntegration] Skipping decomposition: complexity={score:.2f} < 0.4"
+        )
+        return False
+
     return True
+
+
+def _compute_complexity_score(message: str) -> float:
+    """
+    Berechnet einen Komplexitaets-Score fuer die Nachricht.
+
+    Returns:
+        Score zwischen 0.0 und 1.0. Ab 0.4 wird Task-Decomposition empfohlen.
+    """
+    import re as _re
+
+    msg = message.lower()
+    score = 0.0
+
+    # Laenge (normalisiert, max 0.25)
+    score += min(len(msg) / 600, 0.25)
+
+    # Multi-Task-Indikatoren
+    multi_markers = [
+        "und dann", "außerdem", "zusätzlich", "danach", "als nächstes",
+        ". dann ", "erstens", "zweitens", "drittens",
+        "and then", "additionally", "furthermore", "after that",
+        ". then ", "1.", "2.", "3.",
+    ]
+    multi_count = 0
+    for marker in multi_markers:
+        if marker in msg:
+            score += 0.15
+            multi_count += 1
+
+    # "und" als einfacher Verkettungs-Indikator (schwaecher als Multi-Marker)
+    und_count = msg.count(" und ") + msg.count(" and ")
+    if und_count >= 1 and multi_count >= 1:
+        # Multi-Marker + "und" = klarer Multi-Step
+        score += 0.1
+
+    # System-Breite (mehrere Systeme erwaehnt)
+    system_markers = [
+        "frontend", "backend", "datenbank", "database", "api",
+        "deployment", "ci/cd", "docker", "kubernetes",
+    ]
+    systems = sum(1 for m in system_markers if m in msg)
+    if systems >= 2:
+        score += 0.2
+
+    # Satzanzahl als Proxy
+    sentences = len(_re.split(r'[.!?]\s+', msg))
+    if sentences >= 4:
+        score += 0.1
+    elif sentences >= 3:
+        score += 0.05
+
+    # "X und Y und Z" — 3+ items via "und"/"and"
+    if _re.search(r'\w+\s+und\s+\w+\s+und\s+\w+', msg, _re.IGNORECASE):
+        score += 0.15
+
+    return min(score, 1.0)
 
 
 async def process_with_tasks(

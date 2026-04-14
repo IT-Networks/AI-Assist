@@ -546,6 +546,32 @@ class AgentOrchestrator:
             state.web_fallback_approved = False
         # ─────────────────────────────────────────────────────────────────────
 
+        # ── Intent Classification Gate ────────────────────────────────────
+        # Classifies user intent BEFORE Enhancement/TaskDecomp to avoid
+        # premature tool calls and unnecessary pipeline overhead.
+        from app.agent.orchestration.intent_classifier import classify_intent, Intent
+        intent_result = None
+        if not is_continue and not is_continue_enhanced and not forced_capability:
+            intent_result = classify_intent(user_message)
+            logger.info(
+                f"[agent] Intent: {intent_result.intent.value} "
+                f"(conf={intent_result.confidence:.2f}, "
+                f"enhance={intent_result.pipeline.enhancement}, "
+                f"decomp={intent_result.pipeline.task_decomposition})"
+            )
+            yield AgentEvent(AgentEventType.INTENT_CLASSIFIED, {
+                "intent": intent_result.intent.value,
+                "confidence": intent_result.confidence,
+                "reasoning": intent_result.reasoning,
+                "pipeline": {
+                    "enhancement": intent_result.pipeline.enhancement,
+                    "task_decomposition": intent_result.pipeline.task_decomposition,
+                    "first_call_with_tools": intent_result.pipeline.first_call_with_tools,
+                    "tool_restriction": intent_result.pipeline.tool_restriction,
+                }
+            })
+        # ─────────────────────────────────────────────────────────────────────
+
         # ── MCP Prompt Enhancement Phase ────────────────────────────────────
         # Sammelt Kontext via MCP vor Task-Decomposition
         enriched_context: Optional[str] = None
@@ -598,8 +624,9 @@ class AgentOrchestrator:
                     event_callback=self._emit_mcp_event  # FIX: Enable live event streaming
                 )
 
-                # Prüfen ob Enhancement sinnvoll
-                if enhancer.detector.should_enhance(user_message):
+                # Prüfen ob Enhancement sinnvoll (Intent-Gate: nur bei COMPLEX)
+                _intent_value = intent_result.intent.value if intent_result else ""
+                if enhancer.detector.should_enhance(user_message, intent=_intent_value):
                     logger.info("[agent] Starting MCP prompt enhancement")
 
                     # ── TaskTracker: Kontext-Sammlung Task ──────────────────────
@@ -786,7 +813,8 @@ class AgentOrchestrator:
                     TaskEventType
                 )
 
-                if await should_use_task_decomposition(user_message):
+                _intent_for_decomp = intent_result.intent.value if intent_result else ""
+                if await should_use_task_decomposition(user_message, intent=_intent_for_decomp):
                     logger.info("[agent] Using Task-Decomposition for complex query")
 
                     # WICHTIG: Event SOFORT senden bevor LLM-Call blockiert!
@@ -979,6 +1007,29 @@ class AgentOrchestrator:
                 "Lokale Tools wie read_file oder search_code sind NICHT verfügbar.\n"
                 "Die PR-Analyse erscheint automatisch im Workspace-Panel."
             )
+
+        # ── Intent-basierte Tool-Filterung ────────────────────────────────
+        # DIRECT intent: Keine Tools im ersten Call
+        # LOOKUP intent: Nur read-only Tools
+        # GUIDED/COMPLEX: Alle Tools (je nach Modus)
+        _all_tool_schemas = list(tool_schemas)  # Vollständige Liste aufbewahren
+        if intent_result and not pr_url:
+            restriction = intent_result.pipeline.tool_restriction
+            if restriction == "none":
+                # DIRECT: Erster Call komplett ohne Tools
+                tool_schemas = []
+                logger.debug("[agent] Intent DIRECT: first call without tools")
+            elif restriction == "read_only":
+                # LOOKUP: Nur read-only Tools
+                tool_schemas = [
+                    t for t in tool_schemas
+                    if t.get("function", {}).get("name", "").startswith((
+                        "search_", "read_", "get_", "list_", "describe_",
+                        "grep_", "glob_", "trace_", "git_", "github_",
+                    ))
+                ]
+                logger.debug(f"[agent] Intent LOOKUP: {len(tool_schemas)} read-only tools (of {len(_all_tool_schemas)})")
+        # ─────────────────────────────────────────────────────────────────────
 
         # Agent-Instruktionen (from context_builder module)
         agent_instructions = _build_agent_instructions(state.mode, state.plan_approved)
@@ -1295,6 +1346,11 @@ class AgentOrchestrator:
             return  # End here - no normal agent loop
 
         # Agent-Loop
+        # Track whether tools were restricted for intent-based first call
+        _tools_restricted_for_intent = (
+            intent_result is not None
+            and intent_result.pipeline.tool_restriction in ("none", "read_only")
+        )
         has_used_tools = False
         # Token-Tracking für diese Anfrage zurücksetzen
         state.current_usage = TokenUsage()
@@ -1361,6 +1417,13 @@ class AgentOrchestrator:
                 # Tool-Budget: Neue Iteration starten
                 if state.tool_budget and iteration > 0:
                     state.tool_budget.next_iteration()
+
+                # Intent-Gate: Restore full tools after first iteration
+                # If first call was restricted (DIRECT/LOOKUP), subsequent calls get all tools
+                if iteration == 1 and _tools_restricted_for_intent:
+                    tool_schemas = _all_tool_schemas
+                    _tools_restricted_for_intent = False
+                    logger.debug(f"[agent] Restored full tool set: {len(tool_schemas)} tools")
 
                 # === Kontext-Status prüfen und Summarizer aktivieren ===
                 current_model = model or settings.llm.default_model

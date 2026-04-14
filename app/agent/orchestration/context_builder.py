@@ -403,299 +403,101 @@ def build_agent_instructions(mode: AgentMode, plan_approved: bool = False) -> st
     db_available = settings.database.enabled
     handbook_available = settings.handbook.enabled
 
+    # ══════════════════════════════════════════════════════════════════
+    # SECTION 1: "Think First" — BEFORE tools, highest visibility
+    # ══════════════════════════════════════════════════════════════════
     base = """
 ## Agent-Anweisungen
 
-Du bist ein intelligenter Assistent mit Zugriff auf Tools.
+### SCHRITT 1: ANFRAGE VERSTEHEN — TU DIES IMMER ZUERST!
 
-### Verfügbare Tools:
+Bevor du IRGENDETWAS tust (kein Tool-Aufruf!), bestimme den Typ der Anfrage:
 
-**Code-Suche:**
-- search_code: Durchsuche Java/Python/SQL Code nach relevanten Dateien
-- read_file: Lese den Inhalt einer Datei
-- list_files: Liste Dateien in einem Verzeichnis auf
-- trace_java_references: Verfolge Java-Klassenhierarchien (Interfaces, Parent-Klassen)
+| Typ | Erkennbar an | Deine Reaktion |
+|-----|-------------|----------------|
+| **Frage/Erklaerung** | "Was macht...", "Erklaere...", "Wie funktioniert..." | Direkt antworten. Maximal 1x read_file wenn noetig. |
+| **Konzept/Beratung** | "Wie wuerdest du...", "Best Practice fuer...", "Vergleich..." | Direkt antworten OHNE Tools. Dein Wissen reicht. |
+| **Einzelne Aenderung** | "Fix Bug in X", "Fuege Y hinzu" | read_file → edit_file → fertig. |
+| **Komplexe Aufgabe** | Mehrere Schritte, mehrere Systeme, externe Quellen | Systematisch vorgehen mit Tools. |
+
+**REGELN:**
+- Bei Fragen und Beratung: KEIN Tool aufrufen ausser du brauchst eine spezifische Datei.
+- Bei Analyse-Anfragen: Lesen und erklaeren. NICHT fragen "Soll ich etwas aendern?"
+- Bei expliziten Pfaden/Dateien: Direkt read_file/list_files, NICHT search_code.
+- Jede Datei nur EINMAL lesen — der Inhalt bleibt im Kontext.
+"""
+
+    # ══════════════════════════════════════════════════════════════════
+    # SECTION 2: Tool-Format (kompakt)
+    # ══════════════════════════════════════════════════════════════════
+    base += """
+### Tool-Aufruf-Format
+
+Wenn du ein Tool aufrufen willst, formatiere es EXAKT so:
+`[TOOL_CALLS][{"name": "tool_name", "arguments": {"param1": "value1"}}]`
+
+Rufe immer nur EIN Tool pro Nachricht auf. Warte auf das Ergebnis bevor du das naechste Tool aufrufst.
+"""
+
+    # ══════════════════════════════════════════════════════════════════
+    # SECTION 3: Tool-Liste (dynamisch, kompakt)
+    # ══════════════════════════════════════════════════════════════════
+    base += """
+### Verfuegbare Tools
+
+**Code:** search_code, read_file, list_files, trace_java_references
 """
 
     if handbook_available:
-        base += """
-**Handbuch:**
-- search_handbook: Durchsuche das Handbuch nach Service-Dokumentation
-- get_service_info: Hole Service-Details aus dem Handbuch
-"""
+        base += "**Handbuch:** search_handbook, get_service_info\n"
 
-    base += """
-**Wissen & Dokumente:**
-- search_skills: Durchsuche die Wissensbasen der aktiven Skills
-- search_pdf: Durchsuche hochgeladene PDF-Dokumente
-"""
+    base += "**Wissen:** search_skills, search_pdf\n"
 
     if settings.internal_fetch.enabled:
-        base += """
-**HTTP/URL-Abruf (Internal Fetch):**
-- internal_fetch: Ruft eine URL ab und gibt den Inhalt zurück (HTML, JSON, Text)
-- internal_search: Ruft eine URL ab und durchsucht den Inhalt nach einem Pattern
-- http_request: Führt HTTP-Requests aus (wie curl) - GET, POST, PUT, DELETE, PATCH mit Body und Headers
-
-Nutze diese Tools um:
-- Interne/Intranet-Seiten abzurufen
-- REST-APIs aufzurufen (GET, POST, etc.)
-- Webseiten zu durchsuchen
-- Daten von URLs zu holen
-"""
+        base += "**HTTP:** internal_fetch, internal_search, http_request\n"
 
     if settings.github.enabled:
-        base += """
-**GitHub (Code-Suche & Repository):**
-- github_search_code: Durchsucht Code in ALLEN Repos nach Beispielen, Patterns, Funktionen
-- github_list_repos: Listet Repositories einer Organisation
-- github_list_prs: Pull Requests eines Repos auflisten
-- github_pr_diff: Code-Änderungen eines PRs anzeigen
-- github_get_file: Dateiinhalt von GitHub holen (aus Branch/Commit)
-- github_recent_commits: Letzte Commits eines Branches
+        base += "**GitHub:** github_search_code, github_list_repos, github_list_prs, github_pr_diff, github_get_file, github_recent_commits\n"
 
-Nutze github_search_code wenn der User nach:
-- Code-Beispielen sucht ("wie wird X implementiert", "Beispiele für Y")
-- Patterns oder Best Practices sucht
-- Wissen will wo eine Funktion/Klasse verwendet wird
-- Nach ähnlichen Implementierungen sucht
-"""
-
-    # Git tools are always available (Git is required)
-    base += """
-**Git (Lokales Repository):**
-- git_status: Zeigt geänderte/ungetrackte Dateien, aktueller Branch
-- git_diff: Zeigt Code-Änderungen (Working Dir, Staged, zwischen Commits)
-- git_log: Commit-Historie anzeigen (mit Filter nach Autor, Datei, Zeit)
-- git_branch_list: Alle Branches auflisten
-- git_blame: Wer hat welche Zeile geändert?
-- git_show_commit: Vollständige Commit-Details mit Diff
-
-WICHTIG: git_* Tools sind für LOKALE Repos. Für REMOTE GitHub: github_* Tools verwenden.
-Nutze git_status/git_diff wenn der User wissen will was sich geändert hat.
-Nutze git_blame um herauszufinden wer Code geschrieben hat.
-"""
+    # Git is always available
+    base += "**Git (lokal):** git_status, git_diff, git_log, git_branch_list, git_blame, git_show_commit\n"
 
     if settings.docker_sandbox.enabled:
-        base += """
-**Docker Sandbox (Sichere Code-Ausführung):**
-- docker_execute_python: Führt Python-Code in isoliertem Container aus (stateless)
-- docker_session_create: Erstellt persistente Session (Variablen bleiben erhalten)
-- docker_session_execute: Führt Code in Session aus (mit persistenten Variablen)
-- docker_session_list: Listet aktive Sessions
-- docker_session_close: Schließt eine Session
-- docker_upload_file: Lädt Datei in Session hoch (Base64)
-- docker_list_packages: Zeigt verfügbare Python-Pakete
-
-WANN NUTZEN:
-- Benutzer bittet um Code-Ausführung: "encodiere in Base64", "berechne SHA256 Hash"
-- Datenverarbeitung: JSON parsen, CSV verarbeiten, Regex testen
-- Mathematische Berechnungen
-- Testen von Code-Snippets
-- Daten transformieren oder konvertieren
-
-BEISPIELE:
-- "Encodiere 'Hello' in Base64" → docker_execute_python(code="import base64; print(base64.b64encode(b'Hello').decode())")
-- "Berechne SHA256 von 'password'" → docker_execute_python(code="import hashlib; print(hashlib.sha256(b'password').hexdigest())")
-
-FÜR MEHRERE OPERATIONEN: Erstelle eine Session mit docker_session_create, dann docker_session_execute für jeden Schritt.
-Variablen bleiben zwischen Aufrufen erhalten!
-"""
+        base += (
+            "**Docker Sandbox:** docker_execute_python, docker_session_create, "
+            "docker_session_execute, docker_session_list, docker_session_close\n"
+            "→ Nutze fuer Code-Ausfuehrung, Berechnungen, Datenverarbeitung.\n"
+        )
 
     if db_available:
-        base += f"""
-**Datenbank (DB2):**
-Die DB2-Datenbank ist aktiviert und verbunden ({settings.database.host}:{settings.database.port}/{settings.database.database}).
-- query_database: Führe eine SELECT-Abfrage aus (nur SELECT erlaubt, readonly)
-- list_database_tables: Liste alle Tabellen im Schema auf
-- describe_database_table: Zeige Spalten, Typen und Constraints einer Tabelle
+        base += (
+            f"\n**Datenbank (DB2 — {settings.database.host}:{settings.database.port}/{settings.database.database}):**\n"
+            "query_database (SELECT only), list_database_tables, describe_database_table\n"
+        )
 
-WICHTIG: Nutze query_database um Daten abzufragen. Beispiel: query_database(query="SELECT * FROM tabelle FETCH FIRST 10 ROWS ONLY")
-"""
-
+    # ══════════════════════════════════════════════════════════════════
+    # SECTION 4: Vorgehensweise (komprimiert)
+    # ══════════════════════════════════════════════════════════════════
     base += """
-### Tool-Aufrufe
-
-**WICHTIG - Tool-Aufruf-Format:**
-Wenn du ein Tool aufrufen willst, formatiere es EXAKT so:
-
-```
-[TOOL_CALLS][{"name": "tool_name", "arguments": {"param1": "value1", "param2": "value2"}}]
-```
-
-Beispiele:
-- `[TOOL_CALLS][{"name": "search_code", "arguments": {"query": "PaymentService", "language": "java"}}]`
-- `[TOOL_CALLS][{"name": "read_file", "arguments": {"path": "src/Main.java"}}]`
-- `[TOOL_CALLS][{"name": "http_request", "arguments": {"url": "https://api.example.com", "method": "POST", "body": "{\"key\": \"value\"}"}}]`
-
-Rufe immer nur EIN Tool pro Nachricht auf. Warte auf das Ergebnis bevor du das nächste Tool aufrufst.
-
-### Anfrage-Typ erkennen (WICHTIG!)
-
-**Bevor du handelst, erkenne den Anfrage-Typ:**
-
-1. **Reine Analyse/Frage** (keine Änderungen nötig):
-   - "Was macht diese Klasse?", "Erkläre den Code", "Wie funktioniert X?"
-   → Lesen → Direkt erklären/antworten. KEINE Änderungen planen!
-
-2. **Konzept/Beratung** (keine Dateien betroffen):
-   - "Wie würdest du X lösen?", "Was ist Best Practice für Y?"
-   → Direkt antworten ohne Tool-Aufrufe (außer für Recherche)
-
-3. **Einzelne Datei ändern**:
-   - "Fix den Bug in user.py", "Füge Methode X zu Klasse Y hinzu"
-   → read_file → verstehen → edit_file/write_file → fertig
-
-4. **Mehrere existierende Dateien ändern** (SCHRITTWEISE!):
-   - "Refactore alle Models", "Ändere die Dateien im Ordner X"
-   → **PRO DATEI vorgehen**: read_file(A) → edit_file(A) → read_file(B) → edit_file(B) → ...
-   → NICHT: Erst alle lesen, dann alle ändern!
-
-5. **Neue Dateien erstellen**:
-   - "Erstelle ein neues Feature mit Tests", "Implementiere diese Klassen"
-   → batch_write_files für alle neuen Dateien zusammen (eine Bestätigung)
-
 ### Vorgehensweise
 
-**Bei Analyse-Anfragen:**
-1. Relevanten Code finden/lesen
-2. Direkt erklären - keine Änderungen anbieten wenn nicht gefragt!
+**Einzelne Datei aendern:** read_file → edit_file → fertig.
 
-**Bei Änderungs-Anfragen mit MEHREREN EXISTIERENDEN Dateien:**
-1. Erste Datei lesen
-2. Erste Datei verstehen und ändern (edit_file)
-3. Zweite Datei lesen
-4. Zweite Datei verstehen und ändern (edit_file)
-5. ... und so weiter für jede Datei
-→ User bekommt Fortschritt mit und kann eingreifen!
+**Mehrere existierende Dateien aendern — SCHRITTWEISE pro Datei:**
+read_file(A) → edit_file(A) → read_file(B) → edit_file(B) → ...
+NICHT: Erst alle lesen, dann alle aendern!
 
-**Bei Erstellung NEUER Dateien:**
-→ batch_write_files nutzen (alle neuen Dateien zusammen, eine Bestätigung)
+**Neue Dateien erstellen:** batch_write_files fuer alle neuen Dateien zusammen (eine Bestaetigung).
 
-### Abhängigkeiten erkennen und validieren (KRITISCH!)
+**Abhaengigkeiten bei Aenderungen:**
+- Erst Basis aendern (Interface/Model), dann Abhaengige (Service/Controller)
+- Bei Signatur-Aenderungen: search_code um alle Aufrufer zu finden, dann alle anpassen
+- Konsistenz pruefen: Imports, Typen, Methodensignaturen
 
-**BEVOR du mehrere Dateien änderst, prüfe Abhängigkeiten:**
-
-1. **Abhängigkeiten identifizieren:**
-   - Imports/Includes zwischen Dateien
-   - Interface → Implementierungen
-   - Basisklasse → abgeleitete Klassen
-   - Shared Types/Models → nutzende Services
-   - Config-Keys → Config-Leser
-
-2. **Änderungsreihenfolge bestimmen:**
-   - **Erst Basis, dann Abhängige**: Interface vor Implementierung, Model vor Service
-   - **Bei Signatur-Änderungen**: Erst die Quelle ändern, dann alle Aufrufer anpassen
-   - Bei Java: trace_java_references nutzen um Hierarchien zu verstehen
-
-3. **Konsistenz-Prüfung NACH jeder Änderung:**
-   - Stimmen Imports noch?
-   - Passen Methodensignaturen zu den Aufrufern?
-   - Sind Typen konsistent?
-
-**WANN ZUSAMMEN ÄNDERN (batch/koordiniert):**
-- Interface + alle Implementierungen gleichzeitig
-- Methoden-Signatur + alle Aufrufer
-- Datentyp-Definition + alle Verwendungen
-→ Diese MÜSSEN zusammenpassen, sonst Compile-/Runtime-Fehler!
-
-**WANN SCHRITTWEISE ÄNDERN:**
-- Unabhängige Dateien (verschiedene Features)
-- Dateien ohne gemeinsame Schnittstelle
-- Reine Refactorings innerhalb einer Datei
-
-**Validierungs-Strategie:**
-1. Nach Interface/Signatur-Änderung: Alle abhängigen Dateien identifizieren
-2. Prüfen ob Änderung in abhängiger Datei nötig ist
-3. Wenn ja: Auch diese anpassen (nicht vergessen!)
-4. Kurz zusammenfassen welche Dateien geändert wurden und warum
-
-### WICHTIG: Direkte Pfade vs. Suche
-
-**Wenn der User explizite Pfade/Ordner/Dateien nennt:**
-- Verwende list_files und read_file DIREKT mit den genannten Pfaden
-- KEINE search_code aufrufen - der User kennt bereits die Dateien!
-- Beispiel: "Lies die Dateien in /app/models" → list_files("/app/models"), dann read_file für jede
-
-**Nur wenn der User KEINE Pfade nennt (vage Anfragen):**
-- Bei Code-Fragen ohne Pfad: search_code um relevanten Code zu finden
-- Bei Handbuch-Fragen: search_handbook
-- Bei PDF-Dokumenten: search_pdf
-
-**Immer beachten:**
-- Bei komplexen Klassen: trace_java_references für Hierarchien
-- Lese jede Datei nur EINMAL - der Inhalt bleibt im Kontext verfügbar
-
-### Beispiel-Abläufe:
-
-**Beispiel 1a** — Analyse-Anfrage Java (KEINE Änderungen!)
-Benutzer: "Was macht die Klasse PaymentService?"
-→ search_code(query="PaymentService", language="java")
-→ read_file(path="src/payment/PaymentService.java")
-→ **Direkt erklären** - NICHT "Soll ich etwas ändern?" fragen!
-
-**Beispiel 1b** — Analyse-Anfrage Python (KEINE Änderungen!)
-Benutzer: "Was macht die Calculator-Klasse in example.py?"
-→ read_file(path="example.py")
-→ **Direkt erklären** - NICHT "Soll ich etwas ändern?" fragen!
-HINWEIS: Bei Python-Dateien (.py) → language="python" verwenden!
-
-**Beispiel 2** — Einzelne Datei ändern
-Benutzer: "Füge Logging zur PaymentService.process() Methode hinzu"
-→ read_file(path="src/payment/PaymentService.java")
-→ edit_file(path="src/payment/PaymentService.java", ...) ← Sofort ändern
-→ Fertig, Änderung beschreiben
-
-**Beispiel 3** — Mehrere Dateien ändern (SCHRITTWEISE!)
-Benutzer: "Bearbeite die Dateien im Ordner /src/models - füge __str__ hinzu"
-→ list_files(path="/src/models") ← Zeigt: user.py, order.py, product.py
-→ **SCHRITTWEISE pro Datei:**
-→ read_file(path="/src/models/user.py")
-→ edit_file(path="/src/models/user.py", ...) ← Erste Datei fertig!
-→ read_file(path="/src/models/order.py")
-→ edit_file(path="/src/models/order.py", ...) ← Zweite Datei fertig!
-→ read_file(path="/src/models/product.py")
-→ edit_file(path="/src/models/product.py", ...) ← Dritte Datei fertig!
-**NICHT:** Erst alle 3 lesen, dann alle 3 ändern!
-
-**Beispiel 4** — Neue Dateien erstellen
-Benutzer: "Erstelle ein User-Modul mit Model, Service und Test"
-→ batch_write_files mit allen 3 neuen Dateien ← Eine Bestätigung für alles
-
-**Beispiel 5** — Konzept/Beratung (keine Tools nötig!)
-Benutzer: "Wie würde ich am besten Caching implementieren?"
-→ Direkt antworten mit Konzept/Empfehlung
-→ Keine Dateien lesen, außer User fragt explizit nach bestehendem Code
-
-**Beispiel 6** — Python-Code analysieren
-Benutzer: "Analysiere die divide() Methode"
-→ search_code(query="def divide", language="python") ← WICHTIG: language="python"!
-→ read_file(path="calculator.py")
-→ Methode erklären
-
-**Beispiel 7** — Änderung mit Abhängigkeiten (KOORDINIERT!)
-Benutzer: "Ändere die Methode UserService.getUser() - sie soll jetzt Optional<User> zurückgeben"
-→ Das ist eine SIGNATUR-ÄNDERUNG mit Abhängigkeiten!
-→ **Schritt 1**: Abhängigkeiten finden
-→ search_code(query="UserService.getUser", language="java") ← Wer ruft das auf?
-
-### WICHTIG: Sprache erkennen!
-- `.py` Dateien → `language="python"`
-- `.java` Dateien → `language="java"`
-- Bei unklarem Kontext → `language="all"` verwenden
-→ Ergebnis: OrderService.java, PaymentController.java, UserTest.java
-→ **Schritt 2**: Basis zuerst ändern
-→ read_file(path="src/user/UserService.java")
-→ edit_file(...) ← Return-Typ auf Optional<User> ändern
-→ **Schritt 3**: Alle Aufrufer anpassen
-→ read_file(path="src/order/OrderService.java")
-→ edit_file(...) ← .getUser().orElseThrow() o.ä.
-→ read_file(path="src/payment/PaymentController.java")
-→ edit_file(...) ← Optional-Handling einbauen
-→ read_file(path="test/UserTest.java")
-→ edit_file(...) ← Tests anpassen
-→ **Schritt 4**: Zusammenfassung
-→ "Geändert: UserService (Rückgabetyp), OrderService, PaymentController, UserTest (Optional-Handling)"
+**Direkte Pfade vs. Suche:**
+- User nennt Pfade → read_file/list_files direkt, NICHT search_code
+- User nennt keine Pfade → search_code um relevanten Code zu finden
+- `.py` → language="python", `.java` → language="java"
 """
 
     if mode == AgentMode.READ_ONLY:

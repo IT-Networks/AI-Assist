@@ -296,41 +296,48 @@ class EnhancementDetector:
     Erkennt ob und welche Art von Kontext-Anreicherung sinnvoll ist.
     """
 
-    # Keywords für verschiedene Enhancement-Typen
-    RESEARCH_TRIGGERS = [
-        # Deutsch
-        "wiki", "dokumentation", "handbuch", "confluence", "readme",
-        "wie beschrieben", "laut", "gemäß", "nach vorlage", "siehe",
+    # STRONG triggers: Each one alone is enough to trigger enhancement
+    STRONG_RESEARCH_TRIGGERS = [
+        # Deutsch - explizite Quellreferenzen
+        "wiki", "confluence", "handbuch", "dokumentation", "readme",
+        "laut", "gemäß", "nach vorlage", "siehe", "wie beschrieben",
+        # Englisch
+        "documentation", "as described", "according to", "as specified",
+    ]
+
+    STRONG_SEQUENTIAL_TRIGGERS = [
+        # Starke Debug-Signale
+        "stacktrace", "traceback", "root cause", "ursache",
+        "exception", "funktioniert nicht", "geht nicht",
+        "doesn't work", "broken",
+    ]
+
+    # WEAK triggers: Need >= 2 matches to trigger enhancement
+    WEAK_RESEARCH_TRIGGERS = [
         "basierend auf", "entsprechend", "wie in",
-        # Englisch
-        "documentation", "as described", "according to", "based on",
-        "as specified", "per the"
+        "based on", "per the",
     ]
 
-    SEQUENTIAL_TRIGGERS = [
-        # Deutsch
-        "warum", "wieso", "weshalb", "debug", "debugge", "analysiere",
-        "verstehe nicht", "fehler", "problem", "bug", "exception",
-        "funktioniert nicht", "geht nicht", "kaputt", "root cause",
-        "ursache", "stacktrace", "traceback",
-        # Englisch
-        "why", "debug", "analyze", "doesn't work", "broken", "error",
-        "issue", "investigate", "root cause"
+    WEAK_SEQUENTIAL_TRIGGERS = [
+        "warum", "wieso", "weshalb", "debug", "debugge",
+        "fehler", "problem", "bug", "error", "issue",
+        "why", "investigate", "analyze", "analysiere",
     ]
 
-    ANALYZE_TRIGGERS = [
-        # Deutsch
+    WEAK_ANALYZE_TRIGGERS = [
         "refactor", "erweitere", "ändere", "impact", "auswirkung",
         "was passiert wenn", "abhängigkeiten", "dependencies",
         "bestehend", "existierend", "aktuell",
-        # Englisch
-        "refactor", "extend", "modify", "impact", "existing",
-        "current", "dependencies"
+        "extend", "modify", "existing", "current",
     ]
 
     def detect(self, query: str) -> EnhancementType:
         """
         Erkennt den passenden Enhancement-Typ für eine Query.
+
+        Uses tiered trigger system:
+        - STRONG triggers: One match is enough
+        - WEAK triggers: Need >= 2 matches
 
         Args:
             query: Die User-Anfrage
@@ -340,34 +347,56 @@ class EnhancementDetector:
         """
         query_lower = query.lower()
 
-        # Prioritäts-Reihenfolge: Research > Sequential > Analyze
-        # (spezifischer zu allgemeiner)
-
-        # Research: Externe Quellen explizit referenziert
-        if any(trigger in query_lower for trigger in self.RESEARCH_TRIGGERS):
-            logger.debug("[EnhancementDetector] Detected: RESEARCH")
+        # Strong triggers: single match is enough
+        if any(t in query_lower for t in self.STRONG_RESEARCH_TRIGGERS):
+            logger.debug("[EnhancementDetector] Strong RESEARCH trigger matched")
             return EnhancementType.RESEARCH
 
-        # Sequential: Debug/Fehleranalyse
-        if any(trigger in query_lower for trigger in self.SEQUENTIAL_TRIGGERS):
-            logger.debug("[EnhancementDetector] Detected: SEQUENTIAL")
+        if any(t in query_lower for t in self.STRONG_SEQUENTIAL_TRIGGERS):
+            logger.debug("[EnhancementDetector] Strong SEQUENTIAL trigger matched")
             return EnhancementType.SEQUENTIAL
 
-        # Analyze: Bestehendes verstehen/erweitern
-        if any(trigger in query_lower for trigger in self.ANALYZE_TRIGGERS):
-            logger.debug("[EnhancementDetector] Detected: ANALYZE")
+        # Weak triggers: need >= 2 matches across all weak categories
+        weak_research = sum(1 for t in self.WEAK_RESEARCH_TRIGGERS if t in query_lower)
+        weak_sequential = sum(1 for t in self.WEAK_SEQUENTIAL_TRIGGERS if t in query_lower)
+        weak_analyze = sum(1 for t in self.WEAK_ANALYZE_TRIGGERS if t in query_lower)
+
+        # Research has priority
+        if weak_research >= 2:
+            logger.debug(f"[EnhancementDetector] Weak RESEARCH triggers ({weak_research})")
+            return EnhancementType.RESEARCH
+
+        if weak_sequential >= 2:
+            logger.debug(f"[EnhancementDetector] Weak SEQUENTIAL triggers ({weak_sequential})")
+            return EnhancementType.SEQUENTIAL
+
+        if weak_analyze >= 2:
+            logger.debug(f"[EnhancementDetector] Weak ANALYZE triggers ({weak_analyze})")
             return EnhancementType.ANALYZE
 
-        # Keine Anreicherung nötig
+        # Cross-category: if total weak matches >= 2, use highest scoring
+        total_weak = weak_research + weak_sequential + weak_analyze
+        if total_weak >= 2:
+            if weak_research >= weak_sequential and weak_research >= weak_analyze:
+                logger.debug(f"[EnhancementDetector] Cross-category RESEARCH ({total_weak} total)")
+                return EnhancementType.RESEARCH
+            if weak_sequential >= weak_analyze:
+                logger.debug(f"[EnhancementDetector] Cross-category SEQUENTIAL ({total_weak} total)")
+                return EnhancementType.SEQUENTIAL
+            logger.debug(f"[EnhancementDetector] Cross-category ANALYZE ({total_weak} total)")
+            return EnhancementType.ANALYZE
+
         logger.debug("[EnhancementDetector] Detected: NONE")
         return EnhancementType.NONE
 
-    def should_enhance(self, query: str) -> bool:
+    def should_enhance(self, query: str, intent: str = "") -> bool:
         """
         Prüft ob Enhancement sinnvoll ist.
 
         Args:
             query: Die User-Anfrage
+            intent: Intent classification ("direct", "lookup", "guided", "complex").
+                    If provided and not "complex", enhancement is skipped.
 
         Returns:
             True wenn Enhancement empfohlen
@@ -378,6 +407,11 @@ class EnhancementDetector:
 
         # Skip-Marker prüfen (zentralisierte Konstanten)
         if should_skip_enhancement(query):
+            return False
+
+        # Intent-Gate: nur bei COMPLEX-Intent Enhancement durchführen
+        if intent and intent != "complex":
+            logger.debug(f"[EnhancementDetector] Skipping: intent={intent} (not complex)")
             return False
 
         return self.detect(query) != EnhancementType.NONE

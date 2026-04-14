@@ -92,6 +92,8 @@ class AgentEventType(str, Enum):
     WORKSPACE_PR = "workspace_pr"                    # PR-Daten fuer Workspace Panel
     WORKSPACE_PR_ANALYSIS = "workspace_pr_analysis"  # PR-Analyse-Ergebnisse fuer Badges
     PR_OPENED_HINT = "pr_opened_hint"                # Kurzer Chat-Hinweis: "PR im Workspace"
+    # Intent Classification Events
+    INTENT_CLASSIFIED = "intent_classified"           # Intent erkannt (fuer UI/Logging)
     # Progress & Stuck Detection Events
     STUCK_DETECTED = "stuck_detected"                # Agent dreht sich im Kreis
     PROGRESS_UPDATE = "progress_update"              # Neues Wissen gewonnen
