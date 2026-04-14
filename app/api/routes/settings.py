@@ -9,10 +9,10 @@ Features:
 """
 
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Union
 
 import yaml
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Body, HTTPException
 from pydantic import BaseModel, Field
 
 from app.core.config import settings, Settings, load_settings
@@ -382,7 +382,7 @@ async def delete_credential(name: str) -> Dict[str, Any]:
 @router.put("/section/{section}")
 async def update_section_settings(
     section: str,
-    values: Dict[str, Any]
+    values: Union[Dict[str, Any], List[Any]] = Body(...)
 ) -> Dict[str, Any]:
     """
     Aktualisiert eine Settings-Section (nur im Speicher).

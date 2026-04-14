@@ -13334,7 +13334,8 @@ async function saveCurrentSection() {
     const data = await res.json();
 
     if (!res.ok) {
-      throw new Error(data.detail || 'Fehler');
+      const detail = typeof data.detail === 'string' ? data.detail : JSON.stringify(data.detail);
+      throw new Error(detail || 'Fehler');
     }
 
     settingsState.settings[section] = data.values;
