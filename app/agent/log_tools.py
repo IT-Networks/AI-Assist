@@ -163,13 +163,76 @@ def _cleanup_old_caches() -> None:
 
 # ── Grep-Helper ──────────────────────────────────────────────────────────────
 
+# Stacktrace-Continuation: Zeilen die zu einem Stacktrace gehören
+_STACKTRACE_CONT_RE = re.compile(
+    r"^\s+(at |\.\.\.|\d+ more|Caused by:|Suppressed:)"
+    r"|^(java|javax|org|com|net|io|sun|jdk)\.\S+Exception"
+    r"|^(java|javax|org|com|net|io|sun|jdk)\.\S+Error"
+    r"|^\s*\.\.\. \d+ more",
+    re.IGNORECASE,
+)
+
+
+def _is_log_entry_start(line: str) -> bool:
+    """Prüft ob eine Zeile der Beginn eines neuen Log-Eintrags ist (hat Timestamp + Level)."""
+    return bool(_TIMESTAMP_RE.match(line) and _LOG_LEVEL_RE.search(line))
+
+
+def _find_block_start(lines: List[str], idx: int, fallback_context: int) -> int:
+    """Findet den Anfang des Log-Eintrags/Stacktrace-Blocks rückwärts."""
+    start = idx
+    for i in range(idx - 1, max(-1, idx - 200), -1):
+        if _is_log_entry_start(lines[i]):
+            start = i
+            break
+        if _STACKTRACE_CONT_RE.match(lines[i]):
+            continue
+        # Zeile gehört nicht zum Stacktrace – vielleicht Teil der Error-Message
+        # Weiter rückwärts suchen bis zum Log-Entry-Start
+        continue
+    else:
+        # Kein Log-Entry-Start gefunden → Fallback auf context
+        start = max(0, idx - fallback_context)
+    return start
+
+
+def _find_block_end(lines: List[str], idx: int, fallback_context: int) -> int:
+    """Findet das Ende des Stacktrace-Blocks vorwärts."""
+    end = idx + 1
+    for i in range(idx + 1, min(len(lines), idx + 500)):
+        if _is_log_entry_start(lines[i]):
+            # Neuer Log-Eintrag → Stacktrace ist zuende
+            end = i
+            break
+        if _STACKTRACE_CONT_RE.match(lines[i]):
+            end = i + 1
+            continue
+        # Leere Zeile oder sonstige Zeile nach dem Stacktrace
+        # Noch 1-2 Zeilen tolerieren (leere Zeilen zwischen Caused-by)
+        if lines[i].strip() == "":
+            end = i + 1
+            continue
+        # Nicht-Stacktrace-Zeile → Ende
+        end = i
+        break
+    else:
+        end = min(len(lines), idx + fallback_context + 1)
+    return end
+
+
 def _grep_with_context(
     lines: List[str],
     pattern: re.Pattern,
     context: int = _DEFAULT_CONTEXT_LINES,
     max_matches: int = _DEFAULT_MAX_MATCHES,
 ) -> List[Dict]:
-    """Grep mit Kontext-Zeilen (wie grep -C). Gibt Match-Blöcke zurück."""
+    """
+    Grep mit Stacktrace-aware Kontext.
+
+    Wenn der Match in einem Stacktrace liegt, wird der komplette Block
+    zurückgegeben (vom Log-Entry-Start bis zum Ende des Stacktrace).
+    Sonst: normaler Kontext (N Zeilen vor/nach, wie grep -C).
+    """
     match_indices = []
     for i, line in enumerate(lines):
         if pattern.search(line):
@@ -177,15 +240,42 @@ def _grep_with_context(
             if len(match_indices) >= max_matches:
                 break
 
+    # Deduplizierung: überlappende Blöcke zusammenführen
     blocks = []
+    covered_until = -1
+
     for idx in match_indices:
-        start = max(0, idx - context)
-        end = min(len(lines), idx + context + 1)
+        if idx <= covered_until:
+            # Bereits in einem vorherigen Block enthalten
+            continue
+
+        # Prüfen ob Match in/nahe einem Stacktrace liegt
+        in_stacktrace = (
+            _STACKTRACE_CONT_RE.match(lines[idx])
+            or (idx + 1 < len(lines) and _STACKTRACE_CONT_RE.match(lines[idx + 1]))
+            or any(
+                _STACKTRACE_CONT_RE.match(lines[j])
+                for j in range(idx + 1, min(len(lines), idx + 4))
+            )
+        )
+
+        if in_stacktrace:
+            start = _find_block_start(lines, idx, context)
+            end = _find_block_end(lines, idx, context)
+        else:
+            start = max(0, idx - context)
+            end = min(len(lines), idx + context + 1)
+
+        covered_until = end - 1
+        block_lines = lines[start:end]
+
         blocks.append({
             "line_number": idx + 1,
+            "block_start": start + 1,
+            "block_end": end,
             "match_line": lines[idx],
-            "context_before": lines[start:idx],
-            "context_after": lines[idx + 1:end],
+            "is_stacktrace": in_stacktrace,
+            "block": "\n".join(block_lines),
         })
     return blocks
 
@@ -532,6 +622,8 @@ def register_log_tools(registry: ToolRegistry) -> int:
         description=(
             "Durchsucht zuvor mit log_fetch_stage heruntergeladene OSPE-Logs per Regex (NICHT lokale WLP-Server). "
             "Arbeitet auf lokalen Dateien – kein Netzwerk, beliebig oft aufrufbar. "
+            "Stacktrace-aware: erkennt Java-Stacktraces automatisch und gibt den KOMPLETTEN "
+            "Block zurück (inkl. Caused-by-Ketten), nicht nur einzelne Zeilen. "
             "Gibt Treffer mit Kontext-Zeilen zurück (wie grep -C). Case-insensitive. "
             "Unterstützt Regex-Patterns (z.B. 'Exception.*timeout|Connection refused'). "
             "Voraussetzung: log_fetch_stage muss vorher aufgerufen worden sein."
