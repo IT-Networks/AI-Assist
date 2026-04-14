@@ -250,7 +250,7 @@ def _grep_with_context(
             continue
 
         # Prüfen ob Match in/nahe einem Stacktrace liegt
-        in_stacktrace = (
+        in_stacktrace = bool(
             _STACKTRACE_CONT_RE.match(lines[idx])
             or (idx + 1 < len(lines) and _STACKTRACE_CONT_RE.match(lines[idx + 1]))
             or any(
