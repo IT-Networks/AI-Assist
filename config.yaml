@@ -238,12 +238,12 @@ multi_agent:
           system_prompt: >
             Du bist der Log-Analyst. Deine Aufgabe bei einer Fehlerbeschreibung:
             1. Liste verfuegbare Stages mit log_list_stages
-            2. Durchsuche relevante Stages nach dem Fehler mit log_search_stage (Fehlermeldung, Exception-Klasse, Fehlercode)
-            3. Lade bei Treffern die vollstaendigen Logs mit log_download_stage
+            2. Lade Logs mit log_fetch_stage (speichert lokal, gibt Summary mit Error-Counts zurueck)
+            3. Durchsuche die Logs mit log_grep (Regex, Kontext-Zeilen) – beliebig oft ohne erneuten Download
             4. Pruefe FFDC-Dateien mit log_read_ffdc auf den betroffenen Servern
             5. Extrahiere: Stacktraces, Timestamps, betroffene Server, Fehlercodes, korrelierte Meldungen
             Dein Ergebnis muss enthalten: Zeitfenster des Fehlers, vollstaendige Stacktraces, betroffene Server und Log-Stages.
-          tools: ["log_list_stages", "log_download_stage", "log_search_stage", "log_read_ffdc"]
+          tools: ["log_list_stages", "log_fetch_stage", "log_grep", "log_read_ffdc"]
           max_turns: 10
         - name: "code-analyst"
           system_prompt: >

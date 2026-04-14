@@ -2,19 +2,31 @@
 Agent-Tools für Remote-Log-Server-Zugriff (ospe_ope.log).
 NICHT für lokale WLP-Server-Logs – dafür gibt es wlp_read_log / wlp_read_ffdc.
 Wird beim Startup registriert wenn log_servers aktiviert ist.
+
+Architektur: Fetch-once → Grep-local
+  - log_fetch_stage: Download + lokales Speichern → Summary + Dateipfade
+  - log_grep: Regex-Suche auf lokalen Dateien mit Kontext-Zeilen
 """
 
 import asyncio
+import json
 import re
+import shutil
 from collections import Counter
-from typing import Any, Dict, List
+from datetime import datetime
+from pathlib import Path
+from typing import Any, Dict, List, Optional
 
 from app.agent.tools import Tool, ToolCategory, ToolParameter, ToolResult, ToolRegistry
 
-# Content-Limit fuer LLM-Kontextfenster (Analyse laeuft auf Voll-Log, nur Ausgabe gekuerzt)
-_MAX_CONTENT_CHARS = 30_000
-_MAX_CONTENT_LINES = 2000
+# Cache-Konfiguration
+_CACHE_DIR = Path("data/log_cache")
+_CACHE_TTL_SECONDS = 600       # 10 Minuten
+_CACHE_CLEANUP_SECONDS = 1800  # 30 Minuten – alte Caches entfernen
 
+# Grep-Defaults
+_DEFAULT_CONTEXT_LINES = 3
+_DEFAULT_MAX_MATCHES = 50
 
 # Regex für Log-Level-Erkennung – ALLE Levels, nicht nur Fehler
 _LOG_LEVEL_RE = re.compile(
@@ -66,6 +78,118 @@ def _read_file_sync(path: str) -> str:
         return f.read()
 
 
+# ── Cache-Helpers ────────────────────────────────────────────────────────────
+
+def _cache_dir_for_stage(stage_id: str) -> Path:
+    return _CACHE_DIR / stage_id
+
+
+def _is_cache_valid(stage_id: str) -> bool:
+    meta_path = _cache_dir_for_stage(stage_id) / "_meta.json"
+    if not meta_path.exists():
+        return False
+    try:
+        meta = json.loads(meta_path.read_text(encoding="utf-8"))
+        fetched_at = datetime.fromisoformat(meta["fetched_at"])
+        return (datetime.now() - fetched_at).total_seconds() < _CACHE_TTL_SECONDS
+    except Exception:
+        return False
+
+
+def _read_cached_meta(stage_id: str) -> Optional[Dict]:
+    meta_path = _cache_dir_for_stage(stage_id) / "_meta.json"
+    if not meta_path.exists():
+        return None
+    try:
+        return json.loads(meta_path.read_text(encoding="utf-8"))
+    except Exception:
+        return None
+
+
+def _write_cache(stage_id: str, stage_name: str, server_results: List[Dict]) -> None:
+    """Schreibt Logs + Meta in den Cache."""
+    cache_dir = _cache_dir_for_stage(stage_id)
+    cache_dir.mkdir(parents=True, exist_ok=True)
+
+    meta = {
+        "fetched_at": datetime.now().isoformat(),
+        "stage_name": stage_name,
+        "servers": {},
+    }
+
+    for sr in server_results:
+        sid = sr["server_id"]
+        if sr["success"]:
+            # Log-Datei schreiben
+            log_path = cache_dir / f"{sid}.log"
+            log_path.write_text(sr["_content"], encoding="utf-8")
+            meta["servers"][sid] = {
+                "server_name": sr["server"],
+                "success": True,
+                "total_lines": sr["total_lines"],
+                "log_summary": sr["log_summary"],
+            }
+        else:
+            meta["servers"][sid] = {
+                "server_name": sr["server"],
+                "success": False,
+                "error": sr.get("error", "Unbekannter Fehler"),
+            }
+
+    (cache_dir / "_meta.json").write_text(
+        json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8"
+    )
+
+
+def _cleanup_old_caches() -> None:
+    """Entfernt Caches älter als _CACHE_CLEANUP_SECONDS."""
+    if not _CACHE_DIR.exists():
+        return
+    for stage_dir in _CACHE_DIR.iterdir():
+        if not stage_dir.is_dir():
+            continue
+        meta_path = stage_dir / "_meta.json"
+        if not meta_path.exists():
+            shutil.rmtree(stage_dir, ignore_errors=True)
+            continue
+        try:
+            data = json.loads(meta_path.read_text(encoding="utf-8"))
+            age = (datetime.now() - datetime.fromisoformat(data["fetched_at"])).total_seconds()
+            if age > _CACHE_CLEANUP_SECONDS:
+                shutil.rmtree(stage_dir, ignore_errors=True)
+        except Exception:
+            shutil.rmtree(stage_dir, ignore_errors=True)
+
+
+# ── Grep-Helper ──────────────────────────────────────────────────────────────
+
+def _grep_with_context(
+    lines: List[str],
+    pattern: re.Pattern,
+    context: int = _DEFAULT_CONTEXT_LINES,
+    max_matches: int = _DEFAULT_MAX_MATCHES,
+) -> List[Dict]:
+    """Grep mit Kontext-Zeilen (wie grep -C). Gibt Match-Blöcke zurück."""
+    match_indices = []
+    for i, line in enumerate(lines):
+        if pattern.search(line):
+            match_indices.append(i)
+            if len(match_indices) >= max_matches:
+                break
+
+    blocks = []
+    for idx in match_indices:
+        start = max(0, idx - context)
+        end = min(len(lines), idx + context + 1)
+        blocks.append({
+            "line_number": idx + 1,
+            "match_line": lines[idx],
+            "context_before": lines[start:idx],
+            "context_after": lines[idx + 1:end],
+        })
+    return blocks
+
+
 def register_log_tools(registry: ToolRegistry) -> int:
     from app.core.config import settings
 
@@ -91,8 +215,8 @@ def register_log_tools(registry: ToolRegistry) -> int:
         name="log_list_stages",
         description=(
             "Listet alle konfigurierten Remote-Log-Server-Stages auf (OSPE-Server, NICHT lokale WLP-Server). "
-            "Gibt Stage-IDs und Server-IDs zurück. Diese IDs werden für log_download_stage und "
-            "log_search_stage benötigt. Authentifizierung erfolgt automatisch – keine Zugangsdaten nötig."
+            "Gibt Stage-IDs und Server-IDs zurück. Diese IDs werden für log_fetch_stage und "
+            "log_grep benötigt. Authentifizierung erfolgt automatisch – keine Zugangsdaten nötig."
         ),
         category=ToolCategory.SEARCH,
         parameters=[],
@@ -100,13 +224,13 @@ def register_log_tools(registry: ToolRegistry) -> int:
     ))
     count += 1
 
-    # ── log_download_stage ────────────────────────────────────────────────────
-    async def log_download_stage(**kwargs: Any) -> ToolResult:
+    # ── log_fetch_stage ─────────────────────────────────────────────────────
+    async def log_fetch_stage(**kwargs: Any) -> ToolResult:
         from app.api.routes.log_servers import _fetch_server_logs, _get_credentials
 
         stage_id: str = kwargs.get("stage_id", "")
         server_id: str = kwargs.get("server_id", "")
-        search_term: str = kwargs.get("search_term", "")
+        force: bool = kwargs.get("force", False)
 
         stage = next((s for s in settings.log_servers.stages if s.id == stage_id), None)
         if not stage:
@@ -114,13 +238,67 @@ def register_log_tools(registry: ToolRegistry) -> int:
         if not stage.servers:
             return ToolResult(success=False, error="Stage hat keine Server konfiguriert")
 
+        # Cache prüfen (wenn nicht force)
+        if not force and _is_cache_valid(stage_id):
+            meta = _read_cached_meta(stage_id)
+            if meta:
+                # Wenn server_id angegeben: prüfen ob dieser Server im Cache ist
+                if server_id and server_id not in meta.get("servers", {}):
+                    pass  # Cache hat den Server nicht → neu fetchen
+                else:
+                    # Cache-Hit: Summary aus Meta zurückgeben
+                    total_level_counts: Counter = Counter()
+                    all_notable: list = []
+                    servers_info = []
+                    for sid, sdata in meta["servers"].items():
+                        if server_id and sid != server_id:
+                            continue
+                        servers_info.append({
+                            "server_id": sid,
+                            "server": sdata.get("server_name", sid),
+                            "success": sdata.get("success", False),
+                            "total_lines": sdata.get("total_lines", 0),
+                            "error": sdata.get("error"),
+                        })
+                        if sdata.get("success"):
+                            summary = sdata.get("log_summary", {})
+                            for level, cnt in summary.get("level_counts", {}).items():
+                                total_level_counts[level] += cnt
+                            all_notable.extend(summary.get("notable_entries", []))
+
+                    successful = [s for s in servers_info if s["success"]]
+                    return ToolResult(
+                        success=bool(successful),
+                        data={
+                            "stage": meta.get("stage_name", stage.name),
+                            "cached": True,
+                            "cached_at": meta.get("fetched_at", ""),
+                            "servers_total": len(servers_info),
+                            "servers_successful": len(successful),
+                            "log_overview": {
+                                "level_counts": dict(total_level_counts),
+                                "total_errors": sum(v for k, v in total_level_counts.items() if k in _ERROR_LEVELS),
+                                "total_warnings": total_level_counts.get("WARN", 0),
+                                "total_info": total_level_counts.get("INFO", 0),
+                                "total_debug": total_level_counts.get("DEBUG", 0),
+                                "notable_entries": all_notable[:100],
+                            },
+                            "servers": servers_info,
+                            "hint": "Logs gecacht. Nutze log_grep zum Durchsuchen.",
+                        },
+                        error=None if successful else "Kein Server im Cache erfolgreich",
+                    )
+
+        # Alte Caches aufräumen
+        _cleanup_old_caches()
+
         # Credentials einmal vorab laden
         try:
             creds = _get_credentials()
         except ValueError as e:
             return ToolResult(success=False, error=f"Credentials: {e}")
 
-        # Server-Auswahl: einzelner Server oder alle
+        # Server-Auswahl
         if server_id:
             servers_to_try = [s for s in stage.servers if s.id == server_id]
             if not servers_to_try:
@@ -138,7 +316,6 @@ def register_log_tools(registry: ToolRegistry) -> int:
 
         results = []
         for server, fetch_result in zip(servers_to_try, fetch_results):
-            # asyncio.gather mit return_exceptions=True: Exceptions als Werte
             if isinstance(fetch_result, BaseException):
                 results.append({
                     "server_id": server.id,
@@ -161,47 +338,44 @@ def register_log_tools(registry: ToolRegistry) -> int:
             total_lines = len(all_lines)
 
             # Analyse auf VOLLEM Content
-            err_summary = _extract_log_summary(fetch_result.content, server.name)
-
-            # Filter (optional)
-            lines = all_lines
-            if search_term:
-                term_lower = search_term.lower()
-                lines = [l for l in lines if term_lower in l.lower()]
-
-            # Content fuer LLM-Kontext kuerzen (Analyse ist bereits komplett)
-            output_lines = lines[-_MAX_CONTENT_LINES:] if len(lines) > _MAX_CONTENT_LINES else lines
-            content = "\n".join(output_lines)
-            if len(content) > _MAX_CONTENT_CHARS:
-                content = content[-_MAX_CONTENT_CHARS:]
+            log_summary = _extract_log_summary(fetch_result.content, server.name)
 
             results.append({
                 "server_id": server.id,
                 "server": server.name,
                 "success": True,
                 "total_lines": total_lines,
-                "returned_lines": len(lines),
-                "content_truncated": len(lines) > _MAX_CONTENT_LINES,
-                "log_summary": err_summary,
-                "content": content,
+                "log_summary": log_summary,
+                "_content": fetch_result.content,  # Nur für Cache, nicht im Response
             })
 
         successful = [r for r in results if r["success"]]
         all_errors = [r["error"] for r in results if not r["success"]]
 
-        # Gesamt-Übersicht über alle Server (ALLE Log-Levels)
-        total_level_counts: Counter = Counter()
-        all_notable: list = []
+        # Cache schreiben
+        if successful:
+            _write_cache(stage_id, stage.name, results)
+
+        # Gesamt-Übersicht
+        total_level_counts = Counter()
+        all_notable = []
         for r in successful:
             summary = r.get("log_summary", {})
             for level, cnt in summary.get("level_counts", {}).items():
                 total_level_counts[level] += cnt
             all_notable.extend(summary.get("notable_entries", []))
 
+        # _content aus Response entfernen
+        servers_info = []
+        for r in results:
+            info = {k: v for k, v in r.items() if k != "_content"}
+            servers_info.append(info)
+
         return ToolResult(
             success=bool(successful),
             data={
                 "stage": stage.name,
+                "cached": False,
                 "servers_total": len(servers_to_try),
                 "servers_successful": len(successful),
                 "log_overview": {
@@ -212,62 +386,70 @@ def register_log_tools(registry: ToolRegistry) -> int:
                     "total_debug": total_level_counts.get("DEBUG", 0),
                     "notable_entries": all_notable[:100],
                 },
-                "results": results,
+                "servers": servers_info,
+                "hint": "Logs heruntergeladen. Nutze log_grep zum Durchsuchen.",
             },
             error=None if successful else f"Kein Server erreichbar: {'; '.join(all_errors)}",
         )
 
     registry.register(Tool(
-        name="log_download_stage",
+        name="log_fetch_stage",
         description=(
-            "Lädt die ospe_ope.log von Remote-OSPE-Servern herunter (NICHT lokale WLP-Server). "
+            "Lädt ospe_ope.log von Remote-OSPE-Servern herunter und speichert sie lokal (NICHT lokale WLP-Server). "
             "Authentifizierung erfolgt vollautomatisch – KEINE Zugangsdaten nötig. "
-            "Lädt den KOMPLETTEN Log (tail4) von ALLEN Servern einer Stage parallel herunter. "
-            "Die Logs werden lokal durchsucht – search_term filtert ALLE Zeilen (case-insensitive), "
-            "nicht nur Fehler. Findet auch INFO, DEBUG oder beliebige Textfragmente. "
-            "Optional: server_id für einen einzelnen Server. "
+            "Gibt eine Log-Zusammenfassung zurück (Error-Counts, Notable Entries) – KEINEN Log-Content. "
+            "Die Logs können danach beliebig oft mit log_grep durchsucht werden, ohne erneuten Download. "
+            "Überspringt den Download wenn gecachte Logs < 10 Min alt (force=true erzwingt Neuladen). "
             "Voraussetzung: log_list_stages aufrufen um stage_id zu erhalten."
         ),
         category=ToolCategory.SEARCH,
         parameters=[
             ToolParameter(name="stage_id", type="string", description="ID der Stage (aus log_list_stages)", required=True),
-            ToolParameter(name="server_id", type="string", description="Einzelnen Server abfragen statt alle (ID aus log_list_stages)", required=False),
-            ToolParameter(name="search_term", type="string", description="Beliebiger Suchbegriff – durchsucht ALLE Log-Zeilen case-insensitive (nicht nur Fehler)", required=False),
+            ToolParameter(name="server_id", type="string", description="Nur einen Server laden (optional)", required=False),
+            ToolParameter(name="force", type="boolean", description="Cache ignorieren, neu downloaden (Default: false)", required=False),
         ],
-        handler=log_download_stage,
+        handler=log_fetch_stage,
     ))
     count += 1
 
-    # ── log_search_stage ──────────────────────────────────────────────────────
-    async def log_search_stage(**kwargs: Any) -> ToolResult:
-        from datetime import datetime
-        from app.api.routes.log_servers import _fetch_server_logs, _get_credentials, _filter_lines_to_window
+    # ── log_grep ─────────────────────────────────────────────────────────────
+    async def log_grep(**kwargs: Any) -> ToolResult:
+        from app.api.routes.log_servers import _filter_lines_to_window
 
         stage_id: str = kwargs.get("stage_id", "")
+        pattern_str: str = kwargs.get("pattern", "")
         server_id: str = kwargs.get("server_id", "")
-        search_term: str = kwargs.get("search_term", "")
         time_start: str = kwargs.get("time_start", "")
         time_end: str = kwargs.get("time_end", "")
 
-        stage = next((s for s in settings.log_servers.stages if s.id == stage_id), None)
-        if not stage:
-            return ToolResult(success=False, error=f"Stage '{stage_id}' nicht gefunden")
-        if not stage.servers:
-            return ToolResult(success=False, error="Stage hat keine Server konfiguriert")
-
-        # Credentials einmal vorab laden
         try:
-            creds = _get_credentials()
-        except ValueError as e:
-            return ToolResult(success=False, error=f"Credentials: {e}")
+            context_lines = int(kwargs.get("context_lines", _DEFAULT_CONTEXT_LINES))
+            context_lines = max(0, min(context_lines, 20))
+        except (ValueError, TypeError):
+            context_lines = _DEFAULT_CONTEXT_LINES
 
-        # Server-Auswahl: einzelner Server oder alle
-        if server_id:
-            servers_to_try = [s for s in stage.servers if s.id == server_id]
-            if not servers_to_try:
-                return ToolResult(success=False, error=f"Server '{server_id}' nicht in Stage '{stage.name}' gefunden")
-        else:
-            servers_to_try = stage.servers
+        try:
+            max_matches = int(kwargs.get("max_matches", _DEFAULT_MAX_MATCHES))
+            max_matches = max(1, min(max_matches, 200))
+        except (ValueError, TypeError):
+            max_matches = _DEFAULT_MAX_MATCHES
+
+        if not pattern_str:
+            return ToolResult(success=False, error="pattern ist erforderlich")
+
+        # Cache prüfen
+        meta = _read_cached_meta(stage_id)
+        if not meta:
+            return ToolResult(
+                success=False,
+                error=f"Keine gecachten Logs für Stage '{stage_id}'. Erst log_fetch_stage aufrufen.",
+            )
+
+        # Regex kompilieren
+        try:
+            pattern = re.compile(pattern_str, re.IGNORECASE)
+        except re.error as e:
+            return ToolResult(success=False, error=f"Ungültiges Regex-Pattern: {e}")
 
         # Zeitfenster parsen (optional)
         t_start = t_end = None
@@ -278,109 +460,93 @@ def register_log_tools(registry: ToolRegistry) -> int:
             except Exception:
                 return ToolResult(success=False, error="Ungültiges Zeitformat – ISO-8601 erwartet")
 
-        tail = settings.log_servers.default_tail
-
-        # Alle Server parallel abfragen
-        fetch_results = await asyncio.gather(
-            *[_fetch_server_logs(s, tail, credentials=creds) for s in servers_to_try],
-            return_exceptions=True,
-        )
-
+        # Lokale Log-Dateien durchsuchen
+        cache_dir = _cache_dir_for_stage(stage_id)
         results = []
-        for server, fetch_result in zip(servers_to_try, fetch_results):
-            if isinstance(fetch_result, BaseException):
-                results.append({"server_id": server.id, "server": server.name, "success": False, "error": f"{type(fetch_result).__name__}: {fetch_result}"})
+        total_matches = 0
+
+        servers_to_search = meta.get("servers", {})
+        if server_id:
+            if server_id not in servers_to_search:
+                return ToolResult(success=False, error=f"Server '{server_id}' nicht im Cache. Verfügbar: {list(servers_to_search.keys())}")
+            servers_to_search = {server_id: servers_to_search[server_id]}
+
+        loop = asyncio.get_event_loop()
+        for sid, sdata in servers_to_search.items():
+            if not sdata.get("success"):
+                results.append({
+                    "server_id": sid,
+                    "server": sdata.get("server_name", sid),
+                    "matches": 0,
+                    "skipped": True,
+                    "reason": sdata.get("error", "Fetch war nicht erfolgreich"),
+                })
                 continue
 
-            if not fetch_result.success:
-                results.append({"server_id": server.id, "server": server.name, "success": False, "error": fetch_result.error})
+            log_path = cache_dir / f"{sid}.log"
+            if not log_path.exists():
+                results.append({
+                    "server_id": sid,
+                    "server": sdata.get("server_name", sid),
+                    "matches": 0,
+                    "skipped": True,
+                    "reason": "Log-Datei nicht im Cache gefunden",
+                })
                 continue
 
-            all_lines = fetch_result.content.splitlines()
-            total_lines = len(all_lines)
+            # Datei lesen (async via executor)
+            content = await loop.run_in_executor(None, _read_file_sync, str(log_path))
+            lines = content.splitlines()
 
-            # Analyse auf VOLLEM Content
-            err_summary = _extract_log_summary(fetch_result.content, server.name)
-
-            # Filter
-            lines = all_lines
+            # Zeitfenster-Filter (optional)
             if t_start and t_end:
                 lines = _filter_lines_to_window(lines, t_start, t_end)
-            if search_term:
-                term_lower = search_term.lower()
-                lines = [l for l in lines if term_lower in l.lower()]
 
-            # Content fuer LLM-Kontext kuerzen (Analyse ist bereits komplett)
-            matched_count = len(lines)
-            output_lines = lines[-_MAX_CONTENT_LINES:] if len(lines) > _MAX_CONTENT_LINES else lines
-            content = "\n".join(output_lines) if output_lines else ""
-            if len(content) > _MAX_CONTENT_CHARS:
-                content = content[-_MAX_CONTENT_CHARS:]
+            # Grep mit Kontext
+            match_blocks = _grep_with_context(lines, pattern, context_lines, max_matches)
+            match_count = len(match_blocks)
+            total_matches += match_count
 
             results.append({
-                "server_id": server.id,
-                "server": server.name,
-                "success": True,
-                "total_lines": total_lines,
-                "matching_lines": matched_count,
-                "content_truncated": matched_count > _MAX_CONTENT_LINES,
-                "log_summary": err_summary,
-                "content": content,
+                "server_id": sid,
+                "server": sdata.get("server_name", sid),
+                "total_lines": sdata.get("total_lines", len(lines)),
+                "matches": match_count,
+                "truncated": match_count >= max_matches,
+                "match_blocks": match_blocks,
             })
 
-        found = [r for r in results if r["success"] and r.get("matching_lines", 0) > 0]
-        all_errors = [r["error"] for r in results if not r["success"]]
-
-        # Gesamt-Übersicht (ALLE Log-Levels)
-        total_level_counts: Counter = Counter()
-        all_notable: list = []
-        for r in results:
-            if not r.get("success"):
-                continue
-            summary = r.get("log_summary", {})
-            for level, cnt in summary.get("level_counts", {}).items():
-                total_level_counts[level] += cnt
-            all_notable.extend(summary.get("notable_entries", []))
-
         return ToolResult(
-            success=bool(found),
+            success=True,  # Immer True wenn Cache vorhanden – auch bei 0 Matches
             data={
-                "stage": stage.name,
-                "servers_total": len(servers_to_try),
-                "servers_with_matches": len(found),
-                "log_overview": {
-                    "level_counts": dict(total_level_counts),
-                    "total_errors": sum(v for k, v in total_level_counts.items() if k in _ERROR_LEVELS),
-                    "total_warnings": total_level_counts.get("WARN", 0),
-                    "total_info": total_level_counts.get("INFO", 0),
-                    "total_debug": total_level_counts.get("DEBUG", 0),
-                    "notable_entries": all_notable[:100],
-                },
+                "stage": meta.get("stage_name", stage_id),
+                "pattern": pattern_str,
+                "total_matches": total_matches,
+                "servers_searched": len(results),
                 "results": results,
             },
-            error=None if found else f"Keine Treffer: {'; '.join(all_errors)}" if all_errors else "Keine Treffer in den Logs gefunden",
         )
 
     registry.register(Tool(
-        name="log_search_stage",
+        name="log_grep",
         description=(
-            "Durchsucht die ospe_ope.log auf Remote-OSPE-Servern (NICHT lokale WLP-Server). "
-            "Authentifizierung erfolgt automatisch – KEINE Zugangsdaten nötig. "
-            "Lädt den KOMPLETTEN Log (tail4) von ALLEN Servern parallel herunter und "
-            "durchsucht lokal ALLE Zeilen (nicht nur Fehler). Findet auch INFO, DEBUG "
-            "oder beliebige Textfragmente. Case-insensitive Suche. "
-            "Optional: Zeitfenster-Filter zusätzlich zum Suchbegriff. "
-            "Voraussetzung: log_list_stages aufrufen um stage_id zu erhalten."
+            "Durchsucht zuvor mit log_fetch_stage heruntergeladene OSPE-Logs per Regex (NICHT lokale WLP-Server). "
+            "Arbeitet auf lokalen Dateien – kein Netzwerk, beliebig oft aufrufbar. "
+            "Gibt Treffer mit Kontext-Zeilen zurück (wie grep -C). Case-insensitive. "
+            "Unterstützt Regex-Patterns (z.B. 'Exception.*timeout|Connection refused'). "
+            "Voraussetzung: log_fetch_stage muss vorher aufgerufen worden sein."
         ),
         category=ToolCategory.SEARCH,
         parameters=[
-            ToolParameter(name="stage_id", type="string", description="ID der Stage (aus log_list_stages)", required=True),
-            ToolParameter(name="server_id", type="string", description="Einzelnen Server durchsuchen statt alle (ID aus log_list_stages)", required=False),
-            ToolParameter(name="search_term", type="string", description="Beliebiger Suchbegriff – durchsucht ALLE Log-Zeilen case-insensitive", required=False),
-            ToolParameter(name="time_start", type="string", description="Beginn des Zeitfensters ISO-8601 (optional)", required=False),
-            ToolParameter(name="time_end", type="string", description="Ende des Zeitfensters ISO-8601 (optional)", required=False),
+            ToolParameter(name="stage_id", type="string", description="ID der Stage (Logs müssen vorher mit log_fetch_stage geladen sein)", required=True),
+            ToolParameter(name="pattern", type="string", description="Regex-Suchpattern (case-insensitive)", required=True),
+            ToolParameter(name="server_id", type="string", description="Nur einen Server durchsuchen (optional)", required=False),
+            ToolParameter(name="context_lines", type="integer", description="Zeilen vor/nach jedem Treffer, wie grep -C (Default: 3)", required=False),
+            ToolParameter(name="time_start", type="string", description="Zeitfenster-Beginn ISO-8601 (optional)", required=False),
+            ToolParameter(name="time_end", type="string", description="Zeitfenster-Ende ISO-8601 (optional)", required=False),
+            ToolParameter(name="max_matches", type="integer", description="Max Treffer pro Server (Default: 50)", required=False),
         ],
-        handler=log_search_stage,
+        handler=log_grep,
     ))
     count += 1
 
@@ -440,7 +606,7 @@ def register_log_tools(registry: ToolRegistry) -> int:
         name="log_read_ffdc",
         description=(
             "Liest FFDC-Logs (First Failure Data Capture) eines LOKALEN WLP-Servers. "
-            "NICHT für Remote-OSPE-Server – dafür log_download_stage / log_search_stage nutzen. "
+            "NICHT für Remote-OSPE-Server – dafür log_fetch_stage / log_grep nutzen. "
             "FFDC-Logs enthalten detaillierte Stack-Traces bei unerwarteten Fehlern. "
             "Nutze dies wenn messages.log nur 'FFDC' erwähnt aber keine Details zeigt."
         ),
