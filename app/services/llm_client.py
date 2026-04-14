@@ -83,7 +83,7 @@ def _extract_text_from_content(content):
     return str(content) if content else ""
 
 
-def _sanitize_messages_for_mistral(messages: List[Dict]) -> List[Dict]:
+def _sanitize_messages_for_mistral(messages: List[Dict], vision: bool = False) -> List[Dict]:
     """
     Sanitiert Messages für Mistral-Kompatibilität.
 
@@ -97,6 +97,7 @@ def _sanitize_messages_for_mistral(messages: List[Dict]) -> List[Dict]:
 
     Args:
         messages: Original-Nachrichten
+        vision: True wenn Modell Vision unterstützt (Bilder beibehalten)
 
     Returns:
         Sanitierte Nachrichten (Kopie)
@@ -198,15 +199,20 @@ def _sanitize_messages_for_mistral(messages: List[Dict]) -> List[Dict]:
             # Merge consecutive user messages
             if prev_role == "user" and result:
                 prev_content = result[-1].get("content", "")
-                # Multimodal content (list) zu Text extrahieren für Merge
-                prev_text = _extract_text_from_content(prev_content)
-                curr_text = _extract_text_from_content(content)
-                result[-1]["content"] = f"{prev_text}\n\n{curr_text}"
+                if vision and (isinstance(prev_content, list) or isinstance(content, list)):
+                    # Vision: Multimodal-Content als Liste zusammenführen
+                    prev_parts = prev_content if isinstance(prev_content, list) else [{"type": "text", "text": prev_content}]
+                    curr_parts = content if isinstance(content, list) else [{"type": "text", "text": content}]
+                    result[-1]["content"] = prev_parts + curr_parts
+                else:
+                    prev_text = _extract_text_from_content(prev_content)
+                    curr_text = _extract_text_from_content(content)
+                    result[-1]["content"] = f"{prev_text}\n\n{curr_text}"
                 logger.debug("[llm] Mistral: Merged consecutive user messages")
                 continue
 
-            # Multimodal content zu Text konvertieren (Mistral unterstützt kein Vision)
-            if isinstance(content, list):
+            # Multimodal content zu Text konvertieren wenn KEIN Vision-Support
+            if isinstance(content, list) and not vision:
                 content = _extract_text_from_content(content)
 
             result.append({"role": "user", "content": content})
@@ -790,12 +796,13 @@ class LLMClient:
     ) -> str:
         model = model or self.default_model
         is_mistral = _is_mistral_model(model)
+        is_vision = _is_vision_model(model)
         # Mistral-Kompatibilität
         if is_mistral:
             logger.info(f"[llm.chat] Mistral detected: {model}, sanitizing messages")
-            messages = _sanitize_messages_for_mistral(messages)
+            messages = _sanitize_messages_for_mistral(messages, vision=is_vision)
         # Multimodal Fallback für Nicht-Vision-Modelle
-        if _has_multimodal_content(messages) and not _is_vision_model(model):
+        if _has_multimodal_content(messages) and not is_vision:
             from app.services.multimodal import ensure_text_only_messages
             messages = ensure_text_only_messages(messages)
         payload = {
@@ -847,11 +854,12 @@ class LLMClient:
     ) -> AsyncGenerator[str, None]:
         model = model or self.default_model
         is_mistral = _is_mistral_model(model)
+        is_vision = _is_vision_model(model)
         # Mistral-Kompatibilität
         if is_mistral:
-            messages = _sanitize_messages_for_mistral(messages)
+            messages = _sanitize_messages_for_mistral(messages, vision=is_vision)
         # Multimodal Fallback für Nicht-Vision-Modelle
-        if _has_multimodal_content(messages) and not _is_vision_model(model):
+        if _has_multimodal_content(messages) and not is_vision:
             from app.services.multimodal import ensure_text_only_messages
             messages = ensure_text_only_messages(messages)
         payload = {
@@ -1027,8 +1035,9 @@ class LLMClient:
 
         # DEBUG: Model-Check für Mistral-Erkennung (immer loggen)
         is_mistral = _is_mistral_model(model)
-        print(f"[LLM DEBUG] chat_with_tools called - model='{model}', is_mistral={is_mistral}")
-        logger.warning(f"[llm] Model: '{model}', is_mistral={is_mistral}")
+        is_vision = _is_vision_model(model)
+        print(f"[LLM DEBUG] chat_with_tools called - model='{model}', is_mistral={is_mistral}, is_vision={is_vision}")
+        logger.warning(f"[llm] Model: '{model}', is_mistral={is_mistral}, is_vision={is_vision}")
 
         # Reasoning in System-Message injizieren falls aktiviert
         if reasoning:
@@ -1059,7 +1068,7 @@ class LLMClient:
                     has_tools = bool(m.get("tool_calls"))
                     print(f"[LLM DEBUG] Pre-sanitize assistant[{i}]: content={has_content}, tool_calls={has_tools}")
 
-            messages = _sanitize_messages_for_mistral(messages)
+            messages = _sanitize_messages_for_mistral(messages, vision=is_vision)
 
             new_count = len(messages)
             new_roles = [m.get("role") for m in messages]
@@ -1081,7 +1090,7 @@ class LLMClient:
 
         # Multimodal Fallback: Nicht-Vision-Modelle können keine Bilder verarbeiten
         # → Content-Arrays zu reinem Text konvertieren
-        if _has_multimodal_content(messages) and not _is_vision_model(model):
+        if _has_multimodal_content(messages) and not is_vision:
             from app.services.multimodal import ensure_text_only_messages
             logger.warning(f"[llm] Modell '{model}' hat keinen Vision-Support — Bilder werden als Text-Hinweis gesendet")
             print(f"[LLM DEBUG] Non-vision model '{model}': stripping image content from messages")
