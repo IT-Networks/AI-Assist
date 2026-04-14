@@ -24,15 +24,15 @@ def _is_mistral_model(model: str) -> bool:
 
 
 def _is_vision_model(model: str) -> bool:
-    """Prüft ob das Modell Vision/Bilder unterstützt."""
+    """Prüft ob das Modell Vision/Bilder unterstützt (per Config-Flag)."""
     if not model:
         return False
-    model_lower = model.lower()
-    # Bekannte Vision-Modelle: pixtral, llava, qwen-vl/qwen2-vl, gpt-4o, gpt-4-vision, internvl
-    return any(name in model_lower for name in (
-        "pixtral", "llava", "qwen-vl", "qwen2-vl", "internvl",
-        "gpt-4o", "gpt-4-vision", "gpt-4-turbo", "vision",
-    ))
+    from app.core.config import get_settings
+    settings = get_settings()
+    for m in settings.models:
+        if m.id == model and m.vision:
+            return True
+    return False
 
 
 def _has_multimodal_content(messages: List[Dict]) -> bool:

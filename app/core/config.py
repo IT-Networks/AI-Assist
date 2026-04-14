@@ -149,6 +149,7 @@ class ProxyConfig(BaseModel):
 class ModelEntry(BaseModel):
     id: str
     display_name: str
+    vision: bool = False
 
 
 class DataSourceParam(BaseModel):

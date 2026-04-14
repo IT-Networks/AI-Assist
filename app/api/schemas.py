@@ -36,6 +36,7 @@ class ChatResponse(BaseModel):
 class ModelInfo(BaseModel):
     id: str
     display_name: str
+    vision: bool = False
 
 
 class ModelsResponse(BaseModel):

@@ -12594,6 +12594,11 @@ function renderModelsSection() {
           data-field="id" onchange="markSettingsModified()">
         <input type="text" value="${escapeHtml(model.display_name)}" placeholder="Anzeigename"
           data-field="display_name" onchange="markSettingsModified()">
+        <label class="model-vision-toggle" title="Vision/Bild-Support aktivieren">
+          <input type="checkbox" data-field="vision" ${model.vision ? 'checked' : ''}
+            onchange="markSettingsModified()">
+          Vision
+        </label>
         ${isDefault ? '<span style="color: var(--success);">Standard</span>' : ''}
         <button class="model-delete" onclick="deleteModel(${idx})">✕</button>
       </div>
@@ -12623,7 +12628,8 @@ function addNewModel() {
 
   const newModel = {
     id: idInput.value.trim(),
-    display_name: nameInput.value.trim() || idInput.value.trim()
+    display_name: nameInput.value.trim() || idInput.value.trim(),
+    vision: false
   };
 
   settingsState.settings.models.push(newModel);
@@ -12910,8 +12916,9 @@ function collectSectionValues(section) {
     document.querySelectorAll('.model-item').forEach(item => {
       const id = item.querySelector('[data-field="id"]').value;
       const displayName = item.querySelector('[data-field="display_name"]').value;
+      const vision = item.querySelector('[data-field="vision"]')?.checked || false;
       if (id) {
-        models.push({ id, display_name: displayName || id });
+        models.push({ id, display_name: displayName || id, vision });
       }
     });
     return models;
