@@ -74,6 +74,7 @@ from app.agent.orchestration.response_handler import (
 )
 from app.agent.orchestration.tool_parser import (
     parse_text_tool_calls as _parse_text_tool_calls,
+    detect_malformed_tool_attempt as _detect_malformed_tool_attempt,
     REGEX_PATTERNS as _TOOL_REGEX,
 )
 from app.agent.orchestration.command_parser import (
@@ -1538,6 +1539,40 @@ class AgentOrchestrator:
                         # Content bereinigen - Tool-Marker entfernen
                         content = _strip_tool_markers(content)
                         logger.debug("[agent] Content nach Tool-Marker-Bereinigung: %d Zeichen", len(content) if content else 0)
+                    else:
+                        # Strict mode: wenn der Content klar ein Tool-Call sein wollte
+                        # (z.B. write_file("path":...)), aber nicht parsbar war, NICHT
+                        # stillschweigend als Text an den User durchreichen. Stattdessen
+                        # eine Korrektur-Instruktion in die Message-History einfügen und
+                        # die nächste Iteration starten, damit das Modell das korrekte
+                        # Format verwendet.
+                        malformed = _detect_malformed_tool_attempt(content)
+                        if malformed:
+                            snippet, hints = malformed
+                            logger.warning(
+                                "[agent] MALFORMED TOOL CALL detected (hints=%s). "
+                                "Suppressing text output and retrying with format hint. "
+                                "Snippet=%r", hints, snippet
+                            )
+                            messages.append({
+                                "role": "assistant",
+                                "content": snippet,
+                            })
+                            messages.append({
+                                "role": "user",
+                                "content": (
+                                    "Your previous response contained a tool-call-like "
+                                    f"fragment that could not be parsed (detected: "
+                                    f"{', '.join(hints)}). Retry using the exact "
+                                    "format:\n"
+                                    "<tool_call>{\"name\": \"<tool>\", "
+                                    "\"arguments\": {...}}</tool_call>\n"
+                                    "Do NOT use Python-style paren syntax like "
+                                    "funcname(\"key\": val)."
+                                ),
+                            })
+                            content = ""
+                            continue
 
                 # Tool-Calls verarbeiten
                 if not tool_calls:

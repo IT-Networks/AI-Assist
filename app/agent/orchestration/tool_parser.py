@@ -9,15 +9,31 @@ Supported formats:
 2. XML: <tool_call>{"name": "func", "arguments": {...}}</tool_call>
 3. OpenHermes: <functioncall>{"name": "func", "arguments": {...}}</functioncall>
 4. JSON-Block: ```json\n{"tool": "func", ...}\n```
+5. Paren-Call: write_file("path": "...", "content": "...")  [Python-style; auto-normalized]
 """
 
 import json
 import logging
 import re
 import uuid
-from typing import Dict, List
+from typing import Dict, List, Optional, Tuple
 
 logger = logging.getLogger(__name__)
+
+
+class MalformedToolCall(Exception):
+    """Raised when content clearly attempted a tool call but could not be parsed.
+
+    Orchestrator should catch this and surface a clear error to the user instead
+    of silently leaking the raw text into chat output.
+    """
+
+    def __init__(self, snippet: str, hints: List[str]):
+        self.snippet = snippet
+        self.hints = hints
+        super().__init__(
+            f"Malformed tool call detected (hints={hints}): {snippet[:160]!r}"
+        )
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -32,12 +48,17 @@ _RE_XML_INVOKE = re.compile(r'<invoke>(.*?)</invoke>', re.DOTALL)
 _RE_JSON_BLOCK = re.compile(r'```(?:json)?\s*\n(.*?)\n```', re.DOTALL)
 _RE_INLINE_NAME = re.compile(r'\{[^{}]*"name"\s*:\s*"([^"]+)"[^{}]*\}')
 
+# Paren-Call Format: funcname("key": value, ...)  OR  funcname({"key": value})
+# Matches identifier followed by '(' that contains at least one quoted key
+_RE_PAREN_CALL_HEAD = re.compile(r'\b([a-zA-Z_]\w{2,})\s*\(\s*\{?\s*"[\w\-]+"\s*:', re.DOTALL)
+
 # Debug hint patterns
 _RE_HINT_TOOL = re.compile(r'\[TOOL', re.IGNORECASE)
 _RE_HINT_XML_TOOL = re.compile(r'<tool', re.IGNORECASE)
 _RE_HINT_XML_FUNC = re.compile(r'<function', re.IGNORECASE)
 _RE_HINT_NAME = re.compile(r'"name"\s*:')
 _RE_HINT_TOOL_KEY = re.compile(r'"tool"\s*:')
+_RE_HINT_PAREN_CALL = re.compile(r'\b\w{3,}\s*\(\s*\{?\s*"[\w\-]+"\s*:')
 
 
 def parse_text_tool_calls(content: str, available_tools: List[Dict]) -> List[Dict]:
@@ -69,7 +90,8 @@ def parse_text_tool_calls(content: str, available_tools: List[Dict]) -> List[Dic
         "<function_calls>" in content or
         "<invoke>" in content or
         ('"name"' in content and ("arguments" in content or "parameters" in content)) or
-        ("```" in content and '"tool"' in content)
+        ("```" in content and '"tool"' in content) or
+        _RE_PAREN_CALL_HEAD.search(content) is not None
     )
     if not _HAS_TOOL_MARKERS:
         return []
@@ -214,6 +236,35 @@ def parse_text_tool_calls(content: str, available_tools: List[Dict]) -> List[Dic
             logger.debug(f"[agent] Inline JSON Tool-Call Format detected: {len(parsed_calls)} calls")
             return parsed_calls
 
+    # Format 5: Paren-Call (Python-style)
+    # funcname("key": value, ...) or funcname({"key": value})
+    # Only attempt if tool_names is known, to avoid matching arbitrary function-like text.
+    if tool_names:
+        for name, payload in _iter_paren_calls(content):
+            if name not in tool_names:
+                continue
+            args = _parse_paren_args(payload)
+            if args is None:
+                # Clearly intended as a tool call but unparseable - treat as malformed.
+                # We do NOT raise here (parse_text_tool_calls must return a list);
+                # instead, detect_malformed_tool_attempt() will surface this to the caller.
+                logger.warning(
+                    "[agent] paren-call for %r found but args unparseable: %r",
+                    name, payload[:120]
+                )
+                continue
+            parsed_calls.append({
+                "id": f"call_{uuid.uuid4().hex[:8]}",
+                "type": "function",
+                "function": {
+                    "name": name,
+                    "arguments": json.dumps(args)
+                }
+            })
+        if parsed_calls:
+            logger.debug(f"[agent] Paren-Call Format detected: {len(parsed_calls)} calls")
+            return parsed_calls
+
     # Debug: If no tool call detected, log helpful info
     if content and len(content) > 20:
         # Check for potential tool call patterns that didn't match
@@ -235,6 +286,133 @@ def parse_text_tool_calls(content: str, available_tools: List[Dict]) -> List[Dic
     return []
 
 
+def _iter_paren_calls(content: str):
+    """Yield (name, payload) tuples for each paren-style call found.
+
+    payload is the raw string between the matching parens (without the surrounding
+    parens themselves). Uses a balanced-paren scanner so nested () in JSON string
+    values don't terminate the match early.
+    """
+    for m in _RE_PAREN_CALL_HEAD.finditer(content):
+        name = m.group(1)
+        open_idx = content.find('(', m.start())
+        if open_idx < 0:
+            continue
+        end = _find_matching_paren(content, open_idx)
+        if end < 0:
+            continue
+        payload = content[open_idx + 1:end]
+        yield name, payload
+
+
+def _find_matching_paren(s: str, open_idx: int) -> int:
+    """Return index of the `)` matching `s[open_idx] == '('`, or -1.
+
+    Skips parens inside JSON string literals. Not a full tokenizer — aims to
+    survive typical LLM output where strings may contain '(' or ')'.
+    """
+    if open_idx >= len(s) or s[open_idx] != '(':
+        return -1
+    depth = 0
+    in_str = False
+    escape = False
+    i = open_idx
+    while i < len(s):
+        c = s[i]
+        if in_str:
+            if escape:
+                escape = False
+            elif c == '\\':
+                escape = True
+            elif c == '"':
+                in_str = False
+        else:
+            if c == '"':
+                in_str = True
+            elif c == '(':
+                depth += 1
+            elif c == ')':
+                depth -= 1
+                if depth == 0:
+                    return i
+        i += 1
+    return -1
+
+
+def _parse_paren_args(payload: str) -> Optional[Dict]:
+    """Try hard to turn a paren-style arg payload into a dict.
+
+    Accepts:
+      "key": "val", "k2": "v2"     (bare kwargs)
+      {"key": "val"}                (already JSON object)
+    Returns None if it cannot extract *any* key/value safely — caller should
+    treat that as malformed and surface a clear error rather than silently
+    dropping content.
+    """
+    if not payload or not payload.strip():
+        return None
+    s = payload.strip()
+
+    # If already wrapped in braces, try direct JSON parse first.
+    if s.startswith('{') and s.endswith('}'):
+        try:
+            data = json.loads(s)
+            if isinstance(data, dict):
+                return data
+        except json.JSONDecodeError:
+            pass  # fall through to bracket-wrap attempt
+
+    # Wrap in braces and try JSON parse.
+    try:
+        data = json.loads('{' + s.rstrip(',').rstrip() + '}')
+        if isinstance(data, dict):
+            return data
+    except json.JSONDecodeError:
+        pass
+
+    # Last resort: regex-extract each "key": "value" pair.
+    # Only used when JSON parse fails (often due to unescaped quotes/newlines in values).
+    pairs = re.findall(
+        r'"([\w\-]+)"\s*:\s*"((?:\\.|[^"\\])*)"',
+        s,
+        flags=re.DOTALL,
+    )
+    if pairs:
+        return {k: v for k, v in pairs}
+    return None
+
+
+def detect_malformed_tool_attempt(content: str) -> Optional[Tuple[str, List[str]]]:
+    """Check whether content looks like an attempted-but-broken tool call.
+
+    Returns (snippet, hints) if a tool call was clearly intended but the
+    `parse_text_tool_calls` function returned no results. Callers can use this
+    to raise `MalformedToolCall` or surface a user-visible error, preventing
+    the malformed text from silently leaking into chat output.
+
+    Returns None if content has no tool-call hints.
+    """
+    if not content or len(content) < 20:
+        return None
+    hints = []
+    if _RE_HINT_TOOL.search(content):
+        hints.append('[TOOL...')
+    if _RE_HINT_XML_TOOL.search(content):
+        hints.append('<tool...')
+    if _RE_HINT_XML_FUNC.search(content):
+        hints.append('<function...')
+    if _RE_HINT_NAME.search(content):
+        hints.append('"name":')
+    if _RE_HINT_TOOL_KEY.search(content):
+        hints.append('"tool":')
+    if _RE_HINT_PAREN_CALL.search(content):
+        hints.append('funcname(...)')
+    if not hints:
+        return None
+    snippet = content[:200]
+    return snippet, hints
+
+
 # Export regex patterns for use by orchestrator (if still needed for other purposes)
 REGEX_PATTERNS = {
     "mistral_compact": _RE_MISTRAL_COMPACT,
@@ -245,4 +423,13 @@ REGEX_PATTERNS = {
     "xml_invoke": _RE_XML_INVOKE,
     "json_block": _RE_JSON_BLOCK,
     "inline_name": _RE_INLINE_NAME,
+    "paren_call_head": _RE_PAREN_CALL_HEAD,
 }
+
+
+__all__ = [
+    "parse_text_tool_calls",
+    "detect_malformed_tool_attempt",
+    "MalformedToolCall",
+    "REGEX_PATTERNS",
+]

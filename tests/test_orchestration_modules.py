@@ -556,3 +556,53 @@ class TestToolParser:
         result = parse_text_tool_calls(content, tools)
         assert len(result) == 1
         assert result[0]["function"]["name"] == "list_files"
+
+    def test_parse_paren_call_simple(self):
+        """Paren-style Python call is normalized to a tool call."""
+        content = 'write_file("path": "/tmp/a.py", "content": "print(1)")'
+        tools = [{"function": {"name": "write_file"}}]
+        result = parse_text_tool_calls(content, tools)
+        assert len(result) == 1
+        assert result[0]["function"]["name"] == "write_file"
+        import json as _json
+        args = _json.loads(result[0]["function"]["arguments"])
+        assert args["path"] == "/tmp/a.py"
+        assert args["content"] == "print(1)"
+
+    def test_parse_paren_call_with_braces(self):
+        """Paren-style with braces around args also parses."""
+        content = 'read_file({"path": "/tmp/b.py"})'
+        tools = [{"function": {"name": "read_file"}}]
+        result = parse_text_tool_calls(content, tools)
+        assert len(result) == 1
+        assert result[0]["function"]["name"] == "read_file"
+
+    def test_parse_paren_call_ignores_unknown_tools(self):
+        """Paren-style only matches when the function name is a known tool."""
+        content = 'print("path": "x")'
+        tools = [{"function": {"name": "write_file"}}]
+        result = parse_text_tool_calls(content, tools)
+        assert result == []
+
+    def test_detect_malformed_tool_attempt_paren(self):
+        """Clearly-attempted paren call that fails to parse is flagged."""
+        from app.agent.orchestration.tool_parser import detect_malformed_tool_attempt
+        # Malformed: period instead of comma, unmatched brace
+        content = 'write_file("path":"C:/a.py". "content": "broken\nstuff"}'
+        detected = detect_malformed_tool_attempt(content)
+        assert detected is not None
+        snippet, hints = detected
+        assert 'funcname(...)' in hints
+
+    def test_detect_malformed_returns_none_for_plain_text(self):
+        """Plain prose is NOT flagged as malformed."""
+        from app.agent.orchestration.tool_parser import detect_malformed_tool_attempt
+        content = "Die letzte Datei-Operation wurde bestaetigt und ausgefuehrt."
+        assert detect_malformed_tool_attempt(content) is None
+
+    def test_malformed_paren_returns_empty_list(self):
+        """Parser returns [] (not partial garbage) for malformed paren call."""
+        content = 'write_file("path":"C:/a.py". broken'
+        tools = [{"function": {"name": "write_file"}}]
+        result = parse_text_tool_calls(content, tools)
+        assert result == []
