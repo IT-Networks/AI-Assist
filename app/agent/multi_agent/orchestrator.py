@@ -13,9 +13,18 @@ import json
 import logging
 import re
 import time
+import uuid
 from typing import Awaitable, Callable, Dict, List, Optional
 
 from app.agent.multi_agent.agent_pool import AgentPool
+from app.agent.multi_agent.approval_manager import (
+    ApprovalDecision,
+    ApprovalManager,
+    ApprovalRequest,
+    register_approval_manager,
+    unregister_approval_manager,
+)
+from app.agent.multi_agent.change_tracker import ChangeTracker
 from app.agent.multi_agent.message_bus import MessageBus
 from app.agent.multi_agent.models import (
     TeamConfig,
@@ -37,9 +46,13 @@ class MultiAgentOrchestrator:
         self,
         team_config: TeamConfig,
         on_progress: Optional[Callable[[Dict], Awaitable[None]]] = None,
+        on_approval_request: Optional[Callable[[ApprovalRequest], Awaitable[None]]] = None,
+        is_implementation_team: bool = False,
     ):
         self._team = team_config
         self._on_progress = on_progress
+        self._on_approval_request = on_approval_request
+        self._is_implementation_team = is_implementation_team
         self._message_bus = MessageBus()
         self._shared_context: Dict[str, str] = {}  # task_id → result
         self._pool = AgentPool(max_concurrent=team_config.max_parallel)
@@ -58,8 +71,28 @@ class MultiAgentOrchestrator:
         # Agent-Diagramme: agent_name → (diagram, title)
         self._agent_diagrams: Dict[str, tuple] = {}
 
+        # Implementation team: Change tracking and approval management
+        if is_implementation_team:
+            feature_id = f"feat_{uuid.uuid4().hex[:12]}"
+            self._change_tracker = ChangeTracker(feature_id=feature_id)
+            self._approval_manager = ApprovalManager(on_approval_request=on_approval_request)
+            register_approval_manager(feature_id, self._approval_manager)
+            logger.info(f"[MultiAgent] Implementation team initialized: {feature_id}")
+        else:
+            self._change_tracker = None
+            self._approval_manager = None
+
     async def run(self, goal: str) -> TeamRunResult:
         """Fuehrt den kompletten Team-Run aus."""
+        try:
+            return await self._run_impl(goal)
+        finally:
+            # Cleanup: Registry entfernen damit Manager nicht leaken
+            if self._is_implementation_team and self._change_tracker:
+                unregister_approval_manager(self._change_tracker.feature_id)
+
+    async def _run_impl(self, goal: str) -> TeamRunResult:
+        """Interne Run-Implementation (siehe run() fuer Registry-Cleanup)."""
         start = time.time()
         self._goal = goal  # Fuer Durchreichung an Agents
         logger.info(f"[MultiAgent] Team '{self._team.name}' startet: {goal[:100]}")
@@ -89,6 +122,38 @@ class MultiAgentOrchestrator:
             "agents": self._team.agent_names(),
         })
 
+        # NEW: For implementation team, request plan approval before execution
+        if self._is_implementation_team and self._approval_manager:
+            await self._emit({"phase": "plan_approval_requested"})
+            logger.info(f"[MultiAgent] Requesting plan approval for implementation team")
+
+            plan_summary = {
+                "agents": self._team.agent_names(),
+                "tasks": len(tasks),
+                "file_count": len(tasks) * 2,  # Rough estimate
+                "files_affected": [t.title for t in tasks],
+                "estimated_duration_minutes": 5 + len(tasks),
+            }
+
+            decision = await self._approval_manager.request_plan_approval(
+                feature_id=self._change_tracker.feature_id,
+                title=goal[:100],
+                plan=plan_summary
+            )
+
+            if decision != ApprovalDecision.APPROVE:
+                logger.info("[MultiAgent] User rejected plan")
+                await self._emit({"phase": "plan_rejected"})
+                return TeamRunResult(
+                    team_name=self._team.name,
+                    goal=goal,
+                    final_summary="Feature-Implementierung wurde vom Benutzer abgelehnt.",
+                    duration_seconds=time.time() - start,
+                )
+
+            await self._emit({"phase": "plan_approved", "message": "Benutzer genehmigt - beginne Ausführung..."})
+            logger.info("[MultiAgent] User approved plan - starting execution")
+
         # Phase 2: Scheduling
         ordered = self._scheduler.schedule(tasks, self._team.agents)
 
@@ -117,6 +182,67 @@ class MultiAgentOrchestrator:
         duration = time.time() - start
 
         logger.info(f"[MultiAgent] Fertig: {completed}/{len(tasks)} Tasks in {duration:.1f}s")
+
+        # NEW: For implementation team, request verification approval
+        if self._is_implementation_team and self._approval_manager and self._change_tracker:
+            await self._emit({"phase": "verification_approval_requested"})
+            logger.info("[MultiAgent] Requesting verification approval for implementation team")
+
+            # Build test results summary
+            test_results = {
+                "backend_tests": {"passed": 0, "failed": 0},
+                "frontend_tests": {"passed": 0, "failed": 0},
+                "coverage": {"percentage": 0},
+            }
+
+            files_changed = self._change_tracker.get_summary()["files"]
+
+            decision = await self._approval_manager.request_verification_approval(
+                feature_id=self._change_tracker.feature_id,
+                title=goal[:100],
+                test_results=test_results,
+                files_changed=files_changed,
+                diff_preview=summary[:500] if summary else ""
+            )
+
+            if decision == ApprovalDecision.DISCARD:
+                logger.info("[MultiAgent] User rejected implementation - rolling back")
+                await self._emit({"phase": "rollback_started"})
+                rollback_stats = self._change_tracker.rollback()
+                logger.info(f"[MultiAgent] Rollback complete: {rollback_stats}")
+                await self._emit({"phase": "rollback_complete", "stats": rollback_stats})
+
+                return TeamRunResult(
+                    team_name=self._team.name,
+                    goal=goal,
+                    final_summary=f"Implementierung wurde vom Benutzer abgelehnt und rückgängig gemacht.\n\nRollback-Statistik: {rollback_stats}",
+                    duration_seconds=duration,
+                )
+
+            elif decision == ApprovalDecision.CHANGES_REQUESTED:
+                logger.info("[MultiAgent] User requested changes - rolling back")
+                await self._emit({"phase": "rollback_started"})
+                rollback_stats = self._change_tracker.rollback()
+                logger.info(f"[MultiAgent] Rollback complete: {rollback_stats}")
+                await self._emit({"phase": "rollback_complete", "stats": rollback_stats})
+
+                return TeamRunResult(
+                    team_name=self._team.name,
+                    goal=goal,
+                    final_summary="Benutzer hat Änderungen angefordert. Implementierung wurde rückgängig gemacht.",
+                    duration_seconds=duration,
+                )
+
+            # User approved - save manifest
+            logger.info("[MultiAgent] User approved implementation")
+            self._change_tracker.save_manifest(
+                user_request=goal,
+                status="COMPLETED",
+                test_results=test_results,
+                git_commit=""  # Would be set after actual git commit
+            )
+
+            await self._emit({"phase": "approved", "message": "Benutzer genehmigt - bereit zum Merge"})
 
         await self._emit({
             "phase": "complete",

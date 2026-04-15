@@ -1403,3 +1403,65 @@ async def apply_workspace_code_change(
             status_code=500,
             detail=f"Fehler beim Speichern: {str(e)}"
         )
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Implementation Team - Approval Response Endpoint
+# ══════════════════════════════════════════════════════════════════════════════
+
+class ApprovalResponseRequest(BaseModel):
+    """User-Entscheidung für Implementation-Team Approval-Stufen."""
+    feature_id: str = Field(..., description="Feature-ID aus approval_request Event")
+    stage: str = Field(..., description="plan_ready | reviewing")
+    decision: str = Field(..., description="APPROVE | CHANGES_REQUESTED | DISCARD")
+    feedback: str = Field("", description="Optional user feedback")
+
+
+@router.post("/approval-response")
+async def submit_approval_response(req: ApprovalResponseRequest) -> Dict[str, Any]:
+    """
+    Empfängt User-Entscheidung für Implementation-Team Approval.
+
+    Wird vom Frontend aufgerufen nachdem User im Approval-Modal
+    [Start]/[Cancel] (Plan-Stage) oder [Merge]/[Changes]/[Discard] (Verification) klickt.
+    """
+    from app.agent.multi_agent.approval_manager import (
+        get_approval_manager,
+        ApprovalResponse,
+        ApprovalDecision,
+        ApprovalStage,
+    )
+
+    manager = get_approval_manager(req.feature_id)
+    if manager is None:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Keine wartende Genehmigung für feature_id={req.feature_id}"
+        )
+
+    try:
+        stage_enum = ApprovalStage(req.stage)
+    except ValueError:
+        raise HTTPException(status_code=400, detail=f"Ungültige stage: {req.stage}")
+
+    try:
+        decision_enum = ApprovalDecision[req.decision]
+    except KeyError:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Ungültige decision: {req.decision}. Erwartet: APPROVE | CHANGES_REQUESTED | DISCARD"
+        )
+
+    response = ApprovalResponse(
+        feature_id=req.feature_id,
+        stage=stage_enum,
+        decision=decision_enum,
+        feedback=req.feedback,
+    )
+    await manager.submit_response(response)
+
+    return {
+        "success": True,
+        "feature_id": req.feature_id,
+        "decision": req.decision,
+    }

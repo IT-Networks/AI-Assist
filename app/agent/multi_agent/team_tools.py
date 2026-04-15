@@ -68,12 +68,29 @@ async def _handle_run_team(
         event_type = f"team_{phase}" if not phase.startswith("team_") else phase
         await event_bridge.emit(event_type, data)
 
+    # NEW: Check if implementation team and setup approval callback
+    is_implementation_team = "implementation" in internal_config.name.lower()
+
+    async def on_approval_request(request):
+        """Emit approval request to frontend for user decision."""
+        await event_bridge.emit("approval_request", {
+            "feature_id": request.feature_id,
+            "stage": request.stage.value,
+            "title": request.title,
+            "description": request.description,
+            "plan": request.plan_summary,
+            "test_results": request.execution_summary,
+            "changes": request.changes,
+        })
+
     # Orchestrator erstellen und ausfuehren
     from app.agent.multi_agent.orchestrator import MultiAgentOrchestrator
 
     orchestrator = MultiAgentOrchestrator(
         team_config=internal_config,
         on_progress=on_progress,
+        on_approval_request=on_approval_request if is_implementation_team else None,
+        is_implementation_team=is_implementation_team,
     )
 
     await event_bridge.emit("team_started", {

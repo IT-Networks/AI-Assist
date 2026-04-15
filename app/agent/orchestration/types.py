@@ -117,6 +117,13 @@ class AgentEventType(str, Enum):
     TEAM_PROGRESS = "team_progress"                   # Fortschritts-Update
     TEAM_SYNTHESIZING = "team_synthesizing"           # Synthese laeuft
     TEAM_COMPLETE = "team_complete"                   # Team-Run abgeschlossen
+    # Implementation Team Approval Events
+    APPROVAL_REQUEST = "approval_request"                               # Genehmigung vom User angefordert
+    PLAN_APPROVAL_REQUESTED = "plan_approval_requested"                 # Plan-Genehmigung angefordert
+    VERIFICATION_APPROVAL_REQUESTED = "verification_approval_requested" # Verification-Genehmigung angefordert
+    ROLLBACK_STARTED = "rollback_started"                               # Rollback startet
+    ROLLBACK_COMPLETE = "rollback_complete"                             # Rollback abgeschlossen
+    IMPL_APPROVED = "approved"                                          # Implementierung genehmigt - bereit zum Merge
 
 
 # MCP Event Type Mapping - Maps string event types to AgentEventType
@@ -166,6 +173,15 @@ MCP_EVENT_TYPE_MAPPING: Dict[str, "AgentEventType"] = {
     "team_progress": AgentEventType.TEAM_PROGRESS,
     "team_synthesizing": AgentEventType.TEAM_SYNTHESIZING,
     "team_complete": AgentEventType.TEAM_COMPLETE,
+    # Implementation team approval events
+    "approval_request": AgentEventType.APPROVAL_REQUEST,
+    "plan_approval_requested": AgentEventType.PLAN_APPROVAL_REQUESTED,
+    "plan_approved": AgentEventType.PLAN_APPROVED,
+    "plan_rejected": AgentEventType.PLAN_REJECTED,
+    "verification_approval_requested": AgentEventType.VERIFICATION_APPROVAL_REQUESTED,
+    "rollback_started": AgentEventType.ROLLBACK_STARTED,
+    "rollback_complete": AgentEventType.ROLLBACK_COMPLETE,
+    "approved": AgentEventType.IMPL_APPROVED,
 }
 
 

@@ -6134,7 +6134,289 @@ async function processAgentEvent(event, bubble, msgDiv, chat) {
       if (document.contains(chat.pane)) scrollToBottom();
       break;
     }
+
+    // ── Implementation Team Approval Events ──
+    case 'approval_request': {
+      handleApprovalRequest(data);
+      break;
+    }
+    case 'plan_approval_requested':
+    case 'verification_approval_requested':
+    case 'plan_approved':
+    case 'plan_rejected':
+    case 'rollback_started':
+    case 'rollback_complete':
+    case 'approved': {
+      log.info('[Approval] Phase event:', event.type, data);
+      break;
+    }
   }
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// Implementation Team - Approval Modals (Plan + Verification)
+// ══════════════════════════════════════════════════════════════════════════════
+
+const approvalState = {
+  currentApproval: null,
+  featureId: null,
+  stage: null,
+
+  async submitResponse(decision, feedback = '') {
+    if (!this.currentApproval) {
+      console.warn('[Approval] No pending approval');
+      return false;
+    }
+
+    const payload = {
+      feature_id: this.featureId,
+      stage: this.stage,
+      decision,
+      feedback,
+    };
+
+    log.info('[Approval] Submitting response:', payload);
+
+    try {
+      const res = await fetch('/api/agent/approval-response', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+
+      if (!res.ok) {
+        const err = await res.text();
+        console.error('[Approval] Backend rejected response:', res.status, err);
+        return false;
+      }
+    } catch (e) {
+      console.error('[Approval] Failed to POST approval response:', e);
+      return false;
+    }
+
+    this.clear();
+    return true;
+  },
+
+  clear() {
+    this.currentApproval = null;
+    this.featureId = null;
+    this.stage = null;
+  },
+};
+
+function handleApprovalRequest(data) {
+  const stage = data?.stage;
+  log.info('[Approval] Received approval request:', stage, data);
+
+  if (stage === 'plan_ready') {
+    openPlanApprovalModal(data);
+  } else if (stage === 'reviewing') {
+    openVerificationModal(data);
+  } else {
+    log.warn('[Approval] Unknown approval stage:', stage);
+  }
+}
+
+// ── Plan Approval Modal ──
+function openPlanApprovalModal(planData) {
+  approvalState.currentApproval = planData;
+  approvalState.featureId = planData.feature_id;
+  approvalState.stage = 'plan_ready';
+
+  const existing = document.getElementById('approval-modal-overlay');
+  if (existing) existing.remove();
+
+  document.body.insertAdjacentHTML('beforeend', _createPlanApprovalHTML(planData));
+
+  const modal = document.getElementById('approval-modal-overlay');
+  const handleEsc = (e) => { if (e.key === 'Escape') closePlanApprovalModal(); };
+  document.addEventListener('keydown', handleEsc);
+  modal._escHandler = handleEsc;
+  focusTrap.activate(modal);
+}
+
+function closePlanApprovalModal() {
+  const modal = document.getElementById('approval-modal-overlay');
+  if (modal) {
+    focusTrap.deactivate();
+    if (modal._escHandler) document.removeEventListener('keydown', modal._escHandler);
+    modal.remove();
+  }
+}
+
+function approvePlan() {
+  closePlanApprovalModal();
+  approvalState.submitResponse('APPROVE');
+}
+
+function rejectPlan() {
+  closePlanApprovalModal();
+  approvalState.submitResponse('DISCARD');
+}
+
+function _createPlanApprovalHTML(planData) {
+  const { title = '', description = '', plan = {} } = planData;
+  const agents = (plan.agents || []).join(', ') || 'keine';
+  const duration = plan.estimated_duration_minutes || '5-10';
+  const fileCount = plan.file_count ?? '?';
+  const filesAffected = plan.files_affected || [];
+
+  const filesHtml = filesAffected.length > 0
+    ? `<div class="plan-section">
+         <h4>Betroffene Dateien:</h4>
+         <ul class="plan-files-list">
+           ${filesAffected.slice(0, 10).map(f => `<li class="plan-file-item">${escapeHtml(String(f))}</li>`).join('')}
+           ${filesAffected.length > 10 ? `<li class="plan-file-item">... und ${filesAffected.length - 10} weitere</li>` : ''}
+         </ul>
+       </div>`
+    : '';
+
+  return `
+    <div class="approval-modal-overlay" id="approval-modal-overlay" onclick="closePlanApprovalModal()">
+      <div class="approval-modal plan-approval" onclick="event.stopPropagation()">
+        <div class="approval-modal-header">
+          <h2 class="approval-modal-title">
+            <span class="plan-icon">📋</span>
+            Implementierungsplan
+          </h2>
+          <button class="modal-close" onclick="closePlanApprovalModal()">&times;</button>
+        </div>
+        <div class="approval-modal-content">
+          <div class="plan-section">
+            <h3 class="plan-feature-title">${escapeHtml(title)}</h3>
+            <p class="plan-description">${escapeHtml(description).replace(/\n/g, '<br>')}</p>
+          </div>
+          <div class="plan-details">
+            <div class="plan-detail-row"><span class="plan-label">👥 Agenten:</span><span class="plan-value">${escapeHtml(agents)}</span></div>
+            <div class="plan-detail-row"><span class="plan-label">📁 Dateien:</span><span class="plan-value">ca. ${escapeHtml(String(fileCount))} Dateien</span></div>
+            <div class="plan-detail-row"><span class="plan-label">⏱️ Dauer:</span><span class="plan-value">ca. ${escapeHtml(String(duration))} Minuten</span></div>
+          </div>
+          ${filesHtml}
+        </div>
+        <div class="approval-modal-actions">
+          <button class="btn btn-primary" onclick="approvePlan()">✓ Start Implementation</button>
+          <button class="btn btn-ghost" onclick="rejectPlan()">✕ Abbrechen</button>
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+// ── Verification Modal ──
+function openVerificationModal(verificationData) {
+  approvalState.currentApproval = verificationData;
+  approvalState.featureId = verificationData.feature_id;
+  approvalState.stage = 'reviewing';
+
+  const existing = document.getElementById('approval-modal-overlay');
+  if (existing) existing.remove();
+
+  document.body.insertAdjacentHTML('beforeend', _createVerificationModalHTML(verificationData));
+
+  const modal = document.getElementById('approval-modal-overlay');
+  const handleEsc = (e) => { if (e.key === 'Escape') closeVerificationModal(); };
+  document.addEventListener('keydown', handleEsc);
+  modal._escHandler = handleEsc;
+  focusTrap.activate(modal);
+}
+
+function closeVerificationModal() {
+  const modal = document.getElementById('approval-modal-overlay');
+  if (modal) {
+    focusTrap.deactivate();
+    if (modal._escHandler) document.removeEventListener('keydown', modal._escHandler);
+    modal.remove();
+  }
+}
+
+function approveAndMerge() {
+  closeVerificationModal();
+  approvalState.submitResponse('APPROVE');
+}
+
+function requestChanges() {
+  const feedback = prompt('Bitte beschreiben Sie die gewünschten Änderungen:');
+  if (feedback === null) return;
+  closeVerificationModal();
+  approvalState.submitResponse('CHANGES_REQUESTED', feedback);
+}
+
+function discardAllChanges() {
+  if (!confirm('Wirklich alle Änderungen verwerfen? Dies kann nicht rückgängig gemacht werden.')) return;
+  closeVerificationModal();
+  approvalState.submitResponse('DISCARD');
+}
+
+function _createVerificationModalHTML(data) {
+  const { title = '', description = '', test_results = {}, changes = [] } = data;
+  const backend = test_results.backend_tests || {};
+  const frontend = test_results.frontend_tests || {};
+  const coverage = test_results.coverage || {};
+  const coveragePercent = coverage.percentage ?? 0;
+
+  const backendPassed = backend.passed || 0;
+  const backendFailed = backend.failed || 0;
+  const frontendPassed = frontend.passed || 0;
+  const frontendFailed = frontend.failed || 0;
+
+  const changesHtml = changes.length > 0
+    ? `<div class="verification-section">
+         <h4>📁 Geänderte Dateien (${changes.length})</h4>
+         <ul class="changes-list">
+           ${changes.slice(0, 15).map(c => `
+             <li class="change-item">
+               <span class="change-icon">📄</span>
+               <span class="change-path">${escapeHtml(c.file || 'unbekannt')}</span>
+               <span class="change-type">${escapeHtml(c.type || 'UNKNOWN')}</span>
+             </li>`).join('')}
+           ${changes.length > 15 ? `<li class="change-item change-overflow">... und ${changes.length - 15} weitere Dateien</li>` : ''}
+         </ul>
+       </div>`
+    : '';
+
+  return `
+    <div class="approval-modal-overlay" id="approval-modal-overlay" onclick="closeVerificationModal()">
+      <div class="approval-modal verification-modal" onclick="event.stopPropagation()">
+        <div class="approval-modal-header">
+          <h2 class="approval-modal-title">
+            <span class="verification-icon">✓</span>
+            Implementierung Verifiziert
+          </h2>
+          <button class="modal-close" onclick="closeVerificationModal()">&times;</button>
+        </div>
+        <div class="approval-modal-content verification-content">
+          <div class="verification-section">
+            <h3>${escapeHtml(title)}</h3>
+            <p class="verification-description">${escapeHtml(description).replace(/\n/g, '<br>')}</p>
+          </div>
+          <div class="verification-section">
+            <h4>📊 Test-Ergebnisse</h4>
+            <div class="test-results">
+              <div class="test-result-row">
+                <span class="test-label">Backend-Tests:</span>
+                <span class="test-status ${backendFailed === 0 ? 'passed' : 'failed'}">${backendFailed === 0 ? '✅ bestanden' : '❌ Fehler'} (${backendPassed}/${backendPassed + backendFailed})</span>
+              </div>
+              <div class="test-result-row">
+                <span class="test-label">Frontend-Tests:</span>
+                <span class="test-status ${frontendFailed === 0 ? 'passed' : 'failed'}">${frontendFailed === 0 ? '✅ bestanden' : '❌ Fehler'} (${frontendPassed}/${frontendPassed + frontendFailed})</span>
+              </div>
+              <div class="test-result-row">
+                <span class="test-label">Code-Abdeckung:</span>
+                <span class="test-coverage ${coveragePercent >= 85 ? 'good' : 'warning'}">${coveragePercent}% (Ziel: &gt;85%)</span>
+              </div>
+            </div>
+          </div>
+          ${changesHtml}
+        </div>
+        <div class="approval-modal-actions verification-actions">
+          <button class="btn btn-success" onclick="approveAndMerge()">✓ Zu Git Mergen</button>
+          <button class="btn btn-warning" onclick="requestChanges()">⚙ Änderungen Nötig</button>
+          <button class="btn btn-danger" onclick="discardAllChanges()">✕ Alles Verwerfen</button>
+        </div>
+      </div>
+    </div>
+  `;
 }
 
 // Kontext-Anzeige aktualisieren (per-chat)
