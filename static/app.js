@@ -35,6 +35,10 @@ const focusTrap = {
    * @param {HTMLElement} modal - Das Modal-Element
    */
   activate(modal) {
+    if (!modal || typeof modal.querySelectorAll !== 'function') {
+      console.warn('[focusTrap] activate called without valid modal element');
+      return;
+    }
     if (this._activeModal) this.deactivate();
     this._activeModal = modal;
     this._previousFocus = document.activeElement;
@@ -52,7 +56,8 @@ const focusTrap = {
     // Tab-Trap Handler
     this._boundHandler = (e) => {
       if (e.key !== 'Tab') return;
-      const currentFocusables = Array.from(modal.querySelectorAll(focusableSelector))
+      if (!this._activeModal || typeof this._activeModal.querySelectorAll !== 'function') return;
+      const currentFocusables = Array.from(this._activeModal.querySelectorAll(focusableSelector))
         .filter(el => !el.disabled && el.offsetParent !== null);
       if (currentFocusables.length === 0) return;
 
@@ -6230,19 +6235,22 @@ function openPlanApprovalModal(planData) {
   document.body.insertAdjacentHTML('beforeend', _createPlanApprovalHTML(planData));
 
   const modal = document.getElementById('approval-modal-overlay');
+  if (!modal) {
+    console.error('[Approval] Modal-Element nicht gefunden nach insertAdjacentHTML');
+    return;
+  }
   const handleEsc = (e) => { if (e.key === 'Escape') closePlanApprovalModal(); };
   document.addEventListener('keydown', handleEsc);
   modal._escHandler = handleEsc;
-  focusTrap.activate(modal);
+  try { focusTrap.activate(modal); } catch (e) { console.warn('[Approval] focusTrap.activate failed:', e); }
 }
 
 function closePlanApprovalModal() {
   const modal = document.getElementById('approval-modal-overlay');
-  if (modal) {
-    focusTrap.deactivate();
-    if (modal._escHandler) document.removeEventListener('keydown', modal._escHandler);
-    modal.remove();
-  }
+  if (!modal) return;
+  try { focusTrap.deactivate(); } catch (e) { console.warn('[Approval] focusTrap.deactivate failed:', e); }
+  if (modal._escHandler) document.removeEventListener('keydown', modal._escHandler);
+  modal.remove();
 }
 
 function approvePlan() {
@@ -6315,19 +6323,22 @@ function openVerificationModal(verificationData) {
   document.body.insertAdjacentHTML('beforeend', _createVerificationModalHTML(verificationData));
 
   const modal = document.getElementById('approval-modal-overlay');
+  if (!modal) {
+    console.error('[Approval] Modal-Element nicht gefunden nach insertAdjacentHTML');
+    return;
+  }
   const handleEsc = (e) => { if (e.key === 'Escape') closeVerificationModal(); };
   document.addEventListener('keydown', handleEsc);
   modal._escHandler = handleEsc;
-  focusTrap.activate(modal);
+  try { focusTrap.activate(modal); } catch (e) { console.warn('[Approval] focusTrap.activate failed:', e); }
 }
 
 function closeVerificationModal() {
   const modal = document.getElementById('approval-modal-overlay');
-  if (modal) {
-    focusTrap.deactivate();
-    if (modal._escHandler) document.removeEventListener('keydown', modal._escHandler);
-    modal.remove();
-  }
+  if (!modal) return;
+  try { focusTrap.deactivate(); } catch (e) { console.warn('[Approval] focusTrap.deactivate failed:', e); }
+  if (modal._escHandler) document.removeEventListener('keydown', modal._escHandler);
+  modal.remove();
 }
 
 function approveAndMerge() {

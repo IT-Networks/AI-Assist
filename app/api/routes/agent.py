@@ -1432,6 +1432,13 @@ async def submit_approval_response(req: ApprovalResponseRequest) -> Dict[str, An
         ApprovalStage,
     )
 
+    import logging
+    logger = logging.getLogger(__name__)
+    logger.info(
+        f"[ApprovalResponse] feature_id={req.feature_id} stage={req.stage!r} "
+        f"decision={req.decision!r} feedback_len={len(req.feedback)}"
+    )
+
     manager = get_approval_manager(req.feature_id)
     if manager is None:
         raise HTTPException(
@@ -1439,18 +1446,36 @@ async def submit_approval_response(req: ApprovalResponseRequest) -> Dict[str, An
             detail=f"Keine wartende Genehmigung für feature_id={req.feature_id}"
         )
 
+    # Stage: akzeptiere value ("plan_ready") ODER name ("PLAN_READY")
+    stage_enum: Optional[ApprovalStage] = None
+    stage_raw = (req.stage or "").strip()
     try:
-        stage_enum = ApprovalStage(req.stage)
+        stage_enum = ApprovalStage(stage_raw.lower())
     except ValueError:
-        raise HTTPException(status_code=400, detail=f"Ungültige stage: {req.stage}")
+        try:
+            stage_enum = ApprovalStage[stage_raw.upper()]
+        except KeyError:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Ungültige stage: {req.stage!r}. Erwartet: {[s.value for s in ApprovalStage]}"
+            )
 
+    # Decision: akzeptiere name ("APPROVE") ODER value ("approve")
+    decision_enum: Optional[ApprovalDecision] = None
+    decision_raw = (req.decision or "").strip()
     try:
-        decision_enum = ApprovalDecision[req.decision]
+        decision_enum = ApprovalDecision[decision_raw.upper()]
     except KeyError:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Ungültige decision: {req.decision}. Erwartet: APPROVE | CHANGES_REQUESTED | DISCARD"
-        )
+        try:
+            decision_enum = ApprovalDecision(decision_raw.lower())
+        except ValueError:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    f"Ungültige decision: {req.decision!r}. "
+                    f"Erwartet: APPROVE | CHANGES_REQUESTED | DISCARD"
+                )
+            )
 
     response = ApprovalResponse(
         feature_id=req.feature_id,
@@ -1463,5 +1488,5 @@ async def submit_approval_response(req: ApprovalResponseRequest) -> Dict[str, An
     return {
         "success": True,
         "feature_id": req.feature_id,
-        "decision": req.decision,
+        "decision": decision_enum.name,
     }
