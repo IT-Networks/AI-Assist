@@ -4571,22 +4571,100 @@ async function loadModels() {
     data.models.forEach(m => {
       const opt = document.createElement('option');
       opt.value = m.id;
-      opt.textContent = m.display_name;
+
+      // Option 3: Labels mit Icons in Dropdown-Optionen
+      let label = m.display_name || m.id;
+      if (m.vision) label += ' 👁️';
+      if (m.ocr_model) label += ' 📄';
+
+      opt.textContent = label;
+      opt.dataset.vision = m.vision || false;
+      opt.dataset.ocr = m.ocr_model || false;
+
       if (m.id === data.default) opt.selected = true;
       sel.appendChild(opt);
     });
 
+    // Speichere Modell-Daten für spätere Referenz
+    window.modelsData = data.models;
+
     state.currentModel = sel.value;
+
+    // Initial UI updaten
+    updateModelUIFeedback();
+
     sel.addEventListener('change', () => {
       const prevModel = state.currentModel;
       state.currentModel = sel.value;
       log.info(`[Model] Changed from ${prevModel} to ${sel.value}, mode remains: ${state.mode}`);
+
+      // Update alle UI-Feedback-Optionen
+      updateModelUIFeedback();
+
       // Mode UI-Sync sicherstellen (defensiv - sollte nicht nötig sein)
       syncModeRadioButtons(state.mode);
     });
   } catch (e) {
     log.error('Failed to load models:', e);
     showErrorToast('Modelle konnten nicht geladen werden');
+  }
+}
+
+/**
+ * Updatet alle Modell-UI-Feedback-Elemente (Optionen 1, 2, 3)
+ */
+function updateModelUIFeedback() {
+  // Finde aktuelles Modell in den gesammelten Daten
+  const currentModel = window.modelsData?.find(m => m.id === state.currentModel);
+  if (!currentModel) return;
+
+  // ═══════════════════════════════════════════════════════════════════
+  // OPTION 1: Badge-Container updaten (neben Dropdown)
+  // ═══════════════════════════════════════════════════════════════════
+  const visionBadge = document.getElementById('model-vision-badge');
+  const ocrBadge = document.getElementById('model-ocr-badge');
+
+  if (visionBadge) visionBadge.style.display = currentModel.vision ? 'inline-flex' : 'none';
+  if (ocrBadge) ocrBadge.style.display = currentModel.ocr_model ? 'inline-flex' : 'none';
+
+  // ═══════════════════════════════════════════════════════════════════
+  // OPTION 2: Model-Bar und Chip updaten (Chat-Bereich)
+  // ═══════════════════════════════════════════════════════════════════
+  const modelBar = document.getElementById('active-model-bar');
+  const modelChip = document.getElementById('model-chip');
+
+  if (modelBar && modelChip) {
+    // Nur anzeigen wenn Vision oder OCR aktiv
+    const hasFeatures = currentModel.vision || currentModel.ocr_model;
+    modelBar.style.display = hasFeatures ? 'flex' : 'none';
+
+    if (hasFeatures) {
+      // Model-Name updaten
+      const modelNameEl = modelChip.querySelector('.model-name');
+      if (modelNameEl) {
+        modelNameEl.textContent = currentModel.display_name || currentModel.id;
+      }
+
+      // Feature-Tags updaten
+      const featuresEl = modelChip.querySelector('.model-features');
+      if (featuresEl) {
+        featuresEl.innerHTML = '';
+
+        if (currentModel.vision) {
+          const visionTag = document.createElement('span');
+          visionTag.className = 'model-feature-tag vision';
+          visionTag.innerHTML = '👁️ Vision';
+          featuresEl.appendChild(visionTag);
+        }
+
+        if (currentModel.ocr_model) {
+          const ocrTag = document.createElement('span');
+          ocrTag.className = 'model-feature-tag ocr';
+          ocrTag.innerHTML = '📄 OCR';
+          featuresEl.appendChild(ocrTag);
+        }
+      }
+    }
   }
 }
 

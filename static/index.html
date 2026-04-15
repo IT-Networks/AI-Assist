@@ -33,7 +33,18 @@
     </div>
   </div>
   <div class="header-right">
-    <select id="model-select" title="Modell auswählen"></select>
+    <div class="model-selector-group">
+      <select id="model-select" title="Modell auswählen"></select>
+      <!-- Option 1: Badge-Container neben Dropdown -->
+      <div id="model-badge-container" class="model-badge-container">
+        <span id="model-vision-badge" class="model-feature-badge vision-badge" style="display:none;" title="Vision/Bild-Support">
+          👁️ Vision
+        </span>
+        <span id="model-ocr-badge" class="model-feature-badge ocr-badge" style="display:none;" title="OCR-spezialisiert (keine Tools)">
+          📄 OCR
+        </span>
+      </div>
+    </div>
     <div class="mode-switch">
       <label class="mode-option">
         <input type="radio" name="agent-mode" value="read_only" checked>
@@ -526,6 +537,15 @@
     <div id="task-progress-container" class="task-progress-container" role="status" aria-live="polite" aria-label="Task-Fortschritt"></div>
 
     <div id="input-area" role="form" aria-label="Nachricht eingeben">
+      <!-- Option 2: Model-Bar mit aktiven Modell-Infos -->
+      <div id="active-model-bar" class="active-model-bar" style="display:none;">
+        <span class="model-bar-label">📱 Modell:</span>
+        <div id="model-chip" class="model-chip">
+          <span class="model-name"></span>
+          <div class="model-features"></div>
+        </div>
+      </div>
+
       <!-- Template-Bar: Schnellauswahl für Prompt-Templates -->
       <div id="template-bar" role="toolbar" aria-label="Prompt-Templates">
         <div class="template-bar-header">

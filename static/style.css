@@ -3923,6 +3923,130 @@ textarea.ma-input { resize: vertical; font-family: inherit; }
   width: auto;
 }
 
+/* ═══════════════════════════════════════════════════════════════════════════════
+   OPTION 1: Badge-Container neben Modell-Dropdown (Header-Right)
+   ═══════════════════════════════════════════════════════════════════════════════ */
+
+.model-selector-group {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.model-badge-container {
+  display: flex;
+  gap: 4px;
+  align-items: center;
+}
+
+.model-feature-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 3px 8px;
+  font-size: 0.7rem;
+  border-radius: 10px;
+  white-space: nowrap;
+  font-weight: 500;
+  border: 1px solid;
+  transition: all 0.2s ease;
+}
+
+.model-feature-badge.vision-badge {
+  background: var(--info-bg);
+  color: var(--info);
+  border-color: var(--info);
+}
+
+.model-feature-badge.vision-badge:hover {
+  background: var(--info);
+  color: white;
+}
+
+.model-feature-badge.ocr-badge {
+  background: var(--success-bg);
+  color: var(--success);
+  border-color: var(--success);
+}
+
+.model-feature-badge.ocr-badge:hover {
+  background: var(--success);
+  color: white;
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════════
+   OPTION 2: Model-Bar mit Chip-Style (Chat-Bereich oben)
+   ═══════════════════════════════════════════════════════════════════════════════ */
+
+.active-model-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  background: var(--bg-secondary);
+  border-bottom: 1px solid var(--border);
+  font-size: 0.75rem;
+}
+
+.model-bar-label {
+  color: var(--text-secondary);
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.model-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 12px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  color: var(--text);
+  font-size: 0.8rem;
+  font-weight: 500;
+  transition: all 0.2s ease;
+}
+
+.model-chip:hover {
+  border-color: var(--accent);
+  background: var(--accent-bg);
+}
+
+.model-chip .model-name {
+  flex-shrink: 0;
+}
+
+.model-chip .model-features {
+  display: flex;
+  gap: 4px;
+  margin-left: 4px;
+  padding-left: 6px;
+  border-left: 1px solid var(--border);
+}
+
+.model-feature-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  font-size: 0.65rem;
+  padding: 1px 5px;
+  border-radius: 4px;
+  white-space: nowrap;
+}
+
+.model-feature-tag.vision {
+  background: var(--info-bg);
+  color: var(--info);
+  border: 1px solid var(--info);
+}
+
+.model-feature-tag.ocr {
+  background: var(--success-bg);
+  color: var(--success);
+  border: 1px solid var(--success);
+}
+
 .add-model-form {
   display: flex;
   gap: 8px;
