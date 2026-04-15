@@ -55,15 +55,23 @@ models:
 - id: gptoss120b
   display_name: GPT OSS 120B
   vision: false
+  ocr_model: false
 - id: mistral-678b
   display_name: Mistral 678B
   vision: false
+  ocr_model: false
 - id: qwen-7b
   display_name: Qwen 7B (Schnell)
   vision: false
+  ocr_model: false
 - id: qwen-428b
   display_name: Qwen 428B
   vision: false
+  ocr_model: false
+- id: dotsocr
+  display_name: Dots OCR (Document Parser)
+  vision: true
+  ocr_model: true
 
 # Java-Repository (leer = nicht konfiguriert)
 java:

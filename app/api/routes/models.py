@@ -9,6 +9,6 @@ router = APIRouter(prefix="/api/models", tags=["models"])
 @router.get("", response_model=ModelsResponse)
 async def list_models():
     return ModelsResponse(
-        models=[ModelInfo(id=m.id, display_name=m.display_name, vision=m.vision) for m in settings.models],
+        models=[ModelInfo(id=m.id, display_name=m.display_name, vision=m.vision, ocr_model=m.ocr_model) for m in settings.models],
         default=settings.llm.default_model,
     )

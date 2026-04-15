@@ -38,6 +38,20 @@ def _is_vision_model(model: str) -> bool:
     return False
 
 
+def _is_ocr_model(model: str) -> bool:
+    """Prüft ob das Modell ein spezialisiertes OCR-Modell ist (keine Tools)."""
+    if not model:
+        return False
+    try:
+        for m in settings.models:
+            if m.id == model and m.ocr_model:
+                return True
+    except (AttributeError, NameError):
+        # Fallback wenn settings nicht verfügbar
+        return False
+    return False
+
+
 def _has_multimodal_content(messages: List[Dict]) -> bool:
     """Prüft ob Messages multimodale Content-Arrays enthalten."""
     return any(isinstance(m.get("content"), list) for m in messages)
@@ -1039,8 +1053,15 @@ class LLMClient:
         # DEBUG: Model-Check für Mistral-Erkennung (immer loggen)
         is_mistral = _is_mistral_model(model)
         is_vision = _is_vision_model(model)
-        print(f"[LLM DEBUG] chat_with_tools called - model='{model}', is_mistral={is_mistral}, is_vision={is_vision}")
-        logger.warning(f"[llm] Model: '{model}', is_mistral={is_mistral}, is_vision={is_vision}")
+        is_ocr = _is_ocr_model(model)
+        print(f"[LLM DEBUG] chat_with_tools called - model='{model}', is_mistral={is_mistral}, is_vision={is_vision}, is_ocr={is_ocr}")
+        logger.warning(f"[llm] Model: '{model}', is_mistral={is_mistral}, is_vision={is_vision}, is_ocr={is_ocr}")
+
+        # OCR-Modelle unterstützen keine Tools (z.B. dotsocr)
+        # Falls mit Tools aufgerufen, nutze chat() statt chat_with_tools()
+        if is_ocr:
+            logger.warning(f"[llm] OCR-Modell '{model}' unterstützt keine Tools — chat() ohne Tools aufgerufen")
+            return await self.chat(messages, model=model, temperature=temperature, max_tokens=max_tokens, timeout=timeout)
 
         # Reasoning in System-Message injizieren falls aktiviert
         if reasoning:

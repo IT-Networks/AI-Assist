@@ -37,6 +37,7 @@ class ModelInfo(BaseModel):
     id: str
     display_name: str
     vision: bool = False
+    ocr_model: bool = False
 
 
 class ModelsResponse(BaseModel):

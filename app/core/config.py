@@ -150,6 +150,7 @@ class ModelEntry(BaseModel):
     id: str
     display_name: str
     vision: bool = False
+    ocr_model: bool = False  # OCR-Modelle unterstützen keine Tools
 
 
 class DataSourceParam(BaseModel):

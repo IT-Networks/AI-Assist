@@ -3908,6 +3908,21 @@ textarea.ma-input { resize: vertical; font-family: inherit; }
   width: auto;
 }
 
+.model-ocr-toggle {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 0.8rem;
+  color: var(--text-secondary);
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.model-ocr-toggle input[type="checkbox"] {
+  flex: none;
+  width: auto;
+}
+
 .add-model-form {
   display: flex;
   gap: 8px;

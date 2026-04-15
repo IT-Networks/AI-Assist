@@ -12599,6 +12599,11 @@ function renderModelsSection() {
             onchange="markSettingsModified()">
           Vision
         </label>
+        <label class="model-ocr-toggle" title="OCR-spezialisiertes Modell (keine Tools)">
+          <input type="checkbox" data-field="ocr_model" ${model.ocr_model ? 'checked' : ''}
+            onchange="markSettingsModified()">
+          OCR
+        </label>
         ${isDefault ? '<span style="color: var(--success);">Standard</span>' : ''}
         <button class="model-delete" onclick="deleteModel(${idx})">✕</button>
       </div>
@@ -12629,7 +12634,8 @@ function addNewModel() {
   const newModel = {
     id: idInput.value.trim(),
     display_name: nameInput.value.trim() || idInput.value.trim(),
-    vision: false
+    vision: false,
+    ocr_model: false
   };
 
   settingsState.settings.models.push(newModel);
@@ -12917,8 +12923,9 @@ function collectSectionValues(section) {
       const id = item.querySelector('[data-field="id"]').value;
       const displayName = item.querySelector('[data-field="display_name"]').value;
       const vision = item.querySelector('[data-field="vision"]')?.checked || false;
+      const ocr_model = item.querySelector('[data-field="ocr_model"]')?.checked || false;
       if (id) {
-        models.push({ id, display_name: displayName || id, vision });
+        models.push({ id, display_name: displayName || id, vision, ocr_model });
       }
     });
     return models;
