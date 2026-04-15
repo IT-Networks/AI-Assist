@@ -606,3 +606,14 @@ class TestToolParser:
         tools = [{"function": {"name": "write_file"}}]
         result = parse_text_tool_calls(content, tools)
         assert result == []
+
+    def test_mistral_compact_with_nested_json(self):
+        """Nested {...} inside args is captured in full (balanced-brace scanner)."""
+        import json as _json
+        content = '[TOOL_CALLS]edit_file{"path": "a.py", "changes": {"line": 5, "text": "x"}}'
+        tools = [{"function": {"name": "edit_file"}}]
+        result = parse_text_tool_calls(content, tools)
+        assert len(result) == 1
+        args = _json.loads(result[0]["function"]["arguments"])
+        assert args["changes"]["line"] == 5
+        assert args["changes"]["text"] == "x"

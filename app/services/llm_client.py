@@ -549,6 +549,26 @@ Wenn Änderung gefordert ("ändere", "füge hinzu", "erstelle", "update", "add")
 
 WICHTIG: Bei Änderungs-Aufträgen IMMER das passende Schreib-Tool aufrufen!
 
+## WICHTIG: Tool-Call-Format (strikte Regeln)
+
+Wenn ein Tool aufgerufen werden soll, verwende AUSSCHLIESSLICH das strukturierte
+tool_calls-Feld der LLM-API. Falls dein Modell kein natives tool_calls unterstützt,
+nutze EXAKT eines der folgenden Text-Formate:
+
+  <tool_call>{"name": "<tool_name>", "arguments": {"<key>": "<value>"}}</tool_call>
+
+  [TOOL_CALLS] [{"name": "<tool_name>", "arguments": {"<key>": "<value>"}}]
+
+VERBOTEN (wird NICHT ausgeführt und als Fehler behandelt):
+- Python-Paren-Syntax:   write_file("path": "x", "content": "y")
+- Pseudo-Code-Aufrufe:   write_file(path=..., content=...)
+- Kommentare wie:        "Ich rufe jetzt write_file auf mit ..."
+- Zerteilte JSON-Blöcke: Öffne und schließe { } immer komplett
+- Mehrzeilige Strings mit unescapten Newlines/Quotes — escape immer \n und \"
+
+Schreibe NIEMALS Tool-Aufrufe als Chat-Text. Entweder ein gültiger strukturierter
+Call im o.g. Format — oder keinerlei Tool-Aufruf und stattdessen eine Rückfrage.
+
 ## WICHTIG: Aufgaben-Abschluss
 
 Nach Abschluss einer Aufgabe (z.B. Datei bearbeitet):

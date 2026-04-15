@@ -101,29 +101,29 @@ def parse_text_tool_calls(content: str, available_tools: List[Dict]) -> List[Dic
 
     # Format 1a: Mistral 678B Compact Format
     # [TOOL_CALLS]funcname{"arg": "val"} (no space, no JSON array)
-    mistral_compact_matches = _RE_MISTRAL_COMPACT.findall(content)
-    if mistral_compact_matches:
-        for name, args_str in mistral_compact_matches:
-            if not tool_names or name in tool_names:
-                try:
-                    args = json.loads(args_str)
-                    parsed_calls.append({
-                        "id": f"call_{uuid.uuid4().hex[:8]}",
-                        "type": "function",
-                        "function": {
-                            "name": name,
-                            "arguments": json.dumps(args) if isinstance(args, dict) else args_str
-                        }
-                    })
-                except json.JSONDecodeError:
-                    parsed_calls.append({
-                        "id": f"call_{uuid.uuid4().hex[:8]}",
-                        "type": "function",
-                        "function": {"name": name, "arguments": args_str}
-                    })
-        if parsed_calls:
-            logger.debug("Mistral 678B Compact Format detected: %d calls", len(parsed_calls))
-            return parsed_calls
+    # Use balanced-brace scanner so nested JSON like {"changes": {"x": 1}} parses.
+    for name, args_str in _iter_mistral_compact_calls(content):
+        if tool_names and name not in tool_names:
+            continue
+        try:
+            args = json.loads(args_str)
+            parsed_calls.append({
+                "id": f"call_{uuid.uuid4().hex[:8]}",
+                "type": "function",
+                "function": {
+                    "name": name,
+                    "arguments": json.dumps(args) if isinstance(args, dict) else args_str
+                }
+            })
+        except json.JSONDecodeError:
+            parsed_calls.append({
+                "id": f"call_{uuid.uuid4().hex[:8]}",
+                "type": "function",
+                "function": {"name": name, "arguments": args_str}
+            })
+    if parsed_calls:
+        logger.debug("Mistral 678B Compact Format detected: %d calls", len(parsed_calls))
+        return parsed_calls
 
     # Format 1b: Mistral Standard Format
     # [TOOL_CALLS] [{"name": "...", "arguments": {...}}]
@@ -286,6 +286,25 @@ def parse_text_tool_calls(content: str, available_tools: List[Dict]) -> List[Dic
     return []
 
 
+_RE_MISTRAL_COMPACT_HEAD = re.compile(r'\[TOOL_CALLS\](\w+)\s*([\{\[])', re.DOTALL)
+
+
+def _iter_mistral_compact_calls(content: str):
+    """Yield (name, args_str) for each `[TOOL_CALLS]funcname{...}` match.
+
+    Uses the balanced-bracket scanner so nested JSON ({...} or [...] inside
+    args) is captured in full, unlike the legacy non-greedy regex which
+    stopped at the first `}`.
+    """
+    for m in _RE_MISTRAL_COMPACT_HEAD.finditer(content):
+        name = m.group(1)
+        open_idx = m.start(2)
+        end = _find_matching_bracket(content, open_idx)
+        if end < 0:
+            continue
+        yield name, content[open_idx:end + 1]
+
+
 def _iter_paren_calls(content: str):
     """Yield (name, payload) tuples for each paren-style call found.
 
@@ -305,13 +324,21 @@ def _iter_paren_calls(content: str):
         yield name, payload
 
 
-def _find_matching_paren(s: str, open_idx: int) -> int:
-    """Return index of the `)` matching `s[open_idx] == '('`, or -1.
+_BRACKET_PAIRS = {'(': ')', '{': '}', '[': ']'}
 
-    Skips parens inside JSON string literals. Not a full tokenizer — aims to
-    survive typical LLM output where strings may contain '(' or ')'.
+
+def _find_matching_bracket(s: str, open_idx: int) -> int:
+    """Return index of the bracket matching `s[open_idx]`, or -1.
+
+    Handles `(`, `{`, `[`. Skips brackets inside JSON string literals.
+    Not a full tokenizer — aims to survive typical LLM output where strings
+    may contain unbalanced brackets.
     """
-    if open_idx >= len(s) or s[open_idx] != '(':
+    if open_idx >= len(s):
+        return -1
+    opener = s[open_idx]
+    closer = _BRACKET_PAIRS.get(opener)
+    if closer is None:
         return -1
     depth = 0
     in_str = False
@@ -329,14 +356,21 @@ def _find_matching_paren(s: str, open_idx: int) -> int:
         else:
             if c == '"':
                 in_str = True
-            elif c == '(':
+            elif c == opener:
                 depth += 1
-            elif c == ')':
+            elif c == closer:
                 depth -= 1
                 if depth == 0:
                     return i
         i += 1
     return -1
+
+
+def _find_matching_paren(s: str, open_idx: int) -> int:
+    """Backwards-compatible wrapper for parens only."""
+    if open_idx >= len(s) or s[open_idx] != '(':
+        return -1
+    return _find_matching_bracket(s, open_idx)
 
 
 def _parse_paren_args(payload: str) -> Optional[Dict]:
