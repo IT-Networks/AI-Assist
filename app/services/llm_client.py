@@ -27,11 +27,14 @@ def _is_vision_model(model: str) -> bool:
     """Prüft ob das Modell Vision/Bilder unterstützt (per Config-Flag)."""
     if not model:
         return False
-    from app.core.config import get_settings
-    settings = get_settings()
-    for m in settings.models:
-        if m.id == model and m.vision:
-            return True
+    # Lazy-Load um Circular Imports zu vermeiden
+    try:
+        for m in settings.models:
+            if m.id == model and m.vision:
+                return True
+    except (AttributeError, NameError):
+        # Fallback wenn settings nicht verfügbar
+        return False
     return False
 
 
