@@ -1061,7 +1061,13 @@ class LLMClient:
         # Falls mit Tools aufgerufen, nutze chat() statt chat_with_tools()
         if is_ocr:
             logger.warning(f"[llm] OCR-Modell '{model}' unterstützt keine Tools — chat() ohne Tools aufgerufen")
-            return await self.chat(messages, model=model)
+            content = await self.chat(messages, model=model)
+            return LLMResponse(
+                content=content,
+                finish_reason="stop",
+                model=model,
+                tool_calls=[]
+            )
 
         # Reasoning in System-Message injizieren falls aktiviert
         if reasoning:
