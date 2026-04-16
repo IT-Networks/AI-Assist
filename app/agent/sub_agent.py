@@ -439,7 +439,24 @@ class SubAgent:
                         args = {}
 
                     try:
+                        # Verbose tool-call logging fuer Implementation-Team Debugging
+                        if self.auto_confirm_writes and tc_name in ("write_file", "edit_file", "create_directory"):
+                            _path_arg = args.get("path", "<none>")
+                            _content_len = len(args.get("content", "") or "") if tc_name == "write_file" else None
+                            logger.info(
+                                f"[sub_agent:{self.name}] TOOL_CALL {tc_name} path={_path_arg!r} "
+                                f"content_len={_content_len} args_keys={list(args.keys())}"
+                            )
+
                         result = await tool_registry.execute(tc_name, **args)
+
+                        # Result-Logging
+                        if self.auto_confirm_writes and tc_name in ("write_file", "edit_file", "create_directory"):
+                            logger.info(
+                                f"[sub_agent:{self.name}] TOOL_RESULT {tc_name} "
+                                f"success={result.success} requires_confirm={getattr(result, 'requires_confirmation', False)} "
+                                f"error={result.error!r} data={str(result.data)[:120]!r}"
+                            )
 
                         # Auto-Confirm fuer Implementation-Team: write_file/edit_file
                         # liefern nur Preview mit requires_confirmation=True. Normal laeuft
@@ -452,14 +469,20 @@ class SubAgent:
                             and self.auto_confirm_writes
                         ):
                             try:
-                                exec_result = await self._auto_execute_write(result.confirmation_data)
+                                cdata = result.confirmation_data
+                                logger.info(
+                                    f"[sub_agent:{self.name}] AUTO_CONFIRM exec op={cdata.get('operation')} "
+                                    f"path={cdata.get('path')!r}"
+                                )
+                                exec_result = await self._auto_execute_write(cdata)
                                 if exec_result.success:
                                     tool_content = exec_result.data or "(Datei geschrieben)"
-                                    # Track fuer Rollback wenn ChangeTracker verfuegbar
+                                    logger.info(f"[sub_agent:{self.name}] AUTO_CONFIRM OK: {tool_content[:120]}")
                                     if self._change_tracker:
-                                        self._track_change(result.confirmation_data)
+                                        self._track_change(cdata)
                                 else:
                                     tool_content = f"[Fehler beim Schreiben] {exec_result.error}"
+                                    logger.error(f"[sub_agent:{self.name}] AUTO_CONFIRM FAILED: {exec_result.error}")
                             except Exception as ex:
                                 logger.exception(f"[sub_agent:{self.name}] auto-confirm write failed: {ex}")
                                 tool_content = f"[Fehler beim Schreiben] {ex}"

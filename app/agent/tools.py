@@ -1117,8 +1117,23 @@ async def write_file(path: str, content: str) -> ToolResult:
                 "content": content,
             }
         )
+    except PermissionError as e:
+        logger.error(f"[write_file] PermissionError fuer {resolved_path!r}: {e}")
+        from app.core.config import settings as _s
+        allowed = [str(p) for p in (_s.file_operations.allowed_paths or [])] or ["(keine konfiguriert)"]
+        return ToolResult(
+            success=False,
+            error=(
+                f"SCHREIBVORGANG ABGELEHNT: Pfad '{resolved_path}' liegt ausserhalb der "
+                f"erlaubten Schreib-Verzeichnisse.\n"
+                f"Erlaubte Verzeichnisse: {allowed}\n"
+                f"Loesung: Schreibe in einen erlaubten Pfad ODER Admin erweitert "
+                f"'file_operations.allowed_paths' in config.yaml."
+            )
+        )
     except Exception as e:
-        return ToolResult(success=False, error=str(e))
+        logger.exception(f"[write_file] Unerwarteter Fehler fuer {resolved_path!r}: {e}")
+        return ToolResult(success=False, error=f"{type(e).__name__}: {e}")
 
 
 async def create_directory(path: str) -> ToolResult:
