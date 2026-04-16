@@ -279,7 +279,11 @@ class SubAgent:
         )
 
         # Tool-Schemas nur für erlaubte Tools
-        all_schemas = tool_registry.get_openai_schemas(include_write_ops=False)
+        # Wichtig: Write-Ops inkludieren wenn der Agent sie in allowed_tools hat
+        # (z.B. Implementation-Team braucht write_file/edit_file)
+        write_tools = {"write_file", "edit_file", "run_pytest", "run_npm_tests"}
+        needs_writes = any(t in write_tools for t in self.allowed_tools)
+        all_schemas = tool_registry.get_openai_schemas(include_write_ops=needs_writes)
         tool_schemas = [
             schema for schema in all_schemas
             if schema["function"]["name"] in self.allowed_tools

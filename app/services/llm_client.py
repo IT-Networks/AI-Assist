@@ -1146,6 +1146,21 @@ class LLMClient:
             print(f"[LLM DEBUG] Non-vision model '{model}': stripping image content from messages")
             messages = ensure_text_only_messages(messages)
 
+        # Defensive: Stelle sicher dass bei non-vision Models ALLE content-Felder
+        # Strings sind. Manche Proxy/Endpoints lehnen content=list ab (400 Bad Request).
+        if not is_vision:
+            sanitized = []
+            changed = 0
+            for m in messages:
+                c = m.get("content")
+                if isinstance(c, list):
+                    m = {**m, "content": _extract_text_from_content(c)}
+                    changed += 1
+                sanitized.append(m)
+            if changed:
+                logger.warning(f"[llm] Konvertierte {changed} content-list → content-str fuer non-vision '{model}'")
+            messages = sanitized
+
         payload = {
             "model": model,
             "messages": messages,
