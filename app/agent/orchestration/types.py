@@ -124,6 +124,11 @@ class AgentEventType(str, Enum):
     ROLLBACK_STARTED = "rollback_started"                               # Rollback startet
     ROLLBACK_COMPLETE = "rollback_complete"                             # Rollback abgeschlossen
     IMPL_APPROVED = "approved"                                          # Implementierung genehmigt - bereit zum Merge
+    # Workspace-Command Streaming Events (run_workspace_command, v2.37.33)
+    COMMAND_STARTED = "command_started"           # Subprocess wurde gestartet
+    COMMAND_OUTPUT_CHUNK = "command_output_chunk" # Eine Zeile stdout/stderr
+    COMMAND_DONE = "command_done"                 # Subprocess beendet (success oder fail)
+    COMMAND_CANCELLED = "command_cancelled"       # Subprocess via cancel-Endpoint abgebrochen
 
 
 # MCP Event Type Mapping - Maps string event types to AgentEventType

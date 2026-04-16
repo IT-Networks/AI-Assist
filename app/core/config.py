@@ -386,6 +386,26 @@ class CommandExecConfig(BaseModel):
     # Binary-Whitelist: nur diese Executables darf run_workspace_command starten.
     # Leere Liste = Default-Whitelist aus command_runner.DEFAULT_BINARY_WHITELIST.
     allowed_binaries: List[str] = []
+    # Per-Binary Timeout-Overrides. Realistische Defaults fuer langlaufende
+    # Build/Install-Commands (npm install, mvn package, docker build).
+    # Lookup case-insensitive auf Binary-Name (ohne Pfad/.exe/.cmd).
+    timeout_per_binary: Dict[str, int] = {
+        "npm": 600,
+        "yarn": 600,
+        "pnpm": 600,
+        "npx": 600,
+        "mvn": 900,
+        "gradle": 900,
+        "gradlew": 900,
+        "cargo": 600,
+        "go": 300,
+        "docker": 1800,
+        "make": 600,
+        "cmake": 600,
+        "pytest": 300,
+        "vitest": 300,
+        "jest": 300,
+    }
 
 
 class DatabaseConfig(BaseModel):

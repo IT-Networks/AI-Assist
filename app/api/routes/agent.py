@@ -418,7 +418,17 @@ async def confirm_operation(
                     "on_output_chunk": on_output_chunk
                 }
 
-            result = await orchestrator._execute_confirmed_operation(confirmation_data)
+            # Session-ID per ContextVar setzen, damit Tools (z.B.
+            # run_workspace_command) sie auslesen koennen fuer Cancel-Support.
+            from app.agent.agent_context import (
+                set_current_session_id,
+                reset_current_session_id,
+            )
+            _ctx_token = set_current_session_id(session_id)
+            try:
+                result = await orchestrator._execute_confirmed_operation(confirmation_data)
+            finally:
+                reset_current_session_id(_ctx_token)
 
             # Phase-2: Wenn requires_confirmation=True → weitere Bestätigung nötig
             if result.requires_confirmation:
@@ -726,14 +736,60 @@ async def get_session(session_id: str) -> AgentSessionResponse:
 
 
 @router.post("/cancel/{session_id}")
-async def cancel_request(session_id: str) -> Dict[str, str]:
-    """Bricht die laufende Anfrage einer Session ab."""
+async def cancel_request(session_id: str) -> Dict[str, Any]:
+    """Bricht die laufende Anfrage einer Session ab.
+
+    Killt zusaetzlich einen ggf. laufenden Subprocess (run_workspace_command)
+    via ProcessRegistry - SIGTERM mit 2s grace, dann SIGKILL.
+    """
     from app.agent.orchestrator import get_agent_orchestrator
+    from app.services.process_registry import get_process_registry
 
     orchestrator = get_agent_orchestrator()
     orchestrator.cancel_request(session_id)
 
-    return {"message": f"Anfrage für Session '{session_id}' abgebrochen"}
+    registry = get_process_registry()
+    cancelled_proc = await registry.cancel_session(session_id)
+
+    response: Dict[str, Any] = {
+        "message": f"Anfrage für Session '{session_id}' abgebrochen",
+        "session_id": session_id,
+        "subprocess_cancelled": cancelled_proc is not None,
+    }
+    if cancelled_proc is not None:
+        response["subprocess"] = {
+            "command_id": cancelled_proc.command_id,
+            "command": cancelled_proc.command,
+            "duration_ms": cancelled_proc.duration_ms,
+        }
+    return response
+
+
+@router.get("/processes")
+async def list_running_processes(
+    session_id: Optional[str] = Query(
+        None, description="Nur Subprocesses dieser Session (fuer Refresh-Recovery)"
+    )
+) -> Dict[str, Any]:
+    """Listet aktuell laufende Workspace-Subprocesses.
+
+    - Ohne session_id: alle (Debug/Admin)
+    - Mit session_id: nur die dieser Session (vom Frontend-Init genutzt
+      zur Wiederherstellung der Live-Cards nach Browser-Refresh)
+    """
+    from app.services.process_registry import get_process_registry
+
+    registry = get_process_registry()
+    if session_id:
+        entry = registry.get(session_id)
+        items = [entry.to_dict()] if entry is not None else []
+    else:
+        items = [
+            registry.get(sid).to_dict()
+            for sid in registry.list_sessions()
+            if registry.get(sid) is not None
+        ]
+    return {"count": len(items), "processes": items}
 
 
 @router.delete("/session/{session_id}")

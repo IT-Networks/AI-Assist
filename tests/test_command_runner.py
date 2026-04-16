@@ -14,6 +14,7 @@ from app.services.command_runner import (
     _truncate,
     validate_command,
     run_workspace_command,
+    resolve_timeout,
 )
 
 
@@ -294,3 +295,266 @@ async def test_tool_handler_rejects_missing_path():
         command=["python"],
     )
     assert result.success is False
+
+
+# ════════════════════════════════════════════════════════════════════════════
+# Per-Binary Timeout Resolver
+# ════════════════════════════════════════════════════════════════════════════
+
+def test_resolve_timeout_default_when_empty():
+    assert resolve_timeout(["python", "x.py"], 120, None) == 120
+    assert resolve_timeout(["python", "x.py"], 120, {}) == 120
+
+
+def test_resolve_timeout_exact_match():
+    assert resolve_timeout(["npm", "install"], 120, {"npm": 600}) == 600
+
+
+def test_resolve_timeout_case_insensitive():
+    assert resolve_timeout(["NPM", "install"], 120, {"npm": 600}) == 600
+
+
+def test_resolve_timeout_strips_extension():
+    # npm.cmd auf Windows -> sollte auf 'npm' matchen
+    assert resolve_timeout(["npm.cmd", "install"], 120, {"npm": 600}) == 600
+
+
+def test_resolve_timeout_strips_path():
+    assert resolve_timeout(["/usr/bin/mvn", "package"], 120, {"mvn": 900}) == 900
+
+
+def test_resolve_timeout_unknown_binary_falls_back():
+    assert resolve_timeout(["python", "x.py"], 120, {"npm": 600}) == 120
+
+
+def test_resolve_timeout_empty_command():
+    assert resolve_timeout([], 120, {"npm": 600}) == 120
+
+
+# ════════════════════════════════════════════════════════════════════════════
+# Tool-Handler: stderr prominent bei exit_code != 0
+# ════════════════════════════════════════════════════════════════════════════
+
+@pytest.mark.asyncio
+async def test_tool_handler_failed_exit_includes_stderr(tmp_path, monkeypatch):
+    """Bei exit_code != 0 muss data['error_output'] gesetzt sein und stderr enthalten."""
+    from app.agent import command_tools as ct
+    from app.services import command_runner as cr
+
+    fake_result = cr.CommandResult(
+        success=True,
+        exit_code=2,
+        duration_ms=50,
+        command=["python", "x.py"],
+        workspace=str(tmp_path),
+        stdout_preview="stdout-content",
+        stderr_preview="ImportError: No module 'foo'",
+    )
+
+    async def fake_run(**_kw):
+        return fake_result
+
+    monkeypatch.setattr(ct, "_handle_run_workspace_command",
+                        ct._handle_run_workspace_command)  # noop, just to keep ref
+    monkeypatch.setattr("app.services.command_runner.run_workspace_command", fake_run)
+
+    result = await ct._handle_run_workspace_command(
+        path=str(tmp_path),
+        command=["python", "x.py"],
+        _confirmed=True,
+    )
+    assert result.success is True
+    assert isinstance(result.data, dict)
+    assert result.data["execution_status"] == "failed"
+    assert "stderr_tail" in result.data
+    assert "ImportError" in result.data["stderr_tail"]
+    assert "FEHLGESCHLAGEN" in result.data["message"]
+
+
+@pytest.mark.asyncio
+async def test_tool_handler_success_marks_status(tmp_path, monkeypatch):
+    """Bei exit_code == 0 muss execution_status='success' und KEIN error_output."""
+    from app.agent import command_tools as ct
+    from app.services import command_runner as cr
+
+    fake_result = cr.CommandResult(
+        success=True,
+        exit_code=0,
+        duration_ms=42,
+        command=["python", "--version"],
+        workspace=str(tmp_path),
+        stdout_preview="Python 3.12.0",
+        stderr_preview="",
+    )
+
+    async def fake_run(**_kw):
+        return fake_result
+
+    monkeypatch.setattr("app.services.command_runner.run_workspace_command", fake_run)
+
+    result = await ct._handle_run_workspace_command(
+        path=str(tmp_path),
+        command=["python", "--version"],
+        _confirmed=True,
+    )
+    assert result.success is True
+    assert result.data["execution_status"] == "success"
+    assert result.data["message"].startswith("OK")
+    # Bei Erfolg ohne stderr soll stderr_tail entweder fehlen oder leer sein
+    assert not result.data.get("stderr_tail")
+
+
+# ════════════════════════════════════════════════════════════════════════════
+# Tool-Handler: Per-Binary-Timeout wird angewandt
+# ════════════════════════════════════════════════════════════════════════════
+
+@pytest.mark.asyncio
+async def test_tool_handler_uses_per_binary_timeout(tmp_path, monkeypatch):
+    """Wenn timeout_seconds nicht angegeben, soll per_binary aus config greifen."""
+    from app.agent import command_tools as ct
+    from app.services import command_runner as cr
+    from app.core.config import settings
+
+    captured = {}
+
+    async def fake_run(**kw):
+        captured.update(kw)
+        return cr.CommandResult(
+            success=True, exit_code=0, duration_ms=10,
+            command=kw["command"], workspace=str(tmp_path),
+            stdout_preview="", stderr_preview="",
+        )
+
+    monkeypatch.setattr("app.services.command_runner.run_workspace_command", fake_run)
+    # config.command_exec.timeout_per_binary hat per default npm: 600
+    monkeypatch.setattr(settings.command_exec, "timeout_per_binary", {"npm": 600})
+
+    result = await ct._handle_run_workspace_command(
+        path=str(tmp_path),
+        command=["npm", "install"],
+        _confirmed=True,
+    )
+    assert result.success is True
+    assert captured["timeout_seconds"] == 600
+
+
+# ════════════════════════════════════════════════════════════════════════════
+# LLM-Payload Trimming (Phase 5)
+# ════════════════════════════════════════════════════════════════════════════
+
+def test_tail_helper_short_returns_unchanged():
+    from app.agent.command_tools import _tail
+    assert _tail("hi", 100) == "hi"
+    assert _tail("", 100) == ""
+
+
+def test_tail_helper_long_keeps_only_tail():
+    from app.agent.command_tools import _tail
+    text = "x" * 500 + "TAIL_MARKER"
+    out = _tail(text, 100)
+    assert "TAIL_MARKER" in out
+    assert "gekürzt" in out
+    # Nicht laenger als budget + Praefix
+    assert len(out.encode("utf-8")) <= 100 + 50
+
+
+def test_tail_helper_handles_unicode():
+    from app.agent.command_tools import _tail
+    text = "ä" * 1000  # 2 bytes pro char in utf-8
+    out = _tail(text, 100)
+    # Decode sollte nicht werfen
+    assert isinstance(out, str)
+    assert "gekürzt" in out
+
+
+@pytest.mark.asyncio
+async def test_tool_payload_excludes_full_command_and_workspace(tmp_path, monkeypatch):
+    """LLM-Payload soll keine command/workspace mehr enthalten - sind redundant."""
+    from app.agent import command_tools as ct
+    from app.services import command_runner as cr
+
+    fake_result = cr.CommandResult(
+        success=True, exit_code=0, duration_ms=10,
+        command=["python", "x.py"], workspace=str(tmp_path),
+        stdout_preview="hi", stderr_preview="",
+    )
+
+    async def fake_run(**_kw):
+        return fake_result
+
+    monkeypatch.setattr("app.services.command_runner.run_workspace_command", fake_run)
+
+    result = await ct._handle_run_workspace_command(
+        path=str(tmp_path),
+        command=["python", "x.py"],
+        _confirmed=True,
+    )
+    assert result.success is True
+    # KEIN volles to_dict mehr
+    assert "command" not in result.data
+    assert "workspace" not in result.data
+    assert "stdout_preview" not in result.data
+    assert "stderr_preview" not in result.data
+    # Aber das Wesentliche
+    assert result.data["execution_status"] == "success"
+    assert result.data["exit_code"] == 0
+    assert result.data["stdout_tail"] == "hi"
+
+
+@pytest.mark.asyncio
+async def test_tool_payload_truncates_huge_stderr_on_failure(tmp_path, monkeypatch):
+    """Bei Fehler darf stderr_tail nicht ueber Budget gehen."""
+    from app.agent import command_tools as ct
+    from app.services import command_runner as cr
+
+    huge_stderr = "ERR-" * 5000  # 20 KB
+    fake_result = cr.CommandResult(
+        success=True, exit_code=1, duration_ms=20,
+        command=["python", "x.py"], workspace=str(tmp_path),
+        stdout_preview="", stderr_preview=huge_stderr,
+    )
+
+    async def fake_run(**_kw):
+        return fake_result
+
+    monkeypatch.setattr("app.services.command_runner.run_workspace_command", fake_run)
+
+    result = await ct._handle_run_workspace_command(
+        path=str(tmp_path),
+        command=["python", "x.py"],
+        _confirmed=True,
+    )
+    tail = result.data["stderr_tail"]
+    # Budget 2048 + Praefix
+    assert len(tail.encode("utf-8")) <= 2048 + 50
+    assert "ERR-" in tail  # Tail ist drin
+    assert "gekürzt" in tail
+
+
+@pytest.mark.asyncio
+async def test_tool_handler_explicit_timeout_overrides_per_binary(tmp_path, monkeypatch):
+    """Explizit uebergebenes timeout_seconds gewinnt vor per_binary."""
+    from app.agent import command_tools as ct
+    from app.services import command_runner as cr
+    from app.core.config import settings
+
+    captured = {}
+
+    async def fake_run(**kw):
+        captured.update(kw)
+        return cr.CommandResult(
+            success=True, exit_code=0, duration_ms=10,
+            command=kw["command"], workspace=str(tmp_path),
+            stdout_preview="", stderr_preview="",
+        )
+
+    monkeypatch.setattr("app.services.command_runner.run_workspace_command", fake_run)
+    monkeypatch.setattr(settings.command_exec, "timeout_per_binary", {"npm": 600})
+
+    await ct._handle_run_workspace_command(
+        path=str(tmp_path),
+        command=["npm", "install"],
+        timeout_seconds=42,
+        _confirmed=True,
+    )
+    assert captured["timeout_seconds"] == 42

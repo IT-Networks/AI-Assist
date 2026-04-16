@@ -12824,3 +12824,131 @@ a:visited {
   .approval-modal-actions { flex-direction: column; }
   .approval-modal .btn { min-width: auto; }
 }
+
+/* ══════════════════════════════════════════════════════════════════════════════
+   Live Command Card (run_workspace_command Streaming, v2.37.34)
+   ══════════════════════════════════════════════════════════════════════════════ */
+
+.live-command-card {
+  margin: 8px 0;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-secondary);
+  overflow: hidden;
+  font-family: 'Cascadia Mono', 'Fira Code', Consolas, 'Courier New', monospace;
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.live-command-card.running { border-color: var(--accent); }
+.live-command-card.success { border-color: var(--success); }
+.live-command-card.failed  { border-color: var(--danger, #f85149); }
+.live-command-card.cancelled { border-color: var(--warning); }
+
+.live-command-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+  font-size: 12px;
+}
+.live-command-header .live-command-icon { color: var(--accent); }
+.live-command-header .live-command-text {
+  flex: 1;
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-family: inherit;
+  background: transparent;
+  padding: 0;
+}
+.live-command-header .live-command-status {
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 10px;
+  background: var(--accent-bg);
+  color: var(--accent);
+}
+.live-command-header .live-command-status[data-status="running"] {
+  animation: live-cmd-pulse 1.4s ease-in-out infinite;
+}
+.live-command-header .live-command-status[data-status="success"] {
+  background: var(--success-bg); color: var(--success);
+}
+.live-command-header .live-command-status[data-status="failed"] {
+  background: rgba(248, 81, 73, 0.12); color: var(--danger, #f85149);
+}
+.live-command-header .live-command-status[data-status="cancelled"] {
+  background: var(--warning-bg); color: var(--warning);
+}
+
+@keyframes live-cmd-pulse {
+  0%, 100% { opacity: 1; }
+  50%      { opacity: 0.55; }
+}
+
+.live-command-cancel {
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--text-secondary);
+  border-radius: 4px;
+  width: 22px; height: 22px;
+  display: inline-flex; align-items: center; justify-content: center;
+  cursor: pointer;
+  font-size: 12px;
+  transition: all .12s;
+}
+.live-command-cancel:hover:not(:disabled) {
+  background: var(--danger, #f85149);
+  color: white;
+  border-color: var(--danger, #f85149);
+}
+.live-command-cancel:disabled { opacity: .5; cursor: wait; }
+
+.live-command-trunc-flag {
+  font-size: 10px;
+  padding: 1px 6px;
+  border-radius: 8px;
+  background: var(--warning-bg);
+  color: var(--warning);
+}
+
+.live-command-output {
+  margin: 0;
+  padding: 8px 10px;
+  max-height: 360px;
+  min-height: 30px;
+  overflow-y: auto;
+  background: var(--bg);
+  color: var(--text);
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-family: inherit;
+  font-size: 12px;
+}
+.live-command-output:empty::before {
+  content: '⏳ warte auf Output…';
+  color: var(--text-muted);
+  font-style: italic;
+}
+.live-command-output .live-line { display: block; }
+.live-command-output .live-line.stderr { color: #f0883e; }
+
+.live-command-footer {
+  padding: 4px 10px;
+  background: var(--surface);
+  border-top: 1px solid var(--border);
+  font-size: 11px;
+  color: var(--text-secondary);
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+}
+.live-command-footer .live-command-meta {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}

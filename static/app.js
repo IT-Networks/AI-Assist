@@ -3977,6 +3977,8 @@ async function switchToChat(chatId) {
         incomingChat.needsRestore = false;
         incomingChat.isLoading = false;
         _updateChatLoadingState(chatId, false);
+        // Refresh-Recovery (v2.37.36): laufende Subprocess-Commands wiederherstellen
+        recoverRunningCommands(incomingChat);
       } else {
         // Server-Fehler (4xx/5xx)
         log.error(`[switchToChat] History fetch failed: ${res.status} ${res.statusText}`);
@@ -5793,6 +5795,25 @@ async function processAgentEvent(event, bubble, msgDiv, chat) {
       if (isActive) { state.toolHistory = [...chat.toolHistory]; renderToolHistory(); }
       break;
     }
+    case 'command_started': {
+      // run_workspace_command Phase 3 streaming - erstellt Live-Card
+      const card = createLiveCommandCard(data, chat);
+      bubble.appendChild(card);
+      if (document.contains(chat.pane)) scrollToBottom();
+      break;
+    }
+    case 'command_output_chunk': {
+      appendCommandChunk(data, chat);
+      break;
+    }
+    case 'command_done': {
+      finishCommandCard(data, 'done', chat);
+      break;
+    }
+    case 'command_cancelled': {
+      finishCommandCard(data, 'cancelled', chat);
+      break;
+    }
     case 'confirm_required':
       chat.pendingConfirmation = data;
       if (isActive) {
@@ -6768,6 +6789,230 @@ function createToolCard(toolName, args, status, model = null, toolId = null) {
   return card;
 }
 
+// ══════════════════════════════════════════════════════════════════════════════
+// Live-Command Card (run_workspace_command Streaming v2.37.34)
+// ══════════════════════════════════════════════════════════════════════════════
+
+const COMMAND_CARD_MAX_LINES = 2000;     // DOM-Cap pro Card (oldest abgeschnitten)
+const COMMAND_CARD_TAIL_BUDGET = 200000; // textContent-Cap (~200 KB) bevor truncation
+
+function _ensureCommandCardMap(chat) {
+  if (!chat.commandCards) chat.commandCards = new Map();
+  return chat.commandCards;
+}
+
+function createLiveCommandCard(data, chat) {
+  const cmdId = data.command_id || `cmd-${Date.now()}-${Math.random().toString(36).slice(2,8)}`;
+  const cmdPreview = data.command_preview || (data.command || []).join(' ');
+  const card = document.createElement('div');
+  card.className = 'live-command-card running';
+  card.setAttribute('data-command-id', cmdId);
+
+  const header = document.createElement('div');
+  header.className = 'live-command-header';
+  header.innerHTML = `
+    <span class="live-command-icon">⏵</span>
+    <code class="live-command-text"></code>
+    <span class="live-command-status" data-status="running">läuft…</span>
+    <button type="button" class="live-command-cancel" title="Abbrechen">✕</button>
+  `;
+  header.querySelector('.live-command-text').textContent = cmdPreview;
+  header.querySelector('.live-command-cancel').addEventListener('click', () => {
+    cancelLiveCommand(cmdId, chat);
+  });
+
+  const body = document.createElement('pre');
+  body.className = 'live-command-output';
+
+  const footer = document.createElement('div');
+  footer.className = 'live-command-footer';
+  footer.innerHTML = `<span class="live-command-meta">${escapeHtml(data.workspace || '')}</span>`;
+
+  card.appendChild(header);
+  card.appendChild(body);
+  card.appendChild(footer);
+
+  const map = _ensureCommandCardMap(chat);
+  map.set(cmdId, {
+    card,
+    body,
+    footer,
+    header,
+    lineCount: 0,
+    truncatedDom: false,
+    sessionId: state.sessionId,
+  });
+
+  return card;
+}
+
+function _resolveCommandEntry(data, chat) {
+  const cmdId = data.command_id;
+  if (!cmdId) return null;
+  const map = _ensureCommandCardMap(chat);
+  let entry = map.get(cmdId);
+  if (entry) return entry;
+  // Fallback: alter Eintrag mit temporaerer ID (vor command_done command_id war null)
+  if (map.size === 1) {
+    const [onlyKey] = map.keys();
+    entry = map.get(onlyKey);
+    if (entry) {
+      map.delete(onlyKey);
+      map.set(cmdId, entry);
+      entry.card.setAttribute('data-command-id', cmdId);
+      return entry;
+    }
+  }
+  return null;
+}
+
+function appendCommandChunk(data, chat) {
+  const entry = _resolveCommandEntry(data, chat);
+  if (!entry) return;
+  const line = data.data || '';
+  const stream = data.stream || 'stdout';
+
+  // DOM-Throttling: einfache Append. Bei sehr vielen Zeilen koennten wir
+  // requestAnimationFrame nutzen - aktuell reicht es, weil der Browser
+  // sowieso nur 60 fps neuzeichnet.
+  const span = document.createElement('span');
+  span.className = `live-line ${stream}`;
+  span.textContent = line;
+  entry.body.appendChild(span);
+  entry.lineCount++;
+
+  // Cap: bei zu vielen Zeilen die aeltesten verwerfen
+  if (entry.lineCount > COMMAND_CARD_MAX_LINES) {
+    while (entry.body.firstChild && entry.lineCount > COMMAND_CARD_MAX_LINES) {
+      entry.body.removeChild(entry.body.firstChild);
+      entry.lineCount--;
+      entry.truncatedDom = true;
+    }
+    if (entry.truncatedDom && !entry.header.querySelector('.live-command-trunc-flag')) {
+      const flag = document.createElement('span');
+      flag.className = 'live-command-trunc-flag';
+      flag.textContent = '⚠ Output gekürzt';
+      flag.title = `Nur die letzten ${COMMAND_CARD_MAX_LINES} Zeilen werden angezeigt`;
+      entry.header.appendChild(flag);
+    }
+  }
+
+  // Auto-scroll: nur wenn User schon am Ende war (scroll-stickyness)
+  const nearBottom = entry.body.scrollHeight - entry.body.scrollTop - entry.body.clientHeight < 40;
+  if (nearBottom) {
+    entry.body.scrollTop = entry.body.scrollHeight;
+  }
+}
+
+function finishCommandCard(data, kind, chat) {
+  const entry = _resolveCommandEntry(data, chat);
+  if (!entry) return;
+  const exitCode = data.exit_code;
+  const dur = data.duration_ms;
+  const truncated = data.truncated;
+  const totalBytes = data.total_bytes;
+
+  entry.card.classList.remove('running');
+  entry.card.classList.add(kind === 'cancelled' ? 'cancelled' : (exitCode === 0 ? 'success' : 'failed'));
+
+  const cancelBtn = entry.header.querySelector('.live-command-cancel');
+  if (cancelBtn) cancelBtn.remove();
+
+  const statusEl = entry.header.querySelector('.live-command-status');
+  if (statusEl) {
+    if (kind === 'cancelled') {
+      statusEl.textContent = 'abgebrochen';
+      statusEl.dataset.status = 'cancelled';
+    } else if (exitCode === 0) {
+      statusEl.textContent = `✓ exit=0`;
+      statusEl.dataset.status = 'success';
+    } else {
+      statusEl.textContent = `✗ exit=${exitCode ?? '?'}`;
+      statusEl.dataset.status = 'failed';
+    }
+  }
+
+  // Footer-Meta updaten
+  const meta = [];
+  if (typeof dur === 'number') meta.push(`${dur} ms`);
+  if (totalBytes && (totalBytes.stdout || totalBytes.stderr)) {
+    const total = (totalBytes.stdout || 0) + (totalBytes.stderr || 0);
+    meta.push(`${formatBytes(total)} output`);
+  }
+  if (truncated) meta.push('⚠ truncated');
+  if (data.error) meta.push(`Fehler: ${data.error}`);
+  const metaSpan = entry.footer.querySelector('.live-command-meta');
+  if (metaSpan && meta.length) {
+    metaSpan.textContent += (metaSpan.textContent ? ' · ' : '') + meta.join(' · ');
+  }
+}
+
+function formatBytes(n) {
+  if (n < 1024) return `${n} B`;
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
+  return `${(n / 1024 / 1024).toFixed(2)} MB`;
+}
+
+async function recoverRunningCommands(chat) {
+  // Refresh-Recovery: nach Browser-Reload checkt der Frontend ob fuer diese
+  // Session noch ein Subprocess auf dem Server laeuft. Wenn ja, baut er
+  // eine Recovery-Card mit "wiederhergestellt"-Hinweis. Live-Output ab jetzt
+  // kommt via SSE - Backfill der vorherigen Output-Zeilen ist nicht
+  // implementiert (waere extra Buffer-Persistierung wert: aktuell zu teuer).
+  if (!chat || !chat.sessionId) return;
+  try {
+    const res = await fetch(`/api/agent/processes?session_id=${encodeURIComponent(chat.sessionId)}`);
+    if (!res.ok) return;
+    const data = await res.json();
+    const procs = data.processes || [];
+    if (!procs.length) return;
+    const map = _ensureCommandCardMap(chat);
+    const bubble = chat.pane && chat.pane.querySelector('.message:last-child .bubble');
+    const target = bubble || chat.pane;
+    if (!target) return;
+    for (const proc of procs) {
+      if (map.has(proc.command_id)) continue; // existiert schon (z.B. Tab nie weg)
+      const card = createLiveCommandCard({
+        command_id: proc.command_id,
+        command: proc.command,
+        command_preview: (proc.command || []).join(' '),
+        workspace: proc.workspace,
+      }, chat);
+      // Recovery-Hinweis im Body
+      const note = document.createElement('span');
+      note.className = 'live-line stderr';
+      note.textContent = `…[wiederhergestellt nach ${Math.round((proc.duration_ms || 0)/1000)}s — neuer Output ab jetzt]\n`;
+      const entry = map.get(proc.command_id);
+      if (entry) entry.body.appendChild(note);
+      target.appendChild(card);
+    }
+  } catch (e) {
+    // Fail silent - Recovery ist Best-Effort
+    if (typeof log !== 'undefined') log.debug('[recoverRunningCommands] failed:', e);
+  }
+}
+
+async function cancelLiveCommand(cmdId, chat) {
+  const map = _ensureCommandCardMap(chat);
+  const entry = map.get(cmdId);
+  if (!entry) return;
+  const cancelBtn = entry.header.querySelector('.live-command-cancel');
+  if (cancelBtn) {
+    cancelBtn.disabled = true;
+    cancelBtn.textContent = '…';
+  }
+  try {
+    const sid = entry.sessionId || state.sessionId;
+    await fetch(`/api/agent/cancel/${sid}`, { method: 'POST' });
+  } catch (e) {
+    if (cancelBtn) {
+      cancelBtn.disabled = false;
+      cancelBtn.textContent = '✕';
+    }
+    appendMessage('error', 'Cancel fehlgeschlagen: ' + e.message);
+  }
+}
+
 function updateToolCard(toolId, status, result, pane) {
   // Im Chat-Pane suchen (funktioniert auch wenn Pane detached ist)
   const root = pane || document;
@@ -7493,6 +7738,13 @@ function hideConfirmationPanel() {
 
 async function confirmOperation(confirmed) {
   if (!state.pendingConfirmation) return;
+  // Race-Schutz: doppelter Click waehrend in-flight Request wuerde sonst
+  // zwei POSTs senden (zweiter bekommt 400 oder fuehrt Command doppelt aus).
+  if (state._confirmInFlight) return;
+  state._confirmInFlight = true;
+  const panel = document.getElementById('pending-confirmation');
+  const buttons = panel ? panel.querySelectorAll('button') : [];
+  buttons.forEach(b => { b.disabled = true; });
 
   try {
     const res = await fetch(`/api/agent/confirm/${state.sessionId}`, {
@@ -7530,6 +7782,9 @@ async function confirmOperation(confirmed) {
     }
   } catch (e) {
     appendMessage('error', 'Bestätigung fehlgeschlagen: ' + e.message);
+  } finally {
+    state._confirmInFlight = false;
+    buttons.forEach(b => { b.disabled = false; });
   }
 }
 
