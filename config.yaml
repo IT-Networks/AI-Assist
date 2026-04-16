@@ -16,14 +16,14 @@ proxy:
 #   3. Dashboard:              http://localhost:8080/dashboard
 #
 # Der Proxy mappt AI-Assist Modelle auf OpenAI (siehe LLM-Test-Proxy/config.yaml):
-#   gptoss120b   → gpt-4o-mini
+#   gpt-oss-120b   → gpt-4o-mini
 #   mistral-678b → gpt-4o-mini
 #   qwen-7b      → gpt-4o-mini
 # ═══════════════════════════════════════════════════════════════════
 llm:
   base_url: http://localhost:8080/v1  # LLM-Test-Proxy (Port 8080) → OpenAI
   api_key: none  # Proxy verwendet eigenen OpenAI Key aus .env
-  default_model: gptoss120b
+  default_model: gpt-oss-120b
   timeout_seconds: 120
   max_tokens: 4096
   temperature: 0.2
@@ -47,12 +47,12 @@ llm:
     mistral-678b: 24000    # Mistral konservativ, oft Probleme bei großen Kontexten
     qwen-7b: 6000          # Kleines Modell - kleiner Kontext
     qwen-428b: 32000       # Größeres Qwen
-    gptoss120b: 48000      # GPT OSS - größerer Kontext
+    gpt-oss-120b: 48000      # GPT OSS - größerer Kontext
   default_context_limit: 24000  # Fallback wenn Modell nicht definiert
 
 # Verfügbare Modelle
 models:
-- id: gptoss120b
+- id: gpt-oss-120b
   display_name: GPT OSS 120B
   vision: false
   ocr_model: false
@@ -339,7 +339,7 @@ multi_agent:
             TESTING: run_pytest after each change
 
           tools: ["search_code", "read_file", "edit_file", "write_file", "run_pytest", "list_files", "glob_files", "grep_content"]
-          model: "gptoss120b"
+          model: ""  # Leer = default_model aus llm.default_model
           max_turns: 20
 
         - name: "frontend-engineer"
@@ -364,7 +364,7 @@ multi_agent:
             TESTING: run_npm_tests after changes, check coverage
 
           tools: ["search_code", "read_file", "edit_file", "write_file", "run_npm_tests", "list_files", "glob_files", "grep_content"]
-          model: "gptoss120b"
+          model: ""  # Leer = default_model aus llm.default_model
           max_turns: 18
 
         - name: "database-engineer"
@@ -387,7 +387,7 @@ multi_agent:
             FORMAT: Standard SQL migrations
 
           tools: ["write_file", "edit_file", "read_file", "search_code", "list_files", "glob_files", "grep_content"]
-          model: "gptoss120b"
+          model: ""  # Leer = default_model aus llm.default_model
           max_turns: 12
 
         - name: "test-engineer"
@@ -411,7 +411,7 @@ multi_agent:
             COVERAGE: Must achieve >85% for new code
 
           tools: ["write_file", "edit_file", "read_file", "run_pytest", "run_npm_tests", "search_code", "list_files", "grep_content"]
-          model: "gptoss120b"
+          model: ""  # Leer = default_model aus llm.default_model
           max_turns: 16
 
         - name: "implementation-reviewer"
@@ -455,7 +455,7 @@ multi_agent:
             APPROVED / CHANGES_NEEDED
 
           tools: ["read_file", "search_code", "run_pytest", "run_npm_tests", "list_files", "glob_files", "grep_content"]
-          model: "gptoss120b"
+          model: ""  # Leer = default_model aus llm.default_model
           max_turns: 10
 
 # Kontext-Limits
@@ -1154,7 +1154,7 @@ task_agents:
   enabled: true                        # Master-Switch für Task-Decomposition
   # Model-Zuweisung pro Agent-Typ (leer = Fallback auf Standard-Modelle)
   research_model: qwen-7b              # Für Research-Tasks
-  code_model: gptoss120b               # Für Code-Tasks
+  code_model: ""                         # Leer = default_model (aus llm.default_model)
   analyst_model: mistral-678b          # Für Analyse-Tasks
   devops_model: qwen-7b                # Für DevOps-Tasks
   docs_model: qwen-7b                  # Für Doku-Tasks

@@ -213,7 +213,7 @@ class LLMCacheConfig(BaseModel):
 class LLMConfig(BaseModel):
     base_url: str = "http://localhost/v1"
     api_key: str = "none"
-    default_model: str = "gptoss120b"
+    default_model: str = "gpt-oss-120b"
     timeout_seconds: int = 120
     max_tokens: int = 4096
     temperature: float = 0.2
@@ -239,7 +239,7 @@ class LLMConfig(BaseModel):
     # Pro-Modell Prefill-Override: {"model_id": true/false}
     tool_prefill_models: Dict[str, bool] = {}
     # LLM-spezifische Kontext-Limits in Tokens (für automatisches Trimmen)
-    # z.B. {"mistral-678b": 32000, "qwen-7b": 8000, "gptoss120b": 64000}
+    # z.B. {"mistral-678b": 32000, "qwen-7b": 8000, "gpt-oss-120b": 64000}
     llm_context_limits: Dict[str, int] = {}
     # Standard-Kontext-Limit falls kein LLM-spezifisches definiert ist
     default_context_limit: int = 32000
