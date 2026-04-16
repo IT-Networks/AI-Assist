@@ -6277,12 +6277,12 @@ function closePlanApprovalModal() {
   modal.remove();
 }
 
-function approvePlan() {
+function approveImplementationPlan() {
   closePlanApprovalModal();
   approvalState.submitResponse('APPROVE');
 }
 
-function rejectPlan() {
+function rejectImplementationPlan() {
   closePlanApprovalModal();
   approvalState.submitResponse('DISCARD');
 }
@@ -6327,8 +6327,8 @@ function _createPlanApprovalHTML(planData) {
           ${filesHtml}
         </div>
         <div class="approval-modal-actions">
-          <button class="btn btn-primary" onclick="approvePlan()">✓ Start Implementation</button>
-          <button class="btn btn-ghost" onclick="rejectPlan()">✕ Abbrechen</button>
+          <button class="btn btn-primary" onclick="approveImplementationPlan()">✓ Start Implementation</button>
+          <button class="btn btn-ghost" onclick="rejectImplementationPlan()">✕ Abbrechen</button>
         </div>
       </div>
     </div>
