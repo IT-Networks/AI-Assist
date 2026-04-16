@@ -252,6 +252,8 @@ class SubAgent:
                 resolved.parent.mkdir(parents=True, exist_ok=True)
                 is_new = not resolved.exists()
                 resolved.write_text(content, encoding="utf-8")
+                self._files_written_count += 1
+                self._files_written_paths.append(str(resolved))
                 logger.info(f"[sub_agent:{self.name}] DIRECT write_file {resolved} ({len(content)} chars, new={is_new})")
                 return ToolResult(success=True, data=f"Datei {'erstellt' if is_new else 'ueberschrieben'}: {resolved}")
             except Exception as e:
@@ -293,6 +295,8 @@ class SubAgent:
                         )
                     new_content = content.replace(old_string, new_string, 1)
                 resolved.write_text(new_content, encoding="utf-8")
+                self._files_written_count += 1
+                self._files_written_paths.append(str(resolved))
                 logger.info(f"[sub_agent:{self.name}] DIRECT edit_file {resolved} ({count} Ersetzungen)")
                 return ToolResult(success=True, data=f"Datei bearbeitet: {resolved} ({count} Ersetzungen)")
             except Exception as e:
@@ -404,40 +408,75 @@ class SubAgent:
         # Query speichern für Hooks (z.B. Content-Extraktion)
         self._current_query = query
 
+        # Zaehler fuer tatsaechlich geschriebene Dateien (nur bei auto_confirm_writes)
+        self._files_written_count: int = 0
+        self._files_written_paths: List[str] = []
+
         # Fokussierter System-Prompt für diesen Sub-Agent
         context_section = ""
         if conversation_context:
             context_section = f"\n\n=== KONVERSATIONS-KONTEXT ===\n{conversation_context}\n=== ENDE KONTEXT ===\n"
 
-        system_prompt = (
-            f"Du bist ein spezialisierter Such-Agent: {self.display_name}.\n"
-            f"{self.description}\n\n"
-            "ARBEITSWEISE:\n"
-            "1. Fuehre mehrere gezielte Tool-Aufrufe durch (nicht nur einen!)\n"
-            "2. Sammle KONKRETE Daten: Dateinamen, Zeilennummern, Metriken, Code-Snippets\n"
-            "3. Wenn ein Suchergebnis nicht spezifisch genug ist, suche gezielter nach\n"
-            "4. Wenn du fertig bist, fasse deine Ergebnisse als JSON zusammen\n\n"
-            "QUALITAETSREGELN fuer Findings:\n"
-            "- SCHLECHT: 'Es wurden mehrere relevante Dateien gefunden'\n"
-            "- GUT: 'In `src/auth/login.py:42` fehlt Input-Validierung fuer das email-Feld'\n"
-            "- Jedes Finding MUSS mindestens einen konkreten Verweis enthalten (Datei, Funktion, Metrik, ID)\n"
-            f"{context_section}\n\n"
-            "Wenn du alle Informationen gesammelt hast, antworte NUR mit diesem JSON:\n"
-            "{\n"
-            '  "summary": "Was wurde gefunden? (3-5 Saetze mit konkreten Details)",\n'
-            '  "key_findings": ["Konkretes Finding mit Verweis", "..."],\n'
-            '  "sources": ["pfad/datei.py", "JIRA-123", "wiki/page-id"],\n'
-            '  "diagram": "OPTIONAL: Mermaid-Code OHNE ```-Fences, z.B. sequenceDiagram\\n    A->>B: Request",\n'
-            '  "diagram_title": "OPTIONAL: Titel fuer das Diagramm"\n'
-            "}\n\n"
-            "DIAGRAMM-REGELN (nur wenn es zur Aufgabe passt, sonst weglassen):\n"
-            "- Service-Aufrufe/API-Calls gefunden → sequenceDiagram\n"
-            "- Komponenten/Module/Architektur → flowchart TD\n"
-            "- Datenbank-Tabellen/Entities → erDiagram\n"
-            "- Prozess-Ablaeufe/Workflows → flowchart TD mit Entscheidungen\n"
-            "- Kein passender Typ → diagram-Feld WEGLASSEN\n"
-            "- Der Mermaid-Code muss VALIDE sein (keine Umlaute in IDs, Quotes escapen)"
-        )
+        # WICHTIG: Write-Agents (Implementation-Team) bekommen einen anderen Prompt
+        # als Research-Agents, weil ihr Auftrag Code-Schreiben ist, nicht Suchen.
+        if self.auto_confirm_writes:
+            system_prompt = (
+                f"Du bist ein Code-Schreib-Agent: {self.display_name}.\n"
+                f"{self.description}\n\n"
+                "AUFTRAG: Du SCHREIBST Dateien mit write_file. Du bist KEIN Such-Agent.\n\n"
+                "ARBEITSWEISE (STRIKT in dieser Reihenfolge):\n"
+                "1. Lies den Task-Kontext und den absoluten Ziel-Pfad aus.\n"
+                "2. Wenn der Task-Text keinen absoluten Pfad enthaelt, benutze relative Pfade\n"
+                "   zum aktuellen Arbeitsverzeichnis.\n"
+                "3. Rufe SOFORT write_file auf - eine Datei pro Call. Kein search_code vorher!\n"
+                "4. write_file schreibt unmittelbar (Plan wurde vom User vorab genehmigt).\n"
+                "5. Nach JEDER angelegten Datei: naechsten write_file Call fuer die naechste Datei.\n"
+                "6. ERST wenn ALLE geplanten Dateien geschrieben sind: antworte mit JSON-Summary.\n\n"
+                "PFLICHT-REGELN:\n"
+                "- Mindestens 1 erfolgreicher write_file Call - sonst gilt der Task als fehlgeschlagen.\n"
+                "- KEIN search_code/read_file/list_files beim Greenfield-Implementation.\n"
+                "  Diese nur verwenden wenn du explizit existierenden Code anpassen musst.\n"
+                "- Bei Fehler vom write_file (z.B. SCHREIBVORGANG ABGELEHNT): Pfad im Task-Kontext\n"
+                "  pruefen und korrigieren, KEIN Aufgeben.\n"
+                "- Content muss funktionsfaehiger Code sein (nicht 'TODO'/'...'-Platzhalter).\n"
+                f"{context_section}\n\n"
+                "JSON-FINISH (erst nach allen write_file Calls):\n"
+                "{\n"
+                '  "summary": "Welche Dateien hast du geschrieben, was enthalten sie?",\n'
+                '  "key_findings": ["Datei X geschrieben (Y Zeilen Zweck)", "..."],\n'
+                '  "sources": ["absoluter/pfad/zu/datei1.py", "..."]\n'
+                "}"
+            )
+        else:
+            system_prompt = (
+                f"Du bist ein spezialisierter Such-Agent: {self.display_name}.\n"
+                f"{self.description}\n\n"
+                "ARBEITSWEISE:\n"
+                "1. Fuehre mehrere gezielte Tool-Aufrufe durch (nicht nur einen!)\n"
+                "2. Sammle KONKRETE Daten: Dateinamen, Zeilennummern, Metriken, Code-Snippets\n"
+                "3. Wenn ein Suchergebnis nicht spezifisch genug ist, suche gezielter nach\n"
+                "4. Wenn du fertig bist, fasse deine Ergebnisse als JSON zusammen\n\n"
+                "QUALITAETSREGELN fuer Findings:\n"
+                "- SCHLECHT: 'Es wurden mehrere relevante Dateien gefunden'\n"
+                "- GUT: 'In `src/auth/login.py:42` fehlt Input-Validierung fuer das email-Feld'\n"
+                "- Jedes Finding MUSS mindestens einen konkreten Verweis enthalten (Datei, Funktion, Metrik, ID)\n"
+                f"{context_section}\n\n"
+                "Wenn du alle Informationen gesammelt hast, antworte NUR mit diesem JSON:\n"
+                "{\n"
+                '  "summary": "Was wurde gefunden? (3-5 Saetze mit konkreten Details)",\n'
+                '  "key_findings": ["Konkretes Finding mit Verweis", "..."],\n'
+                '  "sources": ["pfad/datei.py", "JIRA-123", "wiki/page-id"],\n'
+                '  "diagram": "OPTIONAL: Mermaid-Code OHNE ```-Fences, z.B. sequenceDiagram\\n    A->>B: Request",\n'
+                '  "diagram_title": "OPTIONAL: Titel fuer das Diagramm"\n'
+                "}\n\n"
+                "DIAGRAMM-REGELN (nur wenn es zur Aufgabe passt, sonst weglassen):\n"
+                "- Service-Aufrufe/API-Calls gefunden → sequenceDiagram\n"
+                "- Komponenten/Module/Architektur → flowchart TD\n"
+                "- Datenbank-Tabellen/Entities → erDiagram\n"
+                "- Prozess-Ablaeufe/Workflows → flowchart TD mit Entscheidungen\n"
+                "- Kein passender Typ → diagram-Feld WEGLASSEN\n"
+                "- Der Mermaid-Code muss VALIDE sein (keine Umlaute in IDs, Quotes escapen)"
+            )
 
         # Tool-Schemas nur für erlaubte Tools
         # Wichtig: Write-Ops inkludieren wenn der Agent sie in allowed_tools hat
@@ -641,15 +680,51 @@ class SubAgent:
                     "content": f"Tool-Ergebnisse:\n\n{results_text}"
                 })
 
+        # Write-Mode nur aktiv fuer Agents die write-tools in ihrem Toolset haben
+        # (sonst waere z.B. der Reviewer fehlschlagend weil er keinen write macht).
+        has_write_tools = any(
+            t in ("write_file", "edit_file", "create_directory")
+            for t in self.allowed_tools
+        )
+        write_mode = self.auto_confirm_writes and has_write_tools
+
         if final_result is None:
-            # Kein sauberes JSON-Finish nach max_iterations
-            # → Finaler LLM-Call OHNE Tools erzwingt eine Zusammenfassung
-            final_result = await self._force_summary(
-                messages, llm_client, total_tokens, start_ms
-            )
+            # Write-Mode: Wenn mindestens 1 Datei geschrieben wurde, akzeptieren
+            # wir das auch ohne JSON-Finish als Erfolg. Agent hat "geliefert".
+            if write_mode and self._files_written_count > 0:
+                logger.info(
+                    f"[sub_agent:{self.name}] Kein JSON-Finish, aber "
+                    f"{self._files_written_count} Datei(en) geschrieben - als Erfolg werten"
+                )
+                final_result = SubAgentResult(
+                    agent_name=self.display_name,
+                    success=True,
+                    summary=f"{self._files_written_count} Datei(en) erstellt/geaendert.",
+                    key_findings=[f"{p}" for p in self._files_written_paths],
+                    sources=list(self._files_written_paths),
+                    token_usage=total_tokens,
+                    duration_ms=int(time.time() * 1000) - start_ms,
+                )
+            else:
+                # Kein sauberes JSON-Finish nach max_iterations
+                # → Finaler LLM-Call OHNE Tools erzwingt eine Zusammenfassung
+                final_result = await self._force_summary(
+                    messages, llm_client, total_tokens, start_ms
+                )
         else:
             final_result.token_usage = total_tokens
             final_result.duration_ms = int(time.time() * 1000) - start_ms
+            # Write-Mode: Falls write-tools-Agent 0 Dateien geschrieben hat, gilt als failed
+            if write_mode and self._files_written_count == 0:
+                logger.warning(
+                    f"[sub_agent:{self.name}] JSON-Finish ohne einzigen write_file Call - "
+                    f"Task gilt als fehlgeschlagen"
+                )
+                final_result.success = False
+                final_result.error = (
+                    "Agent hat JSON-Summary geliefert, aber KEINE Datei geschrieben. "
+                    "write_file Tool wurde nicht aufgerufen."
+                )
 
         return final_result
 

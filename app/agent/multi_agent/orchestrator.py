@@ -100,6 +100,10 @@ class MultiAgentOrchestrator:
         """Interne Run-Implementation (siehe run() fuer Registry-Cleanup)."""
         start = time.time()
         self._goal = goal  # Fuer Durchreichung an Agents
+        # Workspace-Pfad aus Goal extrahieren (wird als Kontext fuer Agents verwendet)
+        self._workspace_path = self._extract_workspace_path(goal)
+        if self._workspace_path:
+            logger.info(f"[MultiAgent] Workspace-Pfad aus Goal: {self._workspace_path}")
         logger.info(f"[MultiAgent] Team '{self._team.name}' startet: {goal[:100]}")
 
         # Phase 1: Coordinator zerlegt Ziel in Tasks
@@ -274,6 +278,30 @@ class MultiAgentOrchestrator:
         )
 
     # ══════════════════════════════════════════════════════════════════════════
+    # Helpers
+    # ══════════════════════════════════════════════════════════════════════════
+
+    def _extract_workspace_path(self, goal: str) -> Optional[str]:
+        """Findet einen expliziten Workspace-Pfad im Goal-Text.
+
+        Erkennt typische Muster:
+        - "in C:/path/to/project"
+        - "in /path/to/project"
+        - Absolute Pfade (Windows oder Unix) anywhere im Text
+        """
+        if not goal:
+            return None
+        # Windows-Pfad: C:/... oder C:\...
+        win_match = re.search(r"[A-Za-z]:[/\\][^\s'\"`]+", goal)
+        if win_match:
+            return win_match.group(0).rstrip(".,;:!?)")
+        # Unix-Pfad: /... (mind. 2 Segmente)
+        unix_match = re.search(r"(?<!\w)/[a-zA-Z0-9_\-.]+(?:/[a-zA-Z0-9_\-.]+)+", goal)
+        if unix_match:
+            return unix_match.group(0).rstrip(".,;:!?)")
+        return None
+
+    # ══════════════════════════════════════════════════════════════════════════
     # Phase 1: Goal Decomposition
     # ══════════════════════════════════════════════════════════════════════════
 
@@ -287,6 +315,13 @@ class MultiAgentOrchestrator:
         # Fuer Implementation-Teams: explizite Reihenfolge-Regel
         impl_team_rules = ""
         if self._is_implementation_team:
+            workspace_note = ""
+            if getattr(self, "_workspace_path", None):
+                workspace_note = (
+                    f"\n  * WORKSPACE-PFAD erkannt: {self._workspace_path}\n"
+                    f"    JEDE Task-description MUSS diesen absoluten Pfad als Basis nutzen!\n"
+                    f"    Beispiel-Datei-Pfad: {self._workspace_path}/app/auth.py\n"
+                )
             impl_team_rules = (
                 "\n- IMPLEMENTATION-TEAM DEPENDENCY-REGELN (STRIKT!):\n"
                 "  * database-engineer Tasks (Schema, Migrations) haben KEINE deps (dependsOn:[])\n"
@@ -295,9 +330,9 @@ class MultiAgentOrchestrator:
                 "  * test-engineer Tasks haengen IMMER von backend+frontend+database ab\n"
                 "    -> Tests NIEMALS vor dem Code schreiben!\n"
                 "  * implementation-reviewer laeuft zuletzt, haengt von ALLEN anderen ab\n"
-                "  * Fuer Pfade: Wenn der User einen expliziten Ordner nennt (z.B. 'in C:/foo'),\n"
-                "    gib den vollstaendigen absoluten Pfad in der description mit.\n"
-                "    Die Agents nutzen diesen Pfad fuer write_file direkt.\n"
+                "  * Jede Code-Task description muss KONKRETE Dateipfade enthalten\n"
+                "    (write_file braucht die exakten Pfade).\n"
+                f"{workspace_note}"
             )
 
         prompt = (
