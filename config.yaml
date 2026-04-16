@@ -646,6 +646,18 @@ test_exec:
   timeout_seconds: 120      # Abbruchlimit pro Testlauf
   max_output_preview: 5000  # stdout/stderr-Preview-Limit
 
+# Generisches Command-Execution-Tool (run_workspace_command)
+# User kann im Chat sagen: "Starte main.py in C:/myapp" oder "Baue das Projekt".
+# Binary-Whitelist schuetzt vor beliebiger Ausfuehrung. Confirm-Required pro Call.
+command_exec:
+  enabled: true
+  timeout_seconds: 120
+  max_output_preview: 5000
+  # Leere Liste = Default-Whitelist aus command_runner.DEFAULT_BINARY_WHITELIST
+  # (python, node, npm, npx, pytest, pip, uv, poetry, cargo, go, mvn, gradle,
+  #  tsc, jest, vitest, java, javac, make, cmake, plus .exe/.cmd Varianten)
+  allowed_binaries: []
+
 data_sources:
   sources: []
 

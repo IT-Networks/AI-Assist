@@ -378,6 +378,16 @@ class TestExecConfig(BaseModel):
     max_output_preview: int = 5000
 
 
+class CommandExecConfig(BaseModel):
+    """Konfiguration fuer run_workspace_command (Projekt-Binary-Ausfuehrung)."""
+    enabled: bool = True
+    timeout_seconds: int = 120
+    max_output_preview: int = 5000
+    # Binary-Whitelist: nur diese Executables darf run_workspace_command starten.
+    # Leere Liste = Default-Whitelist aus command_runner.DEFAULT_BINARY_WHITELIST.
+    allowed_binaries: List[str] = []
+
+
 class DatabaseConfig(BaseModel):
     """Konfiguration für DB2-Datenbankverbindung."""
     enabled: bool = False
@@ -1568,6 +1578,7 @@ class Settings(BaseModel):
     skills: SkillsConfig = SkillsConfig()
     file_operations: FileOperationsConfig = FileOperationsConfig()
     test_exec: TestExecConfig = TestExecConfig()
+    command_exec: CommandExecConfig = CommandExecConfig()
     data_sources: DataSourcesConfig = Field(default_factory=DataSourcesConfig)
     sub_agents: SubAgentsConfig = Field(default_factory=SubAgentsConfig)
     knowledge_base: KnowledgeBaseConfig = Field(default_factory=KnowledgeBaseConfig)

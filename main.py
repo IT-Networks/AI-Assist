@@ -117,6 +117,15 @@ async def lifespan(app: FastAPI):
         except Exception as e:
             print(f"[startup] Test-Execution-Tools-Registrierung fehlgeschlagen: {e}")
 
+        # Command-Execution-Tool registrieren (run_workspace_command)
+        try:
+            from app.agent.command_tools import register_command_tools
+            cmd_count = register_command_tools(registry)
+            if cmd_count:
+                print(f"[startup] Command-Execution-Tools registriert: {cmd_count}")
+        except Exception as e:
+            print(f"[startup] Command-Execution-Tools-Registrierung fehlgeschlagen: {e}")
+
         # Log-Tools registrieren (log_find_server, log_read_window, log_read_ffdc)
         try:
             from app.agent.log_tools import register_log_tools
@@ -384,7 +393,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="AI Code Assistant",
     description="Lokaler AI-Assistent für Java/Python-Entwicklung mit Handbuch-, WLP-Log-, PDF- und Confluence-Unterstützung",
-    version="2.37.29",
+    version="2.37.30",
     lifespan=lifespan,
 )
 
