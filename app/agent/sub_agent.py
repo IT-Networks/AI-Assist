@@ -439,17 +439,21 @@ class SubAgent:
                 "1. Lies den Task-Kontext und den absoluten Ziel-Pfad aus.\n"
                 "2. Wenn der Task-Text keinen absoluten Pfad enthaelt, benutze relative Pfade\n"
                 "   zum aktuellen Arbeitsverzeichnis.\n"
-                "3. Rufe SOFORT write_file auf - eine Datei pro Call. Kein search_code vorher!\n"
+                "3. Rufe SOFORT write_file auf - GENAU EINE Datei pro Response! Kein search_code vorher!\n"
                 "4. write_file schreibt unmittelbar (Plan wurde vom User vorab genehmigt).\n"
-                "5. Nach JEDER angelegten Datei: naechsten write_file Call fuer die naechste Datei.\n"
+                "5. Nach dem Tool-Result rufst du im NAECHSTEN Response write_file fuer die naechste\n"
+                "   Datei auf. NIEMALS mehrere write_file Calls parallel in einem Response -\n"
+                "   das fuehrt zu abgeschnittenem Content und kaputten Dateien!\n"
                 "6. ERST wenn ALLE geplanten Dateien geschrieben sind: antworte mit JSON-Summary.\n\n"
                 "PFLICHT-REGELN:\n"
+                "- EIN write_file pro Response, sonst werden Contents abgeschnitten!\n"
                 "- Mindestens 1 erfolgreicher write_file Call - sonst gilt der Task als fehlgeschlagen.\n"
                 "- KEIN search_code/read_file/list_files beim Greenfield-Implementation.\n"
                 "  Diese nur verwenden wenn du explizit existierenden Code anpassen musst.\n"
                 "- Bei Fehler vom write_file (z.B. SCHREIBVORGANG ABGELEHNT): Pfad im Task-Kontext\n"
                 "  pruefen und korrigieren, KEIN Aufgeben.\n"
                 "- Content muss funktionsfaehiger Code sein (nicht 'TODO'/'...'-Platzhalter).\n"
+                "- Content als VOLLSTAENDIGER String im 'content' Parameter (kein Kuerzen, kein '...').\n"
                 f"{context_section}\n\n"
                 "JSON-FINISH (erst nach allen write_file Calls):\n"
                 "{\n"
@@ -587,10 +591,35 @@ class SubAgent:
                 if tc_name not in self.allowed_tools:
                     tool_content = f"[Fehler] Tool '{tc_name}' nicht erlaubt für diesen Sub-Agent."
                 else:
+                    parse_error: Optional[str] = None
                     try:
                         args = json.loads(tc_args_raw) if isinstance(tc_args_raw, str) else tc_args_raw
-                    except json.JSONDecodeError:
+                        if not isinstance(args, dict):
+                            args = {}
+                            parse_error = f"args ist kein Objekt: {type(args).__name__}"
+                    except json.JSONDecodeError as je:
                         args = {}
+                        parse_error = f"JSONDecodeError: {je.msg} at pos {je.pos}"
+                        # Raw-Snippet fuer Diagnose (typisch: truncation)
+                        raw_preview = (tc_args_raw or "")[:400]
+                        raw_len = len(tc_args_raw or "")
+                        logger.error(
+                            f"[sub_agent:{self.name}] TOOL_ARGS PARSE-FEHLER fuer {tc_name}: "
+                            f"{je.msg} (raw_len={raw_len}, preview={raw_preview!r})"
+                        )
+
+                    # Fuer Write-Ops: bei Parse-Fehler oder leeren args klare Meldung statt Silent-Fail
+                    if self.auto_confirm_writes and tc_name in ("write_file", "edit_file", "create_directory"):
+                        if parse_error or not args.get("path"):
+                            hint = (
+                                f"[Fehler] {tc_name} konnte nicht ausgefuehrt werden: "
+                                f"{parse_error or 'path-Parameter fehlt oder ist leer'}. "
+                                f"Oft Ursache: Response wurde wegen Token-Limit abgeschnitten - "
+                                f"generiere KUERZEREN content oder splitte in mehrere Dateien."
+                            )
+                            logger.error(f"[sub_agent:{self.name}] {hint}")
+                            tool_results.append((tc_id, tc_name, hint))
+                            continue
 
                     try:
                         # Verbose tool-call logging fuer Implementation-Team Debugging
@@ -758,12 +787,20 @@ class SubAgent:
         # Reasoning für Sub-Agenten (normalerweise aus, da tool-fokussiert)
         reasoning = settings.llm.tool_reasoning or None
 
+        # Token-Budget: Write-Agents brauchen viel Platz fuer Code-Content.
+        # Research-Agents reichen 2048 (nur kurze Tool-Calls + JSON).
+        if self.auto_confirm_writes:
+            # Write-Mode: so viel wie moeglich - volle settings.llm.max_tokens ODER 8192
+            budget = max(settings.llm.max_tokens, 8192)
+        else:
+            budget = min(settings.llm.max_tokens, 2048)
+
         response = await default_llm_client.chat_with_tools(
             messages=messages,
             tools=tool_schemas,
             model=self._model,
             temperature=temperature,
-            max_tokens=min(settings.llm.max_tokens, 2048),  # Sub-Agenten brauchen weniger
+            max_tokens=budget,
             timeout=TIMEOUT_TOOL,
             reasoning=reasoning,
         )
@@ -773,6 +810,14 @@ class SubAgent:
             logger.warning(f"[sub_agent:{self.name}] finish_reason='tool_calls' aber keine tool_calls!")
             if response.content:
                 logger.debug(f"  Content (erste 300 Zeichen): {response.content[:300]}")
+
+        # Warnung bei Truncation (Content/Tool-Calls abgeschnitten)
+        if response.finish_reason == "length":
+            logger.warning(
+                f"[sub_agent:{self.name}] RESPONSE TRUNCATED (finish_reason=length) - "
+                f"max_tokens={budget} evtl. zu klein fuer grosse Dateien. "
+                f"Generierte {len(response.tool_calls or [])} tool_calls."
+            )
 
         return (
             response.content or "",
