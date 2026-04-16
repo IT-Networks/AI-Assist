@@ -220,9 +220,20 @@ class SubAgent:
         # werden write_file/edit_file automatisch ausgefuehrt. Fuer normale SubAgents False.
         self.auto_confirm_writes: bool = False
         self._change_tracker = None  # Optional ChangeTracker fuer Rollback-Tracking
+        # Write-Tracking (auch ausserhalb run() initialisiert, damit _direct_file_op
+        # unabhaengig von run() aufrufbar ist)
+        self._files_written_count: int = 0
+        self._files_written_paths: List[str] = []
 
     async def _direct_file_op(self, tool_name: str, args: Dict) -> "ToolResult":
-        """Fuehrt write_file/edit_file/create_directory direkt aus (bypasst allowed_paths).
+        """Fuehrt write_file/edit_file/create_directory direkt aus.
+
+        BYPASS der FileManager-Restriktionen:
+        - allowed_paths wird NICHT geprueft (Plan-Approval deckt Scope)
+        - allowed_extensions wird NICHT geprueft (jedes Dateiformat erlaubt, z.B.
+          .tsx, .rs, .go, .kt, Dockerfile, .toml - auch solche die nicht in
+          config.yaml's file_operations.allowed_extensions stehen)
+        - denied_patterns werden NICHT geprueft
 
         Wird nur bei auto_confirm_writes=True verwendet. Der User hat im Plan-Modal
         den kompletten Feature-Umfang genehmigt. Rollback ist via ChangeTracker moeglich.
