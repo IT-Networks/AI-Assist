@@ -284,6 +284,22 @@ class MultiAgentOrchestrator:
             for a in self._team.agents
         ])
 
+        # Fuer Implementation-Teams: explizite Reihenfolge-Regel
+        impl_team_rules = ""
+        if self._is_implementation_team:
+            impl_team_rules = (
+                "\n- IMPLEMENTATION-TEAM DEPENDENCY-REGELN (STRIKT!):\n"
+                "  * database-engineer Tasks (Schema, Migrations) haben KEINE deps (dependsOn:[])\n"
+                "  * backend-engineer Tasks haengen von database-engineer ab (falls vorhanden)\n"
+                "  * frontend-engineer Tasks haengen von backend-engineer ab (API-Endpoints)\n"
+                "  * test-engineer Tasks haengen IMMER von backend+frontend+database ab\n"
+                "    -> Tests NIEMALS vor dem Code schreiben!\n"
+                "  * implementation-reviewer laeuft zuletzt, haengt von ALLEN anderen ab\n"
+                "  * Fuer Pfade: Wenn der User einen expliziten Ordner nennt (z.B. 'in C:/foo'),\n"
+                "    gib den vollstaendigen absoluten Pfad in der description mit.\n"
+                "    Die Agents nutzen diesen Pfad fuer write_file direkt.\n"
+            )
+
         prompt = (
             f"Du bist ein Task-Koordinator. Zerlege das folgende Ziel in konkrete Aufgaben "
             f"und weise sie den verfuegbaren Agenten zu.\n\n"
@@ -301,6 +317,7 @@ class MultiAgentOrchestrator:
             f"  Schaue auf die Tools jedes Agenten und pruefe ob sie fuer das Ziel relevant sind.\n"
             f"  Nicht relevante Agenten WEGLASSEN statt ihnen sinnlose Tasks zu geben.\n"
             f"- Der letzte Task (Zusammenfassung/Review) sollte von den anderen abhaengen\n"
+            f"{impl_team_rules}"
             f"- WICHTIG fuer Task-Beschreibungen:\n"
             f"  Die 'description' MUSS die SPEZIFISCHE Frage/Aufgabe enthalten, NICHT generisch!\n"
             f"  Die 'description' MUSS das VOLLSTAENDIGE Ziel referenzieren, NICHT abkuerzen!\n"

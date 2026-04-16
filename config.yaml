@@ -338,7 +338,7 @@ multi_agent:
             TOOLS: Use search_code, read_file to understand patterns
             TESTING: run_pytest after each change
 
-          tools: ["search_code", "read_file", "edit_file", "write_file", "run_pytest", "list_files", "glob_files", "grep_content"]
+          tools: ["search_code", "read_file", "edit_file", "write_file", "list_files", "glob_files", "grep_content"]
           model: ""  # Leer = default_model aus llm.default_model
           max_turns: 20
 
@@ -363,7 +363,7 @@ multi_agent:
             TOOLS: Use search_code, read_file to find patterns
             TESTING: run_npm_tests after changes, check coverage
 
-          tools: ["search_code", "read_file", "edit_file", "write_file", "run_npm_tests", "list_files", "glob_files", "grep_content"]
+          tools: ["search_code", "read_file", "edit_file", "write_file", "list_files", "glob_files", "grep_content"]
           model: ""  # Leer = default_model aus llm.default_model
           max_turns: 18
 
@@ -410,7 +410,7 @@ multi_agent:
             FORMAT: Standard pytest and jest conventions
             COVERAGE: Must achieve >85% for new code
 
-          tools: ["write_file", "edit_file", "read_file", "run_pytest", "run_npm_tests", "search_code", "list_files", "grep_content"]
+          tools: ["write_file", "edit_file", "read_file", "search_code", "list_files", "grep_content"]
           model: ""  # Leer = default_model aus llm.default_model
           max_turns: 16
 
@@ -454,7 +454,7 @@ multi_agent:
             ### Recommendation
             APPROVED / CHANGES_NEEDED
 
-          tools: ["read_file", "search_code", "run_pytest", "run_npm_tests", "list_files", "glob_files", "grep_content"]
+          tools: ["read_file", "search_code", "list_files", "glob_files", "grep_content"]
           model: ""  # Leer = default_model aus llm.default_model
           max_turns: 10
 

@@ -72,6 +72,19 @@ class TeamAgent(SubAgent):
             )
         context_parts.append(f"DEINE ROLLE: {self.description}")
 
+        # Fuer Implementation-Team: Pfad-Hinweise
+        if self.auto_confirm_writes:
+            context_parts.append(
+                "PFAD-REGELN (WICHTIG):\n"
+                "- Wenn das Ziel einen expliziten Zielordner nennt (z.B. 'in C:/foo'), nutze IMMER diesen Pfad.\n"
+                "- Beim write_file IMMER den absoluten Pfad angeben, relativ zum Zielordner.\n"
+                "- Beispiel: Ziel 'C:/myproject' -> write_file path='C:/myproject/app/auth.py'\n"
+                "- Wenn kein Pfad genannt ist: nutze das aktuelle Arbeitsverzeichnis ohne weitere Annahmen.\n"
+                "- write_file schreibt jetzt DIREKT (auto-confirm nach Plan-Genehmigung). Nicht zoegern!\n"
+                "- Wenn das Tool einen SCHREIBVORGANG ABGELEHNT-Fehler meldet, pruefe den Pfad im Task-Kontext.\n"
+                "- run_pytest/run_npm_tests existieren NICHT - nutze NUR die im 'Tools:' aufgelisteten Tools.\n"
+            )
+
         if shared_context:
             context_parts.append(f"\nKONTEXT VON VORHERIGEN TASKS:\n{shared_context}")
 
