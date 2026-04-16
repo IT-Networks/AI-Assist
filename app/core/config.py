@@ -371,6 +371,13 @@ class FileOperationsConfig(BaseModel):
     backup_directory: str = "./backups"
 
 
+class TestExecConfig(BaseModel):
+    """Konfiguration fuer Test-Execution-Tools (run_pytest, run_npm_tests)."""
+    enabled: bool = True
+    timeout_seconds: int = 120
+    max_output_preview: int = 5000
+
+
 class DatabaseConfig(BaseModel):
     """Konfiguration für DB2-Datenbankverbindung."""
     enabled: bool = False
@@ -1560,6 +1567,7 @@ class Settings(BaseModel):
     alm: ALMConfig = ALMConfig()  # HP ALM/Quality Center
     skills: SkillsConfig = SkillsConfig()
     file_operations: FileOperationsConfig = FileOperationsConfig()
+    test_exec: TestExecConfig = TestExecConfig()
     data_sources: DataSourcesConfig = Field(default_factory=DataSourcesConfig)
     sub_agents: SubAgentsConfig = Field(default_factory=SubAgentsConfig)
     knowledge_base: KnowledgeBaseConfig = Field(default_factory=KnowledgeBaseConfig)
