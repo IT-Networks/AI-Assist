@@ -60,11 +60,6 @@ class MultiAgentOrchestrator:
         self._model = settings.multi_agent.coordinator_model or settings.llm.default_model
         self._timeout = settings.multi_agent.task_timeout_seconds
 
-        # Agents erstellen und im Pool registrieren
-        for agent_config in team_config.agents:
-            agent = TeamAgent(agent_config, self._message_bus)
-            self._pool.register(agent)
-
         # Token-Tracking (aggregiert ueber alle LLM-Calls)
         self._total_tokens = 0
         self._total_llm_calls = 0
@@ -81,6 +76,16 @@ class MultiAgentOrchestrator:
         else:
             self._change_tracker = None
             self._approval_manager = None
+
+        # Agents erstellen und im Pool registrieren
+        # Bei Implementation-Teams: auto_confirm_writes + ChangeTracker setzen,
+        # damit write_file/edit_file direkt ausgefuehrt und fuer Rollback getrackt werden.
+        for agent_config in team_config.agents:
+            agent = TeamAgent(agent_config, self._message_bus)
+            if is_implementation_team:
+                agent.auto_confirm_writes = True
+                agent._change_tracker = self._change_tracker
+            self._pool.register(agent)
 
     async def run(self, goal: str) -> TeamRunResult:
         """Fuehrt den kompletten Team-Run aus."""

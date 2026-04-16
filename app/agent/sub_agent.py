@@ -216,6 +216,63 @@ class SubAgent:
     def __init__(self):
         self._model: str = settings.llm.tool_model or settings.llm.default_model
         self._current_query: str = ""  # Wird in run() gesetzt für Hooks
+        # Auto-Confirm fuer Write-Ops: Bei Teams mit Plan-Approval (Implementation-Team)
+        # werden write_file/edit_file automatisch ausgefuehrt. Fuer normale SubAgents False.
+        self.auto_confirm_writes: bool = False
+        self._change_tracker = None  # Optional ChangeTracker fuer Rollback-Tracking
+
+    async def _auto_execute_write(self, confirmation_data: Dict) -> "ToolResult":
+        """Fuehrt eine bestaetigte Write-Operation aus (fuer Teams mit Plan-Approval).
+
+        Spiegelt app/agent/orchestrator.py::_execute_confirmed_operation fuer die
+        haeufigsten File-Operationen wider. Erweiterbar bei Bedarf.
+        """
+        from app.agent.tools import ToolResult
+        from app.services.file_manager import get_file_manager
+
+        operation = confirmation_data.get("operation")
+        path = confirmation_data.get("path")
+
+        if operation == "write_file":
+            content = confirmation_data.get("content", "")
+            manager = get_file_manager()
+            success = await manager.execute_write(path, content)
+            if success:
+                return ToolResult(success=True, data=f"Datei geschrieben: {path}")
+            return ToolResult(success=False, error=f"execute_write fehlgeschlagen: {path}")
+
+        if operation == "edit_file":
+            old_string = confirmation_data.get("old_string", "")
+            new_string = confirmation_data.get("new_string", "")
+            replace_all = bool(confirmation_data.get("replace_all", False))
+            manager = get_file_manager()
+            success = await manager.execute_edit(path, old_string, new_string, replace_all)
+            if success:
+                return ToolResult(success=True, data=f"Datei bearbeitet: {path}")
+            return ToolResult(success=False, error=f"execute_edit fehlgeschlagen: {path}")
+
+        return ToolResult(
+            success=False,
+            error=f"auto_confirm_writes: Operation '{operation}' wird nicht unterstuetzt."
+        )
+
+    def _track_change(self, confirmation_data: Dict) -> None:
+        """Tracked eine Write-Operation im ChangeTracker fuer spaeteren Rollback."""
+        if not self._change_tracker:
+            return
+        try:
+            operation = confirmation_data.get("operation")
+            path = confirmation_data.get("path")
+            if operation == "write_file":
+                is_new = confirmation_data.get("is_new", True)
+                if is_new:
+                    self._change_tracker.track_create(path, agent=self.name)
+                else:
+                    self._change_tracker.track_modify(path, agent=self.name)
+            elif operation == "edit_file":
+                self._change_tracker.track_modify(path, agent=self.name)
+        except Exception as e:
+            logger.warning(f"[sub_agent:{self.name}] ChangeTracker-Track fehlgeschlagen: {e}")
 
     async def run(
         self,
@@ -383,7 +440,31 @@ class SubAgent:
 
                     try:
                         result = await tool_registry.execute(tc_name, **args)
-                        tool_content = result.to_context()
+
+                        # Auto-Confirm fuer Implementation-Team: write_file/edit_file
+                        # liefern nur Preview mit requires_confirmation=True. Normal laeuft
+                        # das ueber User-UI-Bestaetigung. In Teams mit auto_confirm_writes
+                        # (nach Plan-Approval) fuehren wir direkt aus.
+                        if (
+                            result.success
+                            and getattr(result, "requires_confirmation", False)
+                            and getattr(result, "confirmation_data", None)
+                            and self.auto_confirm_writes
+                        ):
+                            try:
+                                exec_result = await self._auto_execute_write(result.confirmation_data)
+                                if exec_result.success:
+                                    tool_content = exec_result.data or "(Datei geschrieben)"
+                                    # Track fuer Rollback wenn ChangeTracker verfuegbar
+                                    if self._change_tracker:
+                                        self._track_change(result.confirmation_data)
+                                else:
+                                    tool_content = f"[Fehler beim Schreiben] {exec_result.error}"
+                            except Exception as ex:
+                                logger.exception(f"[sub_agent:{self.name}] auto-confirm write failed: {ex}")
+                                tool_content = f"[Fehler beim Schreiben] {ex}"
+                        else:
+                            tool_content = result.to_context()
 
                         # Hook: Content-Extraktion für große Ergebnisse
                         if tc_name in self.content_extraction_tools:
