@@ -197,14 +197,48 @@ class MultiAgentOrchestrator:
             await self._emit({"phase": "verification_approval_requested"})
             logger.info("[MultiAgent] Requesting verification approval for implementation team")
 
-            # Build test results summary
-            test_results = {
-                "backend_tests": {"passed": 0, "failed": 0},
-                "frontend_tests": {"passed": 0, "failed": 0},
-                "coverage": {"percentage": 0},
-            }
+            # Build test results summary aus ChangeTracker-Daten (keine Halluzination!)
+            # Es gibt kein run_pytest/run_npm_tests Tool - wir zeigen stattdessen an,
+            # wieviele Test-Dateien geschrieben wurden.
+            files_all = self._change_tracker.get_summary()["files"]
+            files_changed = files_all
 
-            files_changed = self._change_tracker.get_summary()["files"]
+            def _is_backend_test(p: str) -> bool:
+                p_low = p.lower().replace("\\", "/")
+                return ("test_" in p_low or "/tests/" in p_low) and p_low.endswith(".py")
+
+            def _is_frontend_test(p: str) -> bool:
+                p_low = p.lower().replace("\\", "/")
+                return (
+                    p_low.endswith(".test.tsx") or p_low.endswith(".test.ts")
+                    or p_low.endswith(".spec.tsx") or p_low.endswith(".spec.ts")
+                    or p_low.endswith(".test.jsx") or p_low.endswith(".test.js")
+                    or "/__tests__/" in p_low
+                )
+
+            backend_test_count = sum(1 for f in files_all if _is_backend_test(f))
+            frontend_test_count = sum(1 for f in files_all if _is_frontend_test(f))
+
+            test_results = {
+                "backend_tests": {
+                    "written": backend_test_count,
+                    "passed": 0,
+                    "failed": 0,
+                    "note": "Keine Ausfuehrung moeglich - nur Anzahl geschriebener Dateien",
+                },
+                "frontend_tests": {
+                    "written": frontend_test_count,
+                    "passed": 0,
+                    "failed": 0,
+                    "note": "Keine Ausfuehrung moeglich - nur Anzahl geschriebener Dateien",
+                },
+                "coverage": {"percentage": None, "note": "Nicht gemessen"},
+                "files_total": len(files_all),
+            }
+            logger.info(
+                f"[MultiAgent] Verification-Snapshot: {len(files_all)} Dateien, "
+                f"{backend_test_count} Backend-Tests, {frontend_test_count} Frontend-Tests"
+            )
 
             decision = await self._approval_manager.request_verification_approval(
                 feature_id=self._change_tracker.feature_id,
@@ -332,6 +366,13 @@ class MultiAgentOrchestrator:
                 "  * implementation-reviewer laeuft zuletzt, haengt von ALLEN anderen ab\n"
                 "  * Jede Code-Task description muss KONKRETE Dateipfade enthalten\n"
                 "    (write_file braucht die exakten Pfade).\n"
+                "  * TEST-TASKS description muss explizit sagen:\n"
+                "    - Welche konkreten Module zu testen sind (z.B. 'teste auth.py und models.py')\n"
+                "    - Welche Test-Dateien geschrieben werden sollen mit vollem Pfad:\n"
+                "      Python: {workspace}/tests/test_<modul>.py\n"
+                "      Frontend: {workspace}/src/__tests__/<Component>.test.tsx\n"
+                "    - KEIN Test-Ausfuehrung (kein run_pytest Tool): nur Dateien schreiben.\n"
+                "  * REVIEWER-TASK description: nur statische Review, KEIN Test-Run.\n"
                 f"{workspace_note}"
             )
 
