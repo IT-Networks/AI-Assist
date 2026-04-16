@@ -1409,84 +1409,108 @@ async def apply_workspace_code_change(
 # Implementation Team - Approval Response Endpoint
 # ══════════════════════════════════════════════════════════════════════════════
 
-class ApprovalResponseRequest(BaseModel):
-    """User-Entscheidung für Implementation-Team Approval-Stufen."""
-    feature_id: str = Field(..., description="Feature-ID aus approval_request Event")
-    stage: str = Field(..., description="plan_ready | reviewing")
-    decision: str = Field(..., description="APPROVE | CHANGES_REQUESTED | DISCARD")
-    feedback: str = Field("", description="Optional user feedback")
-
-
 @router.post("/approval-response")
-async def submit_approval_response(req: ApprovalResponseRequest) -> Dict[str, Any]:
+async def submit_approval_response(request: Request) -> Dict[str, Any]:
     """
     Empfängt User-Entscheidung für Implementation-Team Approval.
 
-    Wird vom Frontend aufgerufen nachdem User im Approval-Modal
-    [Start]/[Cancel] (Plan-Stage) oder [Merge]/[Changes]/[Discard] (Verification) klickt.
+    Tolerant gegenüber Input-Varianten: Parst Body manuell, akzeptiert
+    sowohl Enum-Namen als auch -Values, und gibt NIE 4xx zurück damit
+    der Frontend-User klare Fehlermeldungen bekommt statt "Bad Request".
     """
+    import logging
+    import json as _json
+
     from app.agent.multi_agent.approval_manager import (
         get_approval_manager,
+        list_pending_feature_ids,
         ApprovalResponse,
         ApprovalDecision,
         ApprovalStage,
     )
 
-    import logging
     logger = logging.getLogger(__name__)
+
+    # Body komplett lesen für Debug
+    try:
+        raw_body = await request.body()
+        body_text = raw_body.decode("utf-8", errors="replace")
+    except Exception as e:
+        logger.error(f"[ApprovalResponse] Body-Read fehlgeschlagen: {e}")
+        return {"success": False, "error": f"Body-Read fehlgeschlagen: {e}"}
+
+    logger.info(f"[ApprovalResponse] RAW body: {body_text!r}")
+
+    try:
+        body = _json.loads(body_text) if body_text else {}
+    except _json.JSONDecodeError as e:
+        logger.error(f"[ApprovalResponse] JSON-Parse fehlgeschlagen: {e}")
+        return {"success": False, "error": f"Body ist kein valides JSON: {e}", "body_received": body_text}
+
+    if not isinstance(body, dict):
+        return {"success": False, "error": f"Body ist kein Objekt sondern {type(body).__name__}", "body_received": body}
+
+    feature_id = str(body.get("feature_id") or "").strip()
+    stage_raw = str(body.get("stage") or "").strip()
+    decision_raw = str(body.get("decision") or "").strip()
+    feedback = str(body.get("feedback") or "")
+
     logger.info(
-        f"[ApprovalResponse] feature_id={req.feature_id} stage={req.stage!r} "
-        f"decision={req.decision!r} feedback_len={len(req.feedback)}"
+        f"[ApprovalResponse] parsed: feature_id={feature_id!r} "
+        f"stage={stage_raw!r} decision={decision_raw!r} "
+        f"feedback_len={len(feedback)} pending={list_pending_feature_ids()}"
     )
 
-    manager = get_approval_manager(req.feature_id)
-    if manager is None:
-        raise HTTPException(
-            status_code=404,
-            detail=f"Keine wartende Genehmigung für feature_id={req.feature_id}"
-        )
+    if not feature_id:
+        return {"success": False, "error": "feature_id fehlt oder ist leer"}
 
-    # Stage: akzeptiere value ("plan_ready") ODER name ("PLAN_READY")
+    manager = get_approval_manager(feature_id)
+    if manager is None:
+        return {
+            "success": False,
+            "error": f"Keine wartende Genehmigung für feature_id={feature_id}",
+            "pending_feature_ids": list_pending_feature_ids(),
+        }
+
+    # Stage: tolerant, default PLAN_READY wenn leer/unbekannt
     stage_enum: Optional[ApprovalStage] = None
-    stage_raw = (req.stage or "").strip()
     try:
         stage_enum = ApprovalStage(stage_raw.lower())
     except ValueError:
         try:
             stage_enum = ApprovalStage[stage_raw.upper()]
         except KeyError:
-            raise HTTPException(
-                status_code=400,
-                detail=f"Ungültige stage: {req.stage!r}. Erwartet: {[s.value for s in ApprovalStage]}"
-            )
+            logger.warning(f"[ApprovalResponse] Unbekannte stage {stage_raw!r}, default PLAN_READY")
+            stage_enum = ApprovalStage.PLAN_READY
 
-    # Decision: akzeptiere name ("APPROVE") ODER value ("approve")
+    # Decision: tolerant, default DISCARD wenn unbekannt (sicher)
     decision_enum: Optional[ApprovalDecision] = None
-    decision_raw = (req.decision or "").strip()
     try:
         decision_enum = ApprovalDecision[decision_raw.upper()]
     except KeyError:
         try:
             decision_enum = ApprovalDecision(decision_raw.lower())
         except ValueError:
-            raise HTTPException(
-                status_code=400,
-                detail=(
-                    f"Ungültige decision: {req.decision!r}. "
-                    f"Erwartet: APPROVE | CHANGES_REQUESTED | DISCARD"
-                )
-            )
+            logger.warning(f"[ApprovalResponse] Unbekannte decision {decision_raw!r}, default DISCARD")
+            decision_enum = ApprovalDecision.DISCARD
 
     response = ApprovalResponse(
-        feature_id=req.feature_id,
+        feature_id=feature_id,
         stage=stage_enum,
         decision=decision_enum,
-        feedback=req.feedback,
+        feedback=feedback,
     )
-    await manager.submit_response(response)
 
+    try:
+        await manager.submit_response(response)
+    except Exception as e:
+        logger.exception(f"[ApprovalResponse] submit_response Exception: {e}")
+        return {"success": False, "error": f"submit_response Exception: {e}"}
+
+    logger.info(f"[ApprovalResponse] OK feature_id={feature_id} decision={decision_enum.name}")
     return {
         "success": True,
-        "feature_id": req.feature_id,
+        "feature_id": feature_id,
+        "stage": stage_enum.value,
         "decision": decision_enum.name,
     }

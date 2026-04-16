@@ -6168,9 +6168,19 @@ const approvalState = {
   stage: null,
 
   async submitResponse(decision, feedback = '') {
+    const reportError = (msg, extra) => {
+      console.error('[Approval]', msg, extra || '');
+      if (typeof showToast === 'function') showToast(msg, 'error');
+      try {
+        const activeChat = typeof chatManager !== 'undefined' && chatManager.getActive?.();
+        if (activeChat && activeChat.pane && typeof appendMessageToPane === 'function') {
+          appendMessageToPane(activeChat.pane, 'error', msg);
+        }
+      } catch {}
+    };
+
     if (!this.currentApproval || !this.featureId) {
-      console.warn('[Approval] No pending approval to submit');
-      if (typeof showToast === 'function') showToast('Keine aktive Genehmigung', 'error');
+      reportError('Keine aktive Genehmigung — Modal wurde ohne approval_request geöffnet');
       return false;
     }
 
@@ -6183,34 +6193,36 @@ const approvalState = {
 
     console.info('[Approval] POST /api/agent/approval-response', payload);
 
+    let res, bodyText = '', bodyJson = null;
     try {
-      const res = await fetch('/api/agent/approval-response', {
+      res = await fetch('/api/agent/approval-response', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
         credentials: 'same-origin',
       });
-
-      const bodyText = await res.text();
-      let bodyJson = null;
+      bodyText = await res.text();
       try { bodyJson = JSON.parse(bodyText); } catch {}
-
-      if (!res.ok) {
-        const detail = (bodyJson && (bodyJson.detail || bodyJson.message)) || bodyText || res.statusText;
-        const msg = `Approval-Response fehlgeschlagen (HTTP ${res.status}): ${detail}`;
-        console.error('[Approval]', msg, { payload, response: bodyJson || bodyText });
-        if (typeof showToast === 'function') showToast(msg, 'error');
-        return false;
-      }
-
-      console.info('[Approval] Backend accepted:', bodyJson || bodyText);
     } catch (e) {
-      const msg = `Approval-POST Netzwerkfehler: ${e.message || e}`;
-      console.error('[Approval]', msg, e);
-      if (typeof showToast === 'function') showToast(msg, 'error');
+      reportError(`Approval-POST Netzwerkfehler: ${e.message || e}`, e);
       return false;
     }
 
+    if (!res.ok) {
+      const detail = (bodyJson && (bodyJson.detail || bodyJson.error || bodyJson.message)) || bodyText || res.statusText;
+      reportError(`Approval-Response fehlgeschlagen (HTTP ${res.status}): ${detail}`, { payload, body: bodyJson || bodyText });
+      return false;
+    }
+
+    // Endpoint liefert jetzt immer 200 aber mit success=false bei Problemen
+    if (bodyJson && bodyJson.success === false) {
+      const detail = bodyJson.error || bodyJson.detail || 'Unbekannter Fehler';
+      const pending = bodyJson.pending_feature_ids ? ` (pending: ${JSON.stringify(bodyJson.pending_feature_ids)})` : '';
+      reportError(`Approval abgelehnt: ${detail}${pending}`, bodyJson);
+      return false;
+    }
+
+    console.info('[Approval] Backend accepted:', bodyJson || bodyText);
     this.clear();
     return true;
   },
