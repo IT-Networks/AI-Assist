@@ -6168,8 +6168,9 @@ const approvalState = {
   stage: null,
 
   async submitResponse(decision, feedback = '') {
-    if (!this.currentApproval) {
-      console.warn('[Approval] No pending approval');
+    if (!this.currentApproval || !this.featureId) {
+      console.warn('[Approval] No pending approval to submit');
+      if (typeof showToast === 'function') showToast('Keine aktive Genehmigung', 'error');
       return false;
     }
 
@@ -6180,22 +6181,33 @@ const approvalState = {
       feedback,
     };
 
-    log.info('[Approval] Submitting response:', payload);
+    console.info('[Approval] POST /api/agent/approval-response', payload);
 
     try {
       const res = await fetch('/api/agent/approval-response', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
+        credentials: 'same-origin',
       });
 
+      const bodyText = await res.text();
+      let bodyJson = null;
+      try { bodyJson = JSON.parse(bodyText); } catch {}
+
       if (!res.ok) {
-        const err = await res.text();
-        console.error('[Approval] Backend rejected response:', res.status, err);
+        const detail = (bodyJson && (bodyJson.detail || bodyJson.message)) || bodyText || res.statusText;
+        const msg = `Approval-Response fehlgeschlagen (HTTP ${res.status}): ${detail}`;
+        console.error('[Approval]', msg, { payload, response: bodyJson || bodyText });
+        if (typeof showToast === 'function') showToast(msg, 'error');
         return false;
       }
+
+      console.info('[Approval] Backend accepted:', bodyJson || bodyText);
     } catch (e) {
-      console.error('[Approval] Failed to POST approval response:', e);
+      const msg = `Approval-POST Netzwerkfehler: ${e.message || e}`;
+      console.error('[Approval]', msg, e);
+      if (typeof showToast === 'function') showToast(msg, 'error');
       return false;
     }
 
