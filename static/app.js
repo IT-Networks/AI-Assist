@@ -4571,6 +4571,8 @@ async function loadModels() {
     const res = await fetch('/api/models');
     const data = await res.json();
     const sel = document.getElementById('model-select');
+    const knownIds = new Set(data.models.map(m => m.id));
+    const prevValue = state.currentModel;
     sel.innerHTML = '';
 
     data.models.forEach(m => {
@@ -4586,13 +4588,19 @@ async function loadModels() {
       opt.dataset.vision = m.vision || false;
       opt.dataset.ocr = m.ocr_model || false;
 
-      if (m.id === data.default) opt.selected = true;
       sel.appendChild(opt);
     });
 
     // Speichere Modell-Daten für spätere Referenz
     window.modelsData = data.models;
 
+    // Auswahl-Logik: Vorheriger Wert nur wenn in neuer Liste bekannt, sonst default
+    if (prevValue && knownIds.has(prevValue)) {
+      sel.value = prevValue;
+    } else {
+      if (prevValue) log.warn(`[Model] Vorheriges Modell '${prevValue}' nicht mehr verfuegbar, falle auf default '${data.default}' zurueck`);
+      sel.value = data.default;
+    }
     state.currentModel = sel.value;
 
     // Initial UI updaten

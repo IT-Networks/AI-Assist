@@ -137,6 +137,8 @@ async def agent_chat(request: AgentChatRequest, http_request: Request):
         SSE-Stream mit AgentEvents
     """
     from app.agent.orchestrator import get_agent_orchestrator, AgentEventType
+    import logging
+    _logger = logging.getLogger(__name__)
 
     orchestrator = get_agent_orchestrator()
 
@@ -147,13 +149,24 @@ async def agent_chat(request: AgentChatRequest, http_request: Request):
     if request.skill_ids:
         orchestrator.set_active_skills(session_id, request.skill_ids)
 
+    # Model-Validierung: Unbekannte Modelle (z.B. Browser-Cache mit altem Namen)
+    # werden auf default_model zurueckgefuehrt statt an LLM weitergegeben.
+    requested_model = request.model
+    known_model_ids = {m.id for m in settings.models}
+    if requested_model and requested_model not in known_model_ids:
+        _logger.warning(
+            f"[agent_chat] Unbekanntes Modell '{requested_model}' "
+            f"(bekannt: {sorted(known_model_ids)}) -> fallback auf '{settings.llm.default_model}'"
+        )
+        requested_model = None  # None -> process() nimmt default_model
+
     async def event_generator():
         """Generiert SSE-Events aus dem Agent-Loop."""
         try:
             gen = orchestrator.process(
                 session_id=session_id,
                 user_message=request.message,
-                model=request.model,
+                model=requested_model,
                 context_selection=request.context,
                 attachments=[a.dict() for a in request.attachments] if request.attachments else None,
                 tts=request.tts,
@@ -222,6 +235,18 @@ async def agent_chat_sync(request: AgentChatRequest) -> Dict[str, Any]:
     if request.skill_ids:
         orchestrator.set_active_skills(session_id, request.skill_ids)
 
+    # Model-Validierung (analog /chat)
+    import logging as _logging
+    _logger = _logging.getLogger(__name__)
+    requested_model = request.model
+    known_model_ids = {m.id for m in settings.models}
+    if requested_model and requested_model not in known_model_ids:
+        _logger.warning(
+            f"[agent_chat_sync] Unbekanntes Modell '{requested_model}' "
+            f"-> fallback auf '{settings.llm.default_model}'"
+        )
+        requested_model = None
+
     events = []
     final_response = ""
     pending_confirmation = None
@@ -230,7 +255,7 @@ async def agent_chat_sync(request: AgentChatRequest) -> Dict[str, Any]:
         gen = orchestrator.process(
             session_id=session_id,
             user_message=request.message,
-            model=request.model,
+            model=requested_model,
             context_selection=request.context,
             attachments=[a.dict() for a in request.attachments] if request.attachments else None,
             tts=request.tts,
