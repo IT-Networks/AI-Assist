@@ -197,11 +197,24 @@ class WebexAutomationService:
             store.update_last_webex_poll(datetime.now().isoformat())
             return
 
+        # Bot-Room aus Todo-Verarbeitung ausklammern (wird von AssistRoomHandler bedient)
+        bot_room_id = (settings.webex.bot.room_id or "") if settings.webex.bot.enabled else ""
+        if bot_room_id:
+            room_ids = [rid for rid in room_ids if rid != bot_room_id]
+            if not room_ids:
+                store.update_last_webex_poll(datetime.now().isoformat())
+                return
+
         messages = await client.get_new_messages_since(
             room_ids=room_ids,
             since=since,
             max_per_room=settings.webex.max_messages_per_poll,
         )
+
+        # Sicherheitsnetz: falls die Room-ID zur Laufzeit gesetzt wurde,
+        # auch nachtraeglich alle Bot-Room-Msgs droppen
+        if bot_room_id and messages:
+            messages = [m for m in messages if m.get("room_id") != bot_room_id]
 
         if not messages:
             store.update_last_webex_poll(datetime.now().isoformat())

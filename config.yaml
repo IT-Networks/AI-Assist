@@ -1216,7 +1216,7 @@ webex:
   client_id: ''                  # Integration Client-ID
   client_secret: ''              # Integration Client-Secret
   redirect_uri: 'http://localhost:8000/api/webex/oauth/callback'
-  scopes: 'spark:rooms_read spark:messages_read spark:people_read'
+  scopes: 'spark:rooms_read spark:messages_read spark:messages_write spark:people_read'
   # Token (OAuth automatisch ODER manueller Bearer-Token)
   access_token: ''               # Manuell: Bearer-Token eintragen / OAuth: automatisch
   refresh_token: ''              # OAuth: automatisch (90 Tage)

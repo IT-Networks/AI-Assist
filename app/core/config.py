@@ -1514,6 +1514,30 @@ class TaskAgentConfig(BaseModel):
     # Hinweis: Web-Suche wird über search.enabled gesteuert (in config.yaml)
 
 
+class WebexBotConfig(BaseModel):
+    """AI-Assist Chat-Bot Konfiguration (dedizierter Webex-Room als Remote-Terminal)."""
+    enabled: bool = False
+    # Identifizierung des Bot-Rooms (room_id bevorzugt; sonst wird nach room_name gesucht)
+    room_id: str = ""
+    room_name: str = "AI-Assist"
+    # Owner-Allowlist: Nur Msgs dieser Emails lösen Agent-Runs aus
+    allowed_senders: List[str] = Field(default_factory=list)
+    # Modus: Webhook (real-time) ODER Fallback-Polling (intervall-basiert)
+    use_webhooks: bool = False
+    fallback_poll_seconds: int = 10
+    # Webhook-spezifisch
+    webhook_public_url: str = ""       # z.B. https://ai-assist.my.domain/api/webex/webhooks/webex
+    webhook_secret: str = ""           # HMAC-SHA1 Shared-Secret — SENSITIVE
+    webhook_name: str = "ai-assist-bot"
+    # Agent-Verhalten
+    default_model: str = ""            # leer = Orchestrator-Default
+    max_concurrent_rooms: int = 3      # Task-Registry Hard-Cap
+    greet_on_startup: bool = True      # "🟢 AI-Assist online" Startup-Post
+    # Schutzlimits
+    daily_token_cap: int = 0           # 0 = off (Enforcement kommt in Phase 4)
+    max_reply_chars: int = 7000        # Webex Message-Limit ~7440, safety margin
+
+
 class WebexConfig(BaseModel):
     """Webex Messaging Konfiguration (OAuth2 Authorization Code Flow)."""
     enabled: bool = False
@@ -1535,6 +1559,8 @@ class WebexConfig(BaseModel):
     polling_enabled: bool = False
     polling_interval_minutes: int = 5  # 1-60 Minuten
     max_messages_per_poll: int = 100
+    # AI-Assist Chat-Bot (Remote-Terminal über dedizierten Room)
+    bot: WebexBotConfig = Field(default_factory=WebexBotConfig)
 
 
 class EmailConfig(BaseModel):

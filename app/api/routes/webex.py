@@ -4,10 +4,12 @@ API-Routes für Webex Messaging Integration.
 Endpoints für Verbindungstest, Räume, Nachrichten, Regeln, Todos und Automation.
 """
 
+import asyncio
+import json
 import logging
 from typing import Optional
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import Response
 from pydantic import BaseModel, Field
 
@@ -296,3 +298,146 @@ async def automation_stop():
     automation = get_webex_automation()
     await automation.stop()
     return {"success": True, "status": "stopped"}
+
+
+# ── AI-Assist Chat-Bot (dedizierter Webex-Room als Remote-Terminal) ──────────
+
+@router.get("/bot/status")
+async def bot_status():
+    """Status des AI-Assist-Chat-Bots."""
+    from app.services.webex_bot_service import get_assist_room_handler
+    handler = get_assist_room_handler()
+    return handler.get_status()
+
+
+@router.post("/bot/start")
+async def bot_start():
+    """Startet den AI-Assist-Chat-Bot (resolved Room, postet Greeting, startet Poller)."""
+    from app.services.webex_bot_service import get_assist_room_handler
+    handler = get_assist_room_handler()
+    try:
+        status = await handler.start()
+        return {"success": True, "status": status}
+    except Exception as e:
+        logger.error("Webex-Bot start fehlgeschlagen: %s", e, exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/bot/stop")
+async def bot_stop():
+    """Stoppt den AI-Assist-Chat-Bot (Poller aus, Agent-Runs bleiben laufen)."""
+    from app.services.webex_bot_service import get_assist_room_handler
+    handler = get_assist_room_handler()
+    await handler.stop()
+    return {"success": True, "status": handler.get_status()}
+
+
+@router.post("/bot/cancel")
+async def bot_cancel(room_id: str = Query("", description="Room-ID oder leer fuer Default-Bot-Room")):
+    """Bricht einen laufenden Agent-Run im Bot-Room ab."""
+    from app.services.webex_bot_service import get_assist_room_handler
+    handler = get_assist_room_handler()
+    cancelled = await handler.cancel(room_id)
+    return {"success": True, "cancelled": cancelled}
+
+
+# ── Webhook-Endpoint + Webhook-Management (Phase 2) ──────────────────────────
+
+@router.post("/webhooks/webex")
+async def webex_webhook_receiver(request: Request) -> Response:
+    """Empfaengt Webex-Webhook-Events (resource=messages, event=created).
+
+    Verifiziert X-Spark-Signature (HMAC-SHA1 des Raw-Bodies mit webhook_secret)
+    und antwortet sofort mit 200 OK. Die Verarbeitung laeuft asynchron im
+    Hintergrund, damit Webex nicht in Timeouts laeuft.
+    """
+    from app.core.config import settings
+    from app.services.webex_bot_service import get_assist_room_handler
+
+    raw_body = await request.body()
+    signature = request.headers.get("X-Spark-Signature", "") or request.headers.get("x-spark-signature", "")
+    secret = settings.webex.bot.webhook_secret or ""
+
+    # HMAC-Verifikation — bei gesetztem Secret PFLICHT
+    if secret:
+        if not AssistRoomHandler_verify(secret, raw_body, signature):
+            logger.warning("[webex-bot] Webhook signature invalid (len=%d)", len(raw_body))
+            raise HTTPException(status_code=403, detail="Invalid signature")
+    else:
+        logger.warning("[webex-bot] webhook_secret not set — signature NOT verified")
+
+    try:
+        payload = json.loads(raw_body.decode("utf-8") or "{}")
+    except Exception as e:
+        logger.warning("[webex-bot] Webhook: ungueltiger JSON-Body: %s", e)
+        raise HTTPException(status_code=400, detail="Invalid JSON")
+
+    # Fire-and-forget Dispatch — keep reference to prevent GC
+    handler = get_assist_room_handler()
+    task = asyncio.create_task(handler.on_webhook_event(payload))
+    _background_webhook_tasks.add(task)
+    task.add_done_callback(_background_webhook_tasks.discard)
+
+    return Response(status_code=200)
+
+
+def AssistRoomHandler_verify(secret: str, body: bytes, signature: str) -> bool:
+    """Lazy-dispatched HMAC-Verifikation (laed den Handler erst bei Bedarf)."""
+    from app.services.webex_bot_service import AssistRoomHandler
+    return AssistRoomHandler.verify_signature(secret, body, signature)
+
+
+# Haelt Referenzen auf laufende Hintergrund-Tasks, damit sie nicht vom GC
+# geraeumt werden bevor on_webhook_event fertig ist.
+_background_webhook_tasks: "set[asyncio.Task]" = set()
+
+
+@router.post("/bot/register-webhook")
+async def bot_register_webhook():
+    """One-shot: Registriert / aktualisiert den Webex-Webhook fuer den Bot-Room.
+
+    Erwartet dass der Bot bereits per /bot/start gestartet wurde (Room resolved).
+    """
+    from app.services.webex_bot_service import get_assist_room_handler
+    handler = get_assist_room_handler()
+    if not handler._room_id:
+        raise HTTPException(
+            status_code=400,
+            detail="Bot nicht gestartet — zuerst POST /api/webex/bot/start aufrufen.",
+        )
+    try:
+        webhook_id = await handler.ensure_webhook()
+        return {"success": True, "webhook_id": webhook_id, "status": handler.get_status()}
+    except Exception as e:
+        logger.error("Webex-Bot ensure_webhook fehlgeschlagen: %s", e, exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/bot/webhooks")
+async def bot_list_webhooks():
+    """Listet alle beim Webex-Account/Bot registrierten Webhooks auf."""
+    from app.services.webex_client import get_webex_client
+    client = get_webex_client()
+    try:
+        hooks = await client.list_webhooks(max_hooks=100)
+        return {"success": True, "count": len(hooks), "webhooks": hooks}
+    except Exception as e:
+        logger.error("list_webhooks fehlgeschlagen: %s", e)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.delete("/bot/webhooks/{webhook_id:path}")
+async def bot_delete_webhook(webhook_id: str):
+    """Entfernt einen Webex-Webhook anhand seiner ID."""
+    from app.services.webex_client import get_webex_client
+    from app.services.webex_bot_service import get_assist_room_handler
+    client = get_webex_client()
+    try:
+        await client.delete_webhook(webhook_id)
+        handler = get_assist_room_handler()
+        if handler._webhook_id == webhook_id:
+            handler._webhook_id = ""
+        return {"success": True, "deleted": webhook_id}
+    except Exception as e:
+        logger.error("delete_webhook fehlgeschlagen: %s", e)
+        raise HTTPException(status_code=500, detail=str(e))

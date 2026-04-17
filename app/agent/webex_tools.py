@@ -766,4 +766,343 @@ def register_webex_tools(registry: ToolRegistry) -> int:
     ))
     count += 1
 
+    # ══════════════════════════════════════════════════════════════════════════
+    # Chat-Bot Tools (Phase 3) — nur sinnvoll wenn AI-Assist im Bot-Room laeuft
+    # ══════════════════════════════════════════════════════════════════════════
+
+    def _resolve_target(
+        kwargs: Any,
+    ) -> tuple:
+        """Loest room_id + parent_id aus Tool-Kwargs ODER aus dem Bot-ContextVar.
+
+        Prioritaet: explizit uebergebene kwargs > aktueller Bot-Run-Kontext.
+        """
+        from app.services.webex_bot_service import get_current_bot_context
+
+        ctx = get_current_bot_context() or {}
+        room_id = (kwargs.get("room_id") or "").strip() or ctx.get("room_id", "")
+        parent_id = (kwargs.get("parent_id") or "").strip() or ctx.get("parent_id", "")
+        return room_id, parent_id
+
+    # ── webex_reply ───────────────────────────────────────────────────────────
+    async def webex_reply(**kwargs: Any) -> ToolResult:
+        from app.services.webex_client import get_webex_client
+        try:
+            room_id, parent_id = _resolve_target(kwargs)
+            if not room_id:
+                return ToolResult(
+                    success=False,
+                    error="Keine room_id verfuegbar (weder als Parameter noch aus Bot-Kontext).",
+                )
+            text = (kwargs.get("text") or "").strip()
+            markdown = (kwargs.get("markdown") or "").strip()
+            if not text and not markdown:
+                return ToolResult(success=False, error="text oder markdown muss gesetzt sein.")
+
+            # Thread-Reply nur wenn explizit gewollt (Default: in Thread-Kontext bleiben)
+            keep_thread = str(kwargs.get("keep_thread", "true")).lower() in ("true", "1", "yes")
+            effective_parent = parent_id if keep_thread else ""
+
+            client = get_webex_client()
+            result = await client.send_message(
+                room_id=room_id,
+                text=text,
+                markdown=markdown,
+                parent_id=effective_parent,
+            )
+            return ToolResult(
+                success=True,
+                data={
+                    "room_id": room_id,
+                    "message_id": result.get("id", ""),
+                    "posted_in_thread": bool(effective_parent),
+                },
+            )
+        except Exception as e:
+            return ToolResult(success=False, error=str(e))
+
+    registry.register(Tool(
+        name="webex_reply",
+        description=(
+            "Sendet eine Zwischen-Status-Nachricht in den aktuellen Webex-Chat (Bot-Room). "
+            "Nuetzlich waehrend laufender Tool-Loops um dem User Fortschritt zu zeigen "
+            "('Analysiere Logs...', 'Query laeuft...').\n\n"
+            "WANN NUTZEN: Explizit bei laufenden Long-Tasks wenn der User ohne Update "
+            ">10s warten muesste. NICHT fuer die finale Antwort — die wird automatisch "
+            "gepostet.\n\n"
+            "CONTEXT: room_id wird automatisch aus dem aktiven Bot-Run uebernommen — "
+            "nur explizit setzen wenn du einen anderen Raum adressieren willst. "
+            "parent_id wird per Default beibehalten (bleibt im Thread)."
+        ),
+        category=ToolCategory.SEARCH,
+        parameters=[
+            ToolParameter(
+                name="markdown",
+                type="string",
+                description="Nachrichtentext in Webex-Markdown (Links, Bullets, Code-Blocks).",
+                required=False,
+            ),
+            ToolParameter(
+                name="text",
+                type="string",
+                description="Alternative Plain-Text-Fassung (Fallback bei fehlendem Markdown-Support).",
+                required=False,
+            ),
+            ToolParameter(
+                name="room_id",
+                type="string",
+                description="Optional: Ziel-Room (Default: aktueller Bot-Room).",
+                required=False,
+            ),
+            ToolParameter(
+                name="parent_id",
+                type="string",
+                description="Optional: Parent-Message-ID fuer Thread-Reply.",
+                required=False,
+            ),
+            ToolParameter(
+                name="keep_thread",
+                type="string",
+                description="true/false — bei true im aktuellen Thread bleiben (Default: true).",
+                required=False,
+            ),
+        ],
+        handler=webex_reply,
+    ))
+    count += 1
+
+    # ── webex_share_diagram ───────────────────────────────────────────────────
+    async def webex_share_diagram(**kwargs: Any) -> ToolResult:
+        from app.services.diagram_renderer import get_diagram_renderer, source_as_code_block
+        from app.services.webex_client import get_webex_client
+        try:
+            room_id, parent_id = _resolve_target(kwargs)
+            if not room_id:
+                return ToolResult(
+                    success=False,
+                    error="Keine room_id verfuegbar (weder als Parameter noch aus Bot-Kontext).",
+                )
+            source = (kwargs.get("source") or "").strip()
+            if not source:
+                return ToolResult(success=False, error="source ist erforderlich.")
+            fmt = (kwargs.get("format") or "mermaid").strip().lower()
+            caption = (kwargs.get("caption") or "").strip()
+
+            renderer = get_diagram_renderer()
+            png_path = await renderer.render(source=source, fmt=fmt, caption=caption)
+
+            client = get_webex_client()
+            if png_path and png_path.exists():
+                await client.upload_file(
+                    file_path=str(png_path),
+                    room_id=room_id,
+                    parent_id=parent_id,
+                    caption=caption or f"📊 {fmt.capitalize()} Diagramm",
+                )
+                return ToolResult(
+                    success=True,
+                    data={
+                        "room_id": room_id,
+                        "rendered": True,
+                        "path": str(png_path.name),
+                        "format": fmt,
+                    },
+                )
+
+            # Fallback: Source als Code-Block posten
+            fallback = source_as_code_block(source, fmt)
+            header = caption or f"_(Diagramm-Render fehlgeschlagen — Quellcode als Fallback)_"
+            await client.send_message(
+                room_id=room_id,
+                markdown=f"{header}\n\n{fallback}",
+                parent_id=parent_id,
+            )
+            return ToolResult(
+                success=True,
+                data={"room_id": room_id, "rendered": False, "fallback": "source", "format": fmt},
+            )
+        except Exception as e:
+            return ToolResult(success=False, error=str(e))
+
+    registry.register(Tool(
+        name="webex_share_diagram",
+        description=(
+            "Rendert ein Diagramm (Mermaid/Graphviz/PlantUML) zu einem PNG und postet es "
+            "als Datei-Anhang in den Webex-Chat. Bei Render-Fehler: Quellcode als "
+            "Markdown-Code-Block als Fallback.\n\n"
+            "WANN NUTZEN: Um Flows, Architektur, ER-Diagramme, State-Machines oder "
+            "Dependency-Graphen visuell zu teilen.\n\n"
+            "FORMATE:\n"
+            "- mermaid: `graph TD; A-->B`\n"
+            "- graphviz (dot): `digraph { A -> B }`\n"
+            "- plantuml: `@startuml\\nA -> B\\n@enduml`\n\n"
+            "RENDER-PIPELINE: lokale CLI (mmdc/dot) falls installiert → Kroki HTTP-API "
+            "→ Source-Fallback. Praktisch immer erfolgreich sofern Internet/Proxy verfuegbar."
+        ),
+        category=ToolCategory.SEARCH,
+        parameters=[
+            ToolParameter(
+                name="source",
+                type="string",
+                description="Diagramm-Quelltext (Mermaid/Graphviz/PlantUML-Syntax).",
+                required=True,
+            ),
+            ToolParameter(
+                name="format",
+                type="string",
+                description="Diagramm-Format: mermaid | graphviz | plantuml (Default: mermaid).",
+                required=False,
+                enum=["mermaid", "graphviz", "plantuml", "dot"],
+            ),
+            ToolParameter(
+                name="caption",
+                type="string",
+                description="Optionale Bildunterschrift im Chat.",
+                required=False,
+            ),
+            ToolParameter(
+                name="room_id",
+                type="string",
+                description="Optional: Ziel-Room (Default: aktueller Bot-Room).",
+                required=False,
+            ),
+            ToolParameter(
+                name="parent_id",
+                type="string",
+                description="Optional: Parent-Message fuer Thread-Reply.",
+                required=False,
+            ),
+        ],
+        handler=webex_share_diagram,
+    ))
+    count += 1
+
+    # ── webex_share_file ──────────────────────────────────────────────────────
+    async def webex_share_file(**kwargs: Any) -> ToolResult:
+        from app.services.webex_client import get_webex_client
+        from pathlib import Path as _Path
+        try:
+            room_id, parent_id = _resolve_target(kwargs)
+            if not room_id:
+                return ToolResult(
+                    success=False,
+                    error="Keine room_id verfuegbar (weder als Parameter noch aus Bot-Kontext).",
+                )
+            file_path_raw = (kwargs.get("path") or "").strip()
+            if not file_path_raw:
+                return ToolResult(success=False, error="'path' ist erforderlich.")
+            caption = (kwargs.get("caption") or "").strip()
+
+            project_root = _Path(__file__).parent.parent.parent
+            allowed_roots = [
+                (project_root / "sandbox_uploads").resolve(),
+                (project_root / "reports").resolve(),
+                (project_root / "claudedocs").resolve(),
+            ]
+
+            candidate = _Path(file_path_raw)
+            if not candidate.is_absolute():
+                candidate = (project_root / candidate).resolve()
+            else:
+                candidate = candidate.resolve()
+
+            # Pfad-Whitelist pruefen (Path-Traversal-Schutz)
+            if not any(
+                str(candidate).startswith(str(root) + _Path("/").anchor if False else str(root))
+                for root in allowed_roots
+            ):
+                # Strikter: candidate muss unter einem der erlaubten Roots liegen
+                inside = False
+                for root in allowed_roots:
+                    try:
+                        candidate.relative_to(root)
+                        inside = True
+                        break
+                    except ValueError:
+                        continue
+                if not inside:
+                    return ToolResult(
+                        success=False,
+                        error=(
+                            "Pfad liegt ausserhalb der erlaubten Verzeichnisse "
+                            "(sandbox_uploads/, reports/, claudedocs/)."
+                        ),
+                    )
+
+            if not candidate.exists() or not candidate.is_file():
+                return ToolResult(success=False, error=f"Datei nicht gefunden: {candidate}")
+
+            # Groessenlimit: 90 MB (Webex-Hard-Cap ~100 MB)
+            size = candidate.stat().st_size
+            if size > 90 * 1024 * 1024:
+                return ToolResult(
+                    success=False,
+                    error=f"Datei zu gross: {size} Bytes (max ~90 MB).",
+                )
+
+            client = get_webex_client()
+            result = await client.upload_file(
+                file_path=str(candidate),
+                room_id=room_id,
+                parent_id=parent_id,
+                caption=caption,
+            )
+            return ToolResult(
+                success=True,
+                data={
+                    "room_id": room_id,
+                    "file": candidate.name,
+                    "size": size,
+                    "message_id": result.get("id", ""),
+                },
+            )
+        except Exception as e:
+            return ToolResult(success=False, error=str(e))
+
+    registry.register(Tool(
+        name="webex_share_file",
+        description=(
+            "Postet eine Datei aus dem Projekt-Sandbox als Anhang in den aktuellen "
+            "Webex-Bot-Chat.\n\n"
+            "PFAD-WHITELIST (Security): Nur Dateien unter `sandbox_uploads/`, `reports/` "
+            "oder `claudedocs/` koennen geteilt werden. Relative Pfade werden gegen "
+            "das Projekt-Root aufgeloest. Pfade ausserhalb dieser Roots werden abgelehnt.\n\n"
+            "LIMITS: Max ~90 MB (Webex-Hard-Cap 100 MB).\n\n"
+            "WANN NUTZEN: Generierte Reports/CSVs/PDFs teilen; Screenshots oder Log-Ausschnitte "
+            "die als Datei vorliegen."
+        ),
+        category=ToolCategory.FILE,
+        parameters=[
+            ToolParameter(
+                name="path",
+                type="string",
+                description=(
+                    "Datei-Pfad (relativ zum Projekt-Root oder absolut). "
+                    "Muss unter sandbox_uploads/, reports/ oder claudedocs/ liegen."
+                ),
+                required=True,
+            ),
+            ToolParameter(
+                name="caption",
+                type="string",
+                description="Optionale Bildunterschrift/Kommentar.",
+                required=False,
+            ),
+            ToolParameter(
+                name="room_id",
+                type="string",
+                description="Optional: Ziel-Room (Default: aktueller Bot-Room).",
+                required=False,
+            ),
+            ToolParameter(
+                name="parent_id",
+                type="string",
+                description="Optional: Parent-Message fuer Thread-Reply.",
+                required=False,
+            ),
+        ],
+        handler=webex_share_file,
+    ))
+    count += 1
+
     return count

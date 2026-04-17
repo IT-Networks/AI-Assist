@@ -7,6 +7,7 @@ Nutzt httpx für async HTTP-Aufrufe mit Proxy- und Rate-Limit-Support.
 
 import asyncio
 import logging
+import mimetypes
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -696,6 +697,183 @@ class WebexClient:
         """Gibt alle Raum-IDs zurück die für Polling relevant sind."""
         rooms = await self.list_rooms(max_rooms=100)
         return [r["id"] for r in rooms]
+
+    # ── Write-API (Chat-Bot) ──────────────────────────────────────────────────
+
+    async def send_message(
+        self,
+        room_id: str = "",
+        text: str = "",
+        markdown: str = "",
+        parent_id: str = "",
+        to_person_email: str = "",
+        to_person_id: str = "",
+    ) -> dict:
+        """POST /messages - Nachricht senden (Text oder Markdown).
+
+        Genau eines der Ziele muss gesetzt sein: room_id, to_person_email, to_person_id.
+        Entweder 'text' oder 'markdown' (oder beides) muss gesetzt sein.
+        Bei 'parent_id' wird die Nachricht als Thread-Reply gepostet.
+        """
+        if not (room_id or to_person_email or to_person_id):
+            raise ValueError("Ziel fehlt: room_id, to_person_email oder to_person_id angeben.")
+        if not text and not markdown:
+            raise ValueError("'text' oder 'markdown' muss gesetzt sein.")
+
+        payload: Dict[str, Any] = {}
+        if room_id:
+            payload["roomId"] = room_id
+        if to_person_email:
+            payload["toPersonEmail"] = to_person_email
+        if to_person_id:
+            payload["toPersonId"] = to_person_id
+        if text:
+            payload["text"] = text
+        if markdown:
+            payload["markdown"] = markdown
+        if parent_id:
+            payload["parentId"] = parent_id
+
+        return await self._request("POST", "/messages", json=payload)
+
+    async def upload_file(
+        self,
+        file_path: str,
+        room_id: str = "",
+        parent_id: str = "",
+        caption: str = "",
+        to_person_email: str = "",
+    ) -> dict:
+        """POST /messages - Datei-Upload via multipart/form-data.
+
+        Nutzt einen frischen httpx-Client (multipart funktioniert nicht mit dem
+        Content-Type: application/json Default-Header des Haupt-Clients).
+        """
+        from pathlib import Path as _Path
+        from app.core.config import settings
+
+        p = _Path(file_path)
+        if not p.exists() or not p.is_file():
+            raise FileNotFoundError(f"Datei nicht gefunden: {file_path}")
+
+        if not (room_id or to_person_email):
+            raise ValueError("Ziel fehlt: room_id oder to_person_email angeben.")
+
+        token = self._get_token()
+        if not token:
+            raise ValueError("Kein Webex Access-Token vorhanden.")
+
+        proxy = None
+        if settings.webex.use_proxy and settings.proxy.enabled:
+            proxy = settings.proxy.get_proxy_url()
+
+        # multipart/form-data zusammenbauen
+        data: Dict[str, str] = {}
+        if room_id:
+            data["roomId"] = room_id
+        if to_person_email:
+            data["toPersonEmail"] = to_person_email
+        if parent_id:
+            data["parentId"] = parent_id
+        if caption:
+            data["markdown"] = caption
+
+        mime_type, _ = mimetypes.guess_type(str(p))
+        mime_type = mime_type or "application/octet-stream"
+
+        async with httpx.AsyncClient(
+            base_url=settings.webex.base_url.rstrip("/"),
+            headers={"Authorization": f"Bearer {token}"},
+            timeout=max(settings.webex.timeout_seconds, 120),
+            verify=settings.webex.verify_ssl,
+            proxy=proxy,
+        ) as client:
+            with p.open("rb") as fh:
+                files = {"files": (p.name, fh, mime_type)}
+                response = await client.post("/messages", data=data, files=files)
+            if response.status_code == 401:
+                # Einmalig Refresh + Retry
+                if await self.refresh_token():
+                    token = self._get_token()
+                    async with httpx.AsyncClient(
+                        base_url=settings.webex.base_url.rstrip("/"),
+                        headers={"Authorization": f"Bearer {token}"},
+                        timeout=max(settings.webex.timeout_seconds, 120),
+                        verify=settings.webex.verify_ssl,
+                        proxy=proxy,
+                    ) as retry_client:
+                        with p.open("rb") as fh:
+                            files = {"files": (p.name, fh, mime_type)}
+                            response = await retry_client.post("/messages", data=data, files=files)
+            response.raise_for_status()
+            return response.json() if response.content else {}
+
+    # ── Webhook-CRUD (Phase 2) ────────────────────────────────────────────────
+
+    async def register_webhook(
+        self,
+        name: str,
+        target_url: str,
+        resource: str = "messages",
+        event: str = "created",
+        filter: str = "",
+        secret: str = "",
+    ) -> dict:
+        """POST /webhooks - registriert einen Webex-Webhook.
+
+        Args:
+            name: Anzeigename (z.B. "ai-assist-bot")
+            target_url: HTTPS-Endpoint der POSTs empfaengt
+            resource: "messages" | "memberships" | "rooms" | "attachmentActions"
+            event: "created" | "updated" | "deleted" | "all"
+            filter: z.B. "roomId=Y2lz..."
+            secret: HMAC-SHA1 Shared-Secret fuer Signatur-Pruefung
+        """
+        if not target_url:
+            raise ValueError("target_url ist erforderlich.")
+        payload: Dict[str, Any] = {
+            "name": name,
+            "targetUrl": target_url,
+            "resource": resource,
+            "event": event,
+        }
+        if filter:
+            payload["filter"] = filter
+        if secret:
+            payload["secret"] = secret
+        return await self._request("POST", "/webhooks", json=payload)
+
+    async def list_webhooks(self, max_hooks: int = 100) -> List[dict]:
+        """GET /webhooks - alle registrierten Webhooks des Auth-Users/Bots."""
+        data = await self._request("GET", "/webhooks", params={"max": max_hooks})
+        return list(data.get("items", []))
+
+    async def delete_webhook(self, webhook_id: str) -> None:
+        """DELETE /webhooks/{id} - einen Webhook entfernen."""
+        if not webhook_id:
+            raise ValueError("webhook_id ist erforderlich.")
+        await self._request("DELETE", f"/webhooks/{webhook_id}")
+
+    async def get_webhook(self, webhook_id: str) -> dict:
+        """GET /webhooks/{id} - Details zu einem Webhook."""
+        return await self._request("GET", f"/webhooks/{webhook_id}")
+
+    async def get_person_me(self) -> dict:
+        """GET /people/me mit Caching. Liefert id/email/displayName des Auth-Users/Bots."""
+        if getattr(self, "_me_cache", None):
+            return self._me_cache  # type: ignore[return-value]
+        data = await self._request("GET", "/people/me")
+        self._me_cache = {
+            "id": data.get("id", ""),
+            "email": (data.get("emails") or [""])[0] if data.get("emails") else "",
+            "display_name": data.get("displayName", ""),
+            "type": data.get("type", ""),  # "person" oder "bot"
+        }
+        # Legacy-Felder für Kompatibilität zu get_my_email()
+        self._my_email = self._me_cache["email"]
+        self._my_person_id = self._me_cache["id"]
+        self._my_display_name = self._me_cache["display_name"]
+        return self._me_cache
 
     async def close(self) -> None:
         """HTTP-Client schließen."""
