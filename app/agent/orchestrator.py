@@ -474,6 +474,8 @@ class AgentOrchestrator:
         context_selection: Optional[Any] = None,
         attachments: Optional[List[dict]] = None,
         tts: Optional[bool] = None,
+        channel_hint: Optional[str] = None,
+        channel_context: Optional[Any] = None,
     ) -> AsyncGenerator[AgentEvent, Optional[bool]]:
         """
         Verarbeitet eine User-Nachricht im Agent-Loop.
@@ -486,6 +488,10 @@ class AgentOrchestrator:
             user_message: Nachricht des Users
             model: Optional: LLM-Modell
             context_selection: Optional: Manuell ausgewählte Kontext-Elemente (ContextSelection)
+            channel_hint: Optional Kanal-Key ("webex", ...) für kanalspezifischen
+                System-Prompt-Zusatz. None = Web-UI-Default (byte-identisch zu vorher).
+            channel_context: Optional ``ChannelContext`` mit Chat-Verlauf für den
+                kanalspezifischen Kontext-Block.
 
         Yields:
             AgentEvent für jeden Schritt
@@ -1039,6 +1045,19 @@ class AgentOrchestrator:
         # Planungsphase: Plan als Kontext injizieren wenn genehmigt
         if state.mode == AgentMode.PLAN_THEN_EXECUTE and state.plan_approved and state.pending_plan:
             system_prompt += f"\n\n## Genehmigter Ausführungsplan\n\n{state.pending_plan}\n\nFühre diesen Plan jetzt Schritt für Schritt aus."
+
+        # Channel-Profil (Webex-Chat-Stil + Verlauf). Bei channel_hint=None No-Op.
+        if channel_hint:
+            try:
+                from app.agent.channel_profiles import build_channel_prompt
+                channel_block = build_channel_prompt(
+                    hint=channel_hint,
+                    ctx=channel_context,
+                )
+                if channel_block:
+                    system_prompt += f"\n\n{channel_block}"
+            except Exception as e:
+                logger.warning(f"[agent] Channel-Profil '{channel_hint}' konnte nicht gebaut werden: {e}")
 
         # Token Budget initialisieren
         state.token_budget = create_budget_from_config()

@@ -542,6 +542,8 @@ class AssistRoomHandler:
             if attachments:
                 logger.info("[webex-bot] %d Bild-Attachment(s) angehaengt", len(attachments))
 
+            channel_context = await self._build_channel_context(original_msg)
+
             gen = orchestrator.process(
                 session_id=session_id,
                 user_message=text,
@@ -549,6 +551,8 @@ class AssistRoomHandler:
                 context_selection=None,
                 attachments=attachments,
                 tts=False,
+                channel_hint="webex",
+                channel_context=channel_context,
             )
 
             async for event in gen:
@@ -647,6 +651,45 @@ class AssistRoomHandler:
         einfache Flows, wird aber vom _run_agent ueberlagert.
         """
         return None
+
+    async def _build_channel_context(self, msg: Dict[str, Any]) -> Optional[Any]:
+        """Baut den ``ChannelContext`` fuer den Orchestrator (Webex-Chat-Verlauf).
+
+        Holt die letzten N Messages aus Thread (wenn ``parent_id`` vorhanden)
+        oder Room, sortiert aelteste-zuerst und filtert die Trigger-Message raus.
+        Bei Fehler / deaktivierter History → None (Bot laeuft weiter ohne Verlauf).
+        """
+        from app.core.config import settings
+        from app.services.webex_client import get_webex_client
+        from app.services.webex_context import WebexContextBuilder
+
+        style = getattr(settings.webex.bot, "response_style", None)
+        if not style or not getattr(style, "include_history", True):
+            return None
+
+        msg_id = msg.get("id") or ""
+        room_id = msg.get("room_id") or self._room_id
+        if not room_id or not msg_id:
+            return None
+
+        builder = WebexContextBuilder(
+            client=get_webex_client(),
+            bot_person_id=self._me.get("id", ""),
+        )
+        try:
+            return await builder.build(
+                room_id=room_id,
+                room_type=msg.get("room_type") or "",
+                room_title=self._room_title,
+                trigger_message_id=msg_id,
+                trigger_author=msg.get("person_display_name") or msg.get("person_email") or "",
+                thread_parent_id=msg.get("parent_id") or "",
+                max_history=int(getattr(style, "max_history", 10) or 10),
+                max_chars_per_message=int(getattr(style, "max_chars_per_message", 500) or 500),
+            )
+        except Exception as e:
+            logger.warning("[webex-bot] channel-context build fehlgeschlagen: %s", e)
+            return None
 
     async def _build_attachments_async(self, msg: Dict[str, Any]) -> Optional[List[dict]]:
         """Laedt Bild-Attachments der User-Msg herunter und baut multimodal-Attachments.

@@ -1514,6 +1514,19 @@ class TaskAgentConfig(BaseModel):
     # Hinweis: Web-Suche wird über search.enabled gesteuert (in config.yaml)
 
 
+class WebexBotResponseStyle(BaseModel):
+    """Antwort-Stil und Chat-Verlauf-Kontext fuer den Webex-Bot.
+
+    Greift, wenn der Orchestrator mit channel_hint="webex" aufgerufen wird —
+    die Web-UI bleibt unveraendert.
+    """
+    target_chars: int = 600              # Ziellaenge der Antwort (weicher Hinweis)
+    allow_tables: bool = False           # Markdown-Tabellen zulassen
+    include_history: bool = True         # Kill-Switch fuer Verlauf-Prefetch
+    max_history: int = 10                # Anzahl vorheriger Messages im Kontext
+    max_chars_per_message: int = 500     # Truncation pro Message im Kontext-Block
+
+
 class WebexBotConfig(BaseModel):
     """AI-Assist Chat-Bot Konfiguration (dedizierter Webex-Room als Remote-Terminal)."""
     enabled: bool = False
@@ -1536,6 +1549,7 @@ class WebexBotConfig(BaseModel):
     # Schutzlimits
     daily_token_cap: int = 0           # 0 = off (Enforcement kommt in Phase 4)
     max_reply_chars: int = 7000        # Webex Message-Limit ~7440, safety margin
+    response_style: WebexBotResponseStyle = Field(default_factory=WebexBotResponseStyle)
 
 
 class WebexConfig(BaseModel):
