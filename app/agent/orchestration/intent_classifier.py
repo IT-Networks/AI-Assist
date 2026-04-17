@@ -103,12 +103,24 @@ _DIRECT_PATTERNS: List[re.Pattern] = [
         r"what\s+do\s+you\s+(think|recommend)|can\s+you\s+explain)",
         re.IGNORECASE,
     ),
+    # Perception questions — asking what the LLM can see in its current context
+    re.compile(
+        r"^(siehst\s+du|kannst\s+du\s+sehen|hast\s+du\s+(das|den|die|einen|zugriff|schon)|"
+        r"can\s+you\s+see|do\s+you\s+see)",
+        re.IGNORECASE,
+    ),
     # Greetings, smalltalk, and casual questions
     re.compile(
         r"^(hallo|hi|hey|moin|guten\s+(morgen|tag|abend)|"
         r"danke|vielen\s+dank|super|perfekt|ok|alles\s+klar|"
         r"hello|thanks|thank\s+you|great|perfect|okay)"
         r"(\s*[!.,?]|\s+wie\s+geht).*$",
+        re.IGNORECASE,
+    ),
+    # Yes/No confirmations and short affirmations
+    re.compile(
+        r"^(ja\s*[,.]?|nein\s*[,.]?|genau|stimmt|richtig|korrekt|"
+        r"yes|no|yep|nope|correct|right|exactly)\s*[!.,?]?\s*$",
         re.IGNORECASE,
     ),
 ]
@@ -120,6 +132,13 @@ _LOOKUP_PATTERNS: List[re.Pattern] = [
         r"(was\s+macht|erkl[aä]r[e]?\s+(mir\s+)?(die|den|das|diese|diesen)?|"
         r"zeig\s+(mir\s+)?|beschreib[e]?\s+|wie\s+funktioniert|"
         r"what\s+does|explain|show\s+me|describe|how\s+does)\s+",
+        re.IGNORECASE,
+    ),
+    # Knowledge questions — asking if something exists or for info (may need read-only tools)
+    re.compile(
+        r"^(gibt\s+es|wei[sß]t\s+du|weisst\s+du|kennst\s+du|"
+        r"sag\s+mir|ist\s+(da|dort|hier)|"
+        r"is\s+there|do\s+you\s+(know|have)|tell\s+me)",
         re.IGNORECASE,
     ),
     # Questions with "?" that reference code artifacts

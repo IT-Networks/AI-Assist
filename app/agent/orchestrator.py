@@ -1353,6 +1353,7 @@ class AgentOrchestrator:
             and intent_result.pipeline.tool_restriction in ("none", "read_only")
         )
         has_used_tools = False
+        _malformed_retries = 0  # Limit für malformed tool-call retries (max 3)
         # Token-Tracking für diese Anfrage zurücksetzen
         state.current_usage = TokenUsage()
         request_prompt_tokens = 0
@@ -1546,13 +1547,15 @@ class AgentOrchestrator:
                         # eine Korrektur-Instruktion in die Message-History einfügen und
                         # die nächste Iteration starten, damit das Modell das korrekte
                         # Format verwendet.
+                        # LIMIT: Max 3 Retries, danach Content als Text durchlassen
                         malformed = _detect_malformed_tool_attempt(content)
-                        if malformed:
+                        if malformed and _malformed_retries < 3:
+                            _malformed_retries += 1
                             snippet, hints = malformed
                             logger.warning(
-                                "[agent] MALFORMED TOOL CALL detected (hints=%s). "
+                                "[agent] MALFORMED TOOL CALL detected (retry %d/3, hints=%s). "
                                 "Suppressing text output and retrying with format hint. "
-                                "Snippet=%r", hints, snippet
+                                "Snippet=%r", _malformed_retries, hints, snippet
                             )
                             messages.append({
                                 "role": "assistant",
@@ -1573,6 +1576,14 @@ class AgentOrchestrator:
                             })
                             content = ""
                             continue
+                        elif malformed:
+                            # Max retries erreicht - Content als normale Antwort durchlassen
+                            logger.warning(
+                                "[agent] Malformed tool call retries exhausted (%d). "
+                                "Passing content through as text response.",
+                                _malformed_retries
+                            )
+                            # tool_calls bleibt leer → fällt in "if not tool_calls" → finale Antwort
 
                 # Tool-Calls verarbeiten
                 if not tool_calls:
@@ -1957,6 +1968,14 @@ class AgentOrchestrator:
 
                         state.tool_calls_history.append(tc)
 
+                    # Force-Break: Bei wiederholter Stuck-Erkennung Loop beenden
+                    _force_stop = progress_tracker._state.stuck_counter >= 2
+                    if _force_stop:
+                        logger.warning(
+                            f"[agent] Force-stopping parallel path after {iteration + 1} iterations "
+                            f"({progress_tracker._state.stuck_counter} stuck detections)"
+                        )
+
                     # Messages für nächste Iteration aufbauen (natives Format)
                     if native_tools:
                         # WICHTIG: Tool-Call-IDs müssen zwischen assistant.tool_calls und
@@ -1990,6 +2009,19 @@ class AgentOrchestrator:
                                 "content": "Tool-Ergebnisse:\n\n" + "\n\n---\n\n".join(results_parts)
                             })
 
+                    # Force-Stop: Keine weiteren Tool-Calls mehr, finale Antwort erzwingen
+                    if _force_stop:
+                        messages.append({
+                            "role": "system",
+                            "content": (
+                                "## STOP - Loop beenden\n\n"
+                                "Du hast dich mehrfach im Kreis gedreht. "
+                                "Antworte dem Nutzer JETZT mit dem was du weißt. "
+                                "Rufe KEINE weiteren Tools auf."
+                            )
+                        })
+                        tool_schemas = []
+                        # Nächste Iteration wird ohne Tools laufen → finale Antwort
                     # Skip zum nächsten Iteration-Loop (keine sequentielle Verarbeitung nötig)
                     continue
 
@@ -2302,6 +2334,13 @@ class AgentOrchestrator:
                             f"[agent] Stuck detected: {stuck_result.reason.value} - "
                             f"{stuck_result.details}"
                         )
+                        # Force-Break: Bei wiederholter Stuck-Erkennung restliche Tools überspringen
+                        if progress_tracker._state.stuck_counter >= 2:
+                            logger.warning(
+                                f"[agent] Force-breaking sequential loop: "
+                                f"{progress_tracker._state.stuck_counter} stuck detections"
+                            )
+                            break
                     # ────────────────────────────────────────────────────────────
 
                     # ── Failure-Tracking: Erkennt wiederholte Fehler beim gleichen Tool ──
@@ -2842,6 +2881,25 @@ class AgentOrchestrator:
                             "role": "user",
                             "content": "Tool-Ergebnisse:\n\n" + "\n\n---\n\n".join(results_parts)
                         })
+
+                # Force-Break: Bei wiederholter Stuck-Erkennung den Agent-Loop beenden
+                if progress_tracker._state.stuck_counter >= 2:
+                    logger.warning(
+                        f"[agent] Force-stopping agent loop after {iteration + 1} iterations "
+                        f"({progress_tracker._state.stuck_counter} stuck detections)"
+                    )
+                    # Zusammenfassung erzwingen: Nächste Iteration ohne Tools
+                    messages.append({
+                        "role": "system",
+                        "content": (
+                            "## STOP - Loop beenden\n\n"
+                            "Du hast dich mehrfach im Kreis gedreht. "
+                            "Antworte dem Nutzer JETZT mit dem was du weißt. "
+                            "Rufe KEINE weiteren Tools auf."
+                        )
+                    })
+                    tool_schemas = []  # Keine Tools mehr anbieten
+                    continue  # Nächste Iteration wird ohne Tools laufen → finale Antwort
 
                 # Proaktive Cross-Source-Anreicherung:
                 # Wenn search_code eine Java-Klasse findet, automatisch search_handbook aufrufen

@@ -257,6 +257,16 @@ async def lifespan(app: FastAPI):
         except Exception as e:
             print(f"[startup] Webex-Automation fehlgeschlagen: {e}")
 
+    # AI-Assist Chat-Bot starten (wenn aktiviert)
+    if settings.webex.enabled and settings.webex.bot.enabled:
+        try:
+            from app.services.webex_bot_service import get_assist_room_handler
+            bot_handler = get_assist_room_handler()
+            await bot_handler.start()
+            print(f"[startup] Webex-Bot gestartet (Room: {bot_handler._room_title!r})")
+        except Exception as e:
+            print(f"[startup] Webex-Bot fehlgeschlagen: {e}")
+
     # External Access Logging initialisieren
     try:
         if settings.access_logging.enabled:
@@ -361,6 +371,16 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         print(f"[shutdown] Email-Client-Cleanup fehlgeschlagen: {e}")
 
+    # AI-Assist Chat-Bot stoppen (vor webex-automation und vor client close)
+    try:
+        from app.services.webex_bot_service import get_assist_room_handler
+        bot_handler = get_assist_room_handler()
+        if bot_handler.is_running:
+            await bot_handler.stop()
+            print("[shutdown] Webex-Bot gestoppt")
+    except Exception as e:
+        print(f"[shutdown] Webex-Bot-Cleanup fehlgeschlagen: {e}")
+
     # Webex-Automation stoppen
     try:
         from app.services.webex_automation import get_webex_automation
@@ -393,7 +413,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="AI Code Assistant",
     description="Lokaler AI-Assistent für Java/Python-Entwicklung mit Handbuch-, WLP-Log-, PDF- und Confluence-Unterstützung",
-    version="2.37.36",
+    version="2.38.2",
     lifespan=lifespan,
 )
 
