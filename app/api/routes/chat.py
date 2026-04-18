@@ -29,19 +29,90 @@ async def _collect_attachments(sources, session_id: str, user_message: str = "")
     if not sources:
         return attachments
 
-    # Python files – manuell gewählt oder per Auto-Index-Suche
-    python_paths = list(sources.python_files)
-    if sources.auto_python_search and not python_paths:
+    # PHASE 2.3: Parallelize independent search operations
+    # Searches can run concurrently; file reading stays sequential (order matters)
+
+    async def search_python_index():
+        """Search Python index."""
         try:
             from app.services.python_indexer import get_python_indexer
             from app.core.config import settings as _s
             py_indexer = get_python_indexer()
             if py_indexer.is_built():
                 py_results = py_indexer.search(user_message, top_k=_s.index.max_search_results)
-                python_paths = [r["file_path"] for r in py_results]
+                return [r["file_path"] for r in py_results]
         except Exception as e:
             logger.debug(f"Python-Index-Suche fehlgeschlagen: {e}")
+        return []
 
+    async def search_java_index():
+        """Search Java index."""
+        try:
+            from app.services.java_indexer import get_java_indexer
+            from app.core.config import settings as _s
+            indexer = get_java_indexer()
+            if indexer.is_built():
+                results = indexer.search(user_message, top_k=_s.index.max_search_results)
+                return [r["file_path"] for r in results]
+        except Exception as e:
+            logger.debug(f"Java-Index-Suche fehlgeschlagen: {e}")
+        return []
+
+    async def search_pdf_index():
+        """Search PDF index."""
+        pdf_results = {}
+        try:
+            _, _pdf_store = _get_stores()
+            from app.services.pdf_indexer import get_pdf_indexer
+            from app.core.config import settings as _s
+            pdf_idx = get_pdf_indexer()
+            for pdf_id in sources.pdf_ids[:3]:
+                if pdf_id in _pdf_store and pdf_idx.has_pdf(pdf_id):
+                    try:
+                        content = pdf_idx.search(pdf_id, user_message, top_k=_s.index.max_search_results)
+                        pdf_results[pdf_id] = content if content else _pdf_store[pdf_id]["text"]
+                    except Exception as e:
+                        logger.debug(f"PDF-Index-Suche fehlgeschlagen ({pdf_id}): {e}")
+                        pdf_results[pdf_id] = None
+        except Exception as e:
+            logger.debug(f"PDF-Indexer Initialisierung fehlgeschlagen: {e}")
+        return pdf_results
+
+    async def search_handbook_index():
+        """Search Handbook index."""
+        try:
+            from app.services.handbook_indexer import get_handbook_indexer
+            from app.core.config import settings as _hs
+            if _hs.handbook.enabled:
+                hb_indexer = get_handbook_indexer()
+                if hb_indexer.is_built():
+                    handbook_service = getattr(sources, 'handbook_service_filter', None)
+                    hb_results = hb_indexer.search(
+                        query=user_message,
+                        service_filter=handbook_service,
+                        top_k=_hs.index.max_search_results
+                    )
+                    return [r["file_path"] for r in hb_results]
+        except Exception as e:
+            logger.debug(f"Handbuch-Index-Suche fehlgeschlagen: {e}")
+        return []
+
+    # Run all searches in parallel
+    search_results = await asyncio.gather(
+        search_python_index() if sources.auto_python_search and not sources.python_files else asyncio.sleep(0),
+        search_java_index() if sources.auto_java_search and not sources.java_files else asyncio.sleep(0),
+        search_pdf_index() if sources.pdf_ids else {},
+        search_handbook_index() if getattr(sources, 'auto_handbook_search', False) and not getattr(sources, 'handbook_pages', []) else [],
+        return_exceptions=False
+    )
+
+    # Extract results (filter out sleep() returns)
+    python_paths = list(sources.python_files) or (search_results[0] if isinstance(search_results[0], list) else [])
+    java_paths = list(sources.java_files) or (search_results[1] if isinstance(search_results[1], list) else [])
+    pdf_results = search_results[2] if isinstance(search_results[2], dict) else {}
+    handbook_paths = getattr(sources, 'handbook_pages', []) or (search_results[3] if isinstance(search_results[3], list) else [])
+
+    # Now read files sequentially (order and context matter)
     if python_paths:
         try:
             from app.services.python_reader import PythonReader
@@ -65,19 +136,6 @@ async def _collect_attachments(sources, session_id: str, user_message: str = "")
             logger.debug(f"Python-Reader Initialisierung fehlgeschlagen: {e}")
 
     # Java files – manuell gewählt oder per Auto-Index-Suche
-    java_paths = list(sources.java_files)
-    if sources.auto_java_search and not java_paths:
-        # FTS-Index nach zur Frage passenden Dateien durchsuchen
-        try:
-            from app.services.java_indexer import get_java_indexer
-            from app.core.config import settings as _s
-            indexer = get_java_indexer()
-            if indexer.is_built():
-                results = indexer.search(user_message, top_k=_s.index.max_search_results)
-                java_paths = [r["file_path"] for r in results]
-        except Exception as e:
-            logger.debug(f"Java-Index-Suche fehlgeschlagen: {e}")
-
     if java_paths:
         try:
             from app.services.java_reader import JavaReader
@@ -129,36 +187,20 @@ async def _collect_attachments(sources, session_id: str, user_message: str = "")
         except Exception as e:
             logger.debug(f"Log-Verarbeitung fehlgeschlagen: {e}")
 
-    # PDFs – relevante Seiten per Index, sonst Volltext
-    for pdf_id in sources.pdf_ids[:3]:
+    # PHASE 2.3: Use pre-searched PDF results
+    if pdf_results:
         try:
             _, _pdf_store = _get_stores()
-            if pdf_id not in _pdf_store:
-                continue
-            pdf_data = _pdf_store[pdf_id]
-            content = ""
-            # Versuche Index-basierte Suche (nur relevante Seiten)
-            if user_message:
-                try:
-                    from app.services.pdf_indexer import get_pdf_indexer
-                    from app.core.config import settings as _s
-                    pdf_idx = get_pdf_indexer()
-                    if pdf_idx.has_pdf(pdf_id):
-                        content = pdf_idx.search(
-                            pdf_id, user_message, top_k=_s.index.max_search_results
-                        )
-                except Exception as e:
-                    logger.debug(f"PDF-Index-Suche fehlgeschlagen ({pdf_id}): {e}")
-            # Fallback: gesamter Text (kleine PDFs oder kein Index)
-            if not content:
-                content = pdf_data["text"]
-            attachments.append(ContextAttachment(
-                label=f"PDF: {pdf_data['filename']}",
-                content=content,
-                priority=4,
-            ))
+            for pdf_id, content in pdf_results.items():
+                if pdf_id in _pdf_store and content:
+                    pdf_data = _pdf_store[pdf_id]
+                    attachments.append(ContextAttachment(
+                        label=f"PDF: {pdf_data['filename']}",
+                        content=content,
+                        priority=4,
+                    ))
         except Exception as e:
-            logger.debug(f"PDF-Verarbeitung fehlgeschlagen ({pdf_id}): {e}")
+            logger.debug(f"PDF-Verarbeitung fehlgeschlagen: {e}")
 
     # Confluence pages - parallel mit asyncio.gather (~3x schneller)
     if sources.confluence_page_ids:
@@ -189,27 +231,7 @@ async def _collect_attachments(sources, session_id: str, user_message: str = "")
         except Exception as e:
             logger.debug(f"Confluence-Verarbeitung fehlgeschlagen: {e}")
 
-    # Handbuch-Seiten – manuell gewählt oder per Auto-Index-Suche
-    handbook_paths = list(sources.handbook_pages) if hasattr(sources, 'handbook_pages') else []
-    auto_handbook = getattr(sources, 'auto_handbook_search', False)
-    handbook_service = getattr(sources, 'handbook_service_filter', None)
-
-    if auto_handbook and not handbook_paths:
-        try:
-            from app.services.handbook_indexer import get_handbook_indexer
-            from app.core.config import settings as _hs
-            if _hs.handbook.enabled:
-                hb_indexer = get_handbook_indexer()
-                if hb_indexer.is_built():
-                    hb_results = hb_indexer.search(
-                        query=user_message,
-                        service_filter=handbook_service,
-                        top_k=_hs.index.max_search_results
-                    )
-                    handbook_paths = [r["file_path"] for r in hb_results]
-        except Exception as e:
-            logger.debug(f"Handbuch-Index-Suche fehlgeschlagen: {e}")
-
+    # PHASE 2.3: Use pre-searched Handbook results
     if handbook_paths:
         try:
             from app.services.handbook_indexer import get_handbook_indexer
