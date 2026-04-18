@@ -870,13 +870,23 @@ class AssistRoomHandler:
         # ── Sprint 1/3: StatusEditor oder LaneDeliverer ──────────────────────
         editor: Any = None  # StatusEditor ODER LaneDeliverer (duck-typed)
         if settings.webex.bot.edit_in_place:
+            # Callback: bei jeder neuen message_id (initial + nach Rotation +
+            # bei LaneDeliverer auch Answer-Lane) in SentCache tracken.
+            async def _on_editor_new_msg(mid: str) -> None:
+                await self._track_sent({"id": mid})
+
             if settings.webex.bot.lane_delivery:
-                editor = LaneDeliverer(client, room_id, parent_id)
+                editor = LaneDeliverer(
+                    client, room_id, parent_id,
+                    on_new_message=_on_editor_new_msg,
+                )
             else:
-                editor = StatusEditor(client, room_id, parent_id)
-            initial_id = await editor.start("⏳ _Agent arbeitet …_")
-            if initial_id:
-                await self._track_sent({"id": initial_id})
+                editor = StatusEditor(
+                    client, room_id, parent_id,
+                    on_new_message=_on_editor_new_msg,
+                )
+            await editor.start("⏳ _Agent arbeitet …_")
+            # Tracking erfolgt bereits via on_new_message-Callback
 
         # ── Sprint 2: Token-Streaming Throttle ───────────────────────────────
         streaming_cfg = settings.webex.bot.streaming

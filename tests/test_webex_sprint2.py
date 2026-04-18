@@ -95,9 +95,10 @@ class TestEditThrottle:
         assert not t.should_flush(200)
 
     def test_second_flush_needs_both_conditions(self):
+        # Groessere Zeit-Marge fuer stabile Tests unter Jitter
         t = EditThrottle(min_interval_seconds=0.05, min_delta_chars=20)
         assert t.should_flush(100)
-        time.sleep(0.06)
+        time.sleep(0.15)  # klar ueber 0.05
         assert not t.should_flush(110)  # nicht genug Delta
         assert t.should_flush(130)       # beides erfuellt
 
