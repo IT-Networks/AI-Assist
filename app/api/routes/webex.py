@@ -392,6 +392,41 @@ def AssistRoomHandler_verify(secret: str, body: bytes, signature: str) -> bool:
 _background_webhook_tasks: "set[asyncio.Task]" = set()
 
 
+@router.post("/webhooks/attachment-actions")
+async def webex_attachment_actions_receiver(request: Request) -> Response:
+    """Empfaengt Webex ``attachmentActions.created`` Webhook-Events (Sprint 2).
+
+    Werden ausgeloest wenn ein User auf einen Adaptive-Card-Button klickt.
+    Wir laden die Action-Details nach (inputs) und leiten sie an den
+    AssistRoomHandler weiter, der die ApprovalBus aufloest.
+    """
+    from app.core.config import settings
+    from app.services.webex_bot_service import get_assist_room_handler
+
+    raw_body = await request.body()
+    signature = request.headers.get("X-Spark-Signature", "") or request.headers.get("x-spark-signature", "")
+    secret = settings.webex.bot.webhook_secret or ""
+
+    if secret:
+        if not AssistRoomHandler_verify(secret, raw_body, signature):
+            logger.warning("[webex-bot] attachment-actions: signature invalid (len=%d)", len(raw_body))
+            raise HTTPException(status_code=403, detail="Invalid signature")
+    else:
+        logger.warning("[webex-bot] attachment-actions: webhook_secret not set — skipping verify")
+
+    try:
+        payload = json.loads(raw_body.decode("utf-8") or "{}")
+    except Exception as e:
+        logger.warning("[webex-bot] attachment-actions: invalid JSON: %s", e)
+        raise HTTPException(status_code=400, detail="Invalid JSON")
+
+    handler = get_assist_room_handler()
+    task = asyncio.create_task(handler.on_attachment_action_event(payload))
+    _background_webhook_tasks.add(task)
+    task.add_done_callback(_background_webhook_tasks.discard)
+    return Response(status_code=200)
+
+
 @router.post("/bot/register-webhook")
 async def bot_register_webhook():
     """One-shot: Registriert / aktualisiert den Webex-Webhook fuer den Bot-Room.

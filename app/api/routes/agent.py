@@ -72,6 +72,15 @@ class AgentChatRequest(BaseModel):
     context: Optional[ContextSelection] = Field(None, description="Manuell ausgewählte Kontext-Elemente")
     attachments: Optional[List[ChatAttachment]] = Field(None, max_length=5, description="Bild-/Audio-Anhänge (max 5)")
     tts: Optional[bool] = Field(None, description="TTS-Audio für Antwort generieren")
+    # Phase 1: Task Continuation (opt-in agentic loop)
+    continuation: Optional[Dict[str, Any]] = Field(
+        None,
+        description=(
+            "Opt-in continuation config: {enabled: bool, max_iterations: int, "
+            "max_seconds: float, iteration_delay_ms: int}. When enabled, agent "
+            "runs in loop until Promise Tag detected or limits hit."
+        ),
+    )
 
 
 class AgentModeRequest(BaseModel):
@@ -160,17 +169,46 @@ async def agent_chat(request: AgentChatRequest, http_request: Request):
         )
         requested_model = None  # None -> process() nimmt default_model
 
+    # Phase 1: Optional Task Continuation Loop
+    # If request.continuation={enabled: true}, use ContinuationController to
+    # run orchestrator in iteration-loop until Promise Tag or limits hit.
+    continuation_config = None
+    if request.continuation:
+        try:
+            from app.agent.continuation import ContinuationConfig as _ContConfig
+            continuation_config = _ContConfig(**request.continuation)
+            if not continuation_config.enabled:
+                continuation_config = None  # Explicitly disabled
+        except Exception as e:
+            _logger.warning(f"[agent_chat] Invalid continuation config ignored: {e}")
+            continuation_config = None
+
     async def event_generator():
         """Generiert SSE-Events aus dem Agent-Loop."""
         try:
-            gen = orchestrator.process(
-                session_id=session_id,
-                user_message=request.message,
-                model=requested_model,
-                context_selection=request.context,
-                attachments=[a.dict() for a in request.attachments] if request.attachments else None,
-                tts=request.tts,
-            )
+            if continuation_config is not None:
+                # Continuation mode: wrap orchestrator in iteration loop
+                from app.agent.continuation import ContinuationController
+                controller = ContinuationController(orchestrator=orchestrator)
+                gen = controller.execute_with_continuation(
+                    session_id=session_id,
+                    user_message=request.message,
+                    config=continuation_config,
+                    model=requested_model,
+                    context_selection=request.context,
+                    attachments=[a.dict() for a in request.attachments] if request.attachments else None,
+                    tts=request.tts,
+                )
+            else:
+                # Standard single-pass mode (existing behavior)
+                gen = orchestrator.process(
+                    session_id=session_id,
+                    user_message=request.message,
+                    model=requested_model,
+                    context_selection=request.context,
+                    attachments=[a.dict() for a in request.attachments] if request.attachments else None,
+                    tts=request.tts,
+                )
 
             async for event in gen:
                 # Client-Disconnect erkennen und Anfrage abbrechen

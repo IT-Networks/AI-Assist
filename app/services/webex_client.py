@@ -708,17 +708,24 @@ class WebexClient:
         parent_id: str = "",
         to_person_email: str = "",
         to_person_id: str = "",
+        attachments: Optional[List[Dict[str, Any]]] = None,
     ) -> dict:
-        """POST /messages - Nachricht senden (Text oder Markdown).
+        """POST /messages - Nachricht senden (Text, Markdown oder Adaptive Card).
 
         Genau eines der Ziele muss gesetzt sein: room_id, to_person_email, to_person_id.
-        Entweder 'text' oder 'markdown' (oder beides) muss gesetzt sein.
+        Mindestens 'text', 'markdown' ODER 'attachments' muss gesetzt sein.
         Bei 'parent_id' wird die Nachricht als Thread-Reply gepostet.
+
+        ``attachments`` erlaubt Adaptive Cards:
+            [{"contentType": "application/vnd.microsoft.card.adaptive",
+              "content": {...AdaptiveCard JSON...}}]
+        Bei Card-Attachments sollte zusaetzlich ``markdown`` als Fallback-Text
+        gesetzt sein (wird in Clients angezeigt die keine Cards rendern).
         """
         if not (room_id or to_person_email or to_person_id):
             raise ValueError("Ziel fehlt: room_id, to_person_email oder to_person_id angeben.")
-        if not text and not markdown:
-            raise ValueError("'text' oder 'markdown' muss gesetzt sein.")
+        if not text and not markdown and not attachments:
+            raise ValueError("'text', 'markdown' oder 'attachments' muss gesetzt sein.")
 
         payload: Dict[str, Any] = {}
         if room_id:
@@ -733,8 +740,87 @@ class WebexClient:
             payload["markdown"] = markdown
         if parent_id:
             payload["parentId"] = parent_id
+        if attachments:
+            payload["attachments"] = attachments
 
         return await self._request("POST", "/messages", json=payload)
+
+    async def get_attachment_action(self, action_id: str) -> dict:
+        """GET /attachment/actions/{id} - Details einer Card-Button-Aktion.
+
+        Webex sendet im ``attachmentActions.created``-Webhook nur die ID.
+        Der volle Payload (inputs) wird hier nachgeladen:
+
+            {"id": "...", "personId": "...", "roomId": "...",
+             "messageId": "...",  # zugehoerige Card-Message
+             "inputs": {"action": "approve", "rid": "abc123"}}
+        """
+        if not action_id:
+            raise ValueError("action_id ist erforderlich.")
+        data = await self._request("GET", f"/attachment/actions/{action_id}")
+        return {
+            "id": data.get("id", ""),
+            "type": data.get("type", ""),
+            "person_id": data.get("personId", ""),
+            "person_email": data.get("personEmail", ""),
+            "room_id": data.get("roomId", ""),
+            "message_id": data.get("messageId", ""),
+            "inputs": data.get("inputs", {}) or {},
+            "created": data.get("created", ""),
+        }
+
+    async def edit_message(
+        self,
+        message_id: str,
+        *,
+        room_id: str,
+        markdown: str = "",
+        text: str = "",
+    ) -> dict:
+        """PUT /messages/{id} - Bestehende Nachricht aktualisieren.
+
+        Webex unterstuetzt Message-Edit seit 2023. ``roomId`` ist im Body
+        pflicht; der Aufrufer uebergibt die gleiche Room-ID, in der die
+        Message urspruenglich gepostet wurde.
+
+        Mindestens eines von ``markdown`` oder ``text`` muss gesetzt sein.
+        Werden beide gesetzt, gewinnt ``markdown`` (Webex-Standard).
+
+        Raises:
+            ValueError: Wenn weder markdown noch text gesetzt ist.
+            httpx.HTTPStatusError: Bei HTTP-Fehler (z.B. 404 wenn Msg
+                bereits geloescht wurde, 429 bei Rate-Limit).
+        """
+        if not message_id:
+            raise ValueError("message_id ist erforderlich.")
+        if not room_id:
+            raise ValueError("room_id ist erforderlich (Webex verlangt roomId im Edit-Body).")
+        if not markdown and not text:
+            raise ValueError("'markdown' oder 'text' muss gesetzt sein.")
+
+        payload: Dict[str, Any] = {"roomId": room_id}
+        if markdown:
+            payload["markdown"] = markdown
+        if text:
+            payload["text"] = text
+
+        return await self._request("PUT", f"/messages/{message_id}", json=payload)
+
+    async def delete_message(self, message_id: str) -> None:
+        """DELETE /messages/{id} - Nachricht loeschen.
+
+        Funktioniert nur fuer Nachrichten des eigenen Accounts/Bots.
+        Silent-Ok bei 404 (bereits geloescht).
+        """
+        if not message_id:
+            raise ValueError("message_id ist erforderlich.")
+        try:
+            await self._request("DELETE", f"/messages/{message_id}")
+        except httpx.HTTPStatusError as e:
+            if e.response.status_code == 404:
+                logger.debug("delete_message: %s bereits geloescht (404)", message_id[:20])
+                return
+            raise
 
     async def upload_file(
         self,

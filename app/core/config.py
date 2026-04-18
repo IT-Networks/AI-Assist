@@ -321,6 +321,38 @@ class ToolsConfig(BaseModel):
     pytest: str = "/root/.local/bin/pytest"
 
 
+class ContinuationSettings(BaseModel):
+    """
+    Task Continuation Settings (Phase 1: MVP).
+
+    Controls opt-in agentic loop that wraps AgentOrchestrator to run multiple
+    iterations until Promise Tag detected or safety valves trigger.
+
+    Phase 1: Tier 1 (Promise Tag) + Tier 3 (Timeout/MaxIter)
+    Phase 3: Adds Tier 2 (Criteria Matching) + TaskClassifier
+    Phase 4: Adds DriftMonitor
+    """
+
+    enabled_by_default: bool = False  # If True, all /api/agent/chat use continuation unless opted out
+    max_iterations: int = 10  # Hard iteration limit per request
+    max_seconds: float = 120.0  # Hard time limit per request
+    default_iteration_delay_ms: int = 0  # Optional delay between iterations
+
+
+class ParallelExecutionSettings(BaseModel):
+    """
+    Parallel Tool Execution Settings (Phase 2).
+
+    Controls smart batching of tool calls: consecutive parallelizable tools
+    run concurrently, non-parallelizable tools break the batch. Reduces
+    total execution time when LLM requests mixed read/write operations.
+    """
+
+    enabled: bool = True  # Enable smart batching (safe default — existing behavior preserved if plan has no parallel savings)
+    min_parallel_group_size: int = 2  # Only batch if group has >= N parallelizable tools
+    log_plans: bool = False  # Emit debug log of plans (helpful for tuning)
+
+
 class IndexConfig(BaseModel):
     directory: str = "./index"
     auto_build_on_start: bool = False
@@ -1527,6 +1559,41 @@ class WebexBotResponseStyle(BaseModel):
     max_chars_per_message: int = 500     # Truncation pro Message im Kontext-Block
 
 
+class WebexBotStreamingConfig(BaseModel):
+    """Sprint 2 — Token-Streaming via Message-Edit."""
+    enabled: bool = False                 # Master-Flag
+    edit_interval_seconds: float = 1.5    # min Abstand zwischen Edits
+    edit_min_delta_chars: int = 50        # min Zuwachs fuer Flush
+    max_edit_chars: int = 6000            # unter Webex ~7440-Limit
+
+
+class WebexBotApprovalsConfig(BaseModel):
+    """Sprint 2 — Approval-Workflow via Adaptive Cards."""
+    enabled: bool = False                 # Master-Flag
+    timeout_seconds: int = 300            # max Wartezeit auf Entscheidung
+    approvers: List[str] = Field(default_factory=list)  # leer = sender darf selbst approven
+
+
+class WebexBotAuditConfig(BaseModel):
+    """Sprint 2 — Audit-Trail in SQLite."""
+    enabled: bool = True
+    retention_days: int = 90
+
+
+class WebexRoomOverride(BaseModel):
+    """Sprint 3 — Per-Room Policy-Override.
+
+    Leere Strings/Listen bedeuten "vom Account-Default uebernehmen".
+    """
+    room_id: str
+    allow_from: List[str] = Field(default_factory=list)
+    require_mention: bool = False
+    default_model: str = ""
+    daily_token_cap: int = 0
+    max_history: int = 0  # 0 = Account-Default benutzen
+    error_policy: str = ""  # leer = Account-Default
+
+
 class WebexBotConfig(BaseModel):
     """AI-Assist Chat-Bot Konfiguration (dedizierter Webex-Room als Remote-Terminal)."""
     enabled: bool = False
@@ -1550,6 +1617,32 @@ class WebexBotConfig(BaseModel):
     daily_token_cap: int = 0           # 0 = off (Enforcement kommt in Phase 4)
     max_reply_chars: int = 7000        # Webex Message-Limit ~7440, safety margin
     response_style: WebexBotResponseStyle = Field(default_factory=WebexBotResponseStyle)
+    # ── Sprint 1: Edit-in-place + Persistenz + Safety-Poller ─────────────
+    # Master-Flag fuer die neue Pipeline. False = komplett bisheriges Verhalten.
+    edit_in_place: bool = False
+    # Error-Policy fuer Fehler-Posts (silent | once | always).
+    error_policy: str = "once"
+    error_cooldown_seconds: int = 300
+    # Safety-Poller: laeuft auch wenn use_webhooks=True (als Netz fuer
+    # Webhook-Ausfaelle). Idempotenz deduped Doppelungen.
+    enable_safety_poller: bool = True
+    safety_poll_seconds: int = 60
+    # ── Sprint 2: Streaming + Approvals + Audit ──────────────────────────
+    streaming: WebexBotStreamingConfig = Field(default_factory=WebexBotStreamingConfig)
+    approvals: WebexBotApprovalsConfig = Field(default_factory=WebexBotApprovalsConfig)
+    audit: WebexBotAuditConfig = Field(default_factory=WebexBotAuditConfig)
+    # Webhook fuer Adaptive-Card-Actions (eigener Endpoint/Filter).
+    actions_webhook_name: str = "ai-assist-bot-actions"
+    # Auto-Ableitung aus webhook_public_url wenn leer.
+    actions_webhook_public_url: str = ""
+    # ── Sprint 3: Multi-Conversation + Lane-Delivery ─────────────────────
+    # Multi-Conversation aktivieren: Bot hoert auf mehrere Rooms (aus
+    # ``rooms``-Liste) statt nur auf ``room_id``/``room_name``.
+    multi_conversation: bool = False
+    # Lane-Delivery: trennt Reasoning-Preview und Answer in zwei Messages.
+    lane_delivery: bool = False
+    # Per-Room-Overrides (nur in Multi-Conv-Mode aktiv).
+    rooms: List[WebexRoomOverride] = Field(default_factory=list)
 
 
 class WebexConfig(BaseModel):
@@ -1669,6 +1762,8 @@ class Settings(BaseModel):
     webex: WebexConfig = Field(default_factory=WebexConfig)
     whisper: WhisperConfig = Field(default_factory=WhisperConfig)
     tts: TTSConfig = Field(default_factory=TTSConfig)
+    continuation: ContinuationSettings = Field(default_factory=ContinuationSettings)
+    parallel_execution: ParallelExecutionSettings = Field(default_factory=ParallelExecutionSettings)
 
     def apply_env_overrides(self) -> "Settings":
         if os.getenv("LLM_BASE_URL"):

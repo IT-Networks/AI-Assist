@@ -67,6 +67,11 @@ from app.agent.orchestration.tool_executor import (
     SEQUENTIAL_ONLY_TOOLS,
     truncate_result as _truncate_result,
 )
+# Phase 2: Smart batching planner for mixed parallel/sequential tool lists.
+from app.agent.parallel_execution import (
+    ExecutionPlan,
+    build_execution_plan,
+)
 from app.agent.orchestration.response_handler import (
     strip_tool_markers as _strip_tool_markers,
     extract_plan_block,
@@ -2042,10 +2047,27 @@ class AgentOrchestrator:
                         arguments=parsed_args
                     ))
 
-                # Prüfe ob parallele Ausführung möglich (alle Tools parallelisierbar)
+                # Phase 2: Use planner to analyze optimal batching.
+                # Backward-compatible: triggers fast path only when plan.all_parallel
+                # (equivalent to the previous all_parallelizable condition).
+                # Mixed plans fall through to existing sequential path (unchanged).
+                execution_plan: Optional[ExecutionPlan] = None
+                try:
+                    if settings.parallel_execution.enabled:
+                        execution_plan = build_execution_plan(parsed_tool_calls)
+                        if settings.parallel_execution.log_plans:
+                            logger.info(f"[agent] ExecutionPlan: {execution_plan.summary()}")
+                except Exception as _plan_err:  # Defensive: planner failure must not break execution
+                    logger.warning(f"[agent] Planner failed, falling back to legacy check: {_plan_err}")
+                    execution_plan = None
+
                 all_parallelizable = (
-                    len(parsed_tool_calls) >= 2 and
-                    all(_is_parallelizable_tool(tc.name) for tc in parsed_tool_calls)
+                    execution_plan.all_parallel and execution_plan.total_tools >= 2
+                    if execution_plan is not None
+                    else (
+                        len(parsed_tool_calls) >= 2
+                        and all(_is_parallelizable_tool(tc.name) for tc in parsed_tool_calls)
+                    )
                 )
 
                 if all_parallelizable:
