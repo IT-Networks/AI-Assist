@@ -28,129 +28,61 @@ from app.services.llm_client import (
     TIMEOUT_QUICK,
     TIMEOUT_TOOL,
 )
+from app.agent.orchestration.tool_parser import parse_text_tool_calls
+from app.agent.orchestration.error_recovery import get_recovery_hint
+from app.agent.orchestration.context_builder import build_available_tools_block
 
 logger = logging.getLogger(__name__)
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# Pre-compiled Regex Patterns (Performance: avoid re-compilation on each call)
+# Note: Text-based tool-call parsing now uses centralized parse_text_tool_calls()
+# from app.agent.orchestration.tool_parser (imported above)
 # ══════════════════════════════════════════════════════════════════════════════
-_RE_MISTRAL_COMPACT = re.compile(r'\[TOOL_CALLS\](\w+)(\{.*?\}|\[.*?\])', re.DOTALL)
-_RE_MISTRAL_STANDARD = re.compile(r'\[TOOL_CALLS\]\s*(\[.*?\])', re.DOTALL)
-_RE_XML_TOOL_CALL = re.compile(r'<(?:tool_call|functioncall)>(.*?)</(?:tool_call|functioncall)>', re.DOTALL | re.IGNORECASE)
-_RE_JSON_BLOCK = re.compile(r'```(?:json)?\s*(\{.*?\})\s*```', re.DOTALL)
-_RE_JSON_EXTRACT = re.compile(r"```(?:json)?\s*([\s\S]*?)```")
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# Text-basierter Tool-Call-Parser (Fallback für Modelle ohne natives Tool-Calling)
+# Modular System Prompt Templates
 # ══════════════════════════════════════════════════════════════════════════════
 
-def _parse_text_tool_calls(content: str, allowed_tools: List[str]) -> List[Dict]:
-    """
-    Parst Tool-Calls aus dem Text-Content von Modellen ohne natives Tool-Calling.
+WRITE_AGENT_INSTRUCTIONS = """AUFTRAG: Du SCHREIBST Dateien mit write_file. Du bist KEIN Such-Agent.
 
-    Unterstützte Formate:
-    1. Mistral Compact: [TOOL_CALLS]funcname{"arg": "val"}
-    2. Mistral Standard: [TOOL_CALLS] [{"name": "func", "arguments": {...}}]
-    3. XML: <tool_call>{"name": "func", "arguments": {...}}</tool_call>
-    4. JSON-Block: ```json\n{"name": "func", ...}\n```
-    """
-    if not content:
-        return []
+ARBEITSWEISE:
+1. Lies den Task-Kontext und identifiziere den absoluten Ziel-Pfad (NOT relativ!).
+2. GREENFIELD: rufe direkt write_file auf. Kein search_code/list_files vorher.
+3. MODIFIKATION: erst read_file (um vorhandene Struktur zu verstehen), DANN write_file mit fundiertem Content.
+4. write_file schreibt unmittelbar – der Plan wurde vom User vorab im Modal genehmigt.
+5. GENAU EINE write_file/edit_file pro Response! NIEMALS mehrere gleichzeitig – Contents werden sonst abgeschnitten!
+6. Nach jedem Tool-Result: In der NÄCHSTEN Response die nächste Op aufrufen (sequentiell).
+7. ERST wenn ALLE geplanten Dateien geschrieben sind: antworte mit JSON-Summary.
 
-    tool_names = set(allowed_tools) if allowed_tools else set()
-    parsed_calls = []
+PFLICHT-REGELN:
+- EIN write_file/edit_file pro Response, sonst werden Contents abgeschnitten!
+- Mindestens 1 erfolgreicher write_file Call (sonst ist deine Arbeit unvollständig).
+- Bei Fehler: Analysiere den Pfad im Task-Kontext und korrigiere, KEIN Aufgeben.
+- Content muss funktionsfaehiger Code sein (nicht pseudocode oder Platzhalter).
+- Content als VOLLSTAENDIGER String im 'content' Parameter (nicht in Chunks).
+- Tests nur AUSDENKEN, nicht AUSFÜHREN (dafuer gibt es Test-Agenten).
+- Vorsicht: "content zu lang" → splitte die Datei oder loesche Kommentare."""
 
-    # Format 1a: Mistral Compact Format (pre-compiled pattern)
-    mistral_compact_matches = _RE_MISTRAL_COMPACT.findall(content)
-    if mistral_compact_matches:
-        for name, args_str in mistral_compact_matches:
-            if not tool_names or name in tool_names:
-                try:
-                    args = json.loads(args_str)
-                    parsed_calls.append({
-                        "id": f"call_{uuid.uuid4().hex[:8]}",
-                        "type": "function",
-                        "function": {
-                            "name": name,
-                            "arguments": json.dumps(args) if isinstance(args, dict) else args_str
-                        }
-                    })
-                except json.JSONDecodeError:
-                    parsed_calls.append({
-                        "id": f"call_{uuid.uuid4().hex[:8]}",
-                        "type": "function",
-                        "function": {"name": name, "arguments": args_str}
-                    })
-        if parsed_calls:
-            return parsed_calls
+RESEARCH_AGENT_INSTRUCTIONS = """ARBEITSWEISE:
+1. Führe mehrere gezielte Tool-Aufrufe durch (nicht nur einen!).
+2. Sammle KONKRETE Daten: Dateinamen, Zeilennummern, Metriken, Code-Snippets, nicht nur "existiert".
+3. Wenn ein Suchergebnis nicht spezifisch genug ist, suche gezielter nach.
+4. Wenn du fertig bist, fasse deine Ergebnisse als JSON zusammen.
 
-    # Format 1b: Mistral Standard Format (pre-compiled pattern)
-    mistral_match = _RE_MISTRAL_STANDARD.search(content)
-    if mistral_match:
-        try:
-            calls = json.loads(mistral_match.group(1))
-            if isinstance(calls, list):
-                for call in calls:
-                    name = call.get("name") or call.get("function")
-                    args = call.get("arguments") or call.get("parameters") or {}
-                    if name and (not tool_names or name in tool_names):
-                        parsed_calls.append({
-                            "id": f"call_{uuid.uuid4().hex[:8]}",
-                            "type": "function",
-                            "function": {
-                                "name": name,
-                                "arguments": json.dumps(args) if isinstance(args, dict) else args
-                            }
-                        })
-            if parsed_calls:
-                return parsed_calls
-        except (json.JSONDecodeError, KeyError):
-            pass
+QUALITAETSREGELN fuer Findings:
+- SCHLECHT: "Es wurden mehrere relevante Dateien gefunden"
+- GUT: "In `src/auth/login.py:42` fehlt Input-Validierung fuer das email-Feld"
+- Jedes Finding MUSS mindestens einen konkreten Verweis enthalten (Datei, Funktion, Metrik, ID).
 
-    # Format 2: XML <tool_call> oder <functioncall> (pre-compiled pattern)
-    xml_matches = _RE_XML_TOOL_CALL.findall(content)
-    for match in xml_matches:
-        try:
-            data = json.loads(match.strip())
-            name = data.get("name") or data.get("function")
-            args = data.get("arguments") or data.get("parameters") or {}
-            if name and (not tool_names or name in tool_names):
-                parsed_calls.append({
-                    "id": f"call_{uuid.uuid4().hex[:8]}",
-                    "type": "function",
-                    "function": {
-                        "name": name,
-                        "arguments": json.dumps(args) if isinstance(args, dict) else str(args)
-                    }
-                })
-        except (json.JSONDecodeError, KeyError):
-            pass
-    if parsed_calls:
-        return parsed_calls
-
-    # Format 3: JSON-Block mit Tool-Call-Struktur (pre-compiled pattern)
-    json_blocks = _RE_JSON_BLOCK.findall(content)
-    for block in json_blocks:
-        try:
-            data = json.loads(block)
-            name = data.get("name") or data.get("tool") or data.get("function")
-            args = data.get("arguments") or data.get("parameters") or data.get("args") or {}
-            if name and (not tool_names or name in tool_names):
-                parsed_calls.append({
-                    "id": f"call_{uuid.uuid4().hex[:8]}",
-                    "type": "function",
-                    "function": {
-                        "name": name,
-                        "arguments": json.dumps(args) if isinstance(args, dict) else str(args)
-                    }
-                })
-        except (json.JSONDecodeError, KeyError):
-            pass
-
-    return parsed_calls
-
+DIAGRAMM-REGELN (nur wenn es zur Aufgabe passt, sonst weglassen):
+- Service-Aufrufe/API-Calls gefunden → sequenceDiagram
+- Komponenten/Module/Architektur → flowchart TD
+- Datenbank-Tabellen/Entities → erDiagram
+- Prozess-Ablaeufe/Workflows → flowchart TD mit Entscheidungen
+- Kein passender Typ → diagram-Feld WEGLASSEN
+- Der Mermaid-Code muss VALIDE sein (keine Umlaute in IDs, Quotes escapen)."""
 
 # ══════════════════════════════════════════════════════════════════════════════
 # Ergebnis-Datenstruktur
@@ -428,70 +360,22 @@ class SubAgent:
         if conversation_context:
             context_section = f"\n\n=== KONVERSATIONS-KONTEXT ===\n{conversation_context}\n=== ENDE KONTEXT ===\n"
 
-        # WICHTIG: Write-Agents (Implementation-Team) bekommen einen anderen Prompt
-        # als Research-Agents, weil ihr Auftrag Code-Schreiben ist, nicht Suchen.
+        # Build system_prompt from modular components
         if self.auto_confirm_writes:
             system_prompt = (
                 f"Du bist ein Code-Schreib-Agent: {self.display_name}.\n"
                 f"{self.description}\n\n"
-                "AUFTRAG: Du SCHREIBST Dateien mit write_file. Du bist KEIN Such-Agent.\n\n"
-                "ARBEITSWEISE:\n"
-                "1. Lies den Task-Kontext und identifiziere den absoluten Ziel-Pfad.\n"
-                "2. GREENFIELD (neuer Code, keine bestehende Datei): rufe direkt write_file auf -\n"
-                "   kein search_code/list_files vorher, weil noch nichts existiert.\n"
-                "3. MODIFIKATION / TEST-SCHREIBUNG (basierend auf vorhandenem Code):\n"
-                "   zuerst read_file der relevanten Dateien (z.B. das zu testende Modul),\n"
-                "   DANACH write_file mit fundiertem Content.\n"
-                "4. write_file schreibt unmittelbar (Plan wurde vom User vorab genehmigt).\n"
-                "5. GENAU EINE write_file/edit_file pro Response! NIEMALS mehrere parallel -\n"
-                "   das fuehrt zu abgeschnittenem Content und kaputten Dateien!\n"
-                "6. Nach dem Tool-Result rufst du im NAECHSTEN Response die naechste Op auf.\n"
-                "7. ERST wenn ALLE geplanten Dateien geschrieben sind: antworte mit JSON-Summary.\n\n"
-                "PFLICHT-REGELN:\n"
-                "- EIN write_file/edit_file pro Response, sonst werden Contents abgeschnitten!\n"
-                "- Mindestens 1 erfolgreicher write_file Call - sonst gilt der Task als fehlgeschlagen.\n"
-                "- Bei Fehler vom write_file (z.B. SCHREIBVORGANG ABGELEHNT): Pfad im Task-Kontext\n"
-                "  pruefen und korrigieren, KEIN Aufgeben.\n"
-                "- Content muss funktionsfaehiger Code sein (nicht 'TODO'/'...'-Platzhalter).\n"
-                "- Content als VOLLSTAENDIGER String im 'content' Parameter (kein Kuerzen, kein '...').\n"
-                "- Tests nur AUSDENKEN, nicht AUSFUEHREN (kein run_pytest/run_npm_tests Tool).\n"
+                f"{WRITE_AGENT_INSTRUCTIONS}"
                 f"{context_section}\n\n"
-                "JSON-FINISH (erst nach allen write_file Calls):\n"
-                "{\n"
-                '  "summary": "Welche Dateien hast du geschrieben, was enthalten sie?",\n'
-                '  "key_findings": ["Datei X geschrieben (Y Zeilen Zweck)", "..."],\n'
-                '  "sources": ["absoluter/pfad/zu/datei1.py", "..."]\n'
-                "}"
+                f"JSON-FINISH (erst nach allen write_file Calls):\n{JSON_RESPONSE_TEMPLATE_WRITE}"
             )
         else:
             system_prompt = (
                 f"Du bist ein spezialisierter Such-Agent: {self.display_name}.\n"
                 f"{self.description}\n\n"
-                "ARBEITSWEISE:\n"
-                "1. Fuehre mehrere gezielte Tool-Aufrufe durch (nicht nur einen!)\n"
-                "2. Sammle KONKRETE Daten: Dateinamen, Zeilennummern, Metriken, Code-Snippets\n"
-                "3. Wenn ein Suchergebnis nicht spezifisch genug ist, suche gezielter nach\n"
-                "4. Wenn du fertig bist, fasse deine Ergebnisse als JSON zusammen\n\n"
-                "QUALITAETSREGELN fuer Findings:\n"
-                "- SCHLECHT: 'Es wurden mehrere relevante Dateien gefunden'\n"
-                "- GUT: 'In `src/auth/login.py:42` fehlt Input-Validierung fuer das email-Feld'\n"
-                "- Jedes Finding MUSS mindestens einen konkreten Verweis enthalten (Datei, Funktion, Metrik, ID)\n"
+                f"{RESEARCH_AGENT_INSTRUCTIONS}"
                 f"{context_section}\n\n"
-                "Wenn du alle Informationen gesammelt hast, antworte NUR mit diesem JSON:\n"
-                "{\n"
-                '  "summary": "Was wurde gefunden? (3-5 Saetze mit konkreten Details)",\n'
-                '  "key_findings": ["Konkretes Finding mit Verweis", "..."],\n'
-                '  "sources": ["pfad/datei.py", "JIRA-123", "wiki/page-id"],\n'
-                '  "diagram": "OPTIONAL: Mermaid-Code OHNE ```-Fences, z.B. sequenceDiagram\\n    A->>B: Request",\n'
-                '  "diagram_title": "OPTIONAL: Titel fuer das Diagramm"\n'
-                "}\n\n"
-                "DIAGRAMM-REGELN (nur wenn es zur Aufgabe passt, sonst weglassen):\n"
-                "- Service-Aufrufe/API-Calls gefunden → sequenceDiagram\n"
-                "- Komponenten/Module/Architektur → flowchart TD\n"
-                "- Datenbank-Tabellen/Entities → erDiagram\n"
-                "- Prozess-Ablaeufe/Workflows → flowchart TD mit Entscheidungen\n"
-                "- Kein passender Typ → diagram-Feld WEGLASSEN\n"
-                "- Der Mermaid-Code muss VALIDE sein (keine Umlaute in IDs, Quotes escapen)"
+                f"Antworte mit diesem JSON:\n{JSON_RESPONSE_TEMPLATE_RESEARCH}"
             )
 
         # Tool-Schemas nur für erlaubte Tools
@@ -504,6 +388,20 @@ class SubAgent:
             schema for schema in all_schemas
             if schema["function"]["name"] in self.allowed_tools
         ]
+
+        # Inject Available Tools Block so Sub-Agent understands tool availability
+        try:
+            restriction_level = "write_only" if self.auto_confirm_writes else "research_only"
+            available_tools_block = build_available_tools_block(
+                tool_schemas=tool_schemas,
+                restriction=restriction_level,
+                detected_domains=None,
+            )
+            if available_tools_block:
+                system_prompt += f"\n\n{available_tools_block}"
+                logger.debug(f"[sub_agent:{self.name}] Available tools block injected ({len(tool_schemas)} tools)")
+        except Exception as e:
+            logger.warning(f"[sub_agent:{self.name}] Available tools block injection failed: {e}")
 
         # Debug: Log welche Tools verfügbar vs. erlaubt
         available_tools = [s["function"]["name"] for s in all_schemas]
@@ -555,7 +453,7 @@ class SubAgent:
             # Fallback: Text-basiertes Tool-Call-Parsing für Modelle ohne natives Tool-Calling
             native_tools = bool(tool_calls_raw)
             if not tool_calls_raw and response_text:
-                text_tool_calls = _parse_text_tool_calls(response_text, self.allowed_tools)
+                text_tool_calls = parse_text_tool_calls(response_text, self.allowed_tools)
                 if text_tool_calls:
                     logger.debug(f"[sub_agent:{self.name}] Text-Parser erkannte {len(text_tool_calls)} Tool-Calls")
                     tool_calls_raw = text_tool_calls
@@ -687,6 +585,13 @@ class SubAgent:
                                 tool_content = f"[Fehler beim Schreiben] {ex}"
                         else:
                             tool_content = result.to_context()
+
+                        # Inject pattern-based error recovery hints when tool fails
+                        if not result.success and result.error:
+                            recovery_hint = get_recovery_hint(tc_name, result.error)
+                            if recovery_hint:
+                                tool_content = f"{tool_content}\n\n{recovery_hint}"
+                                logger.debug(f"[sub_agent:{self.name}] Error recovery hint injected for {tc_name}")
 
                         # Hook: Content-Extraktion für große Ergebnisse
                         if tc_name in self.content_extraction_tools:

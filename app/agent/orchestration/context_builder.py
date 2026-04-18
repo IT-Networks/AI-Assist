@@ -428,13 +428,26 @@ Bevor du IRGENDETWAS tust (kein Tool-Aufruf!), bestimme den Typ der Anfrage:
 """
 
     # ══════════════════════════════════════════════════════════════════
-    # SECTION 2: Tool-Format (kompakt)
+    # SECTION 2: Tool-Format (UNIFIKATION: nur ein Format!)
     # ══════════════════════════════════════════════════════════════════
     base += """
-### Tool-Aufruf-Format
+### Tool-Aufruf-Format (PFLICHT: NUR DIESES FORMAT!)
 
-Wenn du ein Tool aufrufen willst, formatiere es EXAKT so:
-`[TOOL_CALLS][{"name": "tool_name", "arguments": {"param1": "value1"}}]`
+Verwende AUSSCHLIESSLICH das folgende Format für Tool-Calls:
+
+```
+[TOOL_CALLS][{"name": "tool_name", "arguments": {"param1": "wert1"}}]
+```
+
+**BEISPIEL: search_code aufrufen:**
+```
+[TOOL_CALLS][{"name": "search_code", "arguments": {"query": "MySearchTerm"}}]
+```
+
+**VERBOTEN (wird NICHT ausgeführt):**
+- ~~<tool_call>...</tool_call>~~ Format (nur [TOOL_CALLS] nutzen!)
+- ~~Python: search_code("query": "x")~~ (nicht syntaktisch korrekt)
+- ~~Text: "Ich rufe search_code auf mit..."~~ (muss strukturiert sein)
 
 Rufe immer nur EIN Tool pro Nachricht auf. Warte auf das Ergebnis bevor du das naechste Tool aufrufst.
 """
@@ -629,3 +642,137 @@ Format: batch_write_files(files='[{"path": "...", "content": "..."}, ...]')
 Du kannst Dateien ohne Bestätigung schreiben/bearbeiten.
 Sei vorsichtig und mache nur notwendige Änderungen.
 """
+
+
+def build_available_tools_block(
+    tool_schemas: List[Dict],
+    restriction: str,
+    detected_domains: Optional[List[str]] = None,
+) -> str:
+    """
+    Build dynamic "Available Tools" guidance block.
+
+    Shows which tools are available after filtering (domain + intent),
+    and which tools are NOT available in this context. Helps LLM
+    understand why certain tools can't be used.
+
+    Args:
+        tool_schemas: Filtered list of available tool definitions
+        restriction: Restriction level (none/read_only/guided/complex)
+        detected_domains: Optional list of detected tool domains
+
+    Returns:
+        Formatted markdown block for system prompt
+    """
+    if not tool_schemas:
+        return "## VERFÜGBARE TOOLS\n\nKEINE Tools verfügbar in diesem Kontext."
+
+    # Group tools by category (by prefix)
+    tool_by_category = {
+        "search": [],
+        "file": [],
+        "read": [],
+        "git": [],
+        "github": [],
+        "docker": [],
+        "database": [],
+        "web": [],
+        "other": [],
+    }
+
+    for tool in tool_schemas:
+        name = tool.get("function", {}).get("name", "")
+        desc = tool.get("function", {}).get("description", "")
+
+        if name.startswith("search_") or name.startswith("combined_"):
+            tool_by_category["search"].append((name, desc))
+        elif name.startswith("read_") or name.startswith("list_"):
+            tool_by_category["read"].append((name, desc))
+        elif name.startswith("write_") or name.startswith("edit_") or name.startswith("create_"):
+            tool_by_category["file"].append((name, desc))
+        elif name.startswith("git_"):
+            tool_by_category["git"].append((name, desc))
+        elif name.startswith("github_"):
+            tool_by_category["github"].append((name, desc))
+        elif name.startswith("docker_"):
+            tool_by_category["docker"].append((name, desc))
+        elif name.startswith("execute_sql") or name.startswith("get_schema"):
+            tool_by_category["database"].append((name, desc))
+        elif name.startswith("run_http") or name.startswith("fetch_"):
+            tool_by_category["web"].append((name, desc))
+        else:
+            tool_by_category["other"].append((name, desc))
+
+    # Build available tools section
+    parts = ["## VERFÜGBARE TOOLS"]
+
+    if detected_domains:
+        parts.append(f"**Erkannte Domänen:** {', '.join(detected_domains)}")
+    parts.append(f"**Restriktionslevel:** {restriction}")
+    parts.append("")
+    parts.append("### Verfügbar in dieser Anfrage:")
+
+    for category, tools in tool_by_category.items():
+        if tools:
+            parts.append(f"**{category.title()}:**")
+            for tool_name, tool_desc in tools[:10]:  # Max 10 per category
+                desc_short = tool_desc[:60].replace("\n", "") if tool_desc else "Kein Beschreibung"
+                if len(tool_desc or "") > 60:
+                    desc_short += "..."
+                parts.append(f"- `{tool_name}` — {desc_short}")
+
+    # Add unavailable tools section
+    restricted_tools = _get_restricted_tools(restriction)
+    if restricted_tools:
+        parts.append("")
+        parts.append("### NICHT VERFÜGBAR in diesem Kontext:")
+        parts.append(f"Folgende Tools sind **nicht** verfügbar ({restriction} Mode):")
+        for tool_name in restricted_tools[:15]:
+            parts.append(f"- ~~{tool_name}~~")
+
+    # Add meta-tools recommendation
+    parts.append("")
+    parts.append("### Meta-Tools (bevorzugt verwenden):")
+    parts.append("Diese Tools ersetzen mehrere einzelne Calls:")
+    parts.append("- `combined_search` — kombiniert search_code + search_handbook")
+    parts.append("- `batch_read_files` — liest mehrere Dateien auf einmal")
+    parts.append("- `batch_write_files` — schreibt mehrere Dateien auf einmal")
+
+    return "\n".join(parts)
+
+
+def _get_restricted_tools(restriction: str) -> List[str]:
+    """
+    Get list of tools that are NOT available for a given restriction.
+
+    Args:
+        restriction: Restriction level (none/read_only/guided/complex)
+
+    Returns:
+        List of tool names that are restricted
+    """
+    write_tools = [
+        "write_file", "edit_file", "create_file", "batch_write_files",
+        "delete_file", "batch_delete_files", "move_file", "create_directory",
+    ]
+    execute_tools = [
+        "execute_command", "run_shell_command", "run_python_script",
+        "execute_sql", "run_test", "trigger_build",
+    ]
+    admin_tools = [
+        "deploy_application", "restart_service", "manage_users",
+    ]
+
+    if restriction == "none":
+        # DIRECT: no tools at all
+        return write_tools + execute_tools + admin_tools + [
+            "search_code", "read_file", "git_commit", "github_create_pr"
+        ]
+    elif restriction == "read_only":
+        # LOOKUP: only read/search allowed
+        return write_tools + execute_tools + admin_tools
+    elif restriction in ("guided", "complex"):
+        # GUIDED/COMPLEX: most tools available, just some admin restricted
+        return admin_tools
+    else:
+        return []

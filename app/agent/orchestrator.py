@@ -86,6 +86,9 @@ from app.agent.orchestration.context_builder import (
     extract_conversation_context as _extract_conversation_context,
     build_agent_instructions as _build_agent_instructions,
 )
+from app.agent.orchestration.error_recovery import (
+    get_recovery_hint as _get_recovery_hint,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -920,8 +923,29 @@ class AgentOrchestrator:
         else:
             include_write_ops = True
 
-        # System-Prompt bauen
-        system_prompt = SYSTEM_PROMPT
+        # System-Prompt bauen (mit Domain-Modularisierung)
+        # Detect domains early for modular prompt building
+        try:
+            from app.agent.orchestration.domain_detector import get_domain_detector
+            from app.services.prompt_modules import build_system_prompt, get_module_stats
+
+            detector = get_domain_detector()
+            detected_domains = detector.detect(
+                user_message,
+                state.messages_history if hasattr(state, 'messages_history') else [],
+            )
+            system_prompt = build_system_prompt(detected_domains)
+
+            # Log module stats for debugging
+            module_stats = get_module_stats(detected_domains)
+            logger.debug(
+                f"[agent] System prompt modules loaded: {list(module_stats.keys())} "
+                f"→ {module_stats.get('_total', {}).get('token_estimate', 'N/A')} tokens"
+            )
+        except Exception as e:
+            logger.warning(f"[agent] Prompt modularization failed: {e}, using fallback")
+            # Fallback auf alte SYSTEM_PROMPT
+            system_prompt = SYSTEM_PROMPT
 
         # Skill-Prompts hinzufügen
         if state.active_skill_ids:
@@ -1015,10 +1039,10 @@ class AgentOrchestrator:
                 "Die PR-Analyse erscheint automatisch im Workspace-Panel."
             )
 
-        # ── Intent-basierte Tool-Filterung ────────────────────────────────
+        # ── Intent-basierte Tool-Filterung mit Domain-Detection ────────────────
         # DIRECT intent: Keine Tools im ersten Call
         # LOOKUP intent: Nur read-only Tools
-        # GUIDED/COMPLEX: Alle Tools (je nach Modus)
+        # GUIDED/COMPLEX: Domain-basierte Tool-Filterung (NEW)
         _all_tool_schemas = list(tool_schemas)  # Vollständige Liste aufbewahren
         if intent_result and not pr_url:
             restriction = intent_result.pipeline.tool_restriction
@@ -1036,11 +1060,67 @@ class AgentOrchestrator:
                     ))
                 ]
                 logger.debug(f"[agent] Intent LOOKUP: {len(tool_schemas)} read-only tools (of {len(_all_tool_schemas)})")
+            elif restriction in ("guided", "complex"):
+                # NEW: Domain-basierte Filterung für GUIDED/COMPLEX
+                try:
+                    from app.agent.orchestration.domain_detector import get_domain_detector
+                    from app.agent.tool_domains import get_tools_for_domains
+
+                    detector = get_domain_detector()
+                    detected_domains = detector.detect(
+                        user_message,
+                        state.messages_history if hasattr(state, 'messages_history') else [],
+                        previous_intent=restriction
+                    )
+                    allowed_tools = get_tools_for_domains(detected_domains)
+
+                    tool_schemas = [
+                        t for t in tool_schemas
+                        if t.get("function", {}).get("name") in allowed_tools
+                    ]
+
+                    # Logging für Performance Tracking
+                    domain_names = ", ".join(sorted(detected_domains))
+                    logger.debug(
+                        f"[agent] Intent {restriction.upper()}: "
+                        f"Domains [{domain_names}] → {len(tool_schemas)} tools (of {len(_all_tool_schemas)})"
+                    )
+
+                    # Sammle Domain Stats falls Performance Tracker verfügbar
+                    if hasattr(state, 'perf_tracker') and state.perf_tracker:
+                        state.perf_tracker.add_metric(
+                            "detected_domains",
+                            list(sorted(detected_domains))
+                        )
+                        state.perf_tracker.add_metric(
+                            "tools_count_filtered",
+                            len(tool_schemas)
+                        )
+                except Exception as e:
+                    logger.warning(f"[agent] Domain filtering failed: {e}, using all tools")
+                    # Fallback: Alle Tools verwenden
+                    pass
         # ─────────────────────────────────────────────────────────────────────
 
         # Agent-Instruktionen (from context_builder module)
         agent_instructions = _build_agent_instructions(state.mode, state.plan_approved)
         system_prompt += f"\n\n{agent_instructions}"
+
+        # Available Tools Guidance Block (NEW: shows which tools are available after filtering)
+        try:
+            from app.agent.orchestration.context_builder import build_available_tools_block
+            detected_domains = (
+                list(detected_domains) if 'detected_domains' in locals() and detected_domains else None
+            )
+            available_tools_block = build_available_tools_block(
+                tool_schemas=tool_schemas,
+                restriction=restriction if 'restriction' in locals() else "unknown",
+                detected_domains=detected_domains,
+            )
+            system_prompt += f"\n\n{available_tools_block}"
+            logger.debug(f"[agent] Available tools block injected ({len(tool_schemas)} tools available)")
+        except Exception as e:
+            logger.warning(f"[agent] Available tools block injection failed: {e}")
 
         # Planungsphase: Plan als Kontext injizieren wenn genehmigt
         if state.mode == AgentMode.PLAN_THEN_EXECUTE and state.plan_approved and state.pending_plan:
@@ -1583,14 +1663,16 @@ class AgentOrchestrator:
                             messages.append({
                                 "role": "user",
                                 "content": (
-                                    "Your previous response contained a tool-call-like "
-                                    f"fragment that could not be parsed (detected: "
-                                    f"{', '.join(hints)}). Retry using the exact "
-                                    "format:\n"
-                                    "<tool_call>{\"name\": \"<tool>\", "
-                                    "\"arguments\": {...}}</tool_call>\n"
-                                    "Do NOT use Python-style paren syntax like "
-                                    "funcname(\"key\": val)."
+                                    "Deine vorherige Antwort enthielt eine fehlerhaft formatierte Tool-Anfrage. "
+                                    f"Erkannt: {', '.join(hints)}. Verwende EXAKT dieses Format:\n\n"
+                                    "[TOOL_CALLS][{\"name\": \"<tool_name>\", \"arguments\": {\"param\": \"wert\"}}]\n\n"
+                                    "Beispiel:\n"
+                                    "[TOOL_CALLS][{\"name\": \"search_code\", \"arguments\": {\"query\": \"MyClass\"}}]\n\n"
+                                    "VERBOTEN:\n"
+                                    "- <tool_call>...</tool_call> Format\n"
+                                    "- Python: funcname(\"key\": val)\n"
+                                    "- Text: \"Ich rufe X auf...\"\n\n"
+                                    "Nutze NUR [TOOL_CALLS] Format!"
                                 ),
                             })
                             content = ""
@@ -2442,6 +2524,15 @@ class AgentOrchestrator:
                             f"3. Wenn ein bekannter Fehler ist: Erklär es kurz und schlag eine Lösung vor\n"
                             f"4. Versuche das Tool NICHT erneut ohne neue Informationen vom User oder ohne das Problem zu beheben"
                         )
+
+                        # Injiziere spezifische Recovery Hints basierend auf Fehler-Pattern
+                        try:
+                            recovery_hint = _get_recovery_hint(tool_call.name, result.error)
+                            if recovery_hint:
+                                failed_tool_hint = f"{failed_tool_hint}\n\n{recovery_hint}"
+                        except Exception as e:
+                            logger.debug(f"[agent] Error recovery hint generation failed: {e}")
+
                         messages.append({
                             "role": "system",
                             "content": failed_tool_hint

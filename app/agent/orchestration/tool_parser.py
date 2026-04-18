@@ -16,7 +16,7 @@ import json
 import logging
 import re
 import uuid
-from typing import Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 logger = logging.getLogger(__name__)
 
@@ -61,7 +61,7 @@ _RE_HINT_TOOL_KEY = re.compile(r'"tool"\s*:')
 _RE_HINT_PAREN_CALL = re.compile(r'\b\w{3,}\s*\(\s*\{?\s*"[\w\-]+"\s*:')
 
 
-def parse_text_tool_calls(content: str, available_tools: List[Dict]) -> List[Dict]:
+def parse_text_tool_calls(content: str, available_tools: Any) -> List[Dict]:
     """
     Parses tool calls from text content of models without native tool calling.
 
@@ -73,7 +73,7 @@ def parse_text_tool_calls(content: str, available_tools: List[Dict]) -> List[Dic
 
     Args:
         content: The text content to parse
-        available_tools: List of available tool schemas for validation
+        available_tools: List of available tool schemas (List[Dict]) or tool names (List[str]) for validation
 
     Returns:
         List of parsed tool call dictionaries
@@ -96,7 +96,14 @@ def parse_text_tool_calls(content: str, available_tools: List[Dict]) -> List[Dic
     if not _HAS_TOOL_MARKERS:
         return []
 
-    tool_names = {t["function"]["name"] for t in available_tools} if available_tools else set()
+    # Normalize available_tools to set of names (support both List[Dict] and List[str])
+    if available_tools:
+        if isinstance(available_tools[0], str):
+            tool_names = set(available_tools)  # List[str] - tool names only
+        else:
+            tool_names = {t["function"]["name"] for t in available_tools}  # List[Dict] - tool schemas
+    else:
+        tool_names = set()
     parsed_calls = []
 
     # Format 1a: Mistral 678B Compact Format
