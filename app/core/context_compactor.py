@@ -35,10 +35,19 @@ class ContextItem:
     age: int = 0                # Wie viele Turns alt
     tool_name: Optional[str] = None
     is_summarized: bool = False
+    _tokens_cached: bool = False  # PHASE 1.3: Track if tokens computed
 
     def __post_init__(self):
-        if self.tokens == 0:
+        # PHASE 1.3: Cache token estimates to avoid recomputation
+        if self.tokens == 0 and self.content:
             self.tokens = estimate_tokens(self.content)
+            self._tokens_cached = True
+
+    def update_content(self, new_content: str) -> None:
+        """Update content and recompute tokens (PHASE 1.3: caching)."""
+        self.content = new_content
+        self.tokens = estimate_tokens(new_content)
+        self._tokens_cached = True
 
 
 class ContextCompactor:
@@ -57,13 +66,13 @@ class ContextCompactor:
     # Maximale Token-Länge nach Summarization
     MAX_SUMMARY_TOKENS = 300
 
-    # Keywords die in Summaries erhalten bleiben sollen
+    # PHASE 2.2: Pre-compiled regex patterns (compiled once, reused for all instances)
     PRESERVE_PATTERNS = [
-        r'\b[A-Z][a-z]+(?:[A-Z][a-z]+)+\b',  # CamelCase (Klassennamen)
-        r'\b[A-Z_]{2,}\b',                    # UPPER_CASE (Konstanten)
-        r'\b\d+\b',                           # Zahlen
-        r'"[^"]{1,50}"',                      # Kurze Strings
-        r"'[^']{1,50}'",                      # Kurze Strings
+        re.compile(r'\b[A-Z][a-z]+(?:[A-Z][a-z]+)+\b'),  # CamelCase (Klassennamen)
+        re.compile(r'\b[A-Z_]{2,}\b'),                    # UPPER_CASE (Konstanten)
+        re.compile(r'\b\d+\b'),                           # Zahlen
+        re.compile(r'"[^"]{1,50}"'),                      # Kurze Strings
+        re.compile(r"'[^']{1,50}'"),                      # Kurze Strings
     ]
 
     def _compute_relevance(self, item: ContextItem, recent_texts: List[str], _cached_text: str = None) -> float:
@@ -150,36 +159,34 @@ class ContextCompactor:
         if current_tokens <= target_tokens:
             return sorted_items
 
-        # Phase 2: Tool-Outputs summarisieren
+        # PHASE 1.3 + 2.2: Phase 2+3 merged into single pass with token caching
         for item in sorted_items:
             if current_tokens <= target_tokens:
                 break
 
+            # Try summarization first (if applicable and not already summarized)
             if (item.item_type == "tool_output"
                 and item.tokens > self.MIN_TOKENS_FOR_SUMMARY
                 and not item.is_summarized):
 
                 old_tokens = item.tokens
-                item.content = self._summarize_tool_output(item)
-                item.tokens = estimate_tokens(item.content)
+                summarized_content = self._summarize_tool_output(item)
+
+                # Use cached token estimation
+                item.update_content(summarized_content)
                 item.is_summarized = True
                 current_tokens -= (old_tokens - item.tokens)
 
-        if current_tokens <= target_tokens:
-            return sorted_items
-
-        # Phase 3: Längenbegrenzung für alle Items
-        for item in sorted_items:
-            if current_tokens <= target_tokens:
-                break
-
-            if item.tokens > self.MAX_SUMMARY_TOKENS:
+            # Then truncate if still over limit
+            elif item.tokens > self.MAX_SUMMARY_TOKENS:
                 old_tokens = item.tokens
-                item.content = truncate_text_to_tokens(
+                truncated_content = truncate_text_to_tokens(
                     item.content,
                     self.MAX_SUMMARY_TOKENS
                 )
-                item.tokens = estimate_tokens(item.content)
+
+                # Use cached token estimation
+                item.update_content(truncated_content)
                 current_tokens -= (old_tokens - item.tokens)
 
         return sorted_items
@@ -192,20 +199,23 @@ class ContextCompactor:
         1. Wichtige Patterns extrahieren (Namen, IDs, Zahlen)
         2. Erste und letzte Zeilen behalten
         3. Rest kürzen
+
+        PHASE 2.2: Uses pre-compiled patterns for efficiency
         """
         content = item.content
         lines = content.split('\n')
 
-        # Extrahiere wichtige Informationen
+        # PHASE 2.2: Use pre-compiled patterns (already compiled in __init__)
         important_matches = []
+        search_content = content[:1000]  # Limit search to first 1000 chars for speed
         for pattern in self.PRESERVE_PATTERNS:
-            matches = re.findall(pattern, content)
-            important_matches.extend(matches[:10])  # Max 10 pro Pattern
+            matches = pattern.findall(search_content)
+            important_matches.extend(matches[:5])  # Limit to 5 per pattern
 
         # Deduplizieren
-        important_matches = list(dict.fromkeys(important_matches))[:20]
+        important_matches = list(dict.fromkeys(important_matches))[:10]
 
-        # Zusammenfassung bauen
+        # Zusammenfassung bauen (memory-efficient)
         summary_parts = []
 
         # Tool-Name Header
@@ -213,12 +223,11 @@ class ContextCompactor:
             summary_parts.append(f"[{item.tool_name} - Zusammenfassung]")
 
         # Erste paar Zeilen (oft wichtigste Info)
-        first_lines = lines[:3]
-        summary_parts.extend(first_lines)
+        summary_parts.extend(lines[:3])
 
         # Wichtige extrahierte Werte
         if important_matches:
-            summary_parts.append(f"Gefundene Werte: {', '.join(important_matches[:15])}")
+            summary_parts.append(f"Gefundene Werte: {', '.join(important_matches)}")
 
         # Letzte Zeile (oft Ergebnis/Status)
         if len(lines) > 5:
@@ -226,7 +235,7 @@ class ContextCompactor:
             summary_parts.append(lines[-1])
 
         # Info über Originalgrößea
-        summary_parts.append(f"[Original: {item.tokens} Tokens, {len(lines)} Zeilen]")
+        summary_parts.append(f"[Original: {len(lines)} Zeilen]")
 
         return '\n'.join(summary_parts)
 

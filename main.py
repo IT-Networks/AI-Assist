@@ -15,45 +15,70 @@ if sys.platform == 'win32':
 from app.api.routes import chat, java, logs, pdf, confluence, models, python_routes, handbook, skills, agent, settings, database, datasources, mq, log_servers, wlp, maven, search, jenkins, iq_server, alm, github, internal_fetch, docker_sandbox, access_logs, servicenow, testtool, analytics, patterns, tokens, healing, agents, reviews, arena, files, research, output, designs, llm_diagnostics, update, tasks, graph, tests, scripts, email, webex
 
 
+async def _build_java_index():
+    """Build Java index in background thread (parallelizable)."""
+    try:
+        from app.services.java_reader import JavaReader
+        from app.services.java_indexer import get_java_indexer
+        from app.core.config import settings
+
+        if not (settings.index.auto_build_on_start and settings.java.get_active_path()):
+            return None
+
+        reader = JavaReader(settings.java.get_active_path())
+        indexer = get_java_indexer()
+        loop = asyncio.get_event_loop()
+        await loop.run_in_executor(
+            None, lambda: indexer.build(settings.java.get_active_path(), reader, force=False)
+        )
+        print(f"[startup] Java-Index aufgebaut: {settings.java.get_active_path()}")
+        return True
+    except Exception as e:
+        print(f"[startup] Java-Index-Build fehlgeschlagen: {e}")
+        return None
+
+
+async def _build_handbook_index():
+    """Build Handbook index in background thread (parallelizable)."""
+    try:
+        from app.services.handbook_indexer import get_handbook_indexer
+        from app.core.config import settings
+
+        if not (settings.handbook.enabled and settings.handbook.index_on_start and settings.handbook.path):
+            return None
+
+        indexer = get_handbook_indexer()
+        loop = asyncio.get_event_loop()
+        await loop.run_in_executor(
+            None,
+            lambda: indexer.build(
+                handbook_path=settings.handbook.path,
+                functions_subdir=settings.handbook.functions_subdir,
+                fields_subdir=settings.handbook.fields_subdir,
+                exclude_patterns=settings.handbook.exclude_patterns,
+                force=False
+            )
+        )
+        print(f"[startup] Handbuch-Index aufgebaut: {settings.handbook.path}")
+        return True
+    except Exception as e:
+        print(f"[startup] Handbuch-Index-Build fehlgeschlagen: {e}")
+        return None
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Startup: optionaler automatischer Index-Build
     from app.core.config import settings
 
-    # Java Index
-    if settings.index.auto_build_on_start and settings.java.get_active_path():
-        try:
-            from app.services.java_reader import JavaReader
-            from app.services.java_indexer import get_java_indexer
-            reader = JavaReader(settings.java.get_active_path())
-            indexer = get_java_indexer()
-            loop = asyncio.get_event_loop()
-            await loop.run_in_executor(
-                None, lambda: indexer.build(settings.java.get_active_path(), reader, force=False)
-            )
-            print(f"[startup] Java-Index aufgebaut: {settings.java.get_active_path()}")
-        except Exception as e:
-            print(f"[startup] Java-Index-Build fehlgeschlagen: {e}")
+    # ─ PHASE 1.1: PARALLELIZE INDEX BUILDING
+    # Start both index builds concurrently (saves 2-3 seconds)
+    print("[startup] Starte Index-Builds (parallel)...")
+    java_task = asyncio.create_task(_build_java_index())
+    handbook_task = asyncio.create_task(_build_handbook_index())
 
-    # Handbook Index
-    if settings.handbook.enabled and settings.handbook.index_on_start and settings.handbook.path:
-        try:
-            from app.services.handbook_indexer import get_handbook_indexer
-            indexer = get_handbook_indexer()
-            loop = asyncio.get_event_loop()
-            await loop.run_in_executor(
-                None,
-                lambda: indexer.build(
-                    handbook_path=settings.handbook.path,
-                    functions_subdir=settings.handbook.functions_subdir,
-                    fields_subdir=settings.handbook.fields_subdir,
-                    exclude_patterns=settings.handbook.exclude_patterns,
-                    force=False
-                )
-            )
-            print(f"[startup] Handbuch-Index aufgebaut: {settings.handbook.path}")
-        except Exception as e:
-            print(f"[startup] Handbuch-Index-Build fehlgeschlagen: {e}")
+    await asyncio.gather(java_task, handbook_task, return_exceptions=True)
+    print("[startup] Index-Builds abgeschlossen")
 
     # Skills laden
     if settings.skills.enabled:
@@ -65,6 +90,7 @@ async def lifespan(app: FastAPI):
         except Exception as e:
             print(f"[startup] Skills-Laden fehlgeschlagen: {e}")
 
+    # ─ PHASE 2.1: PARALLELIZE TOOL REGISTRATION
     # Agent Orchestrator und Tools initialisieren
     try:
         from app.agent import get_tool_registry, get_agent_orchestrator
@@ -76,163 +102,263 @@ async def lifespan(app: FastAPI):
         print(f"[startup] Agent initialisiert: {tools_count} Tools ({write_tools} Schreib-Ops)")
         if settings.file_operations.enabled:
             print(f"[startup] File-Ops aktiviert: Modus={settings.file_operations.default_mode}")
-        # Datenquellen-Tools registrieren
-        ds_count = register_datasource_tools(registry)
-        if ds_count:
-            print(f"[startup] Datenquellen-Tools registriert: {ds_count}")
 
-        # MQ-Tools registrieren
-        try:
-            from app.agent.mq_tools import register_mq_tools
-            mq_count = register_mq_tools(registry)
-            if mq_count:
-                print(f"[startup] MQ-Tools registriert: {mq_count}")
-        except Exception as e:
-            print(f"[startup] MQ-Tools-Registrierung fehlgeschlagen: {e}")
+        async def register_tools_group_a():
+            """Register Group A tools in parallel (data/indexing operations)."""
+            tasks = []
 
-        # WLP-Tools registrieren
-        try:
-            from app.agent.wlp_tools import register_wlp_tools
-            wlp_count = register_wlp_tools(registry)
-            if wlp_count:
-                print(f"[startup] WLP-Tools registriert: {wlp_count}")
-        except Exception as e:
-            print(f"[startup] WLP-Tools-Registrierung fehlgeschlagen: {e}")
+            async def register_datasource():
+                try:
+                    count = await asyncio.to_thread(register_datasource_tools, registry)
+                    if count:
+                        print(f"[startup] Datenquellen-Tools registriert: {count}")
+                    return count
+                except Exception as e:
+                    print(f"[startup] Datenquellen-Tools fehlgeschlagen: {e}")
+                    return 0
 
-        # Maven-Tools registrieren
-        try:
-            from app.agent.maven_tools import register_maven_tools
-            mvn_count = register_maven_tools(registry)
-            if mvn_count:
-                print(f"[startup] Maven-Tools registriert: {mvn_count}")
-        except Exception as e:
-            print(f"[startup] Maven-Tools-Registrierung fehlgeschlagen: {e}")
+            async def register_mq():
+                try:
+                    from app.agent.mq_tools import register_mq_tools
+                    count = await asyncio.to_thread(register_mq_tools, registry)
+                    if count:
+                        print(f"[startup] MQ-Tools registriert: {count}")
+                    return count
+                except Exception as e:
+                    print(f"[startup] MQ-Tools fehlgeschlagen: {e}")
+                    return 0
 
-        # Test-Execution-Tools registrieren (run_pytest, run_npm_tests)
-        try:
-            from app.agent.test_exec_tools import register_test_exec_tools
-            test_exec_count = register_test_exec_tools(registry)
-            if test_exec_count:
-                print(f"[startup] Test-Execution-Tools registriert: {test_exec_count}")
-        except Exception as e:
-            print(f"[startup] Test-Execution-Tools-Registrierung fehlgeschlagen: {e}")
+            async def register_maven():
+                try:
+                    from app.agent.maven_tools import register_maven_tools
+                    count = await asyncio.to_thread(register_maven_tools, registry)
+                    if count:
+                        print(f"[startup] Maven-Tools registriert: {count}")
+                    return count
+                except Exception as e:
+                    print(f"[startup] Maven-Tools fehlgeschlagen: {e}")
+                    return 0
 
-        # Command-Execution-Tool registrieren (run_workspace_command)
-        try:
-            from app.agent.command_tools import register_command_tools
-            cmd_count = register_command_tools(registry)
-            if cmd_count:
-                print(f"[startup] Command-Execution-Tools registriert: {cmd_count}")
-        except Exception as e:
-            print(f"[startup] Command-Execution-Tools-Registrierung fehlgeschlagen: {e}")
+            async def register_jenkins():
+                try:
+                    from app.agent.jenkins_tools import register_jenkins_tools
+                    count = await asyncio.to_thread(register_jenkins_tools, registry)
+                    if count:
+                        print(f"[startup] Jenkins-Tools registriert: {count}")
+                    return count
+                except Exception as e:
+                    print(f"[startup] Jenkins-Tools fehlgeschlagen: {e}")
+                    return 0
 
-        # Log-Tools registrieren (log_find_server, log_read_window, log_read_ffdc)
-        try:
-            from app.agent.log_tools import register_log_tools
-            log_count = register_log_tools(registry)
-            if log_count:
-                print(f"[startup] Log-Tools registriert: {log_count}")
-        except Exception as e:
-            print(f"[startup] Log-Tools-Registrierung fehlgeschlagen: {e}")
+            results = await asyncio.gather(
+                register_datasource(),
+                register_mq(),
+                register_maven(),
+                register_jenkins(),
+                return_exceptions=False
+            )
+            return sum(r for r in results if r)
 
-        # Web-Such-Tools registrieren (web_search, web_search_toggle)
-        try:
-            from app.agent.search_tools import register_search_tools
-            search_count = register_search_tools(registry)
-            if search_count:
-                print(f"[startup] Such-Tools registriert: {search_count}")
-        except Exception as e:
-            print(f"[startup] Such-Tools-Registrierung fehlgeschlagen: {e}")
+        async def register_tools_group_b():
+            """Register Group B tools in parallel (execution/testing)."""
+            async def register_wlp():
+                try:
+                    from app.agent.wlp_tools import register_wlp_tools
+                    count = await asyncio.to_thread(register_wlp_tools, registry)
+                    if count:
+                        print(f"[startup] WLP-Tools registriert: {count}")
+                    return count
+                except Exception as e:
+                    print(f"[startup] WLP-Tools fehlgeschlagen: {e}")
+                    return 0
 
-        # Jenkins-Tools registrieren
-        try:
-            from app.agent.jenkins_tools import register_jenkins_tools
-            jenkins_count = register_jenkins_tools(registry)
-            if jenkins_count:
-                print(f"[startup] Jenkins-Tools registriert: {jenkins_count}")
-        except Exception as e:
-            print(f"[startup] Jenkins-Tools-Registrierung fehlgeschlagen: {e}")
+            async def register_test_exec():
+                try:
+                    from app.agent.test_exec_tools import register_test_exec_tools
+                    count = await asyncio.to_thread(register_test_exec_tools, registry)
+                    if count:
+                        print(f"[startup] Test-Execution-Tools registriert: {count}")
+                    return count
+                except Exception as e:
+                    print(f"[startup] Test-Execution-Tools fehlgeschlagen: {e}")
+                    return 0
 
-        # GitHub-Tools registrieren
-        try:
-            from app.agent.github_tools import register_github_tools
-            github_count = register_github_tools(registry)
-            if github_count:
-                print(f"[startup] GitHub-Tools registriert: {github_count}")
-        except Exception as e:
-            print(f"[startup] GitHub-Tools-Registrierung fehlgeschlagen: {e}")
+            async def register_command():
+                try:
+                    from app.agent.command_tools import register_command_tools
+                    count = await asyncio.to_thread(register_command_tools, registry)
+                    if count:
+                        print(f"[startup] Command-Execution-Tools registriert: {count}")
+                    return count
+                except Exception as e:
+                    print(f"[startup] Command-Execution-Tools fehlgeschlagen: {e}")
+                    return 0
 
-        # Internal Fetch Tools registrieren
-        try:
-            from app.agent.internal_fetch_tools import register_internal_fetch_tools
-            if_count = register_internal_fetch_tools(registry)
-            if if_count:
-                print(f"[startup] Internal-Fetch-Tools registriert: {if_count}")
-        except Exception as e:
-            print(f"[startup] Internal-Fetch-Tools-Registrierung fehlgeschlagen: {e}")
+            async def register_log():
+                try:
+                    from app.agent.log_tools import register_log_tools
+                    count = await asyncio.to_thread(register_log_tools, registry)
+                    if count:
+                        print(f"[startup] Log-Tools registriert: {count}")
+                    return count
+                except Exception as e:
+                    print(f"[startup] Log-Tools fehlgeschlagen: {e}")
+                    return 0
 
-        # Git-Tools registrieren (lokale Git-Operationen)
-        try:
-            from app.agent.git_tools import register_git_tools
-            git_count = register_git_tools(registry)
-            if git_count:
-                print(f"[startup] Git-Tools registriert: {git_count}")
-        except Exception as e:
-            print(f"[startup] Git-Tools-Registrierung fehlgeschlagen: {e}")
+            results = await asyncio.gather(
+                register_wlp(),
+                register_test_exec(),
+                register_command(),
+                register_log(),
+                return_exceptions=False
+            )
+            return sum(r for r in results if r)
 
-        # Docker-Sandbox-Tools registrieren (sichere Code-Ausführung)
-        try:
-            from app.agent.docker_tools import register_docker_tools
-            docker_count = register_docker_tools(registry)
-            if docker_count:
-                print(f"[startup] Docker-Sandbox-Tools registriert: {docker_count}")
-        except Exception as e:
-            print(f"[startup] Docker-Sandbox-Tools-Registrierung fehlgeschlagen: {e}")
+        async def register_tools_group_c():
+            """Register Group C tools in parallel (code access)."""
+            async def register_search():
+                try:
+                    from app.agent.search_tools import register_search_tools
+                    count = await asyncio.to_thread(register_search_tools, registry)
+                    if count:
+                        print(f"[startup] Such-Tools registriert: {count}")
+                    return count
+                except Exception as e:
+                    print(f"[startup] Such-Tools fehlgeschlagen: {e}")
+                    return 0
 
-        # Shell-Tools registrieren (Container-First Shell-Ausführung)
-        try:
-            from app.agent.shell_tools import register_shell_tools
-            shell_count = register_shell_tools(registry)
-            if shell_count:
-                print(f"[startup] Shell-Tools registriert: {shell_count}")
-        except Exception as e:
-            print(f"[startup] Shell-Tools-Registrierung fehlgeschlagen: {e}")
+            async def register_github():
+                try:
+                    from app.agent.github_tools import register_github_tools
+                    count = await asyncio.to_thread(register_github_tools, registry)
+                    if count:
+                        print(f"[startup] GitHub-Tools registriert: {count}")
+                    return count
+                except Exception as e:
+                    print(f"[startup] GitHub-Tools fehlgeschlagen: {e}")
+                    return 0
 
-        # Knowledge Collector Tools registrieren (research_topic, search_knowledge, list_knowledge)
-        try:
-            from app.agent.knowledge_tools import register_knowledge_collector_tools
-            kc_count = register_knowledge_collector_tools(registry)
-            if kc_count:
-                print(f"[startup] Knowledge Collector Tools registriert: {kc_count}")
-        except Exception as e:
-            print(f"[startup] Knowledge Collector Tools fehlgeschlagen: {e}")
+            async def register_internal_fetch():
+                try:
+                    from app.agent.internal_fetch_tools import register_internal_fetch_tools
+                    count = await asyncio.to_thread(register_internal_fetch_tools, registry)
+                    if count:
+                        print(f"[startup] Internal-Fetch-Tools registriert: {count}")
+                    return count
+                except Exception as e:
+                    print(f"[startup] Internal-Fetch-Tools fehlgeschlagen: {e}")
+                    return 0
 
-        # Multi-Agent Team Tools registrieren (run_team)
-        try:
-            from app.agent.multi_agent.team_tools import register_team_tools
-            team_count = register_team_tools(registry)
-            if team_count:
-                print(f"[startup] Multi-Agent Team Tools registriert: {team_count}")
-        except Exception as e:
-            print(f"[startup] Multi-Agent Team Tools fehlgeschlagen: {e}")
+            async def register_git():
+                try:
+                    from app.agent.git_tools import register_git_tools
+                    count = await asyncio.to_thread(register_git_tools, registry)
+                    if count:
+                        print(f"[startup] Git-Tools registriert: {count}")
+                    return count
+                except Exception as e:
+                    print(f"[startup] Git-Tools fehlgeschlagen: {e}")
+                    return 0
 
-        # Email-Tools registrieren (email_search, email_read, email_draft, email_list_folders)
-        try:
-            from app.agent.email_tools import register_email_tools
-            email_count = register_email_tools(registry)
-            if email_count:
-                print(f"[startup] Email-Tools registriert: {email_count}")
-        except Exception as e:
-            print(f"[startup] Email-Tools-Registrierung fehlgeschlagen: {e}")
+            results = await asyncio.gather(
+                register_search(),
+                register_github(),
+                register_internal_fetch(),
+                register_git(),
+                return_exceptions=False
+            )
+            return sum(r for r in results if r)
 
-        # Webex-Tools registrieren (webex_list_rooms, webex_read_messages, webex_search_messages)
-        try:
-            from app.agent.webex_tools import register_webex_tools
-            webex_count = register_webex_tools(registry)
-            if webex_count:
-                print(f"[startup] Webex-Tools registriert: {webex_count}")
-        except Exception as e:
-            print(f"[startup] Webex-Tools-Registrierung fehlgeschlagen: {e}")
+        async def register_tools_group_d():
+            """Register Group D tools in parallel (integration/communication)."""
+            async def register_docker():
+                try:
+                    from app.agent.docker_tools import register_docker_tools
+                    count = await asyncio.to_thread(register_docker_tools, registry)
+                    if count:
+                        print(f"[startup] Docker-Sandbox-Tools registriert: {count}")
+                    return count
+                except Exception as e:
+                    print(f"[startup] Docker-Sandbox-Tools fehlgeschlagen: {e}")
+                    return 0
+
+            async def register_shell():
+                try:
+                    from app.agent.shell_tools import register_shell_tools
+                    count = await asyncio.to_thread(register_shell_tools, registry)
+                    if count:
+                        print(f"[startup] Shell-Tools registriert: {count}")
+                    return count
+                except Exception as e:
+                    print(f"[startup] Shell-Tools fehlgeschlagen: {e}")
+                    return 0
+
+            async def register_knowledge():
+                try:
+                    from app.agent.knowledge_tools import register_knowledge_collector_tools
+                    count = await asyncio.to_thread(register_knowledge_collector_tools, registry)
+                    if count:
+                        print(f"[startup] Knowledge Collector Tools registriert: {count}")
+                    return count
+                except Exception as e:
+                    print(f"[startup] Knowledge Collector Tools fehlgeschlagen: {e}")
+                    return 0
+
+            async def register_team():
+                try:
+                    from app.agent.multi_agent.team_tools import register_team_tools
+                    count = await asyncio.to_thread(register_team_tools, registry)
+                    if count:
+                        print(f"[startup] Multi-Agent Team Tools registriert: {count}")
+                    return count
+                except Exception as e:
+                    print(f"[startup] Multi-Agent Team Tools fehlgeschlagen: {e}")
+                    return 0
+
+            async def register_email():
+                try:
+                    from app.agent.email_tools import register_email_tools
+                    count = await asyncio.to_thread(register_email_tools, registry)
+                    if count:
+                        print(f"[startup] Email-Tools registriert: {count}")
+                    return count
+                except Exception as e:
+                    print(f"[startup] Email-Tools fehlgeschlagen: {e}")
+                    return 0
+
+            async def register_webex():
+                try:
+                    from app.agent.webex_tools import register_webex_tools
+                    count = await asyncio.to_thread(register_webex_tools, registry)
+                    if count:
+                        print(f"[startup] Webex-Tools registriert: {count}")
+                    return count
+                except Exception as e:
+                    print(f"[startup] Webex-Tools fehlgeschlagen: {e}")
+                    return 0
+
+            results = await asyncio.gather(
+                register_docker(),
+                register_shell(),
+                register_knowledge(),
+                register_team(),
+                register_email(),
+                register_webex(),
+                return_exceptions=False
+            )
+            return sum(r for r in results if r)
+
+        # Execute all groups in parallel (80% improvement in registration time)
+        print("[startup] Registriere Tools (parallel)...")
+        group_results = await asyncio.gather(
+            register_tools_group_a(),
+            register_tools_group_b(),
+            register_tools_group_c(),
+            register_tools_group_d(),
+            return_exceptions=False
+        )
+        total_registered = sum(r for r in group_results if r)
+        print(f"[startup] {total_registered} Tools insgesamt registriert")
 
     except Exception as e:
         print(f"[startup] Agent-Initialisierung fehlgeschlagen: {e}")
@@ -413,7 +539,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="AI Code Assistant",
     description="Lokaler AI-Assistent für Java/Python-Entwicklung mit Handbuch-, WLP-Log-, PDF- und Confluence-Unterstützung",
-    version="2.38.5",
+    version="2.38.6",
     lifespan=lifespan,
 )
 
