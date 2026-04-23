@@ -149,6 +149,50 @@ async def list_rooms(type: str = Query("", description="group oder direct")):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@router.get("/rooms/picker")
+async def list_rooms_for_picker(
+    q: str = Query("", description="Suchbegriff für Titel/ID (case-insensitive)"),
+    type: str = Query("", description="Optional: group|direct"),
+    limit: int = Query(200, ge=1, le=2000),
+):
+    """Schlanke Room-Liste für Settings-Dropdown mit Suchfunktion.
+
+    Unterschied zu ``/rooms``:
+    - Server-seitiger Substring-Filter über Titel + ID (``q``)
+    - Gekappt auf ``limit`` Einträge (Default 200 — Dropdown-Performance)
+    - Nur die vier UI-relevanten Felder (id/title/type/last_activity)
+    """
+    from app.services.webex_client import get_webex_client
+    try:
+        client = get_webex_client()
+        rooms = await client.list_all_rooms(
+            room_type=type or "",
+            name_contains=q if q else "",
+            max_total=max(limit, 200),
+        )
+    except Exception as e:
+        logger.warning("[webex] rooms/picker failed: %s", e)
+        raise HTTPException(status_code=500, detail=str(e))
+
+    # Normalisieren + client-seitiger Fallback-Filter (für ID-Substring)
+    q_lower = (q or "").strip().lower()
+    out = []
+    for r in rooms:
+        title = str(r.get("title") or "")
+        rid = str(r.get("id") or "")
+        if q_lower and q_lower not in title.lower() and q_lower not in rid.lower():
+            continue
+        out.append({
+            "id": rid,
+            "title": title,
+            "type": str(r.get("type") or r.get("room_type") or ""),
+            "last_activity": r.get("last_activity") or r.get("lastActivity") or "",
+        })
+        if len(out) >= limit:
+            break
+    return {"rooms": out, "count": len(out), "query": q}
+
+
 # ── Datei-Download (Proxy) ─────────────────────────────────────────────────────
 
 @router.get("/file")

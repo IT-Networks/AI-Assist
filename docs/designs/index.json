@@ -1,6 +1,6 @@
 {
   "version": "1.0",
-  "updated": "2026-03-27T15:16:47.469104",
+  "updated": "2026-04-23T18:42:49.355301",
   "designs": [
     {
       "id": "design-2026-03-22-001",
@@ -1663,6 +1663,266 @@
           "status": "implemented",
           "commit": "abc123",
           "updated": "2026-03-27T15:16:47.469104"
+        }
+      ]
+    },
+    {
+      "id": "design-2026-04-18-001",
+      "type": "design",
+      "title": "API Test Design",
+      "created": "2026-04-18T16:47:29.117000",
+      "updated": null,
+      "status": "draft",
+      "tags": [
+        "test",
+        "api"
+      ],
+      "sources": [],
+      "command": null,
+      "implementation_refs": []
+    },
+    {
+      "id": "brainstorm-2026-04-18-001",
+      "type": "brainstorm",
+      "title": "Status Test",
+      "created": "2026-04-18T16:47:29.133508",
+      "updated": "2026-04-18T16:47:29.138509",
+      "status": "approved",
+      "tags": [],
+      "sources": [],
+      "command": null,
+      "implementation_refs": []
+    },
+    {
+      "id": "design-2026-04-18-002",
+      "type": "design",
+      "title": "Link Test",
+      "created": "2026-04-18T16:47:29.147510",
+      "updated": "2026-04-18T16:47:29.153017",
+      "status": "draft",
+      "tags": [],
+      "sources": [],
+      "command": null,
+      "implementation_refs": [
+        {
+          "file_path": "app/test.py",
+          "status": "implemented",
+          "commit": "abc123",
+          "updated": "2026-04-18T16:47:29.153017"
+        },
+        {
+          "file_path": "app/test2.py",
+          "status": "implemented",
+          "commit": "abc123",
+          "updated": "2026-04-18T16:47:29.153017"
+        }
+      ]
+    },
+    {
+      "id": "design-2026-04-18-003",
+      "type": "design",
+      "title": "API Test Design",
+      "created": "2026-04-18T17:31:06.723350",
+      "updated": null,
+      "status": "draft",
+      "tags": [
+        "test",
+        "api"
+      ],
+      "sources": [],
+      "command": null,
+      "implementation_refs": []
+    },
+    {
+      "id": "brainstorm-2026-04-18-002",
+      "type": "brainstorm",
+      "title": "Status Test",
+      "created": "2026-04-18T17:31:06.739356",
+      "updated": "2026-04-18T17:31:06.743865",
+      "status": "approved",
+      "tags": [],
+      "sources": [],
+      "command": null,
+      "implementation_refs": []
+    },
+    {
+      "id": "design-2026-04-18-004",
+      "type": "design",
+      "title": "Link Test",
+      "created": "2026-04-18T17:31:06.751866",
+      "updated": "2026-04-18T17:31:06.756865",
+      "status": "draft",
+      "tags": [],
+      "sources": [],
+      "command": null,
+      "implementation_refs": [
+        {
+          "file_path": "app/test.py",
+          "status": "implemented",
+          "commit": "abc123",
+          "updated": "2026-04-18T17:31:06.756865"
+        },
+        {
+          "file_path": "app/test2.py",
+          "status": "implemented",
+          "commit": "abc123",
+          "updated": "2026-04-18T17:31:06.756865"
+        }
+      ]
+    },
+    {
+      "id": "design-2026-04-23-001",
+      "type": "design",
+      "title": "API Test Design",
+      "created": "2026-04-23T18:13:26.773895",
+      "updated": null,
+      "status": "draft",
+      "tags": [
+        "test",
+        "api"
+      ],
+      "sources": [],
+      "command": null,
+      "implementation_refs": []
+    },
+    {
+      "id": "brainstorm-2026-04-23-001",
+      "type": "brainstorm",
+      "title": "Status Test",
+      "created": "2026-04-23T18:13:26.789899",
+      "updated": "2026-04-23T18:13:26.794898",
+      "status": "approved",
+      "tags": [],
+      "sources": [],
+      "command": null,
+      "implementation_refs": []
+    },
+    {
+      "id": "design-2026-04-23-002",
+      "type": "design",
+      "title": "Link Test",
+      "created": "2026-04-23T18:13:26.802902",
+      "updated": "2026-04-23T18:13:26.806905",
+      "status": "draft",
+      "tags": [],
+      "sources": [],
+      "command": null,
+      "implementation_refs": [
+        {
+          "file_path": "app/test.py",
+          "status": "implemented",
+          "commit": "abc123",
+          "updated": "2026-04-23T18:13:26.806905"
+        },
+        {
+          "file_path": "app/test2.py",
+          "status": "implemented",
+          "commit": "abc123",
+          "updated": "2026-04-23T18:13:26.806905"
+        }
+      ]
+    },
+    {
+      "id": "design-2026-04-23-003",
+      "type": "design",
+      "title": "API Test Design",
+      "created": "2026-04-23T18:40:17.035721",
+      "updated": null,
+      "status": "draft",
+      "tags": [
+        "test",
+        "api"
+      ],
+      "sources": [],
+      "command": null,
+      "implementation_refs": []
+    },
+    {
+      "id": "brainstorm-2026-04-23-002",
+      "type": "brainstorm",
+      "title": "Status Test",
+      "created": "2026-04-23T18:40:17.050823",
+      "updated": "2026-04-23T18:40:17.055821",
+      "status": "approved",
+      "tags": [],
+      "sources": [],
+      "command": null,
+      "implementation_refs": []
+    },
+    {
+      "id": "design-2026-04-23-004",
+      "type": "design",
+      "title": "Link Test",
+      "created": "2026-04-23T18:40:17.065756",
+      "updated": "2026-04-23T18:40:17.070760",
+      "status": "draft",
+      "tags": [],
+      "sources": [],
+      "command": null,
+      "implementation_refs": [
+        {
+          "file_path": "app/test.py",
+          "status": "implemented",
+          "commit": "abc123",
+          "updated": "2026-04-23T18:40:17.070760"
+        },
+        {
+          "file_path": "app/test2.py",
+          "status": "implemented",
+          "commit": "abc123",
+          "updated": "2026-04-23T18:40:17.070760"
+        }
+      ]
+    },
+    {
+      "id": "design-2026-04-23-005",
+      "type": "design",
+      "title": "API Test Design",
+      "created": "2026-04-23T18:42:49.323218",
+      "updated": null,
+      "status": "draft",
+      "tags": [
+        "test",
+        "api"
+      ],
+      "sources": [],
+      "command": null,
+      "implementation_refs": []
+    },
+    {
+      "id": "brainstorm-2026-04-23-003",
+      "type": "brainstorm",
+      "title": "Status Test",
+      "created": "2026-04-23T18:42:49.338791",
+      "updated": "2026-04-23T18:42:49.342793",
+      "status": "approved",
+      "tags": [],
+      "sources": [],
+      "command": null,
+      "implementation_refs": []
+    },
+    {
+      "id": "design-2026-04-23-006",
+      "type": "design",
+      "title": "Link Test",
+      "created": "2026-04-23T18:42:49.351301",
+      "updated": "2026-04-23T18:42:49.355301",
+      "status": "draft",
+      "tags": [],
+      "sources": [],
+      "command": null,
+      "implementation_refs": [
+        {
+          "file_path": "app/test.py",
+          "status": "implemented",
+          "commit": "abc123",
+          "updated": "2026-04-23T18:42:49.355301"
+        },
+        {
+          "file_path": "app/test2.py",
+          "status": "implemented",
+          "commit": "abc123",
+          "updated": "2026-04-23T18:42:49.355301"
         }
       ]
     }

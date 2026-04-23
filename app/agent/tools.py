@@ -218,24 +218,60 @@ class ToolDefinition:
 # Tool Registry
 # ══════════════════════════════════════════════════════════════════════════════
 
+@dataclass
+class AliasInfo:
+    """Alias-Zuordnung für ein Tool (Konsolidierungs-Migration)."""
+    target: str
+    deprecation_msg: Optional[str] = None  # Wird ins Log geschrieben
+    surface_to_llm: bool = False  # Wenn True: Hinweis ins Tool-Result für LLM
+    arg_mapper: Optional[Callable[[Dict[str, Any]], Dict[str, Any]]] = None
+    # arg_mapper: Optionale Funktion, die Legacy-Parameter auf die neue
+    # Ziel-Signatur abbildet. Beispiel: search_code(query=..., language=...)
+    # → search(query=..., scope="code", language=...). Wenn None, werden
+    # kwargs unverändert durchgereicht.
+    registered_at: str = ""  # ISO-Zeitstempel, für Aufräum-Stichtag
+
+    def __post_init__(self):
+        if not self.registered_at:
+            from datetime import datetime
+            self.registered_at = datetime.utcnow().isoformat()
+
+
 class ToolRegistry:
     """
     Registry für alle verfügbaren Tools.
     Verwaltet Tool-Definitionen und deren Ausführung.
 
     Performance: Cached aggregierte Schemas für schnellen Zugriff.
+
+    Alias-Mechanismus: Tools können unter alten Namen aufgerufen werden,
+    werden aber auf kanonische Namen aufgelöst (Konsolidierungs-Migration).
+    Aliase erscheinen NICHT in den LLM-Schemas — dem LLM wird nur der
+    kanonische Name gezeigt. Siehe plan_local_tool_consolidation_2026-04-23.md.
     """
 
     def __init__(self):
         self._tools: Dict[str, Tool] = {}
+        self._aliases: Dict[str, AliasInfo] = {}  # alter Name → Alias-Info
+        self._alias_hits: Dict[str, int] = {}  # Laufzeit-Zähler pro Alias
         # Performance: Cached schema lists (invalidated on register)
         self._cached_schemas_read_only: Optional[List[Dict]] = None
         self._cached_schemas_all: Optional[List[Dict]] = None
 
     @property
     def tools(self) -> Dict[str, Tool]:
-        """Gibt alle registrierten Tools zurück."""
+        """Gibt alle registrierten Tools zurück (ohne Aliase)."""
         return self._tools
+
+    @property
+    def aliases(self) -> Dict[str, AliasInfo]:
+        """Gibt alle registrierten Aliase zurück."""
+        return self._aliases
+
+    @property
+    def alias_hits(self) -> Dict[str, int]:
+        """Laufzeit-Zähler: wie oft wurde jeder Alias aufgerufen."""
+        return dict(self._alias_hits)
 
     def register(self, tool: "Tool | ToolDefinition") -> None:
         """Registriert ein Tool. Akzeptiert Tool oder ToolDefinition."""
@@ -246,9 +282,106 @@ class ToolRegistry:
         self._cached_schemas_read_only = None
         self._cached_schemas_all = None
 
+    def unregister(self, name: str) -> bool:
+        """
+        Entfernt ein Tool aus der Registry. Gibt True zurück wenn entfernt.
+
+        Verwendet während der Konsolidierungs-Migration, um einen Legacy-Tool-
+        Namen freizuräumen, bevor er als Alias auf einen kanonischen Namen
+        umgeroutet wird.
+        """
+        if name in self._tools:
+            del self._tools[name]
+            self._cached_schemas_read_only = None
+            self._cached_schemas_all = None
+            return True
+        return False
+
+    def register_alias(
+        self,
+        alias: str,
+        target: str,
+        deprecation_msg: Optional[str] = None,
+        surface_to_llm: bool = False,
+        arg_mapper: Optional[Callable[[Dict[str, Any]], Dict[str, Any]]] = None,
+        replace_existing: bool = False,
+    ) -> None:
+        """
+        Registriert einen Alias, der auf ein bestehendes Tool zeigt.
+
+        Args:
+            alias: Alter/Legacy-Name, den das LLM möglicherweise noch ruft.
+            target: Kanonischer Tool-Name (muss vorher registriert sein).
+            deprecation_msg: Optionale Nachricht für Log (und ggf. LLM).
+            surface_to_llm: Wenn True, wird der Hinweis in das ToolResult
+                eingefügt — damit das LLM den neuen Namen lernt. Default
+                False (log-only), um Tokens zu sparen.
+            arg_mapper: Optionale Funktion, die Legacy-Parameter (dict) in
+                die Parameter der Ziel-Signatur transformiert. Wird benötigt,
+                wenn Alias und Ziel unterschiedliche Signaturen haben
+                (z.B. search_code → search mit scope="code").
+            replace_existing: Wenn True und ein Tool mit diesem Namen bereits
+                registriert ist, wird es zuerst unregistriert. Für
+                Phase-3-Aliase nötig, weil Legacy-Tools durch ihre eigenen
+                register_*_tools() Funktionen bereits in der Registry sind.
+
+        Verwendung während der Konsolidierungs-Migration:
+            registry.register_alias(
+                "read_file", "read",
+                deprecation_msg="read_file ist deprecated, verwende read",
+            )
+            registry.register_alias(
+                "search_code", "search",
+                arg_mapper=lambda kw: {**kw, "scope": "code"},
+            )
+        """
+        if target not in self._tools:
+            raise ValueError(
+                f"Alias-Ziel '{target}' ist nicht registriert — "
+                f"Alias '{alias}' kann nicht eingerichtet werden"
+            )
+        if alias in self._tools:
+            if replace_existing:
+                # Legacy-Tool aus der Registry nehmen — Alias kapert den Namen.
+                # Nur zulässig für dokumentierte Migrationen; nicht magisch.
+                self.unregister(alias)
+                logger.info(
+                    f"[tools] Legacy-Tool '{alias}' unregistriert, wird jetzt "
+                    f"als Alias auf '{target}' geroutet."
+                )
+            else:
+                raise ValueError(
+                    f"Alias '{alias}' kollidiert mit einem registrierten Tool. "
+                    f"Setze replace_existing=True, wenn der Name übernommen werden soll."
+                )
+        if alias in self._aliases:
+            logger.warning(
+                f"[tools] Alias '{alias}' wird überschrieben "
+                f"({self._aliases[alias].target} → {target})"
+            )
+        self._aliases[alias] = AliasInfo(
+            target=target,
+            deprecation_msg=deprecation_msg,
+            surface_to_llm=surface_to_llm,
+            arg_mapper=arg_mapper,
+        )
+
+    def resolve_name(self, name: str) -> tuple[str, Optional[AliasInfo]]:
+        """
+        Löst einen möglicherweise alias-haften Namen zum kanonischen Tool-Namen auf.
+
+        Returns:
+            (canonical_name, alias_info oder None wenn kein Alias).
+        """
+        if name in self._aliases:
+            info = self._aliases[name]
+            return info.target, info
+        return name, None
+
     def get(self, name: str) -> Optional[Tool]:
-        """Gibt ein Tool zurück."""
-        return self._tools.get(name)
+        """Gibt ein Tool zurück (folgt Aliasen)."""
+        canonical, _ = self.resolve_name(name)
+        return self._tools.get(canonical)
 
     def list_tools(self, category: Optional[ToolCategory] = None) -> List[Tool]:
         """Listet alle Tools auf, optional gefiltert nach Kategorie."""
@@ -295,10 +428,30 @@ class ToolRegistry:
         Führt ein Tool aus.
 
         Args:
-            tool_name: Name des Tools
+            tool_name: Name des Tools (Alias oder kanonischer Name)
             **kwargs: Parameter für das Tool
         """
-        name = tool_name
+        # Alias-Auflösung: Legacy-Namen werden transparent auf kanonische Tools gemappt
+        canonical_name, alias_info = self.resolve_name(tool_name)
+        if alias_info is not None:
+            self._alias_hits[tool_name] = self._alias_hits.get(tool_name, 0) + 1
+            msg = alias_info.deprecation_msg or (
+                f"Tool '{tool_name}' ist deprecated, verwende '{canonical_name}'"
+            )
+            logger.warning(f"[tools] Alias-Aufruf: '{tool_name}' → '{canonical_name}'. {msg}")
+            if alias_info.arg_mapper is not None:
+                try:
+                    kwargs = alias_info.arg_mapper(dict(kwargs))
+                except Exception as e:
+                    return ToolResult(
+                        success=False,
+                        error=(
+                            f"Alias-Mapper für '{tool_name}' → '{canonical_name}' "
+                            f"fehlgeschlagen: {e}"
+                        ),
+                    )
+
+        name = canonical_name
 
         # Prüfe auf JSON-Parse-Fehler (vom Orchestrator gesetzt)
         if "__parse_error__" in kwargs:
@@ -307,7 +460,7 @@ class ToolRegistry:
             return ToolResult(
                 success=False,
                 error=(
-                    f"Tool '{name}': JSON-Parsing der Argumente fehlgeschlagen: {parse_error}\n"
+                    f"Tool '{tool_name}': JSON-Parsing der Argumente fehlgeschlagen: {parse_error}\n"
                     f"Rohes Argument: {raw_args[:200]}...\n"
                     f"Bitte korrigiere die JSON-Syntax und rufe das Tool erneut auf."
                 )
@@ -315,7 +468,7 @@ class ToolRegistry:
 
         tool = self._tools.get(name)
         if not tool:
-            return ToolResult(success=False, error=f"Unbekanntes Tool: {name}")
+            return ToolResult(success=False, error=f"Unbekanntes Tool: {tool_name}")
 
         if not tool.handler:
             return ToolResult(success=False, error=f"Tool {name} hat keinen Handler")
@@ -343,9 +496,20 @@ class ToolRegistry:
             )
 
         try:
-            return await tool.handler(**kwargs)
+            result = await tool.handler(**kwargs)
         except Exception as e:
             return ToolResult(success=False, error=f"Fehler bei {name}: {str(e)}")
+
+        # Bei Alias mit surface_to_llm=True: Deprecation-Hinweis ins Ergebnis einblenden,
+        # damit das LLM lernt, künftig den kanonischen Namen zu verwenden.
+        if alias_info is not None and alias_info.surface_to_llm and result.success:
+            hint = alias_info.deprecation_msg or (
+                f"Hinweis: '{tool_name}' ist deprecated. Verwende künftig '{canonical_name}'."
+            )
+            if isinstance(result.data, str):
+                result.data = f"[{hint}]\n\n{result.data}"
+
+        return result
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -3077,6 +3241,1042 @@ SUGGEST_ANSWERS_TOOL = Tool(
 
 
 # ══════════════════════════════════════════════════════════════════════════════
+# Core-Tools (Phase 2 der Lokal-Tool-Konsolidierung)
+#
+# Orthogonaler Kern angelehnt an Claude Code / OpenCode: read, write, edit,
+# ls, glob, grep, search. Legacy-Tools bleiben via Alias-Routing aufrufbar,
+# erscheinen aber nicht mehr im LLM-Schema.
+# Siehe claudedocs/plan_local_tool_consolidation_2026-04-23.md
+# ══════════════════════════════════════════════════════════════════════════════
+
+
+def _parse_pdf_pages(pages: Any) -> "tuple[int, int] | None":
+    """Parst einen Pages-Parameter (z.B. '1-5' oder '3') in (start, end)."""
+    if pages is None or pages == "":
+        return None
+    if isinstance(pages, int):
+        return (pages, pages)
+    s = str(pages).strip()
+    if "-" in s:
+        left, right = s.split("-", 1)
+        return (int(left), int(right))
+    n = int(s)
+    return (n, n)
+
+
+async def read(
+    path: str,
+    encoding: str = "utf-8",
+    offset: int = 0,
+    limit: int = 0,
+    show_line_numbers: bool = True,
+    pages: Optional[str] = None,
+    meta: bool = False,
+) -> ToolResult:
+    """
+    Universeller File-Reader. Dispatch nach Datei-Typ:
+
+    - PDF (`.pdf`) + meta=True  → PDF-Metadaten (Seitenzahl, Titel, Autor)
+    - PDF (`.pdf`) + pages=...  → Seitenbereich lesen (z.B. pages='1-5')
+    - sonst                     → Text-Inhalt mit optional offset/limit
+
+    Ersetzt read_file, read_pdf_pages, get_pdf_info, read_sqlj_file.
+    """
+    path_lower = (path or "").lower().strip()
+    if path_lower.endswith(".pdf"):
+        if meta:
+            return await get_pdf_info(path)
+        page_range = _parse_pdf_pages(pages)
+        if page_range is None:
+            # PDF ohne explizite Seiten: erst Metadaten zurückgeben — LLM wählt dann Bereich
+            return await get_pdf_info(path)
+        return await read_pdf_pages(path, page_range[0], page_range[1])
+
+    if path_lower.endswith(".sqlj"):
+        return await read_sqlj_file(path)
+
+    return await read_file(
+        path=path,
+        encoding=encoding,
+        offset=offset,
+        limit=limit,
+        show_line_numbers=show_line_numbers,
+    )
+
+
+async def write(path: str, content: str = "") -> ToolResult:
+    """
+    Schreibt Datei oder erzeugt Verzeichnis. Dispatch:
+
+    - Pfad endet auf '/' oder '\\'  → create_directory
+    - sonst                         → write_file
+
+    Ersetzt write_file und create_directory.
+    """
+    stripped = (path or "").rstrip()
+    if stripped.endswith("/") or stripped.endswith("\\"):
+        return await create_directory(stripped)
+    return await write_file(path=path, content=content)
+
+
+async def edit(
+    path: str,
+    old_string: str,
+    new_string: str,
+    replace_all: bool = False,
+) -> ToolResult:
+    """Targeted string replacement — Wrapper um edit_file."""
+    return await edit_file(
+        path=path,
+        old_string=old_string,
+        new_string=new_string,
+        replace_all=replace_all,
+    )
+
+
+async def ls(
+    path: str,
+    pattern: str = "*",
+    recursive: bool = False,
+) -> ToolResult:
+    """Verzeichnis-Listing — Wrapper um list_files."""
+    return await list_files(path=path, pattern=pattern, recursive=recursive)
+
+
+async def glob(
+    pattern: str,
+    path: str = ".",
+    sort_by: str = "mtime",
+    max_results: int = 100,
+) -> ToolResult:
+    """File-Pattern-Matching — Wrapper um glob_files."""
+    return await glob_files(
+        pattern=pattern, path=path, sort_by=sort_by, max_results=max_results,
+    )
+
+
+async def grep(
+    pattern: str,
+    path: str = ".",
+    file_pattern: str = "*",
+    context_lines: int = 2,
+    max_results: int = 50,
+    case_sensitive: bool = False,
+) -> ToolResult:
+    """Regex-Suche in Datei-Inhalten — Wrapper um grep_content."""
+    return await grep_content(
+        pattern=pattern,
+        path=path,
+        file_pattern=file_pattern,
+        context_lines=context_lines,
+        max_results=max_results,
+        case_sensitive=case_sensitive,
+    )
+
+
+async def search(
+    query: str,
+    scope: str = "code",
+    limit: int = 20,
+    # Scope-spezifische Passthrough-Parameter:
+    language: str = "all",
+    file_pattern: str = "",
+    service_filter: Optional[str] = None,
+    skill_ids: Optional[List[str]] = None,
+    filename_filter: Optional[str] = None,
+) -> ToolResult:
+    """
+    Semantische/Index-basierte Suche mit Scope-Dispatch:
+
+    - scope='code'     → search_code (ripgrep in Java/Python-Repos)
+    - scope='handbook' → search_handbook (indexiertes Handbuch)
+    - scope='skills'   → search_skills (Skill-Wissensbasen)
+    - scope='pdf'      → search_pdf (hochgeladene PDFs)
+
+    Ersetzt search_code, search_handbook, search_skills, search_pdf.
+    """
+    scope_norm = (scope or "code").lower().strip()
+
+    if scope_norm == "code":
+        return await search_code(
+            query=query,
+            language=language,
+            max_results=limit,
+            file_pattern=file_pattern,
+        )
+    if scope_norm == "handbook":
+        return await search_handbook(
+            query=query, service_filter=service_filter, top_k=limit,
+        )
+    if scope_norm == "skills":
+        return await search_skills(query=query, skill_ids=skill_ids, top_k=limit)
+    if scope_norm == "pdf":
+        return await search_pdf(
+            query=query, filename_filter=filename_filter, top_k=limit,
+        )
+
+    return ToolResult(
+        success=False,
+        error=(
+            f"Unbekannter scope '{scope}'. "
+            f"Erlaubte Werte: 'code', 'handbook', 'skills', 'pdf'."
+        ),
+    )
+
+
+# Tool-Definitionen für die Core-Tools
+
+READ_TOOL = Tool(
+    name="read",
+    description=(
+        "Liest eine LOKALE Datei oder PDF. Ein universeller Reader für alle Text- "
+        "und PDF-Dateien. Für PDFs: nutze 'pages' (z.B. '1-5') für Seitenbereich "
+        "oder 'meta=true' für Metadaten. Für Text: 'offset'/'limit' bei großen "
+        "Dateien. Ersetzt read_file, read_pdf_pages, get_pdf_info, read_sqlj_file. "
+        "PFAD-AUFLÖSUNG: Absoluter Pfad direkt; relativer Pfad wird in "
+        "Java-Repo → Python-Repo → CWD gesucht. Für GitHub-Dateien: github_get_file."
+    ),
+    category=ToolCategory.FILE,
+    parameters=[
+        ToolParameter("path", "string",
+            "Pfad zur Datei (absolut, relativ, oder PDF-Dateiname). "
+            "Stacktrace-Pfade wie 'com/example/Service.java:42' direkt übergeben."
+        ),
+        ToolParameter("pages", "string",
+            "Nur bei PDFs: Seitenbereich wie '1-5' oder '3' (1-basiert, inklusiv).",
+            required=False, default=None,
+        ),
+        ToolParameter("meta", "boolean",
+            "Nur bei PDFs: Gibt Metadaten (Seitenzahl, Titel) statt Inhalt zurück.",
+            required=False, default=False,
+        ),
+        ToolParameter("offset", "integer",
+            "Nur bei Text: Startzeile, 1-basiert (0=Anfang).",
+            required=False, default=0,
+        ),
+        ToolParameter("limit", "integer",
+            "Nur bei Text: Max Zeilen (0=alle, empfohlen: 500 bei großen Dateien).",
+            required=False, default=0,
+        ),
+        ToolParameter("encoding", "string",
+            "Encoding der Datei.", required=False, default="utf-8",
+        ),
+        ToolParameter("show_line_numbers", "boolean",
+            "Nur bei Text: Zeilennummern anzeigen.", required=False, default=True,
+        ),
+    ],
+    handler=read,
+)
+
+WRITE_TOOL = Tool(
+    name="write",
+    description=(
+        "Schreibt eine Datei oder erzeugt ein Verzeichnis. BENÖTIGT USER-BESTÄTIGUNG. "
+        "Pfad endet auf '/' oder '\\' → Verzeichnis wird erstellt; sonst wird die "
+        "Datei überschrieben oder neu angelegt. Ersetzt write_file und create_directory. "
+        "Für GitHub-Repos nicht verfügbar — diese sind read-only."
+    ),
+    category=ToolCategory.FILE,
+    is_write_operation=True,
+    parameters=[
+        ToolParameter("path", "string",
+            "Pfad zur Datei (absolut oder relativ). "
+            "Endet auf '/' → Verzeichnis."
+        ),
+        ToolParameter("content", "string",
+            "Inhalt der geschrieben werden soll. Bei Verzeichnis-Erzeugung "
+            "leer lassen.",
+            required=False, default="",
+        ),
+    ],
+    handler=write,
+)
+
+EDIT_TOOL = Tool(
+    name="edit",
+    description=(
+        "Bearbeitet eine LOKALE Datei durch String-Ersetzung. BENÖTIGT BESTÄTIGUNG.\n\n"
+        "KRITISCH - IMMER ZUERST read AUSFÜHREN! Der old_string muss EXAKT mit dem "
+        "Dateiinhalt übereinstimmen (inkl. Leerzeichen, Tabs, Zeilenumbrüche). "
+        "Bei mehrfachem Vorkommen: entweder mehr Kontext in old_string, oder replace_all=true."
+    ),
+    category=ToolCategory.FILE,
+    is_write_operation=True,
+    parameters=[
+        ToolParameter("path", "string", "Pfad zur Datei (relativ oder absolut)"),
+        ToolParameter("old_string", "string",
+            "EXAKTER zu ersetzender Text — 1:1 aus read kopieren inkl. Whitespaces."
+        ),
+        ToolParameter("new_string", "string", "Neuer Text der old_string ersetzt"),
+        ToolParameter("replace_all", "boolean",
+            "Alle Vorkommen ersetzen (default: false)", required=False, default=False,
+        ),
+    ],
+    handler=edit,
+)
+
+LS_TOOL = Tool(
+    name="ls",
+    description=(
+        "Listet Dateien und Unterverzeichnisse. Für Pattern-Suche quer durch Bäume "
+        "nutze glob. PFAD: Absoluter Pfad zum Verzeichnis. Für GitHub-Repos nutze "
+        "github_* Tools."
+    ),
+    category=ToolCategory.FILE,
+    parameters=[
+        ToolParameter("path", "string",
+            "Absoluter Verzeichnispfad (z.B. 'C:/repo/src'). "
+            "Nutze get_project_paths für verfügbare Projekt-Pfade."
+        ),
+        ToolParameter("pattern", "string",
+            "Glob-Pattern (z.B. '*.java')", required=False, default="*",
+        ),
+        ToolParameter("recursive", "boolean",
+            "Auch Unterverzeichnisse", required=False, default=False,
+        ),
+    ],
+    handler=ls,
+)
+
+GLOB_TOOL = Tool(
+    name="glob",
+    description=(
+        "Sucht Dateien per Glob-Pattern (wie Claude Code Glob). Patterns: '**/*.py' "
+        "(rekursiv), 'src/**/*.java', '*.md'. Sortiert standardmäßig nach "
+        "Änderungsdatum (neueste zuerst)."
+    ),
+    category=ToolCategory.FILE,
+    parameters=[
+        ToolParameter("pattern", "string", "Glob-Pattern (z.B. '**/*.py')"),
+        ToolParameter("path", "string",
+            "Absoluter Pfad zum Basisverzeichnis.",
+            required=False, default=".",
+        ),
+        ToolParameter("sort_by", "string",
+            "Sortierung: mtime|name|size", required=False, default="mtime",
+        ),
+        ToolParameter("max_results", "integer",
+            "Max Ergebnisse", required=False, default=100,
+        ),
+    ],
+    handler=glob,
+)
+
+GREP_TOOL = Tool(
+    name="grep",
+    description=(
+        "Regex-Suche in Datei-Inhalten (wie Claude Code Grep). NUTZE für "
+        "spezifische Verzeichnisse. Für allgemeine Java/Python-Code-Suche ist "
+        "search(scope='code') einfacher (integrierte Sprachfilter)."
+    ),
+    category=ToolCategory.SEARCH,
+    parameters=[
+        ToolParameter("pattern", "string",
+            "Suchtext oder Regex (z.B. 'def process_', 'class.*Handler')."
+        ),
+        ToolParameter("path", "string",
+            "Absoluter Pfad zum Verzeichnis oder zur Datei.",
+            required=False, default=".",
+        ),
+        ToolParameter("file_pattern", "string",
+            "Glob-Filter (z.B. '*.py', '*.java')", required=False, default="*",
+        ),
+        ToolParameter("context_lines", "integer",
+            "Zeilen vor/nach Match", required=False, default=2,
+        ),
+        ToolParameter("max_results", "integer",
+            "Max Treffer", required=False, default=50,
+        ),
+        ToolParameter("case_sensitive", "boolean",
+            "Groß-/Kleinschreibung beachten", required=False, default=False,
+        ),
+    ],
+    handler=grep,
+)
+
+SEARCH_TOOL = Tool(
+    name="search",
+    description=(
+        "Semantische/Index-basierte Suche mit Scope-Auswahl. "
+        "scope='code' durchsucht Java- und Python-Repos (ripgrep); "
+        "scope='handbook' das indexierte Handbuch; "
+        "scope='skills' die Skill-Wissensbasen; "
+        "scope='pdf' in dieser Session hochgeladene PDFs. "
+        "Ersetzt search_code, search_handbook, search_skills, search_pdf."
+    ),
+    category=ToolCategory.SEARCH,
+    parameters=[
+        ToolParameter("query", "string", "Suchbegriff"),
+        ToolParameter("scope", "string",
+            "Suchbereich: 'code', 'handbook', 'skills', 'pdf'",
+            required=False, default="code",
+            enum=["code", "handbook", "skills", "pdf"],
+        ),
+        ToolParameter("limit", "integer",
+            "Max Ergebnisse", required=False, default=20,
+        ),
+        ToolParameter("language", "string",
+            "Nur scope='code': Sprachfilter 'all'|'java'|'python'|'sql'",
+            required=False, default="all",
+        ),
+        ToolParameter("file_pattern", "string",
+            "Nur scope='code': Glob-Pattern", required=False, default="",
+        ),
+        ToolParameter("service_filter", "string",
+            "Nur scope='handbook': Service-Name", required=False,
+        ),
+        ToolParameter("skill_ids", "array",
+            "Nur scope='skills': Skill-IDs einschränken", required=False,
+        ),
+        ToolParameter("filename_filter", "string",
+            "Nur scope='pdf': Nur PDFs mit diesem Namen", required=False,
+        ),
+    ],
+    handler=search,
+)
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Phase-3-Core-Tools: bash, bash_sessions, exec_python
+#
+# Konsolidiert Shell-Exec + Container-Sessions + Python-One-Shot-Exec.
+# Sicherheits-Modell bleibt erhalten:
+#   - sandbox='container' (default) läuft im isolierten Docker-Container
+#   - sandbox='local' eskaliert nach Container-Test mit User-Bestätigung
+#   - sandbox='workspace' nutzt den Whitelist-subprocess-Pfad mit Streaming
+# ══════════════════════════════════════════════════════════════════════════════
+
+
+async def bash(
+    command: str,
+    sandbox: str = "container",
+    cwd: Optional[str] = None,
+    execution_id: Optional[str] = None,
+    timeout: int = 120,
+    mount_repo: bool = False,
+    session_id: Optional[str] = None,
+    new_session: bool = False,
+    packages: Optional[List[str]] = None,
+) -> ToolResult:
+    """
+    Unified shell execution.
+
+    sandbox='container' (default): sicherer Test im Docker-Container.
+      - new_session=True startet eine persistente Python-Session (ruft
+        docker_session_create; liefert session_id zurück).
+      - session_id gesetzt: Python-Code im persistenten Session-Container.
+      - sonst: Shell-Befehl im Ephemer-Container (shell_execute).
+
+    sandbox='local': Eskalation nach Container-Test, erfordert execution_id
+      aus vorherigem bash(sandbox='container')-Aufruf und USER-BESTÄTIGUNG.
+
+    sandbox='workspace': Whitelist-subprocess im Projekt-cwd (Streaming +
+      Cancel, wie bisher run_workspace_command). Command wird via shlex in
+      Liste zerlegt.
+    """
+    sandbox_norm = (sandbox or "container").lower().strip()
+
+    if sandbox_norm == "container":
+        # Python-Session dispatch
+        if new_session:
+            from app.agent.docker_tools import docker_session_create
+            return await docker_session_create(session_name=None, packages=packages)
+        if session_id:
+            from app.agent.docker_tools import docker_session_execute
+            return await docker_session_execute(
+                session_id=session_id, code=command, timeout=timeout,
+            )
+        # Ephemerer Container-Shell-Test
+        from app.agent.shell_tools import shell_execute as _shell_execute
+        return await _shell_execute(
+            command=command, working_dir=cwd, timeout=timeout,
+            mount_repo=mount_repo,
+        )
+
+    if sandbox_norm == "local":
+        from app.agent.shell_tools import shell_execute_local as _shell_execute_local
+        if not execution_id:
+            return ToolResult(
+                success=False,
+                error=(
+                    "bash(sandbox='local') erfordert execution_id aus einem "
+                    "vorherigen bash(sandbox='container')-Aufruf. "
+                    "Führe erst den Container-Test aus und übergib dann die "
+                    "zurückgegebene execution_id."
+                ),
+            )
+        return await _shell_execute_local(
+            execution_id=execution_id, modified_command=command or None,
+        )
+
+    if sandbox_norm == "workspace":
+        from app.agent.command_tools import _handle_run_workspace_command
+        if not cwd:
+            return ToolResult(
+                success=False,
+                error="bash(sandbox='workspace') erfordert cwd (Projekt-Pfad).",
+            )
+        import shlex
+        try:
+            cmd_list = shlex.split(command) if command else []
+        except ValueError as e:
+            return ToolResult(success=False, error=f"Ungültige Shell-Syntax: {e}")
+        if not cmd_list:
+            return ToolResult(success=False, error="command darf nicht leer sein.")
+        return await _handle_run_workspace_command(
+            path=cwd, command=cmd_list, timeout_seconds=timeout,
+        )
+
+    return ToolResult(
+        success=False,
+        error=(
+            f"Unbekannter sandbox-Modus '{sandbox}'. "
+            f"Erlaubt: 'container', 'local', 'workspace'."
+        ),
+    )
+
+
+async def bash_sessions(
+    action: str,
+    session_id: Optional[str] = None,
+    filename: Optional[str] = None,
+    content_base64: Optional[str] = None,
+    packages: Optional[List[str]] = None,
+    session_name: Optional[str] = None,
+) -> ToolResult:
+    """
+    Lifecycle für persistente Container-Sessions und Shell-Execution-Cache.
+
+    action='list':   aktive Python-Sessions + gecachte Shell-Executions
+    action='create': neue Python-Session (optional mit packages / session_name)
+    action='close':  schließt Session per session_id
+    action='upload': Datei in Session hochladen (filename + content_base64)
+    """
+    action_norm = (action or "").lower().strip()
+
+    if action_norm == "list":
+        from app.agent.docker_tools import docker_session_list
+        from app.agent.shell_tools import shell_list_executions
+        sessions_res = await docker_session_list()
+        shells_res = await shell_list_executions()
+        combined = {
+            "python_sessions": sessions_res.data if sessions_res.success else None,
+            "shell_executions": shells_res.data if shells_res.success else None,
+        }
+        return ToolResult(success=True, data=combined)
+
+    if action_norm == "create":
+        from app.agent.docker_tools import docker_session_create
+        return await docker_session_create(
+            session_name=session_name, packages=packages,
+        )
+
+    if action_norm == "close":
+        from app.agent.docker_tools import docker_session_close
+        if not session_id:
+            return ToolResult(success=False, error="action='close' benötigt session_id.")
+        return await docker_session_close(session_id=session_id)
+
+    if action_norm == "upload":
+        from app.agent.docker_tools import docker_upload_file
+        if not session_id or not filename or content_base64 is None:
+            return ToolResult(
+                success=False,
+                error="action='upload' benötigt session_id, filename und content_base64.",
+            )
+        return await docker_upload_file(
+            session_id=session_id,
+            filename=filename,
+            content_base64=content_base64,
+        )
+
+    return ToolResult(
+        success=False,
+        error=f"Unbekannte action '{action}'. Erlaubt: list|create|close|upload.",
+    )
+
+
+async def exec_python(
+    code: str,
+    requirements: Optional[List[str]] = None,
+    session_id: Optional[str] = None,
+    timeout: int = 120,
+) -> ToolResult:
+    """
+    Ephemeral oder session-basierte Python-Ausführung im Container.
+
+    Kein Named-Script-Lifecycle — für wiederverwendbare Scripts gibt es
+    weiterhin generate_python_script / execute_python_script.
+
+    - session_id gesetzt: Code in bestehender Session ausführen
+      (docker_session_execute).
+    - sonst: One-Shot-Container (docker_execute_python) mit optionalen
+      requirements (pip install vor Ausführung).
+
+    Syntax-Check erfolgt vor Ausführung — ersetzt validate_python_script.
+    """
+    if not code or not code.strip():
+        return ToolResult(success=False, error="code darf nicht leer sein.")
+
+    # Syntax-Check (ersetzt validate_python_script bei ephemeralem Use-Case)
+    try:
+        compile(code, "<exec_python>", "exec")
+    except SyntaxError as e:
+        return ToolResult(
+            success=False,
+            error=f"Syntax-Fehler in Zeile {e.lineno}: {e.msg}",
+        )
+
+    if session_id:
+        from app.agent.docker_tools import docker_session_execute
+        return await docker_session_execute(
+            session_id=session_id, code=code, timeout=timeout,
+        )
+
+    from app.agent.docker_tools import docker_execute_python
+    return await docker_execute_python(
+        code=code, packages=requirements, timeout=timeout,
+    )
+
+
+BASH_TOOL = Tool(
+    name="bash",
+    description=(
+        "Unified Shell-Execution. sandbox='container' (default) führt im "
+        "sicheren Docker-Container aus; sandbox='local' eskaliert einen "
+        "vorherigen Container-Test (execution_id nötig) und BENÖTIGT BESTÄTIGUNG; "
+        "sandbox='workspace' nutzt den Whitelist-Pfad mit cwd für Project-Binaries "
+        "(python, node, npm, npx, pytest, pip, uv, poetry, cargo, go, mvn, gradle, "
+        "tsc, jest, vitest, java, make) — ebenfalls BESTÄTIGUNG. "
+        "Für persistente Python-Sessions: new_session=true setzen (liefert "
+        "session_id) oder session_id angeben. "
+        "Git-Operationen laufen NICHT über bash — nutze git_* Tools. "
+        "Für eine Python-Session-Lifecycle-Action (list/close/upload): bash_sessions. "
+        "Für reine Python-Code-Ausführung: exec_python."
+    ),
+    category=ToolCategory.ANALYSIS,
+    is_write_operation=True,  # konservativ — confirmation-Flow bleibt Handler-Sache
+    parameters=[
+        ToolParameter("command", "string",
+            "Shell-Befehl als String. Für workspace wird via shlex zerlegt."
+        ),
+        ToolParameter("sandbox", "string",
+            "Ausführungs-Modus: 'container' (default, sicher), "
+            "'local' (nach Container-Test, Bestätigung), "
+            "'workspace' (Whitelist-Binary im Projekt, Bestätigung).",
+            required=False, default="container",
+            enum=["container", "local", "workspace"],
+        ),
+        ToolParameter("cwd", "string",
+            "Arbeitsverzeichnis. Pflicht bei sandbox='workspace'.",
+            required=False,
+        ),
+        ToolParameter("execution_id", "string",
+            "ID aus vorherigem Container-Test — nur bei sandbox='local'.",
+            required=False,
+        ),
+        ToolParameter("timeout", "integer",
+            "Timeout in Sekunden (default 120).", required=False, default=120,
+        ),
+        ToolParameter("mount_repo", "boolean",
+            "Nur sandbox='container': Java/Python-Repo read-only mounten.",
+            required=False, default=False,
+        ),
+        ToolParameter("session_id", "string",
+            "Nur sandbox='container': persistente Python-Session wiederverwenden.",
+            required=False,
+        ),
+        ToolParameter("new_session", "boolean",
+            "Nur sandbox='container': neue Python-Session erzeugen, "
+            "liefert session_id zurück.",
+            required=False, default=False,
+        ),
+        ToolParameter("packages", "array",
+            "Nur bei new_session=true: pip-Pakete vorinstallieren.",
+            required=False,
+        ),
+    ],
+    handler=bash,
+)
+
+BASH_SESSIONS_TOOL = Tool(
+    name="bash_sessions",
+    description=(
+        "Lifecycle-Verwaltung für persistente Python-Container-Sessions und "
+        "Shell-Execution-Cache. action='list' zeigt beide Arten; 'create' startet "
+        "eine neue Session (alternativ: bash(new_session=true)); 'close' entfernt "
+        "eine Session; 'upload' lädt eine Datei in eine Session hoch (base64)."
+    ),
+    category=ToolCategory.ANALYSIS,
+    is_write_operation=True,
+    parameters=[
+        ToolParameter("action", "string",
+            "Aktion: 'list' | 'create' | 'close' | 'upload'",
+            enum=["list", "create", "close", "upload"],
+        ),
+        ToolParameter("session_id", "string",
+            "Session-ID (nötig bei 'close' und 'upload').",
+            required=False,
+        ),
+        ToolParameter("filename", "string",
+            "Nur 'upload': Datei-Name im Container.",
+            required=False,
+        ),
+        ToolParameter("content_base64", "string",
+            "Nur 'upload': Datei-Inhalt base64-kodiert.",
+            required=False,
+        ),
+        ToolParameter("packages", "array",
+            "Nur 'create': vorinstallierte pip-Pakete.",
+            required=False,
+        ),
+        ToolParameter("session_name", "string",
+            "Nur 'create': optionaler Session-Name.",
+            required=False,
+        ),
+    ],
+    handler=bash_sessions,
+)
+
+EXEC_PYTHON_TOOL = Tool(
+    name="exec_python",
+    description=(
+        "Führt Python-Code im Container aus. One-Shot (ohne session_id) oder in "
+        "einer persistenten Session (session_id). Bei One-Shot können via "
+        "requirements pip-Pakete vorinstalliert werden (muss in pip_allowed_packages "
+        "stehen). Enthält Syntax-Prüfung vor Ausführung. "
+        "Für wiederverwendbare, namentlich gespeicherte Scripts: "
+        "generate_python_script + execute_python_script."
+    ),
+    category=ToolCategory.ANALYSIS,
+    is_write_operation=True,
+    parameters=[
+        ToolParameter("code", "string", "Python-Code."),
+        ToolParameter("requirements", "array",
+            "Optionale pip-Pakete (nur One-Shot, aus pip_allowed_packages).",
+            required=False,
+        ),
+        ToolParameter("session_id", "string",
+            "Persistente Session wiederverwenden (sonst One-Shot).",
+            required=False,
+        ),
+        ToolParameter("timeout", "integer",
+            "Timeout in Sekunden.", required=False, default=120,
+        ),
+    ],
+    handler=exec_python,
+)
+
+
+def _register_phase2_aliases(registry: "ToolRegistry") -> None:
+    """
+    Registriert Legacy-Tool-Namen als Aliase auf die Phase-2-Core-Tools.
+
+    Zweck: Bestehende Chats/Prompts rufen evtl. noch read_file, write_file,
+    search_code etc. auf. Diese Aliase routen transparent auf die neuen
+    Core-Tools. Aliase erscheinen NICHT im LLM-Schema und loggen bei jedem
+    Aufruf — so ist ablesbar, wann die Aliase sicher entfernt werden können.
+
+    Koexistenz-Fenster: 14 Tage (siehe plan §3 Phase 5).
+    Nur Log (surface_to_llm=False) — LLM bekommt keinen Hinweis ins Result.
+    """
+    def _pdf_pages_mapper(kw: Dict[str, Any]) -> Dict[str, Any]:
+        """read_pdf_pages(filename, start_page, end_page) → read(path, pages)"""
+        filename = kw.pop("filename", None)
+        start = kw.pop("start_page", None)
+        end = kw.pop("end_page", None)
+        if filename is not None:
+            kw["path"] = filename
+        if start is not None and end is not None:
+            kw["pages"] = f"{start}-{end}"
+        elif start is not None:
+            kw["pages"] = str(start)
+        return kw
+
+    def _pdf_info_mapper(kw: Dict[str, Any]) -> Dict[str, Any]:
+        """get_pdf_info(filename) → read(path, meta=True)"""
+        filename = kw.pop("filename", None)
+        if filename is not None:
+            kw["path"] = filename
+        kw["meta"] = True
+        return kw
+
+    def _create_dir_mapper(kw: Dict[str, Any]) -> Dict[str, Any]:
+        """create_directory(path) → write(path_mit_slash, content='')"""
+        path = kw.get("path", "")
+        if path and not (path.endswith("/") or path.endswith("\\")):
+            kw["path"] = path + "/"
+        kw.setdefault("content", "")
+        return kw
+
+    def _scope_mapper(scope: str):
+        def mapper(kw: Dict[str, Any]) -> Dict[str, Any]:
+            kw["scope"] = scope
+            # Legacy-Param-Namen auf neue Namen mappen, wo sie abweichen
+            if "top_k" in kw:
+                kw["limit"] = kw.pop("top_k")
+            if "max_results" in kw:
+                kw["limit"] = kw.pop("max_results")
+            return kw
+        return mapper
+
+    # File-I/O-Aliase
+    registry.register_alias(
+        "read_file", "read",
+        deprecation_msg="read_file → read (v3.0.0)",
+    )
+    registry.register_alias(
+        "read_pdf_pages", "read",
+        deprecation_msg="read_pdf_pages → read(path, pages) (v3.0.0)",
+        arg_mapper=_pdf_pages_mapper,
+    )
+    registry.register_alias(
+        "get_pdf_info", "read",
+        deprecation_msg="get_pdf_info → read(path, meta=True) (v3.0.0)",
+        arg_mapper=_pdf_info_mapper,
+    )
+    registry.register_alias(
+        "read_sqlj_file", "read",
+        deprecation_msg="read_sqlj_file → read (v3.0.0)",
+    )
+    registry.register_alias(
+        "write_file", "write",
+        deprecation_msg="write_file → write (v3.0.0)",
+    )
+    registry.register_alias(
+        "create_directory", "write",
+        deprecation_msg="create_directory → write(path_mit_trailing_slash) (v3.0.0)",
+        arg_mapper=_create_dir_mapper,
+    )
+    registry.register_alias(
+        "edit_file", "edit",
+        deprecation_msg="edit_file → edit (v3.0.0)",
+    )
+    registry.register_alias(
+        "list_files", "ls",
+        deprecation_msg="list_files → ls (v3.0.0)",
+    )
+    registry.register_alias(
+        "glob_files", "glob",
+        deprecation_msg="glob_files → glob (v3.0.0)",
+    )
+    registry.register_alias(
+        "grep_content", "grep",
+        deprecation_msg="grep_content → grep (v3.0.0)",
+    )
+
+    # Search-Aliase mit Scope-Dispatch
+    registry.register_alias(
+        "search_code", "search",
+        deprecation_msg="search_code → search(scope='code') (v3.0.0)",
+        arg_mapper=_scope_mapper("code"),
+    )
+    registry.register_alias(
+        "search_handbook", "search",
+        deprecation_msg="search_handbook → search(scope='handbook') (v3.0.0)",
+        arg_mapper=_scope_mapper("handbook"),
+    )
+    registry.register_alias(
+        "search_skills", "search",
+        deprecation_msg="search_skills → search(scope='skills') (v3.0.0)",
+        arg_mapper=_scope_mapper("skills"),
+    )
+    registry.register_alias(
+        "search_pdf", "search",
+        deprecation_msg="search_pdf → search(scope='pdf') (v3.0.0)",
+        arg_mapper=_scope_mapper("pdf"),
+    )
+
+
+def _register_phase3_aliases(registry: "ToolRegistry") -> None:
+    """
+    Registriert Legacy-Exec-Tools als Aliase auf bash / bash_sessions / exec_python.
+
+    Wichtig: replace_existing=True, weil die Legacy-Tools zu diesem Zeitpunkt
+    schon über ihre register_*_tools() Funktionen eingetragen wurden. Der Alias
+    übernimmt den Namen und entfernt die Legacy-Registrierung aus dem
+    LLM-Schema. Die Python-Funktionen (shell_execute, docker_session_execute, …)
+    werden intern weiter genutzt — sie sind aber nicht mehr LLM-sichtbar.
+
+    Nicht-aliasiert (bleiben als eigene Tools):
+      - generate_python_script, execute_python_script, validate_python_script,
+        list_python_scripts, delete_python_script  (User-Entscheidung:
+        Named-Script-Lifecycle bleibt erst mal bestehen)
+      - docker_list_packages, podman_build_image, podman_list_images,
+        podman_remove_image, docker_session_create als eigenständiges Tool
+        (bleiben bis Phase 5 — dann entscheidet Telemetrie)
+      - run_pytest, run_npm_tests (LLM soll stattdessen bash('pytest …') rufen;
+        Tools bleiben für Legacy-Sessions in Registry)
+    """
+
+    # ── bash-Aliase ────────────────────────────────────────────────────────
+
+    def _local_mapper(kw: Dict[str, Any]) -> Dict[str, Any]:
+        """shell_execute_local(execution_id, modified_command?) → bash(command, sandbox='local', execution_id)"""
+        exec_id = kw.pop("execution_id", None)
+        modified = kw.pop("modified_command", None)
+        if exec_id is not None:
+            kw["execution_id"] = exec_id
+        if modified is not None:
+            kw["command"] = modified
+        kw.setdefault("command", "")
+        kw["sandbox"] = "local"
+        return kw
+
+    def _container_mapper(kw: Dict[str, Any]) -> Dict[str, Any]:
+        """shell_execute(command, working_dir?, timeout?, mount_repo?) → bash(..., sandbox='container')"""
+        working_dir = kw.pop("working_dir", None)
+        if working_dir is not None:
+            kw["cwd"] = working_dir
+        kw["sandbox"] = "container"
+        return kw
+
+    def _workspace_mapper(kw: Dict[str, Any]) -> Dict[str, Any]:
+        """run_workspace_command(path, command:list, timeout_seconds?) → bash(command:str, sandbox='workspace', cwd, timeout)"""
+        path = kw.pop("path", None)
+        cmd = kw.pop("command", None)
+        timeout_sec = kw.pop("timeout_seconds", None)
+        if isinstance(cmd, (list, tuple)):
+            import shlex
+            cmd = " ".join(shlex.quote(str(x)) for x in cmd)
+        if cmd is not None:
+            kw["command"] = cmd
+        if path:
+            kw["cwd"] = path
+        if timeout_sec is not None:
+            kw["timeout"] = timeout_sec
+        kw["sandbox"] = "workspace"
+        return kw
+
+    registry.register_alias(
+        "shell_execute", "bash",
+        deprecation_msg="shell_execute → bash(sandbox='container') (v3.0.0)",
+        arg_mapper=_container_mapper,
+        replace_existing=True,
+    )
+    registry.register_alias(
+        "shell_execute_local", "bash",
+        deprecation_msg="shell_execute_local → bash(sandbox='local', execution_id) (v3.0.0)",
+        arg_mapper=_local_mapper,
+        replace_existing=True,
+    )
+    registry.register_alias(
+        "run_workspace_command", "bash",
+        deprecation_msg="run_workspace_command → bash(sandbox='workspace', cwd) (v3.0.0)",
+        arg_mapper=_workspace_mapper,
+        replace_existing=True,
+    )
+
+    # ── bash_sessions-Aliase ───────────────────────────────────────────────
+
+    def _docker_session_list_mapper(kw: Dict[str, Any]) -> Dict[str, Any]:
+        kw.clear()
+        kw["action"] = "list"
+        return kw
+
+    def _shell_list_mapper(kw: Dict[str, Any]) -> Dict[str, Any]:
+        kw.clear()
+        kw["action"] = "list"
+        return kw
+
+    def _docker_session_close_mapper(kw: Dict[str, Any]) -> Dict[str, Any]:
+        sid = kw.pop("session_id", None)
+        kw.clear()
+        kw["action"] = "close"
+        if sid is not None:
+            kw["session_id"] = sid
+        return kw
+
+    def _docker_upload_mapper(kw: Dict[str, Any]) -> Dict[str, Any]:
+        """docker_upload_file(session_id, filename, content_base64) → bash_sessions(action='upload', …)"""
+        sid = kw.pop("session_id", None)
+        fname = kw.pop("filename", None)
+        content = kw.pop("content_base64", None)
+        kw.clear()
+        kw["action"] = "upload"
+        if sid is not None:
+            kw["session_id"] = sid
+        if fname is not None:
+            kw["filename"] = fname
+        if content is not None:
+            kw["content_base64"] = content
+        return kw
+
+    registry.register_alias(
+        "docker_session_list", "bash_sessions",
+        deprecation_msg="docker_session_list → bash_sessions(action='list') (v3.0.0)",
+        arg_mapper=_docker_session_list_mapper,
+        replace_existing=True,
+    )
+    registry.register_alias(
+        "shell_list_executions", "bash_sessions",
+        deprecation_msg="shell_list_executions → bash_sessions(action='list') (v3.0.0)",
+        arg_mapper=_shell_list_mapper,
+        replace_existing=True,
+    )
+    registry.register_alias(
+        "docker_session_close", "bash_sessions",
+        deprecation_msg="docker_session_close → bash_sessions(action='close') (v3.0.0)",
+        arg_mapper=_docker_session_close_mapper,
+        replace_existing=True,
+    )
+    registry.register_alias(
+        "docker_upload_file", "bash_sessions",
+        deprecation_msg="docker_upload_file → bash_sessions(action='upload') (v3.0.0)",
+        arg_mapper=_docker_upload_mapper,
+        replace_existing=True,
+    )
+
+    # ── exec_python-Aliase ─────────────────────────────────────────────────
+
+    def _docker_exec_python_mapper(kw: Dict[str, Any]) -> Dict[str, Any]:
+        """docker_execute_python(code, packages?, timeout?) → exec_python(code, requirements, timeout)"""
+        packages = kw.pop("packages", None)
+        if packages is not None:
+            kw["requirements"] = packages
+        return kw
+
+    def _docker_session_execute_mapper(kw: Dict[str, Any]) -> Dict[str, Any]:
+        """docker_session_execute(session_id, code, timeout?) → exec_python(code, session_id, timeout)"""
+        return kw  # Parameter-Namen passen 1:1
+
+    def _generate_and_execute_mapper(kw: Dict[str, Any]) -> Dict[str, Any]:
+        """generate_and_execute_python_script(code, name, description, parameters, requirements, execute_args, execute_input)
+           → exec_python(code, requirements)
+
+        Verliert name/description/parameters/execute_args/execute_input —
+        diese gehören in den Named-Script-Lifecycle (generate_python_script),
+        nicht in One-Shot-Exec. Bei ungenutzter Funktionalität soll das LLM
+        auf generate_python_script + execute_python_script umsteigen.
+        """
+        for drop in ("name", "description", "parameters", "execute_args", "execute_input"):
+            kw.pop(drop, None)
+        return kw
+
+    registry.register_alias(
+        "docker_execute_python", "exec_python",
+        deprecation_msg="docker_execute_python → exec_python (v3.0.0)",
+        arg_mapper=_docker_exec_python_mapper,
+        replace_existing=True,
+    )
+    registry.register_alias(
+        "docker_session_execute", "exec_python",
+        deprecation_msg="docker_session_execute → exec_python(session_id) (v3.0.0)",
+        arg_mapper=_docker_session_execute_mapper,
+        replace_existing=True,
+    )
+    registry.register_alias(
+        "generate_and_execute_python_script", "exec_python",
+        deprecation_msg=(
+            "generate_and_execute_python_script → exec_python (One-Shot) oder "
+            "generate_python_script + execute_python_script (named) (v3.0.0)"
+        ),
+        arg_mapper=_generate_and_execute_mapper,
+        replace_existing=True,
+    )
+
+
+# ══════════════════════════════════════════════════════════════════════════════
 # Default Registry
 # ══════════════════════════════════════════════════════════════════════════════
 
@@ -3084,30 +4284,32 @@ def create_default_registry() -> ToolRegistry:
     """Erstellt eine Registry mit allen Standard-Tools."""
     registry = ToolRegistry()
 
-    # Search Tools
-    registry.register(SEARCH_CODE_TOOL)
-    registry.register(SEARCH_HANDBOOK_TOOL)
-    registry.register(SEARCH_SKILLS_TOOL)
-    registry.register(SEARCH_PDF_TOOL)
+    # ── Core-Tools (Phase 2 der Konsolidierung) ─────────────────────────────
+    # Diese Tools sind die einzigen, die im LLM-Schema erscheinen.
+    # Die Legacy-Tools darunter sind per register_alias() erreichbar, werden
+    # aber NICHT ans LLM exportiert.
+    registry.register(READ_TOOL)
+    registry.register(WRITE_TOOL)
+    registry.register(EDIT_TOOL)
+    registry.register(LS_TOOL)
+    registry.register(GLOB_TOOL)
+    registry.register(GREP_TOOL)
+    registry.register(SEARCH_TOOL)
 
-    # File Tools
-    registry.register(READ_FILE_TOOL)
-    registry.register(LIST_FILES_TOOL)
-    registry.register(GLOB_FILES_TOOL)
-    registry.register(GREP_CONTENT_TOOL)
-    registry.register(WRITE_FILE_TOOL)
-    registry.register(EDIT_FILE_TOOL)
-    registry.register(CREATE_DIRECTORY_TOOL)
+    # ── Core-Tools (Phase 3: Exec) ─────────────────────────────────────────
+    registry.register(BASH_TOOL)
+    registry.register(BASH_SESSIONS_TOOL)
+    registry.register(EXEC_PYTHON_TOOL)
 
-    # Knowledge Tools
+    # ── Legacy-Aliase (Phase 2, deprecated — nur Log, 14-Tage-Koexistenz) ──
+    _register_phase2_aliases(registry)
+
+    # Knowledge Tools (unverändert, kein Teil von Phase 2)
     registry.register(GET_SERVICE_INFO_TOOL)
-    registry.register(GET_PDF_INFO_TOOL)
-    registry.register(READ_PDF_PAGES_TOOL)
     registry.register(GET_PROJECT_PATHS_TOOL)
 
-    # Analysis Tools
+    # Analysis Tools (READ_SQLJ_FILE_TOOL ist Alias auf read)
     registry.register(TRACE_JAVA_REFERENCES_TOOL)
-    registry.register(READ_SQLJ_FILE_TOOL)
     registry.register(DEBUG_JAVA_TESTDATA_TOOL)
 
     # Database Tools
@@ -3219,6 +4421,12 @@ def create_default_registry() -> ToolRegistry:
     # Script Execution Tools (Python-Script-Generierung und -Ausführung)
     from app.agent.script_tools import register_script_tools
     register_script_tools(registry)
+
+    # ── Phase-3-Aliase (deprecated — nur Log, 14-Tage-Koexistenz) ──────────
+    # MUSS nach register_shell_tools / register_docker_tools /
+    # register_command_tools / register_script_tools laufen, weil die Aliase
+    # deren Tool-Namen überschreiben (replace_existing=True).
+    _register_phase3_aliases(registry)
 
     return registry
 

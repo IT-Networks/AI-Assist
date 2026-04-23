@@ -1276,6 +1276,11 @@ class AgentOrchestrator:
         history_tokens = 0
         history_count = len(state.messages_history)
         history_to_add = state.messages_history[-state.max_history_messages:]
+        # v5 Phase 2: Compaction Stufe 1 — Tool-Output-Elision in alten Turns.
+        # Kein LLM-Call, reine String-Kondensierung; idempotent und billig.
+        # Spart bei GPT-OSS 120B direkt Inference-Latenz.
+        from app.agent.context_compactor import elide_tool_outputs
+        history_to_add = elide_tool_outputs(history_to_add)
         logger.info(f"[agent] Conversation history: {history_count} total, adding {len(history_to_add)} messages")
         if history_to_add:
             # Log ersten und letzten Eintrag für Debug

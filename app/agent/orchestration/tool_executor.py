@@ -171,12 +171,19 @@ async def execute_tools_parallel(
         List of ToolResult in same order as tool_calls
     """
     async def execute_single(tc: ToolCall) -> ToolResult:
-        # Check cache
-        cached = tool_cache.get(tc.name, tc.arguments)
+        # Alias-Auflösung für Cache/Budget (Aufruf selbst läuft über registry.execute)
+        canonical_name = tc.name
+        if hasattr(tool_registry, "resolve_name"):
+            resolved, alias_info = tool_registry.resolve_name(tc.name)
+            if alias_info is not None:
+                canonical_name = resolved
+
+        # Check cache (unter kanonischem Namen)
+        cached = tool_cache.get(canonical_name, tc.arguments)
         if cached is not None:
-            logger.debug(f"[tool_executor] Cache HIT: {tc.name}")
+            logger.debug(f"[tool_executor] Cache HIT: {canonical_name}")
             if state.tool_budget:
-                state.tool_budget.record_tool_call(tc.name, duration_ms=0, cached=True)
+                state.tool_budget.record_tool_call(canonical_name, duration_ms=0, cached=True)
             return cached
 
         # Execute tool
@@ -189,13 +196,13 @@ async def execute_tools_parallel(
 
         duration_ms = int((time.time() - start) * 1000)
 
-        # Cache and track budget
+        # Cache and track budget unter kanonischem Namen
         if result.success:
-            tool_cache.set(tc.name, tc.arguments, result)
+            tool_cache.set(canonical_name, tc.arguments, result)
         if state.tool_budget:
-            state.tool_budget.record_tool_call(tc.name, duration_ms=duration_ms, cached=False)
+            state.tool_budget.record_tool_call(canonical_name, duration_ms=duration_ms, cached=False)
 
-        logger.debug(f"[tool_executor] {tc.name} completed in {duration_ms}ms")
+        logger.debug(f"[tool_executor] {canonical_name} completed in {duration_ms}ms")
         return result
 
     # Execute all in parallel
@@ -272,36 +279,48 @@ async def execute_tool_sequential(
         )
         return result, _list_to_generator(events)
 
+    # Alias-Auflösung für Cache + Telemetrie: Cache wird unter dem kanonischen
+    # Namen geführt, damit Aufrufe unter verschiedenen Aliasen denselben Eintrag
+    # teilen.
+    canonical_name = tool_call.name
+    called_as: Optional[str] = None
+    if hasattr(tool_registry, "resolve_name"):
+        resolved, alias_info = tool_registry.resolve_name(tool_call.name)
+        if alias_info is not None:
+            canonical_name = resolved
+            called_as = tool_call.name
+
     # Standard tools with caching
-    cached = tool_cache.get(tool_call.name, tool_call.arguments)
+    cached = tool_cache.get(canonical_name, tool_call.arguments)
     if cached is not None:
-        logger.debug(f"[tool_executor] Cache HIT: {tool_call.name}")
+        logger.debug(f"[tool_executor] Cache HIT: {canonical_name}")
         if state.tool_budget:
-            state.tool_budget.record_tool_call(tool_call.name, duration_ms=0, cached=True)
+            state.tool_budget.record_tool_call(canonical_name, duration_ms=0, cached=True)
         return cached, _empty_generator()
 
-    # Execute tool
+    # Execute tool (registry löst Alias intern ebenfalls auf)
     start = time.time()
     result = await tool_registry.execute(tool_call.name, **tool_call.arguments)
     duration_ms = int((time.time() - start) * 1000)
 
-    # Cache successful results
+    # Cache successful results unter kanonischem Namen
     if result.success:
-        tool_cache.set(tool_call.name, tool_call.arguments, result)
+        tool_cache.set(canonical_name, tool_call.arguments, result)
 
-    # Budget tracking
+    # Budget tracking unter kanonischem Namen
     if state.tool_budget:
-        state.tool_budget.record_tool_call(tool_call.name, duration_ms=duration_ms, cached=False)
+        state.tool_budget.record_tool_call(canonical_name, duration_ms=duration_ms, cached=False)
 
-    # Analytics
+    # Analytics inkl. Alias-Tracking
     if analytics and analytics.enabled:
         try:
             await analytics.log_tool_execution(
-                tool_name=tool_call.name,
+                tool_name=canonical_name,
                 success=result.success,
                 duration_ms=duration_ms,
                 error=result.error,
                 result_size=len(str(result.data or "")),
+                called_as=called_as,
             )
         except Exception:
             pass

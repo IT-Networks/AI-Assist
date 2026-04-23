@@ -1706,6 +1706,32 @@ class WhisperConfig(BaseModel):
     ffmpeg_path: str = ""  # Expliziter Pfad zu ffmpeg (leer = aus PATH suchen)
 
 
+class MeetingsLocalAudioConfig(BaseModel):
+    """Lokale Audio-Aufnahme (Pfad B) — Windows-WASAPI-Capture von Mic + Loopback.
+
+    Rechtlich: der aufnehmende User ist verantwortlich, die Teilnehmer
+    vor Beginn zu informieren. Der Bot macht keine automatische Ansage.
+    """
+    enabled: bool = False
+    trigger_mode: str = "manual"  # "manual" | "auto_on_detect"
+    purge_audio_after_summary: bool = True
+    output_dir: str = "app/state/meetings/local_audio"
+    watcher_poll_seconds: float = 2.0
+
+
+class MeetingsConfig(BaseModel):
+    """Meeting-Summarization (Sprint 5).
+
+    Gemeinsam fuer Pfad A (Webex-API-Transkripte) und Pfad B (Lokal-Audio).
+    """
+    enabled: bool = False
+    post_to_room_id: str = ""          # leer = Webex-Bot-Default-Room nutzen
+    summary_language: str = "de"
+    retention_days: int = 30
+    summarize_on_transcript_webhook: bool = True  # Pfad A Auto-Trigger
+    local_audio: MeetingsLocalAudioConfig = Field(default_factory=MeetingsLocalAudioConfig)
+
+
 class Settings(BaseModel):
     # Globale Einstellungen
     credentials: CredentialsConfig = Field(default_factory=CredentialsConfig)  # Zentrale Credentials
@@ -1761,6 +1787,7 @@ class Settings(BaseModel):
     email: EmailConfig = Field(default_factory=EmailConfig)
     webex: WebexConfig = Field(default_factory=WebexConfig)
     whisper: WhisperConfig = Field(default_factory=WhisperConfig)
+    meetings: MeetingsConfig = Field(default_factory=MeetingsConfig)
     tts: TTSConfig = Field(default_factory=TTSConfig)
     continuation: ContinuationSettings = Field(default_factory=ContinuationSettings)
     parallel_execution: ParallelExecutionSettings = Field(default_factory=ParallelExecutionSettings)

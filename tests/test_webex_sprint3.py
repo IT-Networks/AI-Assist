@@ -57,9 +57,10 @@ class TestSchemaV3:
         assert expected.issubset(cols)
 
     def test_schema_version_v3(self, db: WebexDb):
+        """Schema muss mind. v3 sein (spaeteres Bump zu v4+ ist OK)."""
         conn = db.connect()
         row = conn.execute("SELECT version FROM schema_version").fetchone()
-        assert row[0] == 3
+        assert row[0] >= 3
 
 
 # ═══════════════════════════════════════════════════════════════════════════

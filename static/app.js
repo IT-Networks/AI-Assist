@@ -11867,6 +11867,16 @@ function renderSettingsSection() {
     return;
   }
 
+  if (section === 'webex_bot') {
+    renderWebexBotSection();
+    return;
+  }
+
+  if (section === 'meetings') {
+    renderMeetingsSection();
+    return;
+  }
+
   const values = settingsState.settings[section];
   const desc = settingsState.descriptions[section] || '';
 
@@ -11962,6 +11972,549 @@ function renderSettingsSection() {
   }
 
   document.getElementById('settings-form').innerHTML = html;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Webex Room-Picker — wiederverwendbare searchable Dropdown-Component
+// ═══════════════════════════════════════════════════════════════════════════
+
+const _roomPickerCache = { items: null, loadedAt: 0 };  // Client-Cache, 60s TTL
+
+function buildRoomPickerHTML(pickerId, currentValue, placeholder = '🔍 Webex-Raum suchen (Titel oder ID)…') {
+  const safeVal = escapeHtml(currentValue || '');
+  return `
+    <div class="room-picker" id="${pickerId}" data-current-id="${safeVal}">
+      <input type="hidden" class="room-picker-value" value="${safeVal}">
+      <div class="room-picker-display">
+        <input type="text" class="room-picker-input" placeholder="${placeholder}" autocomplete="off">
+        <span class="room-picker-badge" style="display:${safeVal ? 'inline-block' : 'none'}">
+          ${safeVal ? safeVal.substring(0, 12) + '…' : ''}
+        </span>
+        <button type="button" class="room-picker-clear" title="Auswahl löschen" style="display:${safeVal ? 'inline-block' : 'none'}">✕</button>
+      </div>
+      <div class="room-picker-dropdown" role="listbox"></div>
+    </div>
+  `;
+}
+
+function initRoomPicker(pickerId, onChange) {
+  const root = document.getElementById(pickerId);
+  if (!root) return;
+  const input = root.querySelector('.room-picker-input');
+  const dropdown = root.querySelector('.room-picker-dropdown');
+  const clearBtn = root.querySelector('.room-picker-clear');
+  const badge = root.querySelector('.room-picker-badge');
+  const hidden = root.querySelector('.room-picker-value');
+  let debounceTimer = null;
+  let cachedResults = [];
+
+  // Initial-Display: wenn schon ein Wert gesetzt ist → title aus API nachladen
+  if (hidden.value) {
+    _resolveRoomTitle(hidden.value).then(title => {
+      if (title) {
+        input.placeholder = title + ' (Klicken um zu ändern)';
+        badge.textContent = hidden.value.substring(0, 12) + '…';
+        badge.title = hidden.value;
+        badge.style.display = 'inline-block';
+        clearBtn.style.display = 'inline-block';
+      }
+    });
+  }
+
+  async function loadRooms(query) {
+    dropdown.innerHTML = '<div class="room-picker-status">⏳ Lädt…</div>';
+    dropdown.classList.add('open');
+    try {
+      const q = encodeURIComponent(query || '');
+      const res = await fetch(`/api/webex/rooms/picker?q=${q}&limit=100`);
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.detail || 'Fehler');
+      cachedResults = data.rooms || [];
+      renderDropdown(cachedResults);
+    } catch (err) {
+      dropdown.innerHTML = `<div class="room-picker-status room-picker-error">✗ ${escapeHtml(err.message)}</div>`;
+    }
+  }
+
+  function renderDropdown(rooms) {
+    if (!rooms.length) {
+      dropdown.innerHTML = '<div class="room-picker-status">Keine Räume gefunden. Ist Webex konfiguriert + OAuth angemeldet?</div>';
+      return;
+    }
+    dropdown.innerHTML = rooms.map(r => `
+      <div class="room-picker-item" data-id="${escapeHtml(r.id)}" data-title="${escapeHtml(r.title)}" role="option">
+        <div class="room-picker-item-title">${escapeHtml(r.title || '(Ohne Titel)')} ${r.type === 'direct' ? '👤' : '👥'}</div>
+        <div class="room-picker-item-meta">${escapeHtml(r.id)}</div>
+      </div>
+    `).join('');
+    dropdown.querySelectorAll('.room-picker-item').forEach(el => {
+      el.addEventListener('click', () => {
+        const id = el.getAttribute('data-id');
+        const title = el.getAttribute('data-title');
+        hidden.value = id;
+        input.value = '';
+        input.placeholder = title + ' (Klicken um zu ändern)';
+        badge.textContent = id.substring(0, 12) + '…';
+        badge.title = id;
+        badge.style.display = 'inline-block';
+        clearBtn.style.display = 'inline-block';
+        dropdown.classList.remove('open');
+        markSettingsModified();
+        if (typeof onChange === 'function') onChange(id, title);
+      });
+    });
+  }
+
+  input.addEventListener('focus', () => loadRooms(input.value));
+  input.addEventListener('input', () => {
+    clearTimeout(debounceTimer);
+    debounceTimer = setTimeout(() => loadRooms(input.value), 250);
+  });
+  clearBtn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    hidden.value = '';
+    input.value = '';
+    input.placeholder = '🔍 Webex-Raum suchen (Titel oder ID)…';
+    badge.style.display = 'none';
+    clearBtn.style.display = 'none';
+    dropdown.classList.remove('open');
+    markSettingsModified();
+    if (typeof onChange === 'function') onChange('', '');
+  });
+
+  // Click-outside schließt Dropdown
+  document.addEventListener('click', (e) => {
+    if (!root.contains(e.target)) dropdown.classList.remove('open');
+  });
+}
+
+function getRoomPickerValue(pickerId) {
+  const root = document.getElementById(pickerId);
+  if (!root) return '';
+  return root.querySelector('.room-picker-value').value || '';
+}
+
+async function _resolveRoomTitle(roomId) {
+  try {
+    const res = await fetch(`/api/webex/rooms/picker?q=${encodeURIComponent(roomId)}&limit=20`);
+    if (!res.ok) return null;
+    const data = await res.json();
+    const match = (data.rooms || []).find(r => r.id === roomId);
+    return match ? match.title : null;
+  } catch {
+    return null;
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Webex Bot Settings Section (Sprint 1-4 Features)
+// ═══════════════════════════════════════════════════════════════════════════
+
+function renderWebexBotSection() {
+  const bot = (settingsState.settings.webex && settingsState.settings.webex.bot) || {};
+  const streaming = bot.streaming || {};
+  const approvals = bot.approvals || {};
+  const audit = bot.audit || {};
+  const rooms = Array.isArray(bot.rooms) ? bot.rooms : [];
+  const form = document.getElementById('settings-form');
+  form.innerHTML = `
+    <div class="settings-section">
+      <h3 class="settings-section-title">Webex Bot (Assist-Room)</h3>
+      <p class="settings-section-desc">
+        Dedizierter Webex-Space als Remote-Terminal für den Agent. Edit-in-place, Streaming,
+        Adaptive-Card-Approvals, Multi-Conversation. Ab 24h Idle wird die Session automatisch
+        neu gestartet; <code>/new</code> setzt sie manuell zurück, <code>/continue</code> stellt sie wieder her.
+      </p>
+    </div>
+
+    <div class="settings-section-group">
+      <h4 class="settings-group-title">Allgemein</h4>
+      <div class="settings-field">
+        <label class="checkbox-label">
+          <input type="checkbox" id="wbot-enabled" ${bot.enabled ? 'checked' : ''} onchange="markSettingsModified()">
+          <span>Bot aktiviert</span>
+        </label>
+        <small class="field-hint">Startet beim App-Boot den AssistRoomHandler (Webhook oder Polling).</small>
+      </div>
+      <div class="settings-field">
+        <label class="checkbox-label">
+          <input type="checkbox" id="wbot-use-webhooks" ${bot.use_webhooks ? 'checked' : ''} onchange="markSettingsModified()">
+          <span>Webhooks nutzen (statt Polling)</span>
+        </label>
+      </div>
+      <div class="settings-field">
+        <label class="checkbox-label">
+          <input type="checkbox" id="wbot-greet" ${bot.greet_on_startup ? 'checked' : ''} onchange="markSettingsModified()">
+          <span>Beim Start im Room begrüßen</span>
+        </label>
+      </div>
+      <div class="settings-field">
+        <label for="wbot-default-model">Default-Modell</label>
+        <input type="text" id="wbot-default-model" value="${escapeHtml(bot.default_model || '')}" placeholder="z.B. sonnet" onchange="markSettingsModified()">
+      </div>
+    </div>
+
+    <div class="settings-section-group">
+      <h4 class="settings-group-title">Primärer Bot-Room</h4>
+      <div class="settings-field">
+        <label>Room (ID oder über Suche auswählen)</label>
+        ${buildRoomPickerHTML('wbot-room-picker', bot.room_id || '')}
+        <small class="field-hint">Wenn leer, wird <code>room_name</code> als Fallback genutzt.</small>
+      </div>
+      <div class="settings-field">
+        <label for="wbot-room-name">Room-Name (Fallback, Substring-Match)</label>
+        <input type="text" id="wbot-room-name" value="${escapeHtml(bot.room_name || '')}" placeholder="z.B. AI-Assist" onchange="markSettingsModified()">
+      </div>
+      <div class="settings-field">
+        <label>Erlaubte Absender (Emails)</label>
+        ${renderArrayField('wbot-allowed-senders', 'webex_bot', 'allowed_senders', bot.allowed_senders || [])}
+        <small class="field-hint">Nur Nachrichten dieser Emails werden vom Agent bearbeitet. Leer = alle.</small>
+      </div>
+    </div>
+
+    <div class="settings-section-group">
+      <h4 class="settings-group-title">Webhooks</h4>
+      <div class="settings-field">
+        <label for="wbot-webhook-url">Öffentliche Webhook-URL</label>
+        <input type="text" id="wbot-webhook-url" value="${escapeHtml(bot.webhook_public_url || '')}" placeholder="https://.../webhooks/webex" style="font-family:var(--font-mono)" onchange="markSettingsModified()">
+      </div>
+      <div class="settings-field">
+        <label for="wbot-webhook-actions-url">Actions-Webhook-URL (Adaptive Cards)</label>
+        <input type="text" id="wbot-webhook-actions-url" value="${escapeHtml(bot.actions_webhook_public_url || '')}" placeholder="leer = automatisch aus obiger URL ableiten" style="font-family:var(--font-mono)" onchange="markSettingsModified()">
+      </div>
+      <div class="settings-field">
+        <label for="wbot-webhook-secret">Webhook-Secret (HMAC-SHA1)</label>
+        <input type="password" id="wbot-webhook-secret" value="${escapeHtml(bot.webhook_secret || '')}" onchange="markSettingsModified()" autocomplete="off">
+        <small class="field-hint">Pflicht für Prod. Leer = unsignierte Webhooks akzeptiert (Warnung im Log).</small>
+      </div>
+    </div>
+
+    <div class="settings-section-group">
+      <h4 class="settings-group-title">Sprint 1+2 — Edit-in-place + Streaming + Approvals</h4>
+      <div class="settings-field">
+        <label class="checkbox-label">
+          <input type="checkbox" id="wbot-edit-in-place" ${bot.edit_in_place ? 'checked' : ''} onchange="markSettingsModified()">
+          <span>Edit-in-place (StatusEditor, Master-Flag)</span>
+        </label>
+        <small class="field-hint">Ohne dieses Flag läuft die Legacy-Pipeline (keine Persistenz, keine Approvals).</small>
+      </div>
+      <div class="settings-field">
+        <label for="wbot-error-policy">Fehler-Policy</label>
+        <select id="wbot-error-policy" onchange="markSettingsModified()">
+          <option value="silent" ${bot.error_policy === 'silent' ? 'selected' : ''}>silent — Fehler nur loggen</option>
+          <option value="once" ${(bot.error_policy || 'once') === 'once' ? 'selected' : ''}>once — ein Fehler-Post je Room, dann Cooldown</option>
+          <option value="always" ${bot.error_policy === 'always' ? 'selected' : ''}>always — jeden Fehler posten</option>
+        </select>
+      </div>
+      <div class="settings-field">
+        <label for="wbot-error-cooldown">Error-Cooldown (Sekunden)</label>
+        <input type="number" id="wbot-error-cooldown" value="${bot.error_cooldown_seconds || 300}" min="0" onchange="markSettingsModified()">
+      </div>
+      <div class="settings-field">
+        <label class="checkbox-label">
+          <input type="checkbox" id="wbot-streaming-enabled" ${streaming.enabled ? 'checked' : ''} onchange="markSettingsModified()">
+          <span>Token-Streaming via Edit</span>
+        </label>
+      </div>
+      <div class="settings-field">
+        <label for="wbot-streaming-interval">Edit-Interval (Sekunden)</label>
+        <input type="number" id="wbot-streaming-interval" value="${streaming.edit_interval_seconds || 1.5}" step="0.1" min="0.5" onchange="markSettingsModified()">
+        <small class="field-hint">Mindestens 1.5s um unter Webex-Rate-Limit (~30/min) zu bleiben.</small>
+      </div>
+      <div class="settings-field">
+        <label for="wbot-streaming-delta">Edit min-delta (Chars)</label>
+        <input type="number" id="wbot-streaming-delta" value="${streaming.edit_min_delta_chars || 50}" min="1" onchange="markSettingsModified()">
+      </div>
+      <div class="settings-field">
+        <label class="checkbox-label">
+          <input type="checkbox" id="wbot-approvals-enabled" ${approvals.enabled ? 'checked' : ''} onchange="markSettingsModified()">
+          <span>Adaptive-Card-Approvals</span>
+        </label>
+        <small class="field-hint">Bei schreibenden Tools wird eine Karte mit Erlauben/Ablehnen gepostet. Nur der Original-Requester darf freigeben (C1-Fix).</small>
+      </div>
+      <div class="settings-field">
+        <label for="wbot-approvals-timeout">Approval-Timeout (Sekunden)</label>
+        <input type="number" id="wbot-approvals-timeout" value="${approvals.timeout_seconds || 300}" min="10" onchange="markSettingsModified()">
+      </div>
+      <div class="settings-field">
+        <label class="checkbox-label">
+          <input type="checkbox" id="wbot-audit-enabled" ${audit.enabled !== false ? 'checked' : ''} onchange="markSettingsModified()">
+          <span>Audit-Log aktiv (msg_in/out, tool_call, approval_*)</span>
+        </label>
+      </div>
+      <div class="settings-field">
+        <label for="wbot-audit-retention">Audit-Retention (Tage)</label>
+        <input type="number" id="wbot-audit-retention" value="${audit.retention_days || 90}" min="1" onchange="markSettingsModified()">
+      </div>
+    </div>
+
+    <div class="settings-section-group">
+      <h4 class="settings-group-title">Sprint 3 — Multi-Conversation + Lane-Delivery</h4>
+      <div class="settings-field">
+        <label class="checkbox-label">
+          <input type="checkbox" id="wbot-multi-conv" ${bot.multi_conversation ? 'checked' : ''} onchange="markSettingsModified()">
+          <span>Multi-Conversation-Modus</span>
+        </label>
+        <small class="field-hint">Bot reagiert in mehreren Rooms (siehe Room-Overrides unten). Sonst nur im primären Bot-Room.</small>
+      </div>
+      <div class="settings-field">
+        <label class="checkbox-label">
+          <input type="checkbox" id="wbot-lane-delivery" ${bot.lane_delivery ? 'checked' : ''} onchange="markSettingsModified()">
+          <span>Lane-Delivery (Reasoning + Answer in 2 Messages)</span>
+        </label>
+      </div>
+      <div class="settings-field">
+        <label>Room-Overrides</label>
+        <div id="wbot-rooms-container" class="settings-array">
+          ${rooms.map((r, idx) => _renderRoomOverrideHTML(idx, r)).join('')}
+        </div>
+        <button class="settings-array-add" onclick="addWebexBotRoomOverride()">+ Room-Override hinzufügen</button>
+        <small class="field-hint">Pro Room eigene Policy (erlaubte Absender, Modell, Cap). Benötigt Multi-Conversation.</small>
+      </div>
+    </div>
+
+    <div class="settings-section-group">
+      <h4 class="settings-group-title">Limits + Polling</h4>
+      <div class="settings-field">
+        <label for="wbot-daily-cap">Daily-Token-Cap (0 = unbegrenzt)</label>
+        <input type="number" id="wbot-daily-cap" value="${bot.daily_token_cap || 0}" min="0" onchange="markSettingsModified()">
+      </div>
+      <div class="settings-field">
+        <label for="wbot-max-rooms">Max. parallele Agent-Runs</label>
+        <input type="number" id="wbot-max-rooms" value="${bot.max_concurrent_rooms || 3}" min="1" max="20" onchange="markSettingsModified()">
+      </div>
+      <div class="settings-field">
+        <label for="wbot-max-reply">Max. Reply-Länge (Zeichen)</label>
+        <input type="number" id="wbot-max-reply" value="${bot.max_reply_chars || 7000}" min="500" max="10000" onchange="markSettingsModified()">
+      </div>
+      <div class="settings-field">
+        <label for="wbot-fallback-poll">Fallback-Poll-Intervall (s)</label>
+        <input type="number" id="wbot-fallback-poll" value="${bot.fallback_poll_seconds || 10}" min="3" onchange="markSettingsModified()">
+      </div>
+      <div class="settings-field">
+        <label class="checkbox-label">
+          <input type="checkbox" id="wbot-safety-poller" ${bot.enable_safety_poller ? 'checked' : ''} onchange="markSettingsModified()">
+          <span>Safety-Poller parallel zu Webhook aktiv</span>
+        </label>
+      </div>
+      <div class="settings-field">
+        <label for="wbot-safety-poll">Safety-Poll-Intervall (s)</label>
+        <input type="number" id="wbot-safety-poll" value="${bot.safety_poll_seconds || 60}" min="10" onchange="markSettingsModified()">
+      </div>
+    </div>
+  `;
+  setTimeout(() => initRoomPicker('wbot-room-picker'), 0);
+}
+
+function _renderRoomOverrideHTML(idx, r) {
+  return `
+    <div class="settings-array-item" data-room-override-idx="${idx}" style="flex-direction:column;gap:6px;padding:8px;border:1px solid var(--border);border-radius:6px;margin-bottom:6px;align-items:stretch">
+      <div style="display:flex;gap:8px;align-items:center">
+        <strong style="font-size:0.82rem">Override #${idx + 1}</strong>
+        <button type="button" class="settings-array-remove" onclick="removeWebexBotRoomOverride(${idx})" style="margin-left:auto">✕</button>
+      </div>
+      ${buildRoomPickerHTML('wbot-override-picker-' + idx, r.room_id || '')}
+      <input type="text" class="room-override-model" value="${escapeHtml(r.default_model || '')}" placeholder="Modell (leer = Default)" onchange="markSettingsModified()">
+      <input type="number" class="room-override-cap" value="${r.daily_token_cap || 0}" placeholder="Daily-Cap (0=default)" min="0" onchange="markSettingsModified()">
+      <input type="text" class="room-override-senders" value="${escapeHtml((r.allow_from || []).join(', '))}" placeholder="Erlaubte Sender (Komma-getrennt)" onchange="markSettingsModified()">
+    </div>
+  `;
+}
+
+function addWebexBotRoomOverride() {
+  const container = document.getElementById('wbot-rooms-container');
+  const idx = container.querySelectorAll('[data-room-override-idx]').length;
+  container.insertAdjacentHTML('beforeend', _renderRoomOverrideHTML(idx, {}));
+  initRoomPicker('wbot-override-picker-' + idx);
+  markSettingsModified();
+}
+
+function removeWebexBotRoomOverride(idx) {
+  const el = document.querySelector(`[data-room-override-idx="${idx}"]`);
+  if (el) {
+    el.remove();
+    markSettingsModified();
+  }
+}
+
+function _collectWebexBotValues() {
+  const streaming = {
+    enabled: document.getElementById('wbot-streaming-enabled').checked,
+    edit_interval_seconds: parseFloat(document.getElementById('wbot-streaming-interval').value) || 1.5,
+    edit_min_delta_chars: parseInt(document.getElementById('wbot-streaming-delta').value) || 50,
+  };
+  const approvals = {
+    enabled: document.getElementById('wbot-approvals-enabled').checked,
+    timeout_seconds: parseInt(document.getElementById('wbot-approvals-timeout').value) || 300,
+  };
+  const audit = {
+    enabled: document.getElementById('wbot-audit-enabled').checked,
+    retention_days: parseInt(document.getElementById('wbot-audit-retention').value) || 90,
+  };
+  const senders = _collectArrayField('webex_bot', 'allowed_senders');
+  const rooms = [];
+  document.querySelectorAll('#wbot-rooms-container [data-room-override-idx]').forEach(el => {
+    const pickerId = el.querySelector('.room-picker').id;
+    const roomId = getRoomPickerValue(pickerId);
+    if (!roomId) return;
+    const sendersRaw = el.querySelector('.room-override-senders').value || '';
+    rooms.push({
+      room_id: roomId,
+      default_model: el.querySelector('.room-override-model').value || '',
+      daily_token_cap: parseInt(el.querySelector('.room-override-cap').value) || 0,
+      allow_from: sendersRaw.split(',').map(s => s.trim()).filter(Boolean),
+    });
+  });
+  return {
+    enabled: document.getElementById('wbot-enabled').checked,
+    use_webhooks: document.getElementById('wbot-use-webhooks').checked,
+    greet_on_startup: document.getElementById('wbot-greet').checked,
+    default_model: document.getElementById('wbot-default-model').value || '',
+    room_id: getRoomPickerValue('wbot-room-picker'),
+    room_name: document.getElementById('wbot-room-name').value || '',
+    allowed_senders: senders,
+    webhook_public_url: document.getElementById('wbot-webhook-url').value || '',
+    actions_webhook_public_url: document.getElementById('wbot-webhook-actions-url').value || '',
+    webhook_secret: document.getElementById('wbot-webhook-secret').value || '',
+    edit_in_place: document.getElementById('wbot-edit-in-place').checked,
+    error_policy: document.getElementById('wbot-error-policy').value || 'once',
+    error_cooldown_seconds: parseFloat(document.getElementById('wbot-error-cooldown').value) || 300,
+    streaming,
+    approvals,
+    audit,
+    multi_conversation: document.getElementById('wbot-multi-conv').checked,
+    lane_delivery: document.getElementById('wbot-lane-delivery').checked,
+    rooms,
+    daily_token_cap: parseInt(document.getElementById('wbot-daily-cap').value) || 0,
+    max_concurrent_rooms: parseInt(document.getElementById('wbot-max-rooms').value) || 3,
+    max_reply_chars: parseInt(document.getElementById('wbot-max-reply').value) || 7000,
+    fallback_poll_seconds: parseInt(document.getElementById('wbot-fallback-poll').value) || 10,
+    enable_safety_poller: document.getElementById('wbot-safety-poller').checked,
+    safety_poll_seconds: parseInt(document.getElementById('wbot-safety-poll').value) || 60,
+  };
+}
+
+function _collectArrayField(section, key) {
+  const items = document.querySelectorAll(`input[data-section="${section}"][data-key="${key}"]`);
+  return Array.from(items).map(i => i.value.trim()).filter(Boolean);
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Meetings Settings Section (Sprint 5)
+// ═══════════════════════════════════════════════════════════════════════════
+
+function renderMeetingsSection() {
+  const m = settingsState.settings.meetings || {};
+  const la = m.local_audio || {};
+  const form = document.getElementById('settings-form');
+  form.innerHTML = `
+    <div class="settings-section">
+      <h3 class="settings-section-title">Meetings — Zusammenfassungen</h3>
+      <p class="settings-section-desc">
+        Transkribiert Meetings lokal via Mikrofon + System-Audio-Loopback (Windows/WASAPI),
+        fasst mit dem LLM zusammen und postet in den konfigurierten Webex-Space.
+        <strong>§201 StGB:</strong> Du bist als aufnehmende Person verantwortlich, Teilnehmer
+        vor Beginn zu informieren — der Bot macht keine automatische Ansage.
+      </p>
+    </div>
+
+    <div class="settings-section-group">
+      <h4 class="settings-group-title">Allgemein</h4>
+      <div class="settings-field">
+        <label class="checkbox-label">
+          <input type="checkbox" id="meet-enabled" ${m.enabled ? 'checked' : ''} onchange="markSettingsModified()">
+          <span>Meetings-Feature aktiviert</span>
+        </label>
+        <small class="field-hint">Master-Flag. Muss für Lokal-Aufnahme und Summary-Pipeline an sein.</small>
+      </div>
+      <div class="settings-field">
+        <label>Ziel-Room für Summaries</label>
+        ${buildRoomPickerHTML('meet-room-picker', m.post_to_room_id || '', '🔍 Raum für Meeting-Summaries suchen…')}
+        <small class="field-hint">Leer = Haupt-Bot-Room. Hier werden die LLM-Summaries gepostet.</small>
+      </div>
+      <div class="settings-field">
+        <label for="meet-lang">Sprache der Zusammenfassung</label>
+        <select id="meet-lang" onchange="markSettingsModified()">
+          <option value="de" ${(m.summary_language || 'de') === 'de' ? 'selected' : ''}>Deutsch</option>
+          <option value="en" ${m.summary_language === 'en' ? 'selected' : ''}>English</option>
+        </select>
+      </div>
+      <div class="settings-field">
+        <label for="meet-retention">Transkript-Retention (Tage)</label>
+        <input type="number" id="meet-retention" value="${m.retention_days || 30}" min="0" max="365" onchange="markSettingsModified()">
+        <small class="field-hint">Wie lange die transkribierten JSONs/Markdown-Summaries behalten werden. 0 = sofort löschen nach Summary.</small>
+      </div>
+      <div class="settings-field">
+        <label class="checkbox-label">
+          <input type="checkbox" id="meet-auto-webhook" ${m.summarize_on_transcript_webhook !== false ? 'checked' : ''} onchange="markSettingsModified()">
+          <span>Auto-Summary bei Webex-Transcript-Webhook (Pfad A, folgt)</span>
+        </label>
+        <small class="field-hint">Wird aktiv, sobald der Webex-API-Pfad implementiert ist (OAuth + <code>/meetingTranscripts</code>-Webhook).</small>
+      </div>
+    </div>
+
+    <div class="settings-section-group">
+      <h4 class="settings-group-title">Lokale Audio-Aufnahme (Windows)</h4>
+      <div class="settings-field">
+        <label class="checkbox-label">
+          <input type="checkbox" id="meet-la-enabled" ${la.enabled ? 'checked' : ''} onchange="markSettingsModified()">
+          <span>Lokale Aufnahme aktiviert</span>
+        </label>
+        <small class="field-hint">
+          Benötigt Windows + <code>pip install pycaw pyaudiowpatch sounddevice soundfile</code>.
+          Greift Mikrofon + System-Output-Loopback parallel ab, transkribiert via Whisper, summarisiert per LLM.
+        </small>
+      </div>
+      <div class="settings-field">
+        <label for="meet-la-trigger">Trigger-Modus</label>
+        <select id="meet-la-trigger" onchange="markSettingsModified()">
+          <option value="manual" ${(la.trigger_mode || 'manual') === 'manual' ? 'selected' : ''}>manual — nur per <code>/record on</code></option>
+          <option value="auto_on_detect" ${la.trigger_mode === 'auto_on_detect' ? 'selected' : ''}>auto_on_detect — startet automatisch bei Webex-Call-Erkennung</option>
+        </select>
+      </div>
+      <div class="settings-field">
+        <label class="checkbox-label">
+          <input type="checkbox" id="meet-la-purge" ${la.purge_audio_after_summary !== false ? 'checked' : ''} onchange="markSettingsModified()">
+          <span>Audio-Dateien nach Summary löschen</span>
+        </label>
+        <small class="field-hint">Empfohlen: Roh-Audio wird nach erfolgreicher Zusammenfassung sofort entfernt; nur das Summary bleibt.</small>
+      </div>
+      <div class="settings-field">
+        <label for="meet-la-dir">Output-Verzeichnis</label>
+        <input type="text" id="meet-la-dir" value="${escapeHtml(la.output_dir || 'app/state/meetings/local_audio')}" style="font-family:var(--font-mono)" onchange="markSettingsModified()">
+      </div>
+      <div class="settings-field">
+        <label for="meet-la-poll">Watcher-Poll-Intervall (s)</label>
+        <input type="number" id="meet-la-poll" value="${la.watcher_poll_seconds || 2.0}" min="0.5" step="0.5" onchange="markSettingsModified()">
+        <small class="field-hint">Wie oft pycaw pollt, um Webex-Calls zu erkennen. Nur relevant in <code>auto_on_detect</code>.</small>
+      </div>
+    </div>
+
+    <div class="settings-actions-section">
+      <p style="font-size:0.78rem;color:var(--text-muted);margin:0">
+        💡 Slash-Commands im Bot-Chat:
+        <code>/record on|off|auto|manual|status|last</code> · <code>/summarize</code> (Pfad A folgt)
+      </p>
+    </div>
+  `;
+  setTimeout(() => initRoomPicker('meet-room-picker'), 0);
+}
+
+function _collectMeetingsValues() {
+  return {
+    enabled: document.getElementById('meet-enabled').checked,
+    post_to_room_id: getRoomPickerValue('meet-room-picker'),
+    summary_language: document.getElementById('meet-lang').value || 'de',
+    retention_days: parseInt(document.getElementById('meet-retention').value) || 30,
+    summarize_on_transcript_webhook: document.getElementById('meet-auto-webhook').checked,
+    local_audio: {
+      enabled: document.getElementById('meet-la-enabled').checked,
+      trigger_mode: document.getElementById('meet-la-trigger').value || 'manual',
+      purge_audio_after_summary: document.getElementById('meet-la-purge').checked,
+      output_dir: document.getElementById('meet-la-dir').value || 'app/state/meetings/local_audio',
+      watcher_poll_seconds: parseFloat(document.getElementById('meet-la-poll').value) || 2.0,
+    },
+  };
 }
 
 async function testEmailConnection() {
@@ -13678,6 +14231,49 @@ function getArrayFieldValues(fieldId) {
 
 async function saveCurrentSection() {
   const section = settingsState.currentSection;
+
+  // Webex-Bot (Sprint 1-4): eigene Felder, speichert als webex.bot
+  if (section === 'webex_bot') {
+    const botValues = _collectWebexBotValues();
+    try {
+      // webex ist Parent-Section; bot als komplettes Sub-Dict mitsenden.
+      // Andere webex-Felder (client_id, access_token, ...) bleiben unberührt,
+      // weil der Backend-Update current_dict.update(values) shallow merged.
+      const res = await fetch('/api/settings/section/webex', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ bot: botValues }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.detail || 'Fehler');
+      // State aktualisieren
+      if (!settingsState.settings.webex) settingsState.settings.webex = {};
+      settingsState.settings.webex.bot = data.values && data.values.bot ? data.values.bot : botValues;
+      updateSettingsStatus('Webex-Bot-Einstellungen angewendet', 'success');
+    } catch (err) {
+      updateSettingsStatus('Fehler: ' + err.message, 'error');
+    }
+    return;
+  }
+
+  // Meetings (Sprint 5)
+  if (section === 'meetings') {
+    const meetValues = _collectMeetingsValues();
+    try {
+      const res = await fetch('/api/settings/section/meetings', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(meetValues),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.detail || 'Fehler');
+      settingsState.settings.meetings = data.values || meetValues;
+      updateSettingsStatus('Meetings-Einstellungen angewendet', 'success');
+    } catch (err) {
+      updateSettingsStatus('Fehler: ' + err.message, 'error');
+    }
+    return;
+  }
 
   // Web-Suche hat eigene Felder (nur timeout - Proxy ist global)
   if (section === 'search') {

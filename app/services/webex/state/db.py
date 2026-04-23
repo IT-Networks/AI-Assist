@@ -22,112 +22,152 @@ logger = logging.getLogger(__name__)
 
 
 # Schema-Version fuer zukuenftige Migrationen. Erhoehen wenn breaking.
-_SCHEMA_VERSION = 3
+_SCHEMA_VERSION = 5
 
 
-_MIGRATIONS = [
+# Pro Version nur die neuen/zu aendernden DDLs. Die Migrations-Loop
+# fuehrt alle Versionen von (current+1) bis _SCHEMA_VERSION aus —
+# so sind ALTER TABLE / andere nicht-idempotente Statements sicher.
+# Die v1..v3 DDLs nutzen weiterhin IF NOT EXISTS, damit ein frischer
+# Startup (current=0) alle Versionen sauber anlegt.
+_MIGRATIONS: dict[int, list[str]] = {
     # v1 — Sprint 1 Initial-Schema
-    """
-    CREATE TABLE IF NOT EXISTS schema_version (
-        version INTEGER NOT NULL
-    );
-    """,
-    """
-    CREATE TABLE IF NOT EXISTS daily_usage (
-        date_utc    TEXT PRIMARY KEY,
-        tokens_used INTEGER NOT NULL DEFAULT 0,
-        updated_at  TEXT NOT NULL
-    );
-    """,
-    """
-    CREATE TABLE IF NOT EXISTS processed_messages (
-        process_key TEXT PRIMARY KEY,
-        room_id     TEXT NOT NULL,
-        created_at  TEXT NOT NULL
-    );
-    """,
-    """
-    CREATE INDEX IF NOT EXISTS idx_processed_created
-        ON processed_messages(created_at);
-    """,
-    """
-    CREATE TABLE IF NOT EXISTS sent_messages (
-        message_id TEXT PRIMARY KEY,
-        room_id    TEXT NOT NULL,
-        created_at TEXT NOT NULL
-    );
-    """,
-    """
-    CREATE INDEX IF NOT EXISTS idx_sent_created
-        ON sent_messages(created_at);
-    """,
+    1: [
+        """
+        CREATE TABLE IF NOT EXISTS schema_version (
+            version INTEGER NOT NULL
+        );
+        """,
+        """
+        CREATE TABLE IF NOT EXISTS daily_usage (
+            date_utc    TEXT PRIMARY KEY,
+            tokens_used INTEGER NOT NULL DEFAULT 0,
+            updated_at  TEXT NOT NULL
+        );
+        """,
+        """
+        CREATE TABLE IF NOT EXISTS processed_messages (
+            process_key TEXT PRIMARY KEY,
+            room_id     TEXT NOT NULL,
+            created_at  TEXT NOT NULL
+        );
+        """,
+        """
+        CREATE INDEX IF NOT EXISTS idx_processed_created
+            ON processed_messages(created_at);
+        """,
+        """
+        CREATE TABLE IF NOT EXISTS sent_messages (
+            message_id TEXT PRIMARY KEY,
+            room_id    TEXT NOT NULL,
+            created_at TEXT NOT NULL
+        );
+        """,
+        """
+        CREATE INDEX IF NOT EXISTS idx_sent_created
+            ON sent_messages(created_at);
+        """,
+    ],
     # v2 — Sprint 2: Approvals + Audit
-    """
-    CREATE TABLE IF NOT EXISTS approval_requests (
-        request_id       TEXT PRIMARY KEY,
-        session_id       TEXT NOT NULL,
-        room_id          TEXT NOT NULL,
-        parent_id        TEXT,
-        tool_name        TEXT NOT NULL,
-        tool_args_json   TEXT NOT NULL,
-        confirmation_json TEXT NOT NULL,
-        card_message_id  TEXT,
-        status           TEXT NOT NULL,
-        actor_email      TEXT,
-        created_at       TEXT NOT NULL,
-        resolved_at      TEXT
-    );
-    """,
-    """
-    CREATE INDEX IF NOT EXISTS idx_approval_session
-        ON approval_requests(session_id);
-    """,
-    """
-    CREATE INDEX IF NOT EXISTS idx_approval_status
-        ON approval_requests(status);
-    """,
-    """
-    CREATE TABLE IF NOT EXISTS webex_audit (
-        id            INTEGER PRIMARY KEY AUTOINCREMENT,
-        ts_utc        TEXT NOT NULL,
-        event_type    TEXT NOT NULL,
-        actor_email   TEXT,
-        room_id       TEXT,
-        session_id    TEXT,
-        risk_level    TEXT,
-        payload_json  TEXT NOT NULL
-    );
-    """,
-    """
-    CREATE INDEX IF NOT EXISTS idx_audit_ts
-        ON webex_audit(ts_utc);
-    """,
-    """
-    CREATE INDEX IF NOT EXISTS idx_audit_session
-        ON webex_audit(session_id);
-    """,
+    2: [
+        """
+        CREATE TABLE IF NOT EXISTS approval_requests (
+            request_id       TEXT PRIMARY KEY,
+            session_id       TEXT NOT NULL,
+            room_id          TEXT NOT NULL,
+            parent_id        TEXT,
+            tool_name        TEXT NOT NULL,
+            tool_args_json   TEXT NOT NULL,
+            confirmation_json TEXT NOT NULL,
+            card_message_id  TEXT,
+            status           TEXT NOT NULL,
+            actor_email      TEXT,
+            created_at       TEXT NOT NULL,
+            resolved_at      TEXT
+        );
+        """,
+        """
+        CREATE INDEX IF NOT EXISTS idx_approval_session
+            ON approval_requests(session_id);
+        """,
+        """
+        CREATE INDEX IF NOT EXISTS idx_approval_status
+            ON approval_requests(status);
+        """,
+        """
+        CREATE TABLE IF NOT EXISTS webex_audit (
+            id            INTEGER PRIMARY KEY AUTOINCREMENT,
+            ts_utc        TEXT NOT NULL,
+            event_type    TEXT NOT NULL,
+            actor_email   TEXT,
+            room_id       TEXT,
+            session_id    TEXT,
+            risk_level    TEXT,
+            payload_json  TEXT NOT NULL
+        );
+        """,
+        """
+        CREATE INDEX IF NOT EXISTS idx_audit_ts
+            ON webex_audit(ts_utc);
+        """,
+        """
+        CREATE INDEX IF NOT EXISTS idx_audit_session
+            ON webex_audit(session_id);
+        """,
+    ],
     # v3 — Sprint 3: Conversation-Bindings (Multi-Conversation)
-    """
-    CREATE TABLE IF NOT EXISTS conversation_bindings (
-        conv_key     TEXT PRIMARY KEY,        -- "{room_id}:{thread_id}"
-        room_id      TEXT NOT NULL,
-        thread_id    TEXT NOT NULL DEFAULT '',
-        session_id   TEXT NOT NULL,
-        scope        TEXT NOT NULL,            -- direct|group|thread
-        policy_json  TEXT NOT NULL,
-        created_at   TEXT NOT NULL,
-        updated_at   TEXT NOT NULL
-    );
-    """,
-    """
-    CREATE INDEX IF NOT EXISTS idx_bindings_room
-        ON conversation_bindings(room_id);
-    """,
-    """
-    CREATE INDEX IF NOT EXISTS idx_bindings_session
-        ON conversation_bindings(session_id);
-    """,
-]
+    3: [
+        """
+        CREATE TABLE IF NOT EXISTS conversation_bindings (
+            conv_key     TEXT PRIMARY KEY,        -- "{room_id}:{thread_id}"
+            room_id      TEXT NOT NULL,
+            thread_id    TEXT NOT NULL DEFAULT '',
+            session_id   TEXT NOT NULL,
+            scope        TEXT NOT NULL,            -- direct|group|thread
+            policy_json  TEXT NOT NULL,
+            created_at   TEXT NOT NULL,
+            updated_at   TEXT NOT NULL
+        );
+        """,
+        """
+        CREATE INDEX IF NOT EXISTS idx_bindings_room
+            ON conversation_bindings(room_id);
+        """,
+        """
+        CREATE INDEX IF NOT EXISTS idx_bindings_session
+            ON conversation_bindings(session_id);
+        """,
+    ],
+    # v4 — Approval-Authorization (C1): Original-Requester wird persistiert,
+    # damit ApprovalBus.resolve() verifizieren kann, dass nur der Absender
+    # der Trigger-Message seine eigene Card auflösen darf.
+    4: [
+        # ALTER TABLE ADD COLUMN ist seit SQLite 3.35 O(1) (Metadata-Only).
+        # Nicht idempotent → deshalb die per-Version-Loop.
+        """
+        ALTER TABLE approval_requests
+            ADD COLUMN requester_email TEXT NOT NULL DEFAULT '';
+        """,
+    ],
+    # v5 — Session-Generation (Context-Management): Pro Conversation wird
+    # eine Generation-Nummer gehalten. Inkrementiert sich bei /new, /fork
+    # oder nach 24h Idle. Die effective_session_id wird "{base}:g{N}" —
+    # dadurch bekommt jede Generation saubere Orchestrator-History.
+    5: [
+        """
+        ALTER TABLE conversation_bindings
+            ADD COLUMN generation INTEGER NOT NULL DEFAULT 1;
+        """,
+        """
+        ALTER TABLE conversation_bindings
+            ADD COLUMN last_activity_utc TEXT NOT NULL DEFAULT '';
+        """,
+        """
+        ALTER TABLE conversation_bindings
+            ADD COLUMN reset_pending INTEGER NOT NULL DEFAULT 0;
+        """,
+    ],
+}
 
 
 def resolve_db_path() -> Path:
@@ -223,9 +263,12 @@ class WebexDb:
             if current >= _SCHEMA_VERSION:
                 return current
 
-            # Alle DDL-Statements ausfuehren (idempotent dank IF NOT EXISTS)
-            for ddl in _MIGRATIONS:
-                conn.execute(ddl)
+            # Pro Version die DDLs ausfuehren — nur fuer Versionen, die
+            # noch nicht angewandt wurden. v1..v3 nutzen IF NOT EXISTS,
+            # v4+ kann nicht-idempotente Statements (ALTER TABLE) enthalten.
+            for version in range(current + 1, _SCHEMA_VERSION + 1):
+                for ddl in _MIGRATIONS.get(version, []):
+                    conn.execute(ddl)
 
             # Version setzen (upsert)
             conn.execute("DELETE FROM schema_version;")

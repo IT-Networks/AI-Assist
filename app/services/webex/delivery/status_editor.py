@@ -16,12 +16,17 @@ User sieht weiterhin "eine Message" — die message_id aendert sich aber
 intern. Externe Tracker werden via ``on_new_message``-Callback informiert.
 
 Fallback: Wenn Edit fehlschlaegt (400/404/429), wird ebenfalls rotiert.
+
+**Collapse-Finalizer (Sprint 4 / Phase 4):**
+``finalize(body, tool_history=...)`` klappt die Zwischen-Status-Zeilen
+hinter einem markdown ``<details>``-Block zusammen. User sieht "Frage →
+Antwort + (N Tools verwendet)"; Details bleiben auf Klick expandierbar.
 """
 
 from __future__ import annotations
 
 import logging
-from typing import Any, Awaitable, Callable, Optional
+from typing import Any, Awaitable, Callable, List, Optional
 
 from app.services.webex.delivery.edit_counter import EditCounterBucket
 
@@ -34,6 +39,43 @@ MAX_EDIT_CHARS = 6500
 
 # Typ-Alias fuer den new-message-Callback.
 OnNewMessageCallback = Callable[[str], Awaitable[None]]
+
+
+def build_collapsed_tool_summary(tool_history: List[str]) -> str:
+    """Baut den Markdown-Suffix mit zusammenklappbarer Tool-Liste.
+
+    Format (Webex-App rendert ``<details>``/``<summary>``):
+        <details>
+        <summary>🔧 N Tool(s): tool_a, tool_b</summary>
+
+        - tool_a
+        - tool_b
+        - tool_c
+
+        </details>
+
+    Wenn das Webex-Client die Tags nicht rendert, faellt die Darstellung
+    auf den rohen Text zurueck — unschoen aber funktional.
+    """
+    if not tool_history:
+        return ""
+    # Dedupe bei behalt der Reihenfolge (sieht der User eher wie "Verlauf")
+    seen: set = set()
+    ordered: List[str] = []
+    for tool in tool_history:
+        if tool not in seen:
+            seen.add(tool)
+            ordered.append(tool)
+    preview_list = ", ".join(ordered[:3])
+    if len(ordered) > 3:
+        preview_list += f", +{len(ordered) - 3}"
+    items = "\n".join(f"- `{t}`" for t in tool_history)  # volle Liste mit Dupes
+    return (
+        "\n\n<details>\n"
+        f"<summary>🔧 {len(tool_history)} Tool(s): {preview_list}</summary>\n\n"
+        f"{items}\n\n"
+        "</details>"
+    )
 
 
 class StatusEditor:
@@ -155,14 +197,29 @@ class StatusEditor:
             )
             return await self._rotate(normalized, phase=phase)
 
-    async def finalize(self, text: str) -> bool:
+    async def finalize(
+        self,
+        text: str,
+        *,
+        tool_history: Optional[List[str]] = None,
+    ) -> bool:
         """Setzt den finalen Antwort-Text (ersetzt Status-Message).
+
+        Args:
+            text: Finaler Markdown-Body.
+            tool_history: Optional Liste der wahrend des Runs verwendeten
+                Tool-Namen. Wird als zusammenklappbare ``<details>``-Liste
+                angehaengt (Phase 4 Collapse-Finalizer). Ohne oder leer:
+                kein Suffix.
 
         Unterschied zu ``update()``: keine Dedup-Pruefung, garantierter Write.
         Falls Counter bereits Threshold erreicht hat, wird rotiert damit
         Finalize nicht den 10. (limit-reissenden) Edit verursacht.
         """
-        normalized = text[:MAX_EDIT_CHARS] if text else ""
+        # Collapse-Suffix VOR Truncation bauen, damit der Body Prio hat.
+        summary = build_collapsed_tool_summary(tool_history or [])
+        combined = f"{text}{summary}" if text else summary
+        normalized = combined[:MAX_EDIT_CHARS] if combined else ""
         if not self._message_id:
             return await self._post_new(normalized, phase="done")
 

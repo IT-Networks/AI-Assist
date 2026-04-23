@@ -1,0 +1,1680 @@
+{
+  "schema_version": 1,
+  "generated_at": "2026-04-23",
+  "tool_count": 103,
+  "alias_count": 24,
+  "tools": [
+    {
+      "name": "alm_add_test_to_test_set",
+      "description": "VERKNUEPFT einen Testfall aus dem Test Pool mit einem Test-Set im Test Lab. Dies ist die Methode um eine Test-Instance zu erstellen - nachdem du ein Test-Set erstellt hast, verwendest du dieses Tool um Testfaelle aus dem Test Pool hinzuzufuegen und sie im Test Lab auszufuehren. WICHTIG: Verwende DIESES Tool um Testfaelle zu einem Test-Set hinzuzufuegen (nicht alm_create_test_set). Parameter: test_id = Testfall-ID aus dem Test Pool (alm_search_tests, alm_read_test), test_set_id = Test-Set-ID aus dem Test Lab (alm_list_test_sets). Die Test-Instance wird dann im Test Lab sichtbar und kann ausgefuehrt werden. Erfordert Bestaetigung durch den User.",
+      "parameters": {
+        "count": 2,
+        "required": [
+          "test_id",
+          "test_set_id"
+        ],
+        "properties": [
+          "test_id",
+          "test_set_id"
+        ]
+      }
+    },
+    {
+      "name": "alm_create_folder",
+      "description": "Erstellt einen neuen Folder im Test Pool (Testfall-Definitionen). NICHT fuer Test Lab Folder! Gib parent_id an um einen Unterordner zu erstellen.",
+      "parameters": {
+        "count": 2,
+        "required": [
+          "name"
+        ],
+        "properties": [
+          "name",
+          "parent_id"
+        ]
+      }
+    },
+    {
+      "name": "alm_create_run",
+      "description": "Erstellt einen Test-Run in HP ALM um ein Testergebnis zu dokumentieren. Aktualisiert automatisch den Status der Test-Instance. Erfordert Bestaetigung durch den User.",
+      "parameters": {
+        "count": 5,
+        "required": [
+          "status"
+        ],
+        "properties": [
+          "test_instance_id",
+          "test_name",
+          "test_set_id",
+          "status",
+          "comment"
+        ]
+      }
+    },
+    {
+      "name": "alm_create_test",
+      "description": "Erstellt einen neuen Testfall in HP ALM/Quality Center. Erfordert Bestaetigung durch den User. Verwende alm_list_folders um die folder_id zu ermitteln.",
+      "parameters": {
+        "count": 5,
+        "required": [
+          "name",
+          "folder_id"
+        ],
+        "properties": [
+          "name",
+          "folder_id",
+          "description",
+          "test_type",
+          "steps"
+        ]
+      }
+    },
+    {
+      "name": "alm_create_test_lab_folder",
+      "description": "Erstellt einen neuen Folder im TEST LAB (NICHT im Test Pool!). Verwende dies um die Ordnerstruktur im Test Lab zu erweitern. Gib parent_id an um einen Unterordner zu erstellen (IDs aus alm_list_test_lab_folders).",
+      "parameters": {
+        "count": 2,
+        "required": [
+          "name"
+        ],
+        "properties": [
+          "name",
+          "parent_id"
+        ]
+      }
+    },
+    {
+      "name": "alm_create_test_set",
+      "description": "ERSTELLT ein NEUES Test-Set im TEST LAB von HP ALM (nicht zum Aendern vorhandener Test-Sets!). Verwende dieses Tool NUR wenn du ein brandneues Test-Set anlegen moechtest. Wenn ein Test-Set bereits existiert, verwende NICHT dieses Tool - verwende stattdessen alm_add_test_to_test_set um Testfaelle hinzuzufuegen! Parameter: name = Test-Set-Name, folder_id = Test Lab Folder-ID (aus alm_list_test_lab_folders). Erfordert Bestaetigung durch den User. Nach dem Erstellen eines neuen Test-Sets koennen Testfaelle mit alm_add_test_to_test_set hinzugefuegt werden.",
+      "parameters": {
+        "count": 4,
+        "required": [
+          "name",
+          "folder_id"
+        ],
+        "properties": [
+          "name",
+          "folder_id",
+          "description",
+          "user_01"
+        ]
+      }
+    },
+    {
+      "name": "alm_get_context",
+      "description": "Zeigt den aktuellen HP ALM Kontext: Server, Domain, Projekt, Benutzer und Session-Status.",
+      "parameters": {
+        "count": 0,
+        "required": [],
+        "properties": []
+      }
+    },
+    {
+      "name": "alm_get_folder",
+      "description": "Laedt Unterordner eines Folders (Navigation in die Tiefe). NICHT verwenden um den Pfad eines Folders zu ermitteln - der Pfad ist bereits in der Ausgabe von alm_list_folders (Test Pool) bzw. alm_list_test_lab_folders (Test Lab) enthalten! Verwende dieses Tool NUR um die Unterordner eines bekannten Folders zu sehen. Du MUSST folder_type angeben: 'test-pool' = Testfall-Definitionen, 'test-lab' = Test-Sets/Ausfuehrung.",
+      "parameters": {
+        "count": 2,
+        "required": [
+          "folder_id",
+          "folder_type"
+        ],
+        "properties": [
+          "folder_id",
+          "folder_type"
+        ]
+      }
+    },
+    {
+      "name": "alm_get_run_history",
+      "description": "Zeigt die Run-Historie einer Test-Instance in HP ALM. Zeigt alle vergangenen Testausfuehrungen mit Status, Datum und Tester.",
+      "parameters": {
+        "count": 2,
+        "required": [
+          "test_instance_id"
+        ],
+        "properties": [
+          "test_instance_id",
+          "limit"
+        ]
+      }
+    },
+    {
+      "name": "alm_get_test_steps",
+      "description": "Laedt die Design-Steps (Testschritte) eines Testfalls aus HP ALM. Zeigt alle Schritte mit Beschreibung und erwartetem Ergebnis. Verwende dies wenn alm_read_test keine Steps anzeigt.",
+      "parameters": {
+        "count": 1,
+        "required": [
+          "test_id"
+        ],
+        "properties": [
+          "test_id"
+        ]
+      }
+    },
+    {
+      "name": "alm_list_folders",
+      "description": "Listet Test Pool Folder in HP ALM auf. Die Ausgabe enthaelt bereits den VOLLSTAENDIGEN PFAD jedes Folders (z.B. 'Root/Modul/Submodul') - kein weiterer Aufruf noetig fuer Pfade! WICHTIG: Dies zeigt die Ordnerstruktur im TEST POOL (wo Testfaelle definiert werden), NICHT die Ordnerstruktur im Test Lab (wo Test-Sets ausgefuehrt werden)! Fuer Test Lab Ordner verwende stattdessen alm_list_test_lab_folders. Ohne parent_id werden Root-Folder angezeigt. Gib dem Benutzer direkt den Pfad aus dieser Ausgabe - NICHT alm_get_folder aufrufen um den Pfad nochmal zu holen.",
+      "parameters": {
+        "count": 1,
+        "required": [],
+        "properties": [
+          "parent_id"
+        ]
+      }
+    },
+    {
+      "name": "alm_list_projects",
+      "description": "Listet alle verfuegbaren Projekte in HP ALM auf. Zeigt auch das aktuell aktive Projekt an. Optional kann eine andere Domain angegeben werden.",
+      "parameters": {
+        "count": 1,
+        "required": [],
+        "properties": [
+          "domain"
+        ]
+      }
+    },
+    {
+      "name": "alm_list_test_lab_folders",
+      "description": "Listet Test Lab Folder in HP ALM auf. Die Ausgabe enthaelt bereits den VOLLSTAENDIGEN PFAD jedes Folders (z.B. 'Root/Regression/Sprint-1') - kein weiterer Aufruf noetig fuer Pfade! WICHTIG: Dies zeigt die Ordnerstruktur im TEST LAB (wo Test-Sets ausgefuehrt werden), NICHT die Ordnerstruktur im Test Pool (wo Testfaelle definiert werden)! Fuer Test Pool Ordner verwende stattdessen alm_list_folders. Verwende die Folder-IDs hier fuer alm_list_test_sets. Gib dem Benutzer direkt den Pfad aus dieser Ausgabe - NICHT alm_get_folder aufrufen um den Pfad nochmal zu holen.",
+      "parameters": {
+        "count": 1,
+        "required": [],
+        "properties": [
+          "parent_id"
+        ]
+      }
+    },
+    {
+      "name": "alm_list_test_sets",
+      "description": "Listet Test-Sets aus dem TEST LAB in HP ALM auf. Die Ausgabe enthaelt den VOLLSTAENDIGEN PFAD jedes Test-Sets im Test Lab (z.B. '2026/Inttest/Projekt1/Testset_1') - gib diesen Pfad direkt an den Benutzer weiter! WICHTIG: Test-Sets liegen im Test Lab (NICHT im Test Pool!). Verwende alm_list_test_lab_folders um die folder_id im Test Lab zu ermitteln.",
+      "parameters": {
+        "count": 1,
+        "required": [],
+        "properties": [
+          "folder_id"
+        ]
+      }
+    },
+    {
+      "name": "alm_read_test",
+      "description": "Liest einen Testfall aus HP ALM mit allen Details: Name, Beschreibung, Folder-Pfad, Status und alle Test-Schritte. Akzeptiert entweder die numerische Test-ID oder einen Test-Namen/Key zur Suche. WICHTIG: Wenn der Test aus einem anderen Projekt stammt, gib project (und optional domain) an!",
+      "parameters": {
+        "count": 4,
+        "required": [],
+        "properties": [
+          "test_id",
+          "test_identifier",
+          "project",
+          "domain"
+        ]
+      }
+    },
+    {
+      "name": "alm_search_test_instances",
+      "description": "Sucht Test-Instances im Test Lab von HP ALM mit erweiterten Filtern. Kann nach Name, Tester, Ausfuehrungsdatum und Status filtern. Beispiel: 'Zeige alle fehlgeschlagenen Tests von user123 diese Woche'",
+      "parameters": {
+        "count": 7,
+        "required": [],
+        "properties": [
+          "query",
+          "test_set_id",
+          "status",
+          "tester",
+          "executed_after",
+          "executed_before",
+          "limit"
+        ]
+      }
+    },
+    {
+      "name": "alm_search_tests",
+      "description": "Sucht Testfaelle im TEST POOL von HP ALM/Quality Center mit erweiterten Filtern. WICHTIG: Dies durchsucht den Test Pool (Testfall-Definitionen), NICHT das Test Lab (Testausfuehrung). Kann nach Name, Autor, Erstelldatum, Status und Typ filtern. Fuer Test Lab Ordner verwende alm_list_test_lab_folders, fuer Test-Sets verwende alm_list_test_sets.",
+      "parameters": {
+        "count": 8,
+        "required": [],
+        "properties": [
+          "query",
+          "folder_id",
+          "owner",
+          "created_after",
+          "created_before",
+          "status",
+          "test_type",
+          "limit"
+        ]
+      }
+    },
+    {
+      "name": "alm_switch_project",
+      "description": "Wechselt das aktive HP ALM Projekt zur Laufzeit. Verwende alm_list_projects um verfuegbare Projekte zu sehen. Der Wechsel ist temporaer und aendert nicht die Settings.",
+      "parameters": {
+        "count": 2,
+        "required": [
+          "project"
+        ],
+        "properties": [
+          "project",
+          "domain"
+        ]
+      }
+    },
+    {
+      "name": "alm_test_connection",
+      "description": "Testet die Verbindung zu HP ALM/Quality Center und fuehrt einen Login durch. Verwende dieses Tool um zu pruefen ob ALM erreichbar ist und die Zugangsdaten korrekt sind. WICHTIG: Dies ist fuer HP ALM/Quality Center, NICHT fuer andere Test-Tools wie SOAP-Tests.",
+      "parameters": {
+        "count": 0,
+        "required": [],
+        "properties": []
+      }
+    },
+    {
+      "name": "alm_update_test",
+      "description": "Aktualisiert einen bestehenden Testfall in HP ALM. Erfordert Bestaetigung durch den User.",
+      "parameters": {
+        "count": 2,
+        "required": [
+          "test_id",
+          "fields"
+        ],
+        "properties": [
+          "test_id",
+          "fields"
+        ]
+      }
+    },
+    {
+      "name": "analyze_java_class",
+      "description": "Analysiert eine Java-Klasse und zeigt deren Struktur: Methoden mit Parametern und Rückgabetypen, Felder/Dependencies für Mocking, Konstruktoren. Nutze dieses Tool VOR generate_junit_test um testbare Methoden zu identifizieren. NICHT für Code-Suche (→ search_code) oder Vererbung (→ trace_java_references).",
+      "parameters": {
+        "count": 2,
+        "required": [
+          "class_path"
+        ],
+        "properties": [
+          "class_path",
+          "show_all"
+        ]
+      }
+    },
+    {
+      "name": "bash",
+      "description": "Unified Shell-Execution. sandbox='container' (default) führt im sicheren Docker-Container aus; sandbox='local' eskaliert einen vorherigen Container-Test (execution_id nötig) und BENÖTIGT BESTÄTIGUNG; sandbox='workspace' nutzt den Whitelist-Pfad mit cwd für Project-Binaries (python, node, npm, npx, pytest, pip, uv, poetry, cargo, go, mvn, gradle, tsc, jest, vitest, java, make) — ebenfalls BESTÄTIGUNG. Für persistente Python-Sessions: new_session=true setzen (liefert session_id) oder session_id angeben. Git-Operationen laufen NICHT über bash — nutze git_* Tools. Für eine Python-Session-Lifecycle-Action (list/close/upload): bash_sessions. Für reine Python-Code-Ausführung: exec_python.",
+      "parameters": {
+        "count": 9,
+        "required": [
+          "command"
+        ],
+        "properties": [
+          "command",
+          "sandbox",
+          "cwd",
+          "execution_id",
+          "timeout",
+          "mount_repo",
+          "session_id",
+          "new_session",
+          "packages"
+        ]
+      }
+    },
+    {
+      "name": "bash_sessions",
+      "description": "Lifecycle-Verwaltung für persistente Python-Container-Sessions und Shell-Execution-Cache. action='list' zeigt beide Arten; 'create' startet eine neue Session (alternativ: bash(new_session=true)); 'close' entfernt eine Session; 'upload' lädt eine Datei in eine Session hoch (base64).",
+      "parameters": {
+        "count": 6,
+        "required": [
+          "action"
+        ],
+        "properties": [
+          "action",
+          "session_id",
+          "filename",
+          "content_base64",
+          "packages",
+          "session_name"
+        ]
+      }
+    },
+    {
+      "name": "batch_read_files",
+      "description": "📁 EFFIZIENZ-TOOL: Liest MEHRERE Dateien in EINEM Aufruf!\nErsetzt: read_file × N\n\nPfade komma-getrennt angeben (max 10 Dateien).\nIdeal für: Stacktrace-Analyse, Code-Review, Vergleiche.\n\nBeispiel: batch_read_files(paths='UserService.java, UserRepository.java, User.java')",
+      "parameters": {
+        "count": 4,
+        "required": [
+          "paths"
+        ],
+        "properties": [
+          "paths",
+          "show_line_numbers",
+          "max_lines_per_file",
+          "encoding"
+        ]
+      }
+    },
+    {
+      "name": "batch_write_files",
+      "description": "📝 EFFIZIENZ-TOOL: Schreibt MEHRERE Dateien mit EINER Bestätigung!\nErsetzt: write_file × N (ohne N einzelne Bestätigungen)\n\nWICHTIG: Nutze dieses Tool wenn du mehrere Dateien erstellen/ändern musst!\nDer User bestätigt EINMAL für alle Dateien.\n\nFormat: JSON-Array mit path und content pro Datei.\nBeispiel: batch_write_files(files='[{\"path\": \"src/User.java\", \"content\": \"...\"}]')",
+      "parameters": {
+        "count": 1,
+        "required": [
+          "files"
+        ],
+        "properties": [
+          "files"
+        ]
+      }
+    },
+    {
+      "name": "combined_search",
+      "description": "🔍 EFFIZIENZ-TOOL: Durchsucht MEHRERE Quellen PARALLEL in EINEM Aufruf!\nErsetzt: search_code + search_handbook + search_skills\n\nNutze sources='code,handbook,skills' um alle zu durchsuchen.\nMit include_content=true werden gefundene Code-Dateien direkt mitgelesen.\n\nBeispiel: combined_search(query='getUserById', sources='code,handbook', include_content=true)",
+      "parameters": {
+        "count": 5,
+        "required": [
+          "query"
+        ],
+        "properties": [
+          "query",
+          "sources",
+          "max_per_source",
+          "include_content",
+          "language"
+        ]
+      }
+    },
+    {
+      "name": "compile_files",
+      "description": "Validiert und kompiliert Dateien im Repository. Unterstützt Python, Java, SQL, SQLJ, XML und Config-Dateien. Standardmäßig werden nur geänderte Dateien (Git) geprüft. Mit fix=true werden Auto-Fixes angewendet (z.B. Linting). Ideal für: Pre-Commit Checks, Code-Qualität, Syntax-Validierung.",
+      "parameters": {
+        "count": 7,
+        "required": [],
+        "properties": [
+          "files",
+          "changed_only",
+          "types",
+          "fix",
+          "strict",
+          "repo",
+          "verbose"
+        ]
+      }
+    },
+    {
+      "name": "debug_java_with_testdata",
+      "description": "Analysiert LOKALEN Java-Code mit Testdaten: liest Code → SQLJ → substituiert Parameter → SQL-Ergebnis. WICHTIG: Arbeitet mit LOKALEM Repository! Für GitHub-Code erst mit github_get_file holen. PFLICHT: class_name angeben (zuerst search_code aufrufen).",
+      "parameters": {
+        "count": 3,
+        "required": [
+          "class_name"
+        ],
+        "properties": [
+          "class_name",
+          "method_name",
+          "test_parameters"
+        ]
+      }
+    },
+    {
+      "name": "delete_python_script",
+      "description": "Löscht ein gespeichertes Python-Script.",
+      "parameters": {
+        "count": 1,
+        "required": [
+          "script_id"
+        ],
+        "properties": [
+          "script_id"
+        ]
+      }
+    },
+    {
+      "name": "describe_database_table",
+      "description": "Zeigt die Struktur einer DB2-Tabelle (Spalten, Typen, Constraints).",
+      "parameters": {
+        "count": 2,
+        "required": [
+          "table_name"
+        ],
+        "properties": [
+          "table_name",
+          "schema"
+        ]
+      }
+    },
+    {
+      "name": "edit",
+      "description": "Bearbeitet eine LOKALE Datei durch String-Ersetzung. BENÖTIGT BESTÄTIGUNG.\n\nKRITISCH - IMMER ZUERST read AUSFÜHREN! Der old_string muss EXAKT mit dem Dateiinhalt übereinstimmen (inkl. Leerzeichen, Tabs, Zeilenumbrüche). Bei mehrfachem Vorkommen: entweder mehr Kontext in old_string, oder replace_all=true.",
+      "parameters": {
+        "count": 4,
+        "required": [
+          "path",
+          "old_string",
+          "new_string"
+        ],
+        "properties": [
+          "path",
+          "old_string",
+          "new_string",
+          "replace_all"
+        ]
+      }
+    },
+    {
+      "name": "exec_python",
+      "description": "Führt Python-Code im Container aus. One-Shot (ohne session_id) oder in einer persistenten Session (session_id). Bei One-Shot können via requirements pip-Pakete vorinstalliert werden (muss in pip_allowed_packages stehen). Enthält Syntax-Prüfung vor Ausführung. Für wiederverwendbare, namentlich gespeicherte Scripts: generate_python_script + execute_python_script.",
+      "parameters": {
+        "count": 4,
+        "required": [
+          "code"
+        ],
+        "properties": [
+          "code",
+          "requirements",
+          "session_id",
+          "timeout"
+        ]
+      }
+    },
+    {
+      "name": "execute_python_script",
+      "description": "Führt ein gespeichertes Python-Script aus.\n\nDas Script wird in einer isolierten Umgebung ausgeführt.\nERFORDERT USER-BESTÄTIGUNG vor der Ausführung.\n\nArgumente werden dem Script als SCRIPT_ARGS Dictionary zur Verfügung gestellt.\nBeispiel im Script: input_file = SCRIPT_ARGS.get('input_file', 'default.csv')",
+      "parameters": {
+        "count": 3,
+        "required": [
+          "script_id"
+        ],
+        "properties": [
+          "script_id",
+          "args",
+          "input_data"
+        ]
+      }
+    },
+    {
+      "name": "fetch_webpage",
+      "description": "Ruft eine ÖFFENTLICHE Webseite ab und extrahiert den Textinhalt. Nutze dies nach web_search um Artikel, Dokumentationen oder Blog-Posts zu lesen. HTML wird automatisch geparst, Navigation/Werbung entfernt. ⚠️ NUR für öffentliche URLs - für Intranet/Firmen-Seiten nutze: internal_fetch",
+      "parameters": {
+        "count": 4,
+        "required": [
+          "url"
+        ],
+        "properties": [
+          "url",
+          "max_length",
+          "extract_mode",
+          "verify_ssl"
+        ]
+      }
+    },
+    {
+      "name": "generate_junit_test",
+      "description": "Generiert JUnit-Tests für eine Java-Klasse. Erstellt Test-Klasse mit Setup, Happy-Path-Tests, Negative-Tests und Edge-Cases. Unterstützt JUnit 4/5, Mockito und Spring. Die Test-Datei wird im src/test/java Verzeichnis mit gespiegelter Package-Struktur erstellt. Tipp: Nutze zuerst analyze_java_class um die Methoden zu sehen.",
+      "parameters": {
+        "count": 6,
+        "required": [
+          "class_path"
+        ],
+        "properties": [
+          "class_path",
+          "methods",
+          "version",
+          "style",
+          "dry_run",
+          "overwrite"
+        ]
+      }
+    },
+    {
+      "name": "generate_python_script",
+      "description": "Erstellt und speichert ein Python-Script für komplexe Aufgaben.\n\nWANN VERWENDEN:\n✅ Komplexe Datentransformationen (CSV→JSON, XML-Parsing)\n✅ Batch-Operationen auf vielen Dateien\n✅ Mathematische/statistische Berechnungen\n✅ Datenanalyse mit pandas/numpy\n✅ Wiederverwendbare Automatisierungen\n\nWANN NICHT VERWENDEN:\n❌ Einfaches Datei-Lesen → read_file\n❌ Einfache Textsuche → grep/search_code\n❌ Shell-Befehle → execute_command\n❌ Einmalige einfache Operationen\n\nDas Script wird validiert und sicher gespeichert.\nGefährliche Imports (subprocess, os.system, etc.) sind nicht erlaubt.\n\nVerfügbare Imports: json, csv, pathlib, re, datetime, collections,\nitertools, functools, math, statistics, pandas, numpy, yaml\n\nDas Script kann über SCRIPT_ARGS auf übergebene Argumente zugreifen.",
+      "parameters": {
+        "count": 5,
+        "required": [
+          "code",
+          "name",
+          "description"
+        ],
+        "properties": [
+          "code",
+          "name",
+          "description",
+          "parameters",
+          "requirements"
+        ]
+      }
+    },
+    {
+      "name": "get_project_paths",
+      "description": "Zeigt die indexierten Projekt-Pfade für Dateioperationen. NUTZE DIESES TOOL wenn du wissen willst, welche Verzeichnisse für Lese-/Schreiboperationen verfügbar sind. Hilft bei Stacktrace-Analyse und gezielter Dateisuche.",
+      "parameters": {
+        "count": 0,
+        "required": [],
+        "properties": []
+      }
+    },
+    {
+      "name": "get_service_info",
+      "description": "Holt detaillierte Informationen zu einem Service aus dem Handbuch (Tabs, Felder, Aufrufvarianten).",
+      "parameters": {
+        "count": 1,
+        "required": [
+          "service_id"
+        ],
+        "properties": [
+          "service_id"
+        ]
+      }
+    },
+    {
+      "name": "git_blame",
+      "description": "Zeigt wer welche Zeile einer Datei zuletzt geändert hat (git blame). Hilfreich um Verantwortliche für Code zu finden. Kann auf Zeilenbereich eingeschränkt werden.",
+      "parameters": {
+        "count": 4,
+        "required": [
+          "file"
+        ],
+        "properties": [
+          "path",
+          "file",
+          "start_line",
+          "end_line"
+        ]
+      }
+    },
+    {
+      "name": "git_branch_list",
+      "description": "Listet alle Git-Branches auf: Name, letzter Commit, aktueller Branch. Optional auch Remote-Branches einschließen.",
+      "parameters": {
+        "count": 2,
+        "required": [],
+        "properties": [
+          "path",
+          "include_remote"
+        ]
+      }
+    },
+    {
+      "name": "git_diff",
+      "description": "Zeigt Git-Diff: Code-Änderungen zwischen Working Directory, Staging, oder Commits. Kann auf bestimmte Dateien gefiltert werden. Zeigt hinzugefügte/entfernte Zeilen mit Kontext.",
+      "parameters": {
+        "count": 6,
+        "required": [],
+        "properties": [
+          "path",
+          "file",
+          "staged",
+          "commit1",
+          "commit2",
+          "context_lines"
+        ]
+      }
+    },
+    {
+      "name": "git_log",
+      "description": "Zeigt die Git-Commit-Historie: Commits, Autoren, Zeitpunkte. Kann nach Branch, Autor, Zeitraum und Datei gefiltert werden. Verwende dies um die Entwicklungsgeschichte zu verstehen.",
+      "parameters": {
+        "count": 7,
+        "required": [],
+        "properties": [
+          "path",
+          "limit",
+          "branch",
+          "author",
+          "since",
+          "file",
+          "oneline"
+        ]
+      }
+    },
+    {
+      "name": "git_show_commit",
+      "description": "Zeigt vollständige Details eines Commits: Metadaten, geänderte Dateien, Diff. Verwende Commit-SHA oder Referenzen wie HEAD, HEAD~1, branch_name.",
+      "parameters": {
+        "count": 2,
+        "required": [
+          "commit"
+        ],
+        "properties": [
+          "path",
+          "commit"
+        ]
+      }
+    },
+    {
+      "name": "git_stash_list",
+      "description": "Zeigt alle gespeicherten Git-Stashes. Stashes sind zwischengespeicherte Änderungen die später wiederhergestellt werden können.",
+      "parameters": {
+        "count": 1,
+        "required": [],
+        "properties": [
+          "path"
+        ]
+      }
+    },
+    {
+      "name": "git_status",
+      "description": "Zeigt den Git-Status des lokalen Repositories: Geänderte Dateien, gestaged Änderungen, ungetrackte Dateien, aktueller Branch. Verwende dies um den aktuellen Zustand des Repos zu verstehen.",
+      "parameters": {
+        "count": 1,
+        "required": [],
+        "properties": [
+          "path"
+        ]
+      }
+    },
+    {
+      "name": "github_commit_diff",
+      "description": "Holt die Code-Änderungen eines spezifischen Commits von GitHub. Zeigt welche Dateien geändert wurden mit dem Diff-Patch. Verwende dies um Commit-Änderungen zu analysieren.",
+      "parameters": {
+        "count": 3,
+        "required": [
+          "commit_sha"
+        ],
+        "properties": [
+          "repo",
+          "commit_sha",
+          "file_filter"
+        ]
+      }
+    },
+    {
+      "name": "github_get_file",
+      "description": "Holt den VOLLSTÄNDIGEN Inhalt einer Datei von GitHub (Remote-Repository). WICHTIG: Verwende dies statt read_file wenn du Dateien aus GitHub-PRs/Branches lesen willst! read_file ist NUR für lokale Dateien. Kann Branch, Tag oder Commit-SHA angeben.",
+      "parameters": {
+        "count": 3,
+        "required": [
+          "path"
+        ],
+        "properties": [
+          "repo",
+          "path",
+          "ref"
+        ]
+      }
+    },
+    {
+      "name": "github_issue_details",
+      "description": "Holt detaillierte Informationen zu einem GitHub Issue: Beschreibung, Labels, Assignees, Milestone und letzte Kommentare. Repo kann als 'owner/repo' oder nur 'repo-name' angegeben werden.",
+      "parameters": {
+        "count": 2,
+        "required": [
+          "issue_number"
+        ],
+        "properties": [
+          "repo",
+          "issue_number"
+        ]
+      }
+    },
+    {
+      "name": "github_list_branches",
+      "description": "Listet alle Branches eines GitHub-Repositories auf (mit Pagination). Zeigt Name und ob der Branch geschützt ist. Repo kann als 'owner/repo' oder nur 'repo-name' angegeben werden.",
+      "parameters": {
+        "count": 1,
+        "required": [],
+        "properties": [
+          "repo"
+        ]
+      }
+    },
+    {
+      "name": "github_list_issues",
+      "description": "Listet Issues eines GitHub-Repositories auf (neueste zuerst, mit Pagination). Zeigt Nummer, Titel, Labels und Kommentar-Anzahl. Repo kann als 'owner/repo' oder nur 'repo-name' angegeben werden.",
+      "parameters": {
+        "count": 4,
+        "required": [],
+        "properties": [
+          "repo",
+          "state",
+          "labels",
+          "max_issues"
+        ]
+      }
+    },
+    {
+      "name": "github_list_prs",
+      "description": "Listet Pull Requests eines GitHub-Repositories auf (neueste zuerst, mit Pagination). Zeigt Nummer, Titel, Autor, Status und Branches. Repo kann als 'owner/repo' oder nur 'repo-name' angegeben werden (default_org wird verwendet).",
+      "parameters": {
+        "count": 3,
+        "required": [],
+        "properties": [
+          "repo",
+          "state",
+          "max_prs"
+        ]
+      }
+    },
+    {
+      "name": "github_list_repos",
+      "description": "Listet alle Repositories einer GitHub-Organisation auf (mit automatischer Pagination). Zeigt Name, Beschreibung, Sichtbarkeit und Anzahl offener Issues. Holt automatisch alle Seiten - nicht auf 50/100 begrenzt. Verwende max_repos um die Anzahl zu limitieren.",
+      "parameters": {
+        "count": 2,
+        "required": [],
+        "properties": [
+          "org",
+          "max_repos"
+        ]
+      }
+    },
+    {
+      "name": "github_pr_details",
+      "description": "Holt detaillierte Informationen zu einem Pull Request: Beschreibung, Status, Änderungsstatistik, Reviews und Mergability. Verwende dies um einen PR im Detail zu analysieren.",
+      "parameters": {
+        "count": 2,
+        "required": [
+          "pr_number"
+        ],
+        "properties": [
+          "repo",
+          "pr_number"
+        ]
+      }
+    },
+    {
+      "name": "github_pr_diff",
+      "description": "Holt die Code-Änderungen (Diff) eines Pull Requests von GitHub. Zeigt welche Dateien geändert wurden mit dem konkreten Diff-Patch. WICHTIG: Für PR-Analyse dieses Tool verwenden, NICHT search_code oder read_file! Für vollständigen Dateiinhalt nach Diff-Analyse: github_get_file verwenden.",
+      "parameters": {
+        "count": 5,
+        "required": [
+          "pr_number"
+        ],
+        "properties": [
+          "repo",
+          "pr_number",
+          "file_filter",
+          "max_files",
+          "include_patch"
+        ]
+      }
+    },
+    {
+      "name": "github_recent_commits",
+      "description": "Holt die letzten Commits eines GitHub-Repositories. Zeigt SHA (gekürzt), Commit-Message und Autor. Repo kann als 'owner/repo' oder nur 'repo-name' angegeben werden.",
+      "parameters": {
+        "count": 3,
+        "required": [],
+        "properties": [
+          "repo",
+          "branch",
+          "limit"
+        ]
+      }
+    },
+    {
+      "name": "github_search_code",
+      "description": "Durchsucht Code in ALLEN GitHub-Repositories nach einem Suchbegriff. Nutzt die GitHub Code Search API für organisationsweite Suche. Findet Code-Stellen, zeigt Kontext und kann Dateiinhalt laden. Unterstützt Filter: Sprache, Dateiname, Extension, Repository. Ideal für: Code-Patterns finden, API-Nutzung suchen, Implementierungen finden.",
+      "parameters": {
+        "count": 8,
+        "required": [
+          "query"
+        ],
+        "properties": [
+          "query",
+          "org",
+          "repo",
+          "language",
+          "filename",
+          "extension",
+          "max_results",
+          "include_content"
+        ]
+      }
+    },
+    {
+      "name": "glob",
+      "description": "Sucht Dateien per Glob-Pattern (wie Claude Code Glob). Patterns: '**/*.py' (rekursiv), 'src/**/*.java', '*.md'. Sortiert standardmäßig nach Änderungsdatum (neueste zuerst).",
+      "parameters": {
+        "count": 4,
+        "required": [
+          "pattern"
+        ],
+        "properties": [
+          "pattern",
+          "path",
+          "sort_by",
+          "max_results"
+        ]
+      }
+    },
+    {
+      "name": "graph_context",
+      "description": "Holt detaillierte Kontext-Informationen zu einem Code-Element aus dem LOKALEN Index.\n\nWANN VERWENDEN:\n- Um zu verstehen was eine Klasse/Methode macht\n- Um Vererbung und Interfaces zu sehen\n- Um Abhängigkeiten zu verstehen bevor du Code änderst\n\nBEISPIELE:\n- graph_context(\"PaymentService\") → Zeigt Interfaces, Dependencies, Verwender\n- graph_context(\"UserRepository.findById\") → Zeigt wer die Methode aufruft\n\nAUSGABE:\n- Vererbung (extends)\n- Implementierte Interfaces\n- Verwendete Dependencies\n- Wer das Element verwendet\n- Datei und Zeilennummer\n\nHINWEIS: Arbeitet NUR mit lokal indexiertem Code, keine GitHub-Verbindung.",
+      "parameters": {
+        "count": 1,
+        "required": [
+          "element_id"
+        ],
+        "properties": [
+          "element_id"
+        ]
+      }
+    },
+    {
+      "name": "graph_dependents",
+      "description": "Zeigt alle Code-Elemente die das angegebene Element verwenden im LOKALEN Projekt.\n\nWANN VERWENDEN:\n- \"Wer verwendet diese Klasse?\"\n- \"Welche Tests testen diese Methode?\"\n- Vor dem Refactoring: Was muss ich alles anpassen?\n\nBEISPIELE:\n- graph_dependents(\"UserRepository\") → UserService, UserServiceTest, AdminService, ...\n- graph_dependents(\"UserRepository\", include_tests=false) → Ohne Test-Klassen\n\nAUSGABE:\n- Gruppiert nach Typ (class, method, etc.)\n- Mit Dateiangabe\n- Optional ohne Tests\n\nHINWEIS: Arbeitet NUR mit lokal indexiertem Code, keine GitHub-Verbindung.",
+      "parameters": {
+        "count": 2,
+        "required": [
+          "element_id"
+        ],
+        "properties": [
+          "element_id",
+          "include_tests"
+        ]
+      }
+    },
+    {
+      "name": "graph_find_path",
+      "description": "Findet wie zwei Code-Elemente miteinander verbunden sind im LOKALEN Projekt.\n\nWANN VERWENDEN:\n- \"Wie hängen Controller und Database zusammen?\"\n- Um den Aufrufpfad zwischen zwei Klassen zu verstehen\n- Um die Architektur nachzuvollziehen\n\nBEISPIELE:\n- graph_find_path(\"UserController\", \"DatabaseService\")\n  → UserController → UserService → UserRepository → DatabaseService\n\nAUSGABE:\n- Pfad als Kette von Elementen\n- Art der Beziehung (calls, uses, extends, implements)\n- Pfadlänge\n\nHINWEIS: Arbeitet NUR mit lokal indexiertem Code, keine GitHub-Verbindung.",
+      "parameters": {
+        "count": 2,
+        "required": [
+          "from_element",
+          "to_element"
+        ],
+        "properties": [
+          "from_element",
+          "to_element"
+        ]
+      }
+    },
+    {
+      "name": "graph_impact",
+      "description": "Analysiert die Auswirkungen einer Code-Änderung im LOKALEN Projekt.\n\nWANN VERWENDEN:\n- Bevor du eine Klasse/Methode änderst: \"Was bricht wenn ich das ändere?\"\n- Um Risiko einer Änderung einzuschätzen\n- Um alle betroffenen Dateien zu finden\n\nBEISPIELE:\n- graph_impact(\"UserService\") → Zeigt wer UserService verwendet\n- graph_impact(\"UserService.save\", depth=3) → Tiefere Analyse\n\nAUSGABE:\n- Direkte Abhängigkeiten (wer verwendet das Element direkt)\n- Indirekte Abhängigkeiten (wer verwendet die Verwender)\n- Betroffene Dateien\n- Risiko-Score (0-100%)\n\nHINWEIS: Arbeitet NUR mit lokal indexiertem Code, keine GitHub-Verbindung.",
+      "parameters": {
+        "count": 2,
+        "required": [
+          "target"
+        ],
+        "properties": [
+          "target",
+          "depth"
+        ]
+      }
+    },
+    {
+      "name": "graph_search",
+      "description": "Sucht im LOKALEN Knowledge Graph nach Code-Elementen.\n\nWANN VERWENDEN:\n- \"Finde alle REST Controller\"\n- \"Welche Klassen verwenden UserService?\"\n- \"Zeige alle Implementierungen von PaymentGateway\"\n\nSPEZIELLE SUCHMUSTER:\n- \"verwendet UserService\" → findet alle Klassen die UserService nutzen\n- \"implementiert Serializable\" → findet alle Implementierungen\n- Einfach \"UserService\" → findet alle Matches\n\nPARAMETER:\n- type_filter: Optional \"class\", \"method\", \"interface\" zum Filtern\n\nHINWEIS: Arbeitet NUR mit lokal indexiertem Code, keine GitHub-Verbindung.\nFür GitHub-Suche verwende stattdessen github_search_code.",
+      "parameters": {
+        "count": 3,
+        "required": [
+          "query"
+        ],
+        "properties": [
+          "query",
+          "type_filter",
+          "limit"
+        ]
+      }
+    },
+    {
+      "name": "grep",
+      "description": "Regex-Suche in Datei-Inhalten (wie Claude Code Grep). NUTZE für spezifische Verzeichnisse. Für allgemeine Java/Python-Code-Suche ist search(scope='code') einfacher (integrierte Sprachfilter).",
+      "parameters": {
+        "count": 6,
+        "required": [
+          "pattern"
+        ],
+        "properties": [
+          "pattern",
+          "path",
+          "file_pattern",
+          "context_lines",
+          "max_results",
+          "case_sensitive"
+        ]
+      }
+    },
+    {
+      "name": "http_request",
+      "description": "⚠️ NUR FÜR INTERNE APIs - NICHT für öffentliche Webseiten! Führt HTTP-Requests gegen INTERNE Endpoints aus (REST-APIs, Services). Für ÖFFENTLICHE Webseiten nutze: fetch_webpage. Unterstützt: GET, POST, PUT, DELETE, PATCH mit Custom Headers.",
+      "parameters": {
+        "count": 5,
+        "required": [
+          "url"
+        ],
+        "properties": [
+          "url",
+          "method",
+          "body",
+          "headers",
+          "content_type"
+        ]
+      }
+    },
+    {
+      "name": "internal_fetch",
+      "description": "⚠️ NUR FÜR INTERNE/INTRANET URLs - NICHT für öffentliche Webseiten! Ruft INTERNE Firmen-URLs ab (Confluence, Jira, interne APIs, Intranet). Für ÖFFENTLICHE Webseiten (nach web_search) nutze stattdessen: fetch_webpage. HTML wird automatisch geparst. Für große Seiten: chunk_index Parameter.",
+      "parameters": {
+        "count": 6,
+        "required": [
+          "url"
+        ],
+        "properties": [
+          "url",
+          "headers",
+          "parse_html",
+          "extract_mode",
+          "max_length",
+          "chunk_index"
+        ]
+      }
+    },
+    {
+      "name": "internal_fetch_section",
+      "description": "⚠️ NUR FÜR INTERNE URLs - extrahiert Abschnitt aus INTRANET-Seite. Für öffentliche Webseiten: fetch_webpage verwenden. Kann nach CSS-Selektor (#id, .class) oder Heading-Text suchen.",
+      "parameters": {
+        "count": 4,
+        "required": [
+          "url",
+          "selector"
+        ],
+        "properties": [
+          "url",
+          "selector",
+          "include_children",
+          "headers"
+        ]
+      }
+    },
+    {
+      "name": "internal_search",
+      "description": "⚠️ NUR FÜR INTERNE URLs - durchsucht INTRANET-Seiten nach Pattern. Für öffentliche Webseiten: erst web_search, dann fetch_webpage. HTML wird geparst, gibt Treffer mit Kontext zurück.",
+      "parameters": {
+        "count": 5,
+        "required": [
+          "url",
+          "pattern"
+        ],
+        "properties": [
+          "url",
+          "pattern",
+          "context_lines",
+          "search_parsed",
+          "headers"
+        ]
+      }
+    },
+    {
+      "name": "iq_check_applicable_waivers",
+      "description": "Prüft ob für eine spezifische Policy-Violation bereits Waivers existieren (aktiv oder abgelaufen). Zeigt Details bestehender Waivers und empfiehlt ob ein abgelaufener Waiver erneuert oder ein neuer angelegt werden sollte. Verwende die violationId aus iq_get_violations.",
+      "parameters": {
+        "count": 1,
+        "required": [
+          "violation_id"
+        ],
+        "properties": [
+          "violation_id"
+        ]
+      }
+    },
+    {
+      "name": "iq_component_details",
+      "description": "Holt Details zu einer Komponente vom IQ Server: bekannte Vulnerabilities, verfügbare Versionen, Lizenzinformationen. Verwende dies um zu prüfen ob eine neuere, sichere Version verfügbar ist.",
+      "parameters": {
+        "count": 4,
+        "required": [
+          "artifact_id"
+        ],
+        "properties": [
+          "format",
+          "group_id",
+          "artifact_id",
+          "version"
+        ]
+      }
+    },
+    {
+      "name": "iq_create_waiver",
+      "description": "Legt einen Waiver (Ausnahme) für eine Policy-Violation an. ACHTUNG: Schreiboperation - erfordert Bestätigung durch den Nutzer. Rufe vorher iq_get_waiver_reasons auf um gültige Reasons zu ermitteln. Rufe vorher iq_check_applicable_waivers auf um zu prüfen ob bereits ein Waiver existiert.",
+      "parameters": {
+        "count": 6,
+        "required": [
+          "violation_id",
+          "comment",
+          "reason_id"
+        ],
+        "properties": [
+          "app_public_id",
+          "violation_id",
+          "comment",
+          "reason_id",
+          "expiry_days",
+          "matcher_strategy"
+        ]
+      }
+    },
+    {
+      "name": "iq_get_violations",
+      "description": "Holt alle Policy-Violations (Findings) für eine Applikation aus dem letzten IQ Server Report. Zeigt Severity, Policy, Komponente, CVE-Referenz und ob bereits ein Waiver existiert. Sortiert nach Threat-Level (kritischste zuerst, max. 50). Analysiere jedes Finding mit KI-Kommentar und frage den Benutzer: Waiver anlegen, Komponente updaten, applicable Waivers prüfen, oder ignorieren?",
+      "parameters": {
+        "count": 2,
+        "required": [],
+        "properties": [
+          "app_public_id",
+          "report_id"
+        ]
+      }
+    },
+    {
+      "name": "iq_get_waiver_reasons",
+      "description": "Holt die vordefinierten Waiver-Begründungen (Reasons) vom IQ Server. Diese müssen beim Anlegen eines Waivers angegeben werden. Rufe dies vor iq_create_waiver auf und zeige dem Benutzer die verfügbaren Optionen.",
+      "parameters": {
+        "count": 0,
+        "required": [],
+        "properties": []
+      }
+    },
+    {
+      "name": "iq_list_applications",
+      "description": "Listet alle Applikationen im Sonatype IQ Server auf. Zeigt publicId, Name und Organisation. Verwende dies um App-IDs für weitere Abfragen (Violations, Waivers) zu finden oder einen Überblick über verwaltete Applikationen zu bekommen.",
+      "parameters": {
+        "count": 1,
+        "required": [],
+        "properties": [
+          "filter"
+        ]
+      }
+    },
+    {
+      "name": "iq_list_waivers",
+      "description": "Listet alle bestehenden Policy-Waivers für eine Applikation. Zeigt Waiver-ID, Policy, Kommentar, Strategie, Ablaufdatum und ob der Waiver abgelaufen ist. Verwende dies um einen Überblick über akzeptierte Risiken zu bekommen.",
+      "parameters": {
+        "count": 1,
+        "required": [],
+        "properties": [
+          "app_public_id"
+        ]
+      }
+    },
+    {
+      "name": "jenkins_build_info",
+      "description": "Holt Details eines spezifischen Jenkins-Builds: Ergebnis, Dauer, Status, und die letzten 100 Zeilen der Konsolen-Ausgabe. Verwende dies um Build-Fehler zu analysieren oder den Fortschritt zu prüfen.",
+      "parameters": {
+        "count": 2,
+        "required": [],
+        "properties": [
+          "job_name",
+          "build_number"
+        ]
+      }
+    },
+    {
+      "name": "jenkins_job_status",
+      "description": "Holt den detaillierten Status eines Jenkins-Jobs: Letzter Build, letzter erfolgreicher/fehlgeschlagener Build, Health-Score. Verwende dies um den aktuellen Zustand einer CI/CD-Pipeline zu prüfen.",
+      "parameters": {
+        "count": 1,
+        "required": [],
+        "properties": [
+          "job_name"
+        ]
+      }
+    },
+    {
+      "name": "jenkins_list_jobs",
+      "description": "Listet alle Jenkins-Jobs auf. Zeigt Name, Status (erfolgreich/fehlgeschlagen/läuft) und Health-Score. Verwende dies um einen Überblick über CI/CD-Pipelines zu bekommen oder um Job-Namen für weitere Abfragen zu finden.",
+      "parameters": {
+        "count": 1,
+        "required": [],
+        "properties": [
+          "filter"
+        ]
+      }
+    },
+    {
+      "name": "jenkins_queue_info",
+      "description": "Zeigt die aktuelle Jenkins Build-Queue: Welche Jobs warten auf Ausführung, warum sie warten (blocked, stuck), etc. Verwende dies um zu prüfen ob Builds in der Warteschlange hängen.",
+      "parameters": {
+        "count": 0,
+        "required": [],
+        "properties": []
+      }
+    },
+    {
+      "name": "jenkins_trigger_build",
+      "description": "Startet einen Jenkins-Build. ACHTUNG: Je nach Konfiguration ist eine Bestätigung durch den Nutzer erforderlich. Verwende dies nur wenn der Nutzer explizit einen Build starten möchte.",
+      "parameters": {
+        "count": 2,
+        "required": [],
+        "properties": [
+          "job_name",
+          "reason"
+        ]
+      }
+    },
+    {
+      "name": "list_confluence_pdfs",
+      "description": "Listet alle PDF-Attachments einer Confluence-Seite auf. Zeigt Titel, ID und Größe. Nutze die Seiten-ID aus search_confluence.",
+      "parameters": {
+        "count": 1,
+        "required": [
+          "page_id"
+        ],
+        "properties": [
+          "page_id"
+        ]
+      }
+    },
+    {
+      "name": "list_database_tables",
+      "description": "Listet alle verfügbaren Tabellen in der DB2-Datenbank auf.",
+      "parameters": {
+        "count": 1,
+        "required": [],
+        "properties": [
+          "schema"
+        ]
+      }
+    },
+    {
+      "name": "list_python_scripts",
+      "description": "Listet alle verfügbaren Python-Scripte auf.",
+      "parameters": {
+        "count": 1,
+        "required": [],
+        "properties": [
+          "filter"
+        ]
+      }
+    },
+    {
+      "name": "ls",
+      "description": "Listet Dateien und Unterverzeichnisse. Für Pattern-Suche quer durch Bäume nutze glob. PFAD: Absoluter Pfad zum Verzeichnis. Für GitHub-Repos nutze github_* Tools.",
+      "parameters": {
+        "count": 3,
+        "required": [
+          "path"
+        ],
+        "properties": [
+          "path",
+          "pattern",
+          "recursive"
+        ]
+      }
+    },
+    {
+      "name": "query_database",
+      "description": "Führt DB2 SELECT-Query aus (NUR SELECT erlaubt). Beispiel: SELECT * FROM ORDERS FETCH FIRST 10 ROWS ONLY",
+      "parameters": {
+        "count": 2,
+        "required": [
+          "query"
+        ],
+        "properties": [
+          "query",
+          "max_rows"
+        ]
+      }
+    },
+    {
+      "name": "read",
+      "description": "Liest eine LOKALE Datei oder PDF. Ein universeller Reader für alle Text- und PDF-Dateien. Für PDFs: nutze 'pages' (z.B. '1-5') für Seitenbereich oder 'meta=true' für Metadaten. Für Text: 'offset'/'limit' bei großen Dateien. Ersetzt read_file, read_pdf_pages, get_pdf_info, read_sqlj_file. PFAD-AUFLÖSUNG: Absoluter Pfad direkt; relativer Pfad wird in Java-Repo → Python-Repo → CWD gesucht. Für GitHub-Dateien: github_get_file.",
+      "parameters": {
+        "count": 7,
+        "required": [
+          "path"
+        ],
+        "properties": [
+          "path",
+          "pages",
+          "meta",
+          "offset",
+          "limit",
+          "encoding",
+          "show_line_numbers"
+        ]
+      }
+    },
+    {
+      "name": "read_confluence_page",
+      "description": "Liest den vollständigen Inhalt einer Confluence-Seite anhand ihrer ID. Die ID erhältst du aus search_confluence.",
+      "parameters": {
+        "count": 1,
+        "required": [
+          "page_id"
+        ],
+        "properties": [
+          "page_id"
+        ]
+      }
+    },
+    {
+      "name": "read_confluence_pdf",
+      "description": "Liest ein PDF-Attachment von einer Confluence-Seite und extrahiert den Text. Unterstützt Relevanz-Bewertung: Gib 'query' an um zu prüfen wie relevant das PDF für eine bestimmte Frage ist. Nutze list_confluence_pdfs um verfügbare PDFs zu sehen.",
+      "parameters": {
+        "count": 4,
+        "required": [
+          "page_id",
+          "pdf_title"
+        ],
+        "properties": [
+          "page_id",
+          "pdf_title",
+          "max_pages",
+          "query"
+        ]
+      }
+    },
+    {
+      "name": "read_jira_issue",
+      "description": "Liest ein einzelnes Jira-Issue mit vollständiger Beschreibung, Details und den letzten Kommentaren.\n\nPARAMETER:\n- issue_key: Der Issue-Schlüssel (z.B. 'PROJ-123')\n- include_subtasks: true (DEFAULT) = Lädt automatisch Details ALLER Subtasks mit\n                    false = Zeigt nur Subtask-Übersicht ohne Details\n\nSTANDARD-VERHALTEN: Subtasks werden automatisch mitgeladen.\nFalls ein Issue Subtasks hat, werden deren vollständige Details (Beschreibung, Status, etc.) direkt mitgeliefert.",
+      "parameters": {
+        "count": 2,
+        "required": [
+          "issue_key"
+        ],
+        "properties": [
+          "issue_key",
+          "include_subtasks"
+        ]
+      }
+    },
+    {
+      "name": "rest_api",
+      "description": "Verbesserter REST-API Client mit Path-Variablen, Query-Parametern und Auth-Shortcuts. URLs können Platzhalter enthalten: /users/{userId}/orders/{orderId}. Auth kann als 'bearer:TOKEN' oder 'basic:user:pass' übergeben werden. JSON-Bodies werden automatisch erkannt und Content-Type gesetzt. Ideal für: REST-APIs, authentifizierte Endpoints, API-Tests.",
+      "parameters": {
+        "count": 9,
+        "required": [
+          "url"
+        ],
+        "properties": [
+          "url",
+          "method",
+          "path_params",
+          "query_params",
+          "body",
+          "headers",
+          "auth",
+          "format_response",
+          "timeout"
+        ]
+      }
+    },
+    {
+      "name": "run_junit_tests",
+      "description": "Führt JUnit-Tests aus und zeigt Ergebnisse inkl. Coverage. Unterstützt Maven und Gradle. Parameter: target (Klasse oder Package), with_coverage (bool), test_method (optional, spezifische Methode). Bei Fehlern: Nutze suggest_test_fix für Lösungsvorschläge.",
+      "parameters": {
+        "count": 3,
+        "required": [
+          "target"
+        ],
+        "properties": [
+          "target",
+          "with_coverage",
+          "test_method"
+        ]
+      }
+    },
+    {
+      "name": "search",
+      "description": "Semantische/Index-basierte Suche mit Scope-Auswahl. scope='code' durchsucht Java- und Python-Repos (ripgrep); scope='handbook' das indexierte Handbuch; scope='skills' die Skill-Wissensbasen; scope='pdf' in dieser Session hochgeladene PDFs. Ersetzt search_code, search_handbook, search_skills, search_pdf.",
+      "parameters": {
+        "count": 8,
+        "required": [
+          "query"
+        ],
+        "properties": [
+          "query",
+          "scope",
+          "limit",
+          "language",
+          "file_pattern",
+          "service_filter",
+          "skill_ids",
+          "filename_filter"
+        ]
+      }
+    },
+    {
+      "name": "search_confluence",
+      "description": "Durchsucht das Confluence-Wiki nach Seiten. Sucht in Titel UND Seiteninhalt (Volltextsuche). Verwende Stichworte oder Phrasen, z.B. 'Installation Anleitung' oder 'API Dokumentation'. Gibt Titel, IDs und Textauszüge zurück. Nutze read_confluence_page mit der ID um den vollständigen Seiteninhalt zu lesen.",
+      "parameters": {
+        "count": 3,
+        "required": [
+          "query"
+        ],
+        "properties": [
+          "query",
+          "space",
+          "limit"
+        ]
+      }
+    },
+    {
+      "name": "search_jira",
+      "description": "Durchsucht Jira nach Issues. Unterstützt JQL-Queries, Freitext-Suche und direkte Issue-Keys.\n\nWICHTIG: Bei direktem Issue-Key oder Jira-URL werden automatisch ALLE Details inkl. Subtask-Details geladen!\n\nBeispiele:\n- \"DIKA-123\" → Lädt Issue + alle Subtask-Details\n- \"https://jira.example.com/browse/DIKA-123\" → Lädt Issue + alle Subtask-Details\n- \"Login Fehler\" → Textsuche (nur Übersicht)\n- \"project=DIKA AND status=Open\" → JQL-Suche (nur Übersicht)",
+      "parameters": {
+        "count": 3,
+        "required": [
+          "query"
+        ],
+        "properties": [
+          "query",
+          "project",
+          "max_results"
+        ]
+      }
+    },
+    {
+      "name": "soap_request",
+      "description": "Führt SOAP-Webservice-Calls aus mit automatischer Envelope-Generierung. Die WSDL wird geparst um die korrekte SOAP-Struktur zu generieren. Nutze wsdl_info() zuerst um verfügbare Operationen und Parameter zu sehen. Parameter können als JSON oder Key=Value übergeben werden. Für komplexe Fälle kann raw_body für manuellen XML-Body genutzt werden.",
+      "parameters": {
+        "count": 7,
+        "required": [
+          "wsdl_url",
+          "operation"
+        ],
+        "properties": [
+          "wsdl_url",
+          "operation",
+          "params",
+          "endpoint",
+          "raw_body",
+          "timeout",
+          "include_raw"
+        ]
+      }
+    },
+    {
+      "name": "suggest_answers",
+      "description": "Stellt dem User eine Rückfrage und zeigt ihm Antwort-Optionen als klickbare Buttons an. Nutze dieses Tool wenn du vor der Analyse mehr Kontext benötigst. Der User kann eine Option klicken oder eine eigene Antwort eingeben. Rufe dieses Tool auf BEVOR du mit der eigentlichen Fehleranalyse beginnst.",
+      "parameters": {
+        "count": 2,
+        "required": [
+          "question",
+          "options"
+        ],
+        "properties": [
+          "question",
+          "options"
+        ]
+      }
+    },
+    {
+      "name": "suggest_test_fix",
+      "description": "Generiert Fix-Vorschläge für fehlgeschlagene Tests. Analysiert Fehlermeldung und Stack-Trace um einen Fix vorzuschlagen. Nutze dieses Tool nach run_junit_tests wenn Tests fehlschlagen.",
+      "parameters": {
+        "count": 4,
+        "required": [
+          "test_class",
+          "error_message"
+        ],
+        "properties": [
+          "test_class",
+          "test_method",
+          "error_message",
+          "stack_trace"
+        ]
+      }
+    },
+    {
+      "name": "trace_java_references",
+      "description": "Findet Interfaces, Parent-Klassen und Implementierungen im LOKALEN Repository. WICHTIG: Analysiert nur LOKALE Dateien! Für GitHub: github_get_file + manuelle Analyse. Nutze NACH search_code wenn Vererbung relevant ist.",
+      "parameters": {
+        "count": 4,
+        "required": [
+          "class_name"
+        ],
+        "properties": [
+          "class_name",
+          "include_interfaces",
+          "include_parent_classes",
+          "max_depth"
+        ]
+      }
+    },
+    {
+      "name": "validate_file",
+      "description": "NUR LESEN/PRÜFEN - Validiert eine Datei auf Syntax-Fehler OHNE sie zu ändern. NICHT zum Schreiben/Ändern verwenden! Für Änderungen: edit_file oder write_file nutzen. Unterstützt Python, Java, SQL, SQLJ, XML und Config-Dateien.",
+      "parameters": {
+        "count": 3,
+        "required": [
+          "file"
+        ],
+        "properties": [
+          "file",
+          "fix",
+          "strict"
+        ]
+      }
+    },
+    {
+      "name": "validate_python_script",
+      "description": "Validiert Python-Code ohne zu speichern.\n\nPrüft:\n- Syntax-Korrektheit\n- Erlaubte Imports\n- Gefährliche Patterns\n\nNützlich um Code vor dem Speichern zu testen.",
+      "parameters": {
+        "count": 1,
+        "required": [
+          "code"
+        ],
+        "properties": [
+          "code"
+        ]
+      }
+    },
+    {
+      "name": "web_search",
+      "description": "Führt eine Internet-Recherche via DuckDuckGo durch. Jede Anfrage MUSS vom Nutzer im Frontend bestätigt werden. Verwende dies für: Fehlercodes (z.B. 'CWWKZ0013E Liberty'), Maven-Fehler ('NoSuchMethodError spring-core 5.3'), Bibliotheksversionen ('jackson-databind 2.15 security fix'), allgemeine Technologiedokumentation. VERBOTEN: Interne IPs, Hostnamen, Datenpfade, Projektnamen in der Query. WICHTIG: Diese Suche liefert nur Snippets (Kurzauszüge). Um den VOLLSTÄNDIGEN Inhalt einer gefundenen Seite zu lesen, nutze anschließend 'fetch_webpage' mit der URL aus den Ergebnissen!",
+      "parameters": {
+        "count": 3,
+        "required": [
+          "query"
+        ],
+        "properties": [
+          "query",
+          "reason",
+          "max_results"
+        ]
+      }
+    },
+    {
+      "name": "web_search_toggle",
+      "description": "Schaltet die Web-Suche-Funktion ein oder aus. Nutze dies wenn der Nutzer 'Websuche einschalten', 'Suche aus' oder ähnliches schreibt.",
+      "parameters": {
+        "count": 1,
+        "required": [
+          "enabled"
+        ],
+        "properties": [
+          "enabled"
+        ]
+      }
+    },
+    {
+      "name": "write",
+      "description": "Schreibt eine Datei oder erzeugt ein Verzeichnis. BENÖTIGT USER-BESTÄTIGUNG. Pfad endet auf '/' oder '\\' → Verzeichnis wird erstellt; sonst wird die Datei überschrieben oder neu angelegt. Ersetzt write_file und create_directory. Für GitHub-Repos nicht verfügbar — diese sind read-only.",
+      "parameters": {
+        "count": 2,
+        "required": [
+          "path"
+        ],
+        "properties": [
+          "path",
+          "content"
+        ]
+      }
+    },
+    {
+      "name": "wsdl_info",
+      "description": "Analysiert eine WSDL-Datei und zeigt verfügbare SOAP-Operationen. Gibt Informationen über Operationsnamen, Input-Parameter, Output-Typen und SOAPAction-Header zurück. Nutze dies VOR soap_request um die korrekte Operation und Parameter zu ermitteln.",
+      "parameters": {
+        "count": 3,
+        "required": [
+          "wsdl_url"
+        ],
+        "properties": [
+          "wsdl_url",
+          "operation",
+          "show_types"
+        ]
+      }
+    }
+  ],
+  "aliases": [
+    {
+      "alias": "create_directory",
+      "target": "write",
+      "deprecation_msg": "create_directory → write(path_mit_trailing_slash) (v3.0.0)",
+      "surface_to_llm": false,
+      "registered_at": "2026-04-23T16:43:21.485875"
+    },
+    {
+      "alias": "docker_execute_python",
+      "target": "exec_python",
+      "deprecation_msg": "docker_execute_python → exec_python (v3.0.0)",
+      "surface_to_llm": false,
+      "registered_at": "2026-04-23T16:43:21.552883"
+    },
+    {
+      "alias": "docker_session_close",
+      "target": "bash_sessions",
+      "deprecation_msg": "docker_session_close → bash_sessions(action='close') (v3.0.0)",
+      "surface_to_llm": false,
+      "registered_at": "2026-04-23T16:43:21.552883"
+    },
+    {
+      "alias": "docker_session_execute",
+      "target": "exec_python",
+      "deprecation_msg": "docker_session_execute → exec_python(session_id) (v3.0.0)",
+      "surface_to_llm": false,
+      "registered_at": "2026-04-23T16:43:21.552883"
+    },
+    {
+      "alias": "docker_session_list",
+      "target": "bash_sessions",
+      "deprecation_msg": "docker_session_list → bash_sessions(action='list') (v3.0.0)",
+      "surface_to_llm": false,
+      "registered_at": "2026-04-23T16:43:21.552883"
+    },
+    {
+      "alias": "docker_upload_file",
+      "target": "bash_sessions",
+      "deprecation_msg": "docker_upload_file → bash_sessions(action='upload') (v3.0.0)",
+      "surface_to_llm": false,
+      "registered_at": "2026-04-23T16:43:21.552883"
+    },
+    {
+      "alias": "edit_file",
+      "target": "edit",
+      "deprecation_msg": "edit_file → edit (v3.0.0)",
+      "surface_to_llm": false,
+      "registered_at": "2026-04-23T16:43:21.485875"
+    },
+    {
+      "alias": "generate_and_execute_python_script",
+      "target": "exec_python",
+      "deprecation_msg": "generate_and_execute_python_script → exec_python (One-Shot) oder generate_python_script + execute_python_script (named) (v3.0.0)",
+      "surface_to_llm": false,
+      "registered_at": "2026-04-23T16:43:21.552883"
+    },
+    {
+      "alias": "get_pdf_info",
+      "target": "read",
+      "deprecation_msg": "get_pdf_info → read(path, meta=True) (v3.0.0)",
+      "surface_to_llm": false,
+      "registered_at": "2026-04-23T16:43:21.485875"
+    },
+    {
+      "alias": "glob_files",
+      "target": "glob",
+      "deprecation_msg": "glob_files → glob (v3.0.0)",
+      "surface_to_llm": false,
+      "registered_at": "2026-04-23T16:43:21.485875"
+    },
+    {
+      "alias": "grep_content",
+      "target": "grep",
+      "deprecation_msg": "grep_content → grep (v3.0.0)",
+      "surface_to_llm": false,
+      "registered_at": "2026-04-23T16:43:21.485875"
+    },
+    {
+      "alias": "list_files",
+      "target": "ls",
+      "deprecation_msg": "list_files → ls (v3.0.0)",
+      "surface_to_llm": false,
+      "registered_at": "2026-04-23T16:43:21.485875"
+    },
+    {
+      "alias": "read_file",
+      "target": "read",
+      "deprecation_msg": "read_file → read (v3.0.0)",
+      "surface_to_llm": false,
+      "registered_at": "2026-04-23T16:43:21.485875"
+    },
+    {
+      "alias": "read_pdf_pages",
+      "target": "read",
+      "deprecation_msg": "read_pdf_pages → read(path, pages) (v3.0.0)",
+      "surface_to_llm": false,
+      "registered_at": "2026-04-23T16:43:21.485875"
+    },
+    {
+      "alias": "read_sqlj_file",
+      "target": "read",
+      "deprecation_msg": "read_sqlj_file → read (v3.0.0)",
+      "surface_to_llm": false,
+      "registered_at": "2026-04-23T16:43:21.485875"
+    },
+    {
+      "alias": "run_workspace_command",
+      "target": "bash",
+      "deprecation_msg": "run_workspace_command → bash(sandbox='workspace', cwd) (v3.0.0)",
+      "surface_to_llm": false,
+      "registered_at": "2026-04-23T16:43:21.552883"
+    },
+    {
+      "alias": "search_code",
+      "target": "search",
+      "deprecation_msg": "search_code → search(scope='code') (v3.0.0)",
+      "surface_to_llm": false,
+      "registered_at": "2026-04-23T16:43:21.485875"
+    },
+    {
+      "alias": "search_handbook",
+      "target": "search",
+      "deprecation_msg": "search_handbook → search(scope='handbook') (v3.0.0)",
+      "surface_to_llm": false,
+      "registered_at": "2026-04-23T16:43:21.485875"
+    },
+    {
+      "alias": "search_pdf",
+      "target": "search",
+      "deprecation_msg": "search_pdf → search(scope='pdf') (v3.0.0)",
+      "surface_to_llm": false,
+      "registered_at": "2026-04-23T16:43:21.485875"
+    },
+    {
+      "alias": "search_skills",
+      "target": "search",
+      "deprecation_msg": "search_skills → search(scope='skills') (v3.0.0)",
+      "surface_to_llm": false,
+      "registered_at": "2026-04-23T16:43:21.485875"
+    },
+    {
+      "alias": "shell_execute",
+      "target": "bash",
+      "deprecation_msg": "shell_execute → bash(sandbox='container') (v3.0.0)",
+      "surface_to_llm": false,
+      "registered_at": "2026-04-23T16:43:21.552883"
+    },
+    {
+      "alias": "shell_execute_local",
+      "target": "bash",
+      "deprecation_msg": "shell_execute_local → bash(sandbox='local', execution_id) (v3.0.0)",
+      "surface_to_llm": false,
+      "registered_at": "2026-04-23T16:43:21.552883"
+    },
+    {
+      "alias": "shell_list_executions",
+      "target": "bash_sessions",
+      "deprecation_msg": "shell_list_executions → bash_sessions(action='list') (v3.0.0)",
+      "surface_to_llm": false,
+      "registered_at": "2026-04-23T16:43:21.552883"
+    },
+    {
+      "alias": "write_file",
+      "target": "write",
+      "deprecation_msg": "write_file → write (v3.0.0)",
+      "surface_to_llm": false,
+      "registered_at": "2026-04-23T16:43:21.485875"
+    }
+  ]
+}

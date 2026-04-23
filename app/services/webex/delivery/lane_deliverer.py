@@ -23,9 +23,10 @@ Handler je nach ``lane_delivery``-Flag das eine oder andere wahlen kann.
 from __future__ import annotations
 
 import logging
-from typing import Any, Awaitable, Callable, Optional
+from typing import Any, Awaitable, Callable, List, Optional
 
 from app.services.webex.delivery.edit_counter import EditCounterBucket
+from app.services.webex.delivery.status_editor import build_collapsed_tool_summary
 
 logger = logging.getLogger(__name__)
 
@@ -154,9 +155,22 @@ class LaneDeliverer:
             )
             return await self._rotate_reasoning(normalized, phase=phase)
 
-    async def finalize(self, answer_text: str) -> bool:
-        """Finalisiert den Run: Answer als neue Message posten + Reasoning-Cleanup."""
-        normalized = answer_text[:MAX_EDIT_CHARS] if answer_text else ""
+    async def finalize(
+        self,
+        answer_text: str,
+        *,
+        tool_history: Optional[List[str]] = None,
+    ) -> bool:
+        """Finalisiert den Run: Answer als neue Message posten + Reasoning-Cleanup.
+
+        Args:
+            answer_text: Finale Antwort (Answer-Lane).
+            tool_history: Optional Tool-Liste als zusammenklappbarer
+                Suffix (Phase 4 Collapse-Finalizer).
+        """
+        summary = build_collapsed_tool_summary(tool_history or [])
+        combined = f"{answer_text}{summary}" if answer_text else summary
+        normalized = combined[:MAX_EDIT_CHARS] if combined else ""
         posted = await self._post_answer(normalized)
 
         # Reasoning-Lane aufraeumen (Default: loeschen)

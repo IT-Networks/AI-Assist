@@ -57,13 +57,16 @@ class ToolDecision:
 class ToolExecution:
     """Ergebnis einer Tool-Ausführung."""
     step: int
-    tool: str
+    tool: str  # Kanonischer Tool-Name (nach Alias-Auflösung)
     status: str  # success | error | timeout | partial
     duration_ms: int
     error_type: Optional[str] = None  # connection | validation | permission | none
     result_tokens: int = 0
     reason: str = ""
     alternatives: List[str] = field(default_factory=list)
+    # Alias-Tracking (Konsolidierungs-Migration): Wenn das LLM den alten
+    # Namen aufgerufen hat, steht hier der Legacy-Name; sonst None.
+    called_as: Optional[str] = None
 
 
 @dataclass
@@ -404,18 +407,22 @@ class AnalyticsLogger:
         result_size: int = 0,
         reason: str = "",
         alternatives: Optional[List[str]] = None,
+        called_as: Optional[str] = None,
     ) -> None:
         """
         Loggt eine Tool-Ausführung.
 
         Args:
-            tool_name: Ausgeführtes Tool
+            tool_name: Ausgeführtes Tool (kanonischer Name nach Alias-Auflösung)
             success: War die Ausführung erfolgreich?
             duration_ms: Dauer in Millisekunden
             error: Fehlermeldung (wird anonymisiert)
             result_size: Größe des Ergebnisses in Bytes
             reason: Begründung für Tool-Wahl
             alternatives: Alternative Tools
+            called_as: Legacy-Name, mit dem das LLM das Tool aufgerufen hat,
+                wenn es sich um einen Alias handelte; sonst None. Ermöglicht
+                Telemetrie für Konsolidierungs-Migration.
         """
         if not self._enabled or not self._current_chain:
             return
@@ -449,6 +456,7 @@ class AnalyticsLogger:
             result_tokens=result_size // 4,  # Grobe Token-Schätzung
             reason=safe_reason,
             alternatives=alternatives or [],
+            called_as=called_as,
         )
 
         self._current_chain.tool_chain.append(execution)

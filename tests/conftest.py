@@ -67,4 +67,10 @@ def reset_singletons():
     import app.services.webex_automation as webex_auto_module
     webex_auto_module._automation = None
 
+    # Reset Tool-Registry Singleton (Phase-3-Migration: Aliase müssen sauber
+    # aufgebaut werden; Tests die die globale Registry mutieren würden sonst
+    # nachfolgende Tests verschmutzen).
+    import app.agent.tools as tools_module
+    tools_module._default_registry = None
+
     yield

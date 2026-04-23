@@ -194,6 +194,52 @@ class TestProcessedMessagesStore:
         assert not await store.is_processed("old-key")
         assert await store.is_processed("new-key")
 
+    # ── C2: Atomic Claim ────────────────────────────────────────────────────
+
+    @pytest.mark.asyncio
+    async def test_claim_first_caller_wins(self, db: WebexDb):
+        """Erster claim() bekommt True, nachfolgende claim() des gleichen Keys False."""
+        store = ProcessedMessagesStore(db)
+        first = await store.claim("wx-bot:v1:msg1", room_id="room1")
+        second = await store.claim("wx-bot:v1:msg1", room_id="room1")
+        assert first is True
+        assert second is False
+
+    @pytest.mark.asyncio
+    async def test_claim_is_atomic_under_concurrency(self, db: WebexDb):
+        """Bei N parallelen claim()s auf denselben Key gewinnt genau einer.
+
+        Das ist die Kern-Invariante gegen Webhook/Poller-Race:
+        Auch wenn beide Tasks die is_processed-Prüfung unsichtbar
+        bestanden haben, darf nur ein Claim True zurückgeben.
+        """
+        store = ProcessedMessagesStore(db)
+        key = "wx-bot:v1:race-key"
+        results = await asyncio.gather(
+            *[store.claim(key, room_id="r") for _ in range(20)]
+        )
+        winners = [r for r in results if r]
+        assert len(winners) == 1, f"Expected exactly 1 winner, got {len(winners)}"
+        assert await store.count() == 1
+
+    @pytest.mark.asyncio
+    async def test_mark_processed_legacy_wrapper_still_works(self, db: WebexDb):
+        """mark_processed() delegiert auf claim(), Return-Wert bleibt None."""
+        store = ProcessedMessagesStore(db)
+        ret = await store.mark_processed("wx-bot:v1:legacy", room_id="r")
+        assert ret is None  # Fire-and-forget Kontrakt
+        assert await store.is_processed("wx-bot:v1:legacy")
+
+    @pytest.mark.asyncio
+    async def test_claim_different_keys_all_win(self, db: WebexDb):
+        """Unabhängige Keys kollidieren nicht — jeder Claim gewinnt."""
+        store = ProcessedMessagesStore(db)
+        results = await asyncio.gather(
+            *[store.claim(f"wx-bot:v1:k{i}", "r") for i in range(10)]
+        )
+        assert all(results)
+        assert await store.count() == 10
+
 
 # ═══════════════════════════════════════════════════════════════════════════
 # SentMessageCache

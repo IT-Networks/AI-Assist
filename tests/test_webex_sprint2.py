@@ -317,6 +317,106 @@ class TestApprovalBus:
         req = await bus.get(rid)
         assert req.card_message_id == "msg-xyz"
 
+    # ── C1: Approval Authorization ──────────────────────────────────────────
+
+    @pytest.mark.asyncio
+    async def test_requester_email_persisted(self, db: WebexDb):
+        """create_pending persistiert requester_email und get liefert es zurück."""
+        bus = ApprovalBus(db)
+        rid = await bus.create_pending(
+            session_id="s", room_id="r", tool_name="t",
+            tool_args={}, confirmation_data={},
+            requester_email="alice@example.com",
+        )
+        req = await bus.get(rid)
+        assert req is not None
+        assert req.requester_email == "alice@example.com"
+
+    @pytest.mark.asyncio
+    async def test_resolve_rejects_foreign_approver(self, db: WebexDb):
+        """Fremder Klicker darf die Card nicht auflösen; Status bleibt pending."""
+        bus = ApprovalBus(db)
+        rid = await bus.create_pending(
+            session_id="s", room_id="r", tool_name="t",
+            tool_args={}, confirmation_data={},
+            requester_email="alice@example.com",
+        )
+        # Bob (nicht Alice) klickt
+        ok = await bus.resolve(rid, approved=True, actor_email="bob@example.com")
+        assert ok is False
+        req = await bus.get(rid)
+        assert req.status == ApprovalStatus.PENDING
+        assert req.actor_email == ""  # keine Zuordnung
+
+    @pytest.mark.asyncio
+    async def test_resolve_accepts_self_approval(self, db: WebexDb):
+        """Der Original-Requester darf seine eigene Card approven."""
+        bus = ApprovalBus(db)
+        rid = await bus.create_pending(
+            session_id="s", room_id="r", tool_name="t",
+            tool_args={}, confirmation_data={},
+            requester_email="alice@example.com",
+        )
+        ok = await bus.resolve(rid, approved=True, actor_email="alice@example.com")
+        assert ok is True
+        req = await bus.get(rid)
+        assert req.status == ApprovalStatus.APPROVED
+        assert req.actor_email == "alice@example.com"
+
+    @pytest.mark.asyncio
+    async def test_resolve_case_insensitive_email_match(self, db: WebexDb):
+        """Email-Vergleich ignoriert Case & Whitespace."""
+        bus = ApprovalBus(db)
+        rid = await bus.create_pending(
+            session_id="s", room_id="r", tool_name="t",
+            tool_args={}, confirmation_data={},
+            requester_email="Alice@Example.COM",
+        )
+        ok = await bus.resolve(rid, approved=True, actor_email="  alice@example.com  ")
+        assert ok is True
+        req = await bus.get(rid)
+        assert req.status == ApprovalStatus.APPROVED
+
+    @pytest.mark.asyncio
+    async def test_resolve_legacy_request_without_requester_email_still_works(
+        self, db: WebexDb,
+    ):
+        """Legacy-Requests (vor v4) haben leeren requester_email → Auth skippt.
+
+        Das ist die Backward-Compat-Regel: in-flight Approvals zum Zeitpunkt
+        der Migration bleiben auflösbar (Timeout wäre die Alternative).
+        """
+        bus = ApprovalBus(db)
+        rid = await bus.create_pending(
+            session_id="s", room_id="r", tool_name="t",
+            tool_args={}, confirmation_data={},
+            # requester_email nicht gesetzt → default ""
+        )
+        ok = await bus.resolve(rid, approved=True, actor_email="anyone@example.com")
+        assert ok is True
+
+    @pytest.mark.asyncio
+    async def test_unauthorized_resolve_does_not_wake_waiter(self, db: WebexDb):
+        """Fremd-Klick darf den wartenden Task nicht vorzeitig aufwecken."""
+        bus = ApprovalBus(db)
+        rid = await bus.create_pending(
+            session_id="s", room_id="r", tool_name="t",
+            tool_args={}, confirmation_data={},
+            requester_email="alice@example.com",
+        )
+
+        async def foreign_clicker():
+            await asyncio.sleep(0.01)
+            ok = await bus.resolve(
+                rid, approved=True, actor_email="bob@example.com",
+            )
+            assert ok is False
+
+        asyncio.create_task(foreign_clicker())
+        # Waiter muss in den Timeout laufen — Bob's Klick zählt nicht
+        with pytest.raises(ApprovalTimeout):
+            await bus.wait_for_decision(rid, timeout_seconds=0.15)
+
     @pytest.mark.asyncio
     async def test_confirmation_data_roundtrip(self, db: WebexDb):
         """tool_args + confirmation_data werden als JSON persistiert + korrekt deserialisiert."""

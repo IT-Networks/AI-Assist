@@ -11,6 +11,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from typing import Any, Callable, Dict, List, Optional
 
 from app.services.webex.conversation.binding_store import (
@@ -26,6 +27,23 @@ from app.services.webex.conversation.scope import (
 logger = logging.getLogger(__name__)
 
 
+# Default Idle-Timeout fuer Auto-Generation-Bump (24h, siehe /sc:brainstorm).
+DEFAULT_IDLE_RESET_SECONDS = 24 * 60 * 60
+
+
+def _parse_iso(ts: str) -> Optional[datetime]:
+    """Parst ISO8601 → datetime (UTC). None wenn leer/ungueltig."""
+    if not ts:
+        return None
+    try:
+        dt = datetime.fromisoformat(ts)
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return dt
+    except ValueError:
+        return None
+
+
 @dataclass
 class WebexConversation:
     """Resolved Conversation — in-memory repraesentation."""
@@ -35,6 +53,9 @@ class WebexConversation:
     session_id: str
     scope: Scope
     policy: ConversationPolicy
+    # v5 — Session-Generation (Context-Management)
+    generation: int = 1
+    reset_pending: bool = False
 
     @classmethod
     def from_binding(cls, binding: ConversationBinding) -> "WebexConversation":
@@ -45,12 +66,25 @@ class WebexConversation:
             session_id=binding.session_id,
             scope=binding.scope,
             policy=binding.policy,
+            generation=binding.generation,
+            reset_pending=binding.reset_pending,
         )
 
     @property
     def token_cap_key(self) -> str:
         """Scope-Key fuer den Daily-Token-Cap (heute nur global)."""
         return self.room_id
+
+    @property
+    def effective_session_id(self) -> str:
+        """Orchestrator-Session-Key inkl. Generation-Suffix.
+
+        Generation 1 (default) ist suffix-frei fuer Backward-Compat.
+        Ab Generation 2 wird ``:g{N}`` angehaengt.
+        """
+        if self.generation <= 1:
+            return self.session_id
+        return f"{self.session_id}:g{self.generation}"
 
 
 # Auto-Strategy: default ist "webex:{room_id}[:{thread_id}]"
@@ -83,10 +117,12 @@ class ConversationRegistry:
         binding_store: ConversationBindingStore,
         policy_resolver: PolicyResolver,
         session_id_factory: Callable[[ConversationKey], str] = default_session_id_factory,
+        idle_reset_seconds: int = DEFAULT_IDLE_RESET_SECONDS,
     ) -> None:
         self._bindings = binding_store
         self._policy_resolver = policy_resolver
         self._session_id_factory = session_id_factory
+        self._idle_reset_seconds = max(0, int(idle_reset_seconds))
         self._cache: Dict[str, WebexConversation] = {}
         self._lock = asyncio.Lock()
 
@@ -181,3 +217,85 @@ class ConversationRegistry:
         async with self._lock:
             self._cache.pop(conv_key, None)
         return await self._bindings.delete(conv_key)
+
+    # ── v5: Session-Generation ──────────────────────────────────────────────
+
+    async def maybe_bump_idle(self, conv_key: str) -> Optional[int]:
+        """Bumpt die Generation wenn ``last_activity`` > ``idle_reset_seconds`` zurueckliegt.
+
+        Wird vom Dispatcher VOR jeder eingehenden Message aufgerufen.
+        Returns neue Generation-Nummer falls gebumped, sonst None.
+        """
+        if self._idle_reset_seconds <= 0:
+            return None
+        binding = await self._bindings.get(conv_key)
+        if binding is None:
+            return None
+        last = _parse_iso(binding.last_activity_utc)
+        if last is None:
+            # Frisches Binding ohne Activity-Timestamp — kein Idle-Bump.
+            await self._bindings.touch_activity(conv_key)
+            return None
+        idle = (datetime.now(timezone.utc) - last).total_seconds()
+        if idle < self._idle_reset_seconds:
+            return None
+        new_gen = await self._bindings.bump_generation(
+            conv_key, mark_reset_pending=True,
+        )
+        if new_gen > 0:
+            # Cache invalidieren: WebexConversation muss neu geladen werden
+            async with self._lock:
+                self._cache.pop(conv_key, None)
+            logger.info(
+                "[conv-registry] Idle-Reset: %s → generation=%d (idle=%.0fs)",
+                conv_key[:32], new_gen, idle,
+            )
+        return new_gen if new_gen > 0 else None
+
+    async def bump_manual(self, conv_key: str) -> Optional[int]:
+        """Manueller Reset (``/new``): Generation +1, kein Reset-Pending-Flag.
+
+        Returns neue Generation oder None wenn Binding nicht existiert.
+        """
+        new_gen = await self._bindings.bump_generation(
+            conv_key, mark_reset_pending=False,
+        )
+        if new_gen > 0:
+            async with self._lock:
+                self._cache.pop(conv_key, None)
+            logger.info(
+                "[conv-registry] Manual-Reset: %s → generation=%d",
+                conv_key[:32], new_gen,
+            )
+            return new_gen
+        return None
+
+    async def continue_previous(self, conv_key: str) -> Optional[int]:
+        """Reaktiviert die vorherige Generation (``/continue``).
+
+        Returns neue (dekrementierte) Generation oder None wenn bereits
+        bei 1 (kein Undo moeglich).
+        """
+        prev_gen = await self._bindings.decrement_generation(conv_key)
+        if prev_gen is not None:
+            async with self._lock:
+                self._cache.pop(conv_key, None)
+            logger.info(
+                "[conv-registry] Continue: %s → generation=%d",
+                conv_key[:32], prev_gen,
+            )
+        return prev_gen
+
+    async def touch(self, conv_key: str) -> None:
+        """Markiert Binding als aktiv (last_activity_utc = now)."""
+        await self._bindings.touch_activity(conv_key)
+
+    async def acknowledge_reset(self, conv_key: str) -> None:
+        """Wird nach Inline-Footer-Anzeige aufgerufen: clear reset_pending."""
+        await self._bindings.clear_reset_pending(conv_key)
+        # Cache-Eintrag aktualisieren, damit nachfolgende resolves nicht
+        # fälschlicherweise reset_pending=True sehen.
+        async with self._lock:
+            cached = self._cache.get(conv_key)
+            if cached is not None:
+                cached.reset_pending = False

@@ -64,6 +64,10 @@ class ApprovalRequest:
     actor_email: str
     created_at: str
     resolved_at: str = ""
+    # C1: Email des Users, der die Trigger-Message gesendet hat.
+    # Nur dieser darf die Card approven. Leerer Wert = Legacy-Request
+    # (vor v4-Migration) → Auth-Check wird übersprungen.
+    requester_email: str = ""
 
 
 class ApprovalBus:
@@ -93,8 +97,14 @@ class ApprovalBus:
         confirmation_data: Dict[str, Any],
         parent_id: str = "",
         card_message_id: str = "",
+        requester_email: str = "",
     ) -> str:
         """Erstellt einen neuen pending Approval-Request.
+
+        Args:
+            requester_email: Email des Users, der die Trigger-Message
+                gesendet hat. Nur dieser darf später ``resolve()`` aufrufen.
+                Leer lassen deaktiviert den Auth-Check (Legacy-Verhalten).
 
         Returns:
             request_id (UUID4-Hex).
@@ -118,6 +128,7 @@ class ApprovalBus:
             confirmation_data,
             card_message_id,
             now,
+            requester_email,
         )
         logger.info(
             "[approval-bus] pending erstellt: rid=%s tool=%s session=%s",
@@ -182,10 +193,33 @@ class ApprovalBus:
     ) -> bool:
         """Setzt die Entscheidung und weckt alle Waiter.
 
+        C1: Nur der ``requester_email`` des Requests darf resolven.
+        Fremde Klicks werden abgelehnt, ohne den Request-Status zu ändern
+        (er bleibt pending bis der echte Requester klickt oder Timeout).
+
         Returns:
-            True wenn erfolgreich aufgeloest, False wenn Request unbekannt
-            oder nicht mehr pending.
+            True wenn erfolgreich aufgeloest. False wenn Request unbekannt,
+            nicht mehr pending, oder der Klicker nicht autorisiert ist.
         """
+        # C1: Identitäts-Check vor CAS. Legacy-Requests mit leerem
+        # requester_email (vor v4-Migration) übergehen diese Prüfung
+        # bewusst — sonst würde jeder alte in-flight Request blockiert.
+        req = await self.get(request_id)
+        if req is None:
+            logger.info(
+                "[approval-bus] resolve ignoriert (unbekannt): rid=%s",
+                request_id,
+            )
+            return False
+        expected = (req.requester_email or "").strip().lower()
+        actual = (actor_email or "").strip().lower()
+        if expected and actual != expected:
+            logger.warning(
+                "[approval-bus] unauthorized approver rid=%s actor=%s expected=%s",
+                request_id, actual or "?", expected,
+            )
+            return False
+
         # Atomar: DB-Status CAS pending → approved/rejected
         target = ApprovalStatus.APPROVED if approved else ApprovalStatus.REJECTED
         updated = await asyncio.to_thread(
@@ -193,7 +227,7 @@ class ApprovalBus:
         )
         if not updated:
             logger.info(
-                "[approval-bus] resolve ignoriert (nicht pending oder unbekannt): rid=%s",
+                "[approval-bus] resolve ignoriert (nicht pending): rid=%s",
                 request_id,
             )
             return False
@@ -249,6 +283,7 @@ class ApprovalBus:
         confirmation_data: Dict[str, Any],
         card_message_id: str,
         created_at: str,
+        requester_email: str,
     ) -> None:
         conn = self._db.connect()
         try:
@@ -257,15 +292,16 @@ class ApprovalBus:
                 INSERT INTO approval_requests(
                     request_id, session_id, room_id, parent_id,
                     tool_name, tool_args_json, confirmation_json,
-                    card_message_id, status, created_at
+                    card_message_id, status, created_at, requester_email
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     rid, session_id, room_id, parent_id,
                     tool_name, json.dumps(tool_args, default=str),
                     json.dumps(confirmation_data, default=str),
                     card_message_id or None, ApprovalStatus.PENDING.value, created_at,
+                    requester_email or "",
                 ),
             )
         finally:
@@ -329,7 +365,8 @@ class ApprovalBus:
                 """
                 SELECT request_id, session_id, room_id, parent_id, tool_name,
                        tool_args_json, confirmation_json, card_message_id,
-                       status, actor_email, created_at, resolved_at
+                       status, actor_email, created_at, resolved_at,
+                       requester_email
                   FROM approval_requests
                  WHERE request_id = ?
                 """,
@@ -347,7 +384,8 @@ class ApprovalBus:
                     """
                     SELECT request_id, session_id, room_id, parent_id, tool_name,
                            tool_args_json, confirmation_json, card_message_id,
-                           status, actor_email, created_at, resolved_at
+                           status, actor_email, created_at, resolved_at,
+                           requester_email
                       FROM approval_requests
                      WHERE session_id = ? AND status = ?
                      ORDER BY created_at
@@ -358,7 +396,8 @@ class ApprovalBus:
                 """
                 SELECT request_id, session_id, room_id, parent_id, tool_name,
                        tool_args_json, confirmation_json, card_message_id,
-                       status, actor_email, created_at, resolved_at
+                       status, actor_email, created_at, resolved_at,
+                       requester_email
                   FROM approval_requests
                  WHERE status = ?
                  ORDER BY created_at
@@ -385,4 +424,5 @@ def _row_to_request(row) -> ApprovalRequest:
         actor_email=row[9] or "",
         created_at=row[10],
         resolved_at=row[11] or "",
+        requester_email=(row[12] if len(row) > 12 else "") or "",
     )
