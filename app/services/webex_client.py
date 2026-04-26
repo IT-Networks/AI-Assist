@@ -8,6 +8,7 @@ Nutzt httpx für async HTTP-Aufrufe mit Proxy- und Rate-Limit-Support.
 import asyncio
 import logging
 import mimetypes
+import random
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -20,6 +21,24 @@ logger = logging.getLogger(__name__)
 # Webex OAuth2 Endpoints
 WEBEX_AUTH_URL = "https://webexapis.com/v1/authorize"
 WEBEX_TOKEN_URL = "https://webexapis.com/v1/access_token"
+
+# Polling-Concurrency-Cap. Webex throttled REST-Endpoints bei ~300 req/min/Bot;
+# 5–8 parallele Calls sind das Sweet-Spot (rednafi, death-and-gravity).
+# Bei 10+ Rooms verwandelt sich eine ~2s-Sequential-Loop in eine ~400ms-Fan-out.
+_POLL_CONCURRENCY = 5
+_POLL_SEMAPHORE: Optional[asyncio.Semaphore] = None
+
+
+def _get_poll_semaphore() -> asyncio.Semaphore:
+    """Lazy-init des Module-Level-Semaphore.
+
+    Verzoegerter Init weil ``asyncio.Semaphore`` an einen laufenden Event-Loop
+    gebunden wird; bei Import ist noch kein Loop aktiv.
+    """
+    global _POLL_SEMAPHORE
+    if _POLL_SEMAPHORE is None:
+        _POLL_SEMAPHORE = asyncio.Semaphore(_POLL_CONCURRENCY)
+    return _POLL_SEMAPHORE
 
 
 _TOKEN_FILE = Path(__file__).parent.parent.parent / "webex_tokens.json"
@@ -671,27 +690,44 @@ class WebexClient:
     async def get_new_messages_since(
         self, room_ids: List[str], since: datetime, max_per_room: int = 50
     ) -> List[dict]:
-        """Neue Nachrichten aus mehreren Räumen seit Zeitpunkt."""
-        all_messages = []
-        since_iso = since.isoformat() + "Z" if not since.isoformat().endswith("Z") else since.isoformat()
+        """Neue Nachrichten aus mehreren Räumen seit Zeitpunkt.
 
-        for room_id in room_ids:
-            try:
-                params: Dict[str, Any] = {
-                    "roomId": room_id,
-                    "max": max_per_room,
-                }
-                data = await self._request("GET", "/messages", params=params)
+        Fan-out per ``asyncio.gather`` mit ``Semaphore(5)``-Cap. Bei N Rooms
+        skaliert die Latenz ~``ceil(N/5) * RTT`` statt ``N * RTT``. Per-Room-
+        Jitter (~0–200 ms) staffelt den Spike auf die Webex-API beim Cycle-Start
+        (vgl. AWS Architecture Blog "Exponential Backoff and Jitter").
+        Fehler in einem Raum schluesseln keinen anderen aus.
+        """
+        if not room_ids:
+            return []
+
+        since_iso = since.isoformat() + "Z" if not since.isoformat().endswith("Z") else since.isoformat()
+        sem = _get_poll_semaphore()
+
+        async def _fetch_room(room_id: str) -> List[dict]:
+            async with sem:
+                # Kleiner Startup-Jitter, damit nicht alle Rooms gleichzeitig
+                # in dieselbe API-Sekunde fallen.
+                await asyncio.sleep(random.uniform(0, 0.2))
+                try:
+                    data = await self._request(
+                        "GET", "/messages",
+                        params={"roomId": room_id, "max": max_per_room},
+                    )
+                except Exception as e:
+                    logger.error("Fehler beim Abrufen von Raum %s: %s", room_id[:20], e)
+                    return []
+                out: List[dict] = []
                 for item in data.get("items", []):
                     created = item.get("created", "")
                     if created and created >= since_iso:
                         msg = self._format_message(item)
                         msg["room_id"] = room_id
-                        all_messages.append(msg)
-            except Exception as e:
-                logger.error("Fehler beim Abrufen von Raum %s: %s", room_id[:20], e)
+                        out.append(msg)
+                return out
 
-        return all_messages
+        nested = await asyncio.gather(*(_fetch_room(rid) for rid in room_ids))
+        return [m for sub in nested for m in sub]
 
     async def get_rooms_for_polling(self) -> List[str]:
         """Gibt alle Raum-IDs zurück die für Polling relevant sind."""

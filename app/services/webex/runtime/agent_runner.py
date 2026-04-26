@@ -215,6 +215,10 @@ class AgentRunner:
 
         # Final-Response aggregieren
         final_response_parts: List[str] = []
+        # Running-Length-Counter: vermeidet O(N²) "".join+len pro Token im
+        # Streaming-Pfad. Vorbild: Anthropic SDK MessageStream (incremental
+        # snapshot), Vercel AI SDK (rope/queue, lazy materialization).
+        accumulated_len: int = 0
         error_msg: Optional[str] = None
         tool_count = 0
         last_tool_name: str = ""
@@ -276,11 +280,32 @@ class AgentRunner:
         })
 
         try:
-            attachments = await self._context_builder.build_attachments(original_msg)
+            # Beide Calls sind unabhaengig (Image-Downloads vs History-Fetch).
+            # Parallel laufen lassen — Vorbild: LangChain RunnableParallel,
+            # OpenAI Agents SDK Cookbook fan-out. return_exceptions=True
+            # damit ein kaputter Image-Download nicht die History killt.
+            attachments_result, channel_context_result = await asyncio.gather(
+                self._context_builder.build_attachments(original_msg),
+                self._context_builder.build_channel_context(original_msg),
+                return_exceptions=True,
+            )
+            if isinstance(attachments_result, BaseException):
+                logger.warning(
+                    "[webex-bot] build_attachments failed: %s", attachments_result,
+                )
+                attachments = None
+            else:
+                attachments = attachments_result
+            if isinstance(channel_context_result, BaseException):
+                logger.warning(
+                    "[webex-bot] build_channel_context failed: %s", channel_context_result,
+                )
+                channel_context = None
+            else:
+                channel_context = channel_context_result
+
             if attachments:
                 logger.info("[webex-bot] %d Bild-Attachment(s) angehaengt", len(attachments))
-
-            channel_context = await self._context_builder.build_channel_context(original_msg)
 
             gen = orchestrator.process(
                 session_id=session_id,
@@ -299,11 +324,17 @@ class AgentRunner:
 
                 if name == "token" and isinstance(event.data, str):
                     final_response_parts.append(event.data)
-                    if throttle is not None and editor is not None:
+                    accumulated_len += len(event.data)
+                    # "".join nur wenn der Throttle wirklich flushen will —
+                    # sonst zahlen wir pro Token den vollen Snapshot-Bau.
+                    if (
+                        throttle is not None
+                        and editor is not None
+                        and throttle.should_flush(accumulated_len)
+                    ):
                         accumulated = "".join(final_response_parts)
-                        if throttle.should_flush(len(accumulated)):
-                            preview = accumulated[:stream_max] + " ▍"
-                            await editor.update(preview, phase="streaming")
+                        preview = accumulated[:stream_max] + " ▍"
+                        await editor.update(preview, phase="streaming")
                 elif name == "tool_start":
                     tool_count += 1
                     tool_name = ""

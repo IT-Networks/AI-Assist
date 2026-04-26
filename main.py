@@ -539,7 +539,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="AI Code Assistant",
     description="Lokaler AI-Assistent für Java/Python-Entwicklung mit Handbuch-, WLP-Log-, PDF- und Confluence-Unterstützung",
-    version="2.43.0",
+    version="2.43.1",
     lifespan=lifespan,
 )
 

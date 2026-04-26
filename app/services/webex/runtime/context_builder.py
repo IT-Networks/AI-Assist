@@ -10,6 +10,7 @@ werden). Bild-Limit: 10MB/Stueck, max 4 pro Message.
 
 from __future__ import annotations
 
+import asyncio
 import base64
 import logging
 from typing import Any, Dict, List, Optional
@@ -75,6 +76,10 @@ class ChannelContextBuilder:
             ``{"type": "image", "mime": "image/png", "data": "<base64>", "name": "..."}``
 
         Nicht-Bild-Attachments werden ignoriert.
+
+        Mehrere Attachments werden parallel geladen — der Cap (``MAX_IMAGES_PER_MSG=4``)
+        liegt weit unter dem Webex Rate-Limit (~300 req/min/Bot), daher kein Semaphore.
+        Reihenfolge der URLs bleibt erhalten.
         """
         from app.services.webex_client import get_webex_client
 
@@ -83,29 +88,41 @@ class ChannelContextBuilder:
             return None
 
         client = get_webex_client()
+        urls = list(file_urls[: self.MAX_IMAGES_PER_MSG])
+        # return_exceptions=True: ein kaputter Download darf andere Bilder
+        # nicht killen (Best-Effort-Enrichment-Pattern, vgl. Hynek "Waiting in asyncio").
+        results = await asyncio.gather(
+            *(self._download_one(client, url) for url in urls),
+            return_exceptions=True,
+        )
+
         out: List[dict] = []
-
-        for url in file_urls[: self.MAX_IMAGES_PER_MSG]:
-            try:
-                data, content_type, filename = await client.download_file(url)
-            except Exception as e:
-                logger.warning("[webex-bot] download_file failed for %s: %s", url[:60], e)
+        for url, item in zip(urls, results):
+            if isinstance(item, BaseException):
+                logger.warning("[webex-bot] download_file failed for %s: %s", url[:60], item)
                 continue
-
-            mime = (content_type or "").split(";")[0].strip().lower()
-            if not mime.startswith("image/"):
-                logger.debug("[webex-bot] Attachment skipped (non-image): %s", mime or "?")
-                continue
-
-            if len(data) > self.MAX_IMAGE_BYTES:
-                logger.info("[webex-bot] Attachment skipped (too large): %d bytes", len(data))
-                continue
-
-            out.append({
-                "type": "image",
-                "mime": mime,
-                "data": base64.b64encode(data).decode("ascii"),
-                "name": filename or "attachment",
-            })
+            if item is not None:
+                out.append(item)
 
         return out or None
+
+    async def _download_one(self, client: Any, url: str) -> Optional[dict]:
+        """Laedt ein einzelnes Image und baut den multimodal-Eintrag.
+
+        Returns ``None`` bei Non-Image-Content oder Oversize. Exceptions
+        propagieren — der ``gather(return_exceptions=True)``-Aufrufer faengt sie.
+        """
+        data, content_type, filename = await client.download_file(url)
+        mime = (content_type or "").split(";")[0].strip().lower()
+        if not mime.startswith("image/"):
+            logger.debug("[webex-bot] Attachment skipped (non-image): %s", mime or "?")
+            return None
+        if len(data) > self.MAX_IMAGE_BYTES:
+            logger.info("[webex-bot] Attachment skipped (too large): %d bytes", len(data))
+            return None
+        return {
+            "type": "image",
+            "mime": mime,
+            "data": base64.b64encode(data).decode("ascii"),
+            "name": filename or "attachment",
+        }
